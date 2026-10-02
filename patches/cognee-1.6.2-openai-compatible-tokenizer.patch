@@ -1,0 +1,49 @@
+--- a/cognee/infrastructure/databases/vector/embeddings/get_embedding_engine.py
++++ b/cognee/infrastructure/databases/vector/embeddings/get_embedding_engine.py
+@@ -120,6 +120,7 @@
+             api_key=embedding_api_key or llm_api_key,
+             batch_size=embedding_batch_size,
+             input_type=embedding_input_type,
++            huggingface_tokenizer=huggingface_tokenizer,
+         )
+ 
+     from .LiteLLMEmbeddingEngine import LiteLLMEmbeddingEngine
+--- a/cognee/infrastructure/databases/vector/embeddings/OpenAICompatibleEmbeddingEngine.py
++++ b/cognee/infrastructure/databases/vector/embeddings/OpenAICompatibleEmbeddingEngine.py
+@@ -87,6 +87,7 @@
+     mock: bool
+     batch_size: int
+     tokenizer: object
++    
+ 
+     def __init__(
+         self,
+@@ -97,6 +98,7 @@
+         api_key: str | None = "no-key-required",
+         batch_size: int = 36,
+         input_type: str | None = None,
++        huggingface_tokenizer: str | None = None,
+     ):
+         self.model = model or "default"
+         self.dimensions = dimensions
+@@ -108,7 +110,10 @@
+         # that isn't part of the OpenAI embeddings spec. Sent via extra_body
+         # so it has no effect on servers that ignore unknown fields.
+         self.input_type = input_type
++        # Must be before self.tokenizer is set
++        self.huggingface_tokenizer = huggingface_tokenizer
+         self.tokenizer = self.get_tokenizer()
++
+         init_input_limit(self, max_completion_tokens)
+ 
+         enable_mocking = os.getenv("MOCK_EMBEDDING", "false").lower()
+@@ -310,4 +315,8 @@
+         model's own tokenizer and warns/falls back safely on mismatch (issue #3646).
+         """
+         logger.debug("Loading tokenizer for OpenAICompatibleEmbeddingEngine...")
+-        return resolve_embedding_tokenizer(provider="openai_compatible", model=self.model)
++        return resolve_embedding_tokenizer(
++            provider="openai_compatible",
++            model=self.model,
++            huggingface_tokenizer=self.huggingface_tokenizer,
++        )
