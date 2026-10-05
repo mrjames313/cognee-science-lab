@@ -49,8 +49,9 @@ Install dependencies:
 uv sync
 
 cp .env.example .env
+```
 
-# Add your API keys (and possibly change configuration if not using those providers)
+# Within .env, add your API keys (and possibly change configuration if not using those providers)
 # Then edit the three root-directory paths to use the absolute repo path as shown
 
 

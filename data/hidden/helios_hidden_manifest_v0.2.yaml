@@ -1,0 +1,527 @@
+manifest_version: '0.2'
+purpose: Hidden ground truth for evaluating ingestion, chunking, graph extraction, entity/coreference resolution,
+  provenance, and limited contextual unit inference on revised DOC01 and DOC02.
+documents:
+  DOC01:
+    title: 'Helios-1 Compact High-Field Tokamak: Technical Overview and Initial Operating Status'
+    date: '2026-04-01'
+    type: technical_overview
+    source_file: DOC01_helios1_technical_overview_v2.md
+  DOC02:
+    title: High-Current Operation of the Helios-1 Compact Tokamak During Campaign A
+    date: '2026-04-08'
+    type: experimental_report
+    source_file: DOC02_campaign_A_high_current_v2.md
+entities:
+  O001:
+    canonical_name: Aurora Fusion Research Laboratory
+    type: Organization
+    aliases:
+    - AFRL
+    - Aurora Fusion
+    - Aurora
+  D001:
+    canonical_name: Helios-1
+    type: Tokamak
+    aliases:
+    - Helios 1
+    - H-1
+    - Helios
+    - the machine
+    - the device
+  S001:
+    canonical_name: Vertical Control System
+    type: ControlSystem
+    aliases:
+    - VCS
+    - vertical-control system
+    - vertical loop
+  S002:
+    canonical_name: Plasma Current Power Supply
+    type: Subsystem
+    aliases:
+    - PCPS
+    - current-control power supply
+  S003:
+    canonical_name: Edge Density Controller
+    type: ControlSystem
+    aliases:
+    - EDC
+    - density controller
+    - edge-density feedback loop
+  H001:
+    canonical_name: Neutral Beam Injection System
+    type: HeatingSystem
+    aliases:
+    - NBI
+    - beam system
+  H002:
+    canonical_name: Electron Cyclotron Heating System
+    type: HeatingSystem
+    aliases:
+    - ECH
+  G001:
+    canonical_name: Rogowski Current Monitor
+    type: Diagnostic
+    aliases:
+    - RCM
+    - Rogowski coil
+    - Rogowski measurement chain
+  G002:
+    canonical_name: Magnetic Probe Array
+    type: Diagnostic
+    aliases:
+    - MPA
+    - probe array
+  G003:
+    canonical_name: Two-color Interferometer
+    type: Diagnostic
+    aliases:
+    - interferometer
+  G004:
+    canonical_name: Thomson Scattering System
+    type: Diagnostic
+    aliases:
+    - Thomson scattering
+    - TS
+  G005:
+    canonical_name: Edge Reflectometer
+    type: Diagnostic
+    aliases:
+    - edge reflectometer
+  SW001:
+    canonical_name: Aurora Reconstruction Suite
+    type: Software
+    aliases:
+    - Aurora
+    - the suite
+    - reconstruction software
+  P001:
+    canonical_name: Mira Patel
+    type: Scientist
+  P002:
+    canonical_name: Daniel Nguyen
+    type: Scientist
+  P003:
+    canonical_name: Sofia Ortiz
+    type: Scientist
+  E001:
+    canonical_name: Campaign A
+    type: ExperimentalCampaign
+    aliases:
+    - March campaign
+    - the campaign
+  SHOT_H1_1854:
+    canonical_name: H1-1854
+    type: Discharge
+  SHOT_H1_1857:
+    canonical_name: H1-1857
+    type: Discharge
+facts:
+- id: F001
+  subject: D001
+  predicate: is_a
+  object: compact high-field tokamak
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F002
+  subject: D001
+  predicate: operated_by
+  object: O001
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F003
+  subject: D001
+  predicate: major_radius
+  value: 1.35
+  unit: m
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F004
+  subject: D001
+  predicate: minor_radius
+  value: 0.42
+  unit: m
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F005
+  subject: D001
+  predicate: nominal_toroidal_field
+  value: 6.2
+  unit: T
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F006
+  subject: D001
+  predicate: installed_NBI_capacity
+  value: 8
+  unit: MW
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F007
+  subject: D001
+  predicate: installed_ECH_capacity
+  value: 4
+  unit: MW
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F008
+  subject: D001
+  predicate: experimental_fuel
+  object: deuterium
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F009
+  subject: G001
+  predicate: measures
+  object: total plasma current
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F010
+  subject: G002
+  predicate: provides
+  object: spatial magnetic measurements
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F011
+  subject: G003
+  predicate: measures
+  object: line-integrated electron density
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F012
+  subject: G004
+  predicate: measures
+  object: electron temperature and electron density profiles
+  expected_sources:
+  - DOC01
+- id: F013
+  subject: G005
+  predicate: measures
+  object: edge fluctuation behavior and density structure
+  expected_sources:
+  - DOC01
+- id: F014
+  subject: SW001
+  predicate: used_for
+  object: post-shot magnetic equilibrium reconstruction
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F015
+  subject: S003
+  predicate: controls
+  object: gas injection using density feedback
+  expected_sources:
+  - DOC01
+  - DOC02
+- id: F016
+  subject: D001
+  predicate: typical_full_field_pulse_length
+  value_min: 5
+  value_max: 6
+  unit: s
+  expected_sources:
+  - DOC01
+temporal_facts:
+- id: T001
+  subject: D001
+  predicate: authorized_plasma_current_limit
+  value: 1.2
+  unit: MA
+  valid_during: Campaign A / through 2026-06-11 in planned corpus
+  expected_sources:
+  - DOC01
+  - DOC02
+  note: Configuration-dependent operating authorization, not a fundamental device limit.
+- id: T003
+  subject: S001
+  predicate: control_update_rate
+  value: 10
+  unit: kHz
+  valid_during: Campaign A
+  expected_sources:
+  - DOC01
+  - DOC02
+experiments:
+  E001:
+    name: Campaign A
+    start_date: '2026-03-10'
+    end_date: '2026-03-21'
+    purpose: Establish repeatable operation near the original authorized high-current limit and evaluate integrated
+      control/diagnostics.
+    explicit_non_goal: Determine maximum achievable plasma current.
+measurements:
+- id: M_A_001
+  subject: SHOT_H1_1854
+  quantity: plasma current
+  reported_value: 1.2
+  unit: MA
+  uncertainty: 0.02
+  uncertainty_type: preliminary_absolute_estimate
+  analysis_state: Campaign A calibration
+  source: DOC02
+  also_summarized_in:
+  - DOC01
+  event_date: '2026-03-18'
+  note: Later corpus document DOC03 will revise the estimate; do not treat this as timeless ground truth.
+- id: M_A_002
+  subject: SHOT_H1_1854
+  quantity: high-current duration
+  reported_value: 4.8
+  unit: s
+  source: DOC02
+  also_summarized_in:
+  - DOC01
+- id: M_A_003
+  subject: SHOT_H1_1854
+  quantity: NBI power during flat-top
+  reported_value: 6
+  unit: MW
+  source: DOC02
+- id: M_A_004
+  subject: SHOT_H1_1857
+  quantity: reported peak plasma current
+  reported_value: 1.18
+  unit: MA
+  source: DOC02
+- id: M_A_005
+  subject: SHOT_H1_1857
+  quantity: high-current duration
+  reported_value: 5.1
+  unit: s
+  source: DOC02
+claims_and_negatives:
+- id: C_A_001
+  claim: Campaign A demonstrated repeatable operation near the 1.20 MA authorized current limit.
+  status: supported_summary
+  sources:
+  - DOC01
+  - DOC02
+- id: C_A_002
+  claim: 1.20 MA is a fundamental plasma stability limit of Helios-1.
+  status: explicitly_not_supported
+  sources:
+  - DOC01
+  - DOC02
+- id: C_A_003
+  claim: Campaign A establishes that the EDC improves energy confinement.
+  status: explicitly_not_supported
+  sources:
+  - DOC01
+  - DOC02
+- id: C_A_004
+  claim: No shots above 1.20 MA were attempted in Campaign A.
+  status: supported_negative_fact
+  sources:
+  - DOC01
+  - DOC02
+entity_resolution_ground_truth:
+- id: ER001
+  document: DOC01
+  section: '1'
+  mention: the machine
+  context: The machine is a conventional axisymmetric tokamak.
+  resolve_to: D001
+  resolution_type: shorthand/coreference
+- id: ER002
+  document: DOC01
+  section: '2'
+  mention: The controller
+  context: The controller receives fast magnetic estimates derived from the Magnetic Probe Array...
+  resolve_to: S001
+  resolution_type: local_nominal_coreference
+  hard_negative_for: S003
+- id: ER003
+  document: DOC01
+  section: '2'
+  mention: It
+  context: It has separate gain schedules for startup, current ramp, and flat-top operation.
+  resolve_to: S001
+  resolution_type: pronoun
+- id: ER004
+  document: DOC01
+  section: '4'
+  mention: The density controller
+  context: The density controller was commissioned in a limited mode before Campaign A...
+  resolve_to: S003
+  resolution_type: shorthand
+- id: ER005
+  document: DOC01
+  section: '4'
+  mention: The controller
+  context: The controller has proportional and integral feedback paths with campaign-specific gain limits.
+  resolve_to: S003
+  resolution_type: local_nominal_coreference
+  hard_negative_for: S001
+- id: ER006
+  document: DOC01
+  section: '4'
+  mention: It
+  context: It can be disabled on a shot-by-shot basis...
+  resolve_to: S003
+  resolution_type: pronoun
+- id: ER007
+  document: DOC01
+  section: '5'
+  mention: Aurora
+  context: Aurora combines calibrated magnetic measurements, coil-current data, and machine geometry to estimate
+    plasma boundary and equilibrium quantities.
+  resolve_to: SW001
+  resolution_type: ambiguous_alias
+  hard_negative_for: O001
+- id: ER008
+  document: DOC01
+  section: '5'
+  mention: The suite
+  context: The suite is maintained by the diagnostics and controls group and is versioned separately from the real-time
+    control software.
+  resolve_to: SW001
+  resolution_type: shorthand
+- id: ER009
+  document: DOC01
+  section: '5'
+  mention: The suite
+  context: The suite was used to reconstruct the Campaign A discharges discussed in Nguyen et al. [2].
+  resolve_to: SW001
+  resolution_type: shorthand
+- id: ER010
+  document: DOC02
+  section: '2.1'
+  mention: the controller
+  context: During tuning shots early in the campaign, the controller gains were adjusted...
+  resolve_to: S001
+  resolution_type: local_nominal_coreference
+  hard_negative_for: S003
+- id: ER011
+  document: DOC02
+  section: '2.1'
+  mention: It
+  context: It responded well to the revised gain schedule...
+  resolve_to: S001
+  resolution_type: pronoun
+- id: ER012
+  document: DOC02
+  section: '2.2'
+  mention: The density controller
+  context: The density controller was enabled on H1-1854 after the plasma-current ramp began.
+  resolve_to: S003
+  resolution_type: shorthand
+- id: ER013
+  document: DOC02
+  section: '2.2'
+  mention: It
+  context: It made small corrections to gas flow but did not determine the current waveform.
+  resolve_to: S003
+  resolution_type: pronoun
+- id: ER014
+  document: DOC02
+  section: '2.2'
+  mention: the controller
+  context: The control-room log notes that “the controller added gas after the density dip.”
+  resolve_to: S003
+  resolution_type: quoted_shorthand
+- id: ER015
+  document: DOC02
+  section: '2.1'
+  mention: the controller
+  context: An operator note from this sequence records that “the controller caught the upward motion at 0.95 MA”.
+  resolve_to: S001
+  resolution_type: quoted_shorthand
+- id: ER016
+  document: DOC02
+  section: '2.3'
+  mention: Aurora
+  context: Aurora incorporates magnetic measurements, coil currents, and machine geometry to estimate the plasma
+    boundary and related equilibrium quantities.
+  resolve_to: SW001
+  resolution_type: ambiguous_alias
+  hard_negative_for: O001
+- id: ER017
+  document: DOC02
+  section: '4.2'
+  mention: the controller
+  context: the controller retained sufficient authority at 1.2 MA
+  resolve_to: S001
+  resolution_type: local_nominal_coreference
+  hard_negative_for: S003
+- id: ER019
+  document: DOC02
+  section: '4.3'
+  mention: the beam system
+  context: The beam system had higher installed capacity, but the campaign did not require operation at its 8 MW
+    limit.
+  resolve_to: H001
+  resolution_type: shorthand
+entity_resolution_policy_notes:
+- 'Surface form alone is insufficient: ''the controller'' maps to S001 or S003 depending on local discourse.'
+- Pronouns are scored only for selected probes, not every pronoun in the documents.
+- Generic uses should not be globally canonicalized. The manifest records particular mention-in-context resolutions.
+- The alias 'Aurora' is intentionally ambiguous between O001 and SW001.
+unit_inference_ground_truth:
+- id: UI001
+  document: DOC01
+  section: '1'
+  text: several early engineering pulses were run at 5.0 before the machine was returned to 6.2 for physics operation
+  quantity: toroidal magnetic field
+  values:
+  - 5.0
+  - 6.2
+  inferred_unit: T
+  inference_basis: Immediately preceding sentence establishes the toroidal-field system and nominal 6.2 T full-field
+    condition.
+  expected_difficulty: moderate
+- id: UI002
+  document: DOC01
+  section: '3'
+  text: Most high-current discharges were run between 4 and 6 MW of beam power. Brief operation at 8 was authorized
+    during actuator checkout
+  quantity: NBI power
+  values:
+  - 8
+  inferred_unit: MW
+  inference_basis: The preceding sentence establishes beam power in MW; the following sentence omits the unit for
+    the value 8.
+  expected_difficulty: moderate_contextual
+unit_inference_policy_notes:
+- Missing-unit cases are intentionally rare.
+- A system should preserve uncertainty about inferred units rather than fabricate one when context is insufficient.
+- Most scientific quantities in DOC01/DOC02 explicitly include units.
+cross_document_links:
+- from: DOC02
+  relation: cites
+  to: DOC01
+  reference_number: 2
+- from: DOC01
+  relation: cites_or_previews
+  to: DOC02
+  reference_number: 2
+- from: DOC01
+  relation: mentions_future_report
+  target: DOC03
+  reference_number: 3
+- from: DOC02
+  relation: mentions_future_report
+  target: DOC03
+  reference_number: 3
+evaluation_notes:
+  provenance: Repeated facts in DOC01 and DOC02 should retain document-level provenance rather than collapsing source
+    identity.
+  temporal_scope: The 1.20 MA limit is valid for Campaign A / DOC01 date, not an eternal device property.
+  measurement_vs_property: 1.20 ± 0.02 MA belongs to shot H1-1854 under a particular calibration state.
+  negative_knowledge: Explicit statements that Campaign A does not establish a fundamental limit or confinement
+    improvement should not be inverted into positive claims.
+  capacity_vs_usage: 8 MW NBI installed capacity and 6 MW H1-1854 operating power are different predicates.
+  benchmark_realism: Source documents should not explain benchmark intent, entity-resolution rules, unit-inference
+    rules, or knowledge-system evaluation criteria; those belong only in this hidden manifest.

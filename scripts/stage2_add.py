@@ -4,7 +4,7 @@ from pathlib import Path
 import cognee
 
 DATASET = "helios_stage2"
-DOC01 = Path("data/DOC01_helios1_technical_overview.md").resolve()
+DOC01 = Path("data/DOC01_helios1_technical_overview_V2.md").resolve()
 
 async def main():
     print(f"Adding: {DOC01}")

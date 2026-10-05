@@ -361,7 +361,10 @@ This suggests that entity resolution in a scientific system cannot be reduced to
 
 ---
 
-## 10. Contextual unit inference worked
+## 10. Contextual unit inference partially worked
+
+Two different versions of the source text were used, leading to slightly
+different outcomes.
 
 The source contained:
 
@@ -371,21 +374,27 @@ the field was lowered to 5.0 ... and later returned to 6.2
 
 without repeating the unit in that sentence.
 
-Cognee extracted:
+In both cases, Cognee extracted:
 
 ```text
 5.0 t
 6.2 t
 ```
 
-and semantic relationships:
+and in the first case, both semantic relationships:
 
 ```text
 Helios-1 --operated_at_during_commissioning--> 5.0 t
 Helios-1 --operated_at--> 6.2 t
 ```
 
-The surrounding chunk had previously established the nominal field as 6.2 T, so this demonstrates successful local contextual unit inference.
+In the second case, the 5.0T value did not generate a graph entity or semantic edge.
+
+The surrounding chunk had previously established the nominal field as 6.2 T, so this demonstrates successful local contextual unit inference in some cases.
+
+Contextual unit inference can occur during cognify,
+but successful inference does not guarantee that the
+inferred quantity is materialized as a graph fact.
 
 It does not demonstrate cross-chunk inference: sufficient unit context was available within the same chunk.
 
@@ -735,9 +744,25 @@ The most important weaknesses were:
 
 ---
 
-## Important architectural takeaway
+## Corpus v2 removed benchmark-explanatory language.
 
+Major Stage 2 conclusions survived:
+- partial entity/coreference normalization
+- persistent alias/granularity fragmentation
+- open-vocabulary predicates
+- preservation of negation and configuration context
+- edge identity and provenance infrastructure
+
+Refined finding:
+- contextual unit inference is representation-dependent.
+  The 5.0 T commissioning value was inferred in the summary
+  but not materialized in the graph, while the isolated NBI
+  value 8 was inferred as 8 MW and represented semantically.
 The default graph is more capable than a simple entity/relation extraction graph. In particular, Cognee already provides useful machinery for:
+
+---
+
+## Important architectural takeaway
 
 ```text
 document → chunk → semantic edge → source evidence
