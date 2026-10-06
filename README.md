@@ -6,6 +6,8 @@ technical information.
 
 There are multiple experiment stages, each building on the previous.
 
+See the writeups in the `results/` directory for summaries of the current findings and conclusions.
+
 ## Stages
 
 ### Stage 1 — DataPoint mechanics
@@ -19,17 +21,17 @@ Goal: understand what Cognee does automatically with an actual scientific-style 
 We created and ingested the synthetic Helios-1 technical corpus, especially DOC01, and examined both ingestion and semantic graph construction.
 
 ### Stage 3 — Retrieval methods
-Status: next
+Status: complete
 Goal: understand how Cognee retrieves knowledge from the graph/vector/chunk layers, and whether retrieval compensates for the fragmentation we observed.
 We planned to test queries
 
-### Stage 4 — Custom graph model
-Status: planned
-Goal: replace the generic Entity / EntityType / arbitrary relation model with a domain-specific Cognee graph model.
+### Stage 4 — Custom / mixed graph model
+Status: next
+Goal: investigate how to specify a graph model with a mix of strongly-typed entities / relationships (for example, physical quantites) and open-world graph such as what Cognee generates by default.  The idea is to enforce specificity and precision where it is warranted by the domain, while allowing for the flexibility and extensibility of open-world extraction.
 
 ### Stage 5 — Identity, relation semantics, and schema evolution
 Status: planned
-Goal: tackle the problems Stage 2 exposed directly.
+Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
 
 ### Stage 6 — Custom pipeline and intermediate representations
 Status: planned, major checkpoint

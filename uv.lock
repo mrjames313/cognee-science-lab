@@ -722,10 +722,14 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cognee" },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "cognee", specifier = ">=1.6,<1.7" }]
+requires-dist = [
+    { name = "cognee", specifier = ">=1.6,<1.7" },
+    { name = "pydantic", specifier = ">=2.13.5" },
+]
 
 [[package]]
 name = "colorama"

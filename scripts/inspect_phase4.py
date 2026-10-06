@@ -175,23 +175,179 @@ async def main():
     print("\nEntity type cardinality:")
     print(Counter(is_a_counts.values()))
 
-    nodes_by_id = {
-        str(node_id): props
-        for node_id, props in nodes
+
+    ## TEMP
+    nodes, edges = await graph_engine.get_graph_data()
+
+    print("\nAbbreviation nodes:")
+
+    for node_id, props in nodes:
+        if props.get("type") == "Abbreviation":
+            print(
+                f"  id={node_id}\n"
+                f"    short_form={props.get('short_form')!r}\n"
+                f"    full_form={props.get('full_form')!r}"
+            )
+    print("\nAbbreviationObservation nodes:")
+
+    observations = []
+
+    for node_id, props in nodes:
+        if props.get("type") == "AbbreviationObservation":
+            observations.append((node_id, props))
+
+    for node_id, props in observations:
+        print(
+            f"  {props.get('short_form')!r}"
+            f" -> {props.get('full_form')!r}"
+            f"  id={node_id}"
+        )
+
+    print(
+        f"\nTotal AbbreviationObservation nodes: "
+        f"{len(observations)}"
+    )
+
+    print("\nAbbreviationGraph nodes:")
+
+    for node_id, props in nodes:
+        if props.get("type") == "AbbreviationGraph":
+            print(f"  id={node_id}")
+            print(f"  properties={props}")
+
+
+
+    abbreviation_edges = []
+
+    for source_id, target_id, rel, props in edges:
+        if rel == "abbreviations":
+            abbreviation_edges.append(
+                (
+                    EdgeIdentity(
+                        source_id=str(source_id),
+                        target_id=str(target_id),
+                        relationship_name=rel,
+                    ),
+                    props,
+                )
+            )
+
+    print("\nAbbreviation edges:")
+
+    for edge, props in abbreviation_edges:
+        print(
+            f"  {edge.source_id} --{edge.relationship_name}--> "
+            f"{edge.target_id}"
+        )
+        print(f"    edge_object_id={props.get('edge_object_id')}")
+
+    edge_identities = [
+        edge for edge, _ in abbreviation_edges
+    ]
+
+    delete_data = await graph_engine.get_edge_delete_data(
+        edge_identities
+    )
+
+    print("\nAbbreviation edge source refs:")
+
+    for edge, data in delete_data.items():
+        print(
+            f"  {edge.source_id} --{edge.relationship_name}--> "
+            f"{edge.target_id}"
+        )
+        print(f"    source_ref_keys={data.source_ref_keys}")
+
+
+    edge_object_ids = {
+        str(props["edge_object_id"])
+        for _, props in abbreviation_edges
+        if props.get("edge_object_id") is not None
     }
 
-    type_counts = Counter()
+    relational_engine = get_relational_engine()
 
-    for source, target, relationship, _ in edges:
-        if relationship == "is_a":
-            type_name = nodes_by_id[str(target)].get("name")
-            type_counts[type_name] += 1
+    async with relational_engine.get_async_session() as session:
+        result = await session.execute(
+            sql_text("SELECT * FROM provenance_edge_evidence")
+        )
+        evidence_rows = result.mappings().all()
 
-    print("\nEntity types by population:")
+    print("\nEdge-evidence columns:")
 
-    for type_name, count in type_counts.most_common():
-        print(f"  {count:3}  {type_name}")
+    if evidence_rows:
+        print(" ", list(evidence_rows[0].keys()))
+    else:
+        print("  no evidence rows")
 
+    print("\nEvidence for abbreviation edges:")
+
+    for row in evidence_rows:
+        row = dict(row)
+
+        # Don't assume whether this version calls it edge_id,
+        # edge_object_id, etc. Look at all edge-related fields.
+        edge_values = {
+            str(value)
+            for key, value in row.items()
+            if "edge" in key.lower() and value is not None
+        }
+
+        if edge_object_ids & edge_values:
+            print(" ", row)
+
+    chunk_index_by_id = {
+        str(node_id): props.get("chunk_index")
+        for node_id, props in nodes
+        if props.get("type") == "DocumentChunk"
+    }
+
+    print("\nChunk IDs:")
+
+    for chunk_id, chunk_index in chunk_index_by_id.items():
+        print(f"  chunk {chunk_index}: {chunk_id}")
+
+
+    print("\nTotal provenance_edge_evidence rows:", len(evidence_rows))
+
+    print("\nEvidence relationship counts:")
+    for name, count in Counter(
+            row["relationship_name"] for row in evidence_rows
+    ).most_common():
+        print(f"  {name!r}: {count}")
+
+    print("\nRows whose relationship_name is 'abbreviations':")
+    for row in evidence_rows:
+        if row["relationship_name"] == "abbreviations":
+            print(" ", dict(row))
+
+
+    abbr_pairs = {
+        (edge.source_id, edge.target_id)
+        for edge, _ in abbreviation_edges
+    }
+
+    print("\nEvidence matching abbreviation endpoints:")
+
+    for row in evidence_rows:
+        pair = (
+            str(row["source_node_id"]),
+            str(row["destination_node_id"]),
+        )
+
+        if pair in abbr_pairs:
+            print(" ", dict(row))
+
+    print("\nSource-linked abbreviation observations:")
+
+    for node_id, props in nodes:
+        if props.get("type") == "AbbreviationObservation":
+            print(
+                f"  chunk={props.get('source_chunk_index')} "
+                f"{props.get('short_form')!r}"
+                f" -> {props.get('full_form')!r} "
+                f"id={node_id}"
+            )
 
     # Produce the graph visualization
     await cognee.visualize_graph(
