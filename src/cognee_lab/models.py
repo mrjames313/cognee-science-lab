@@ -6,6 +6,303 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.shared.data_models import KnowledgeGraph
 
 
+# ---------------------------------------------------------------------------
+# Stage 5 identity vocabulary
+#
+# These are currently DOCUMENTED vocabularies, not enforced enums.
+#
+# Keeping the fields as strings makes the experiments easy to evolve while
+# giving us a stable intended vocabulary to use consistently in scripts,
+# output, evaluation, and later schemas.
+# ---------------------------------------------------------------------------
+
+
+IDENTITY_RESOLUTION_KINDS = (
+    # Short form explicitly expands to the canonical name.
+    # Example: AFRL -> Aurora Fusion Research Laboratory
+    "abbreviation",
+
+    # Alternate name for the same semantic object.
+    # Example: H-1 -> Helios-1
+    "alias",
+
+    # Semantically equivalent naming variant that is not simply an alias.
+    # Example:
+    #   electron cyclotron heating system
+    #       -> electron cyclotron heating
+    "semantic_variant",
+
+    # Context-dependent reference to an entity.
+    # Normally used for Mention rather than IdentityResolution, but retained
+    # here because future identity representations may need it.
+    # Example: "the machine" -> Helios-1
+    "contextual_reference",
+)
+
+
+IDENTITY_EVIDENCE_KEYWORDS = (
+    # The source explicitly defines an abbreviation.
+    # Example: "Vertical Control System (VCS)"
+    "explicit_abbreviation",
+
+    # The source explicitly indicates two names refer to the same object.
+    "explicit_alias",
+
+    # A Stage 4 typed/source-grounded observation supports the mapping.
+    "typed_observation",
+
+    # Simple lexical normalization supports equivalence:
+    # case, punctuation, hyphenation, etc.
+    "lexical_normalization",
+
+    # The names are semantically related variants rather than simple
+    # orthographic variants.
+    # Example: "neutral beam injection system" vs
+    #          "neutral beam injection"
+    "lexical_semantic_variant",
+
+    # is_a/type information is compatible between the representations.
+    "compatible_type",
+
+    # Their graph neighborhoods contain compatible/shared entities.
+    "shared_neighbors",
+
+    # They participate in compatible/shared semantic relationships.
+    "shared_relations",
+
+    # Nearby source text supports the identity relationship.
+    "source_context",
+
+    # Earlier/later material within the same document supports the identity.
+    # This is stronger than merely saying that both entities occur somewhere
+    # in the same document.
+    "document_context",
+
+    # A DefinitionSummary or equivalent document vocabulary supports it.
+    "definition_summary",
+
+    # The existing generic Cognee graph already consolidated the variants
+    # into one semantic entity.
+    "generic_graph_consolidation",
+
+    # Embedding similarity supports equivalence.
+    # Reserved for later experiments.
+    "embedding_similarity",
+
+    # An LLM semantic-resolution step supports equivalence.
+    # Reserved for later experiments.
+    "llm_semantic_judgment",
+)
+
+
+MENTION_RESOLUTION_STATUSES = (
+    # The pipeline provides enough observable evidence to assign a target.
+    "resolved",
+
+    # The pipeline provides evidence that the mention is currently unresolved.
+    "unresolved",
+
+    # We cannot determine from persisted pipeline output whether resolution
+    # succeeded or failed.
+    "indeterminate",
+
+    # More than one plausible referent remains.
+    "ambiguous",
+)
+
+
+MENTION_RESOLUTION_BASIS_KEYWORDS = (
+    # The surrounding source text itself makes the referent clear.
+    "source_context",
+
+    # An explicit abbreviation/alias definition resolves the mention.
+    "explicit_definition",
+
+    # A typed Stage 4 observation resolves the surface form.
+    "typed_observation",
+
+    # A DefinitionSummary provides the relevant document-scoped mapping.
+    "definition_summary",
+
+    # A semantic relation in the generic graph demonstrates the resolved
+    # referent.
+    "semantic_edge",
+
+    # Natural-language edge_text demonstrates the resolved referent.
+    "edge_text",
+
+    # Provenance connects the resolved semantic assertion back to the
+    # source chunk containing this mention.
+    "chunk_provenance",
+
+    # Existing generic-graph consolidation provides the target identity.
+    "generic_graph_consolidation",
+
+    # The source occurrence exists, but no resolved semantic assertion
+    # corresponding to it was materialized.
+    "specific_assertion_not_materialized",
+
+    # Reserved for future resolution mechanisms.
+    "embedding_similarity",
+    "llm_semantic_judgment",
+)
+
+
+class IdentityResolution(DataPoint):
+    """
+    A non-destructive identity assertion.
+
+    This records that a source form or semantic representation resolves to
+    an existing canonical semantic entity within some scope.
+
+    Importantly, source_entity_id is optional.
+
+    This allows us to represent BOTH:
+
+        Entity("nbi") -> Entity("neutral beam injection")
+
+    where both generic Entity nodes exist, AND:
+
+        surface form "VCS" -> Entity("vertical control system")
+
+    where Cognee already consolidated VCS and therefore never created a
+    separate Entity("vcs") node.
+
+    IdentityResolution is informational and auditable. It does not merge,
+    delete, or rewrite generic Cognee entities.
+    """
+
+    # The form being resolved.
+    #
+    # Examples:
+    #   "AFRL"
+    #   "neutral beam injection system"
+    #   "VCS"
+    #   "H-1"
+    source_name: str
+
+    # Optional existing generic Entity corresponding to source_name.
+    #
+    # None is valid and meaningful: it means the surface/semantic form is
+    # known even though Cognee did not materialize it as a separate generic
+    # entity.
+    source_entity_id: str | None = None
+
+    # Existing generic Entity selected as the canonical target.
+    canonical_entity_id: str
+    canonical_name: str
+
+    # Intended vocabulary: IDENTITY_RESOLUTION_KINDS
+    resolution_kind: str
+
+    # Initially "document". Later possibilities may include corpus/domain.
+    scope: str
+    scope_document_id: str
+
+    # Intended vocabulary: IDENTITY_EVIDENCE_KEYWORDS
+    evidence: list[str] = []
+
+    metadata: dict = {
+        "index_fields": [
+            "source_name",
+            "canonical_name",
+        ],
+        "identity_fields": [
+            "source_name",
+            "canonical_entity_id",
+            "scope",
+            "scope_document_id",
+        ],
+    }
+
+
+class Mention(DataPoint):
+    """
+    A particular occurrence of a surface form in source text.
+
+    Mention preserves source-level identity independently of semantic
+    relation extraction.
+
+    Example:
+
+        source:
+            "...the controller reduced vertical motion..."
+
+        Mention("the controller")
+            -> resolves to Vertical Control System
+
+    A Mention may remain unresolved, ambiguous, or indeterminate.
+    """
+
+    source_chunk_id: str
+    source_chunk_index: int
+
+    surface_text: str
+
+    # Zero-based among occurrences of the same surface_text in the chunk.
+    #
+    # This is useful before exact source spans are available. Eventually
+    # start_char/end_char should become the stronger source locator.
+    occurrence_index: int
+
+    start_char: int | None = None
+    end_char: int | None = None
+
+    # Intended vocabulary: MENTION_RESOLUTION_STATUSES
+    resolution_status: str
+
+    # Canonical target when observable from the pipeline.
+    canonical_entity_id: str | None = None
+    canonical_name: str | None = None
+
+    # Intended vocabulary: MENTION_RESOLUTION_BASIS_KEYWORDS
+    resolution_basis: list[str] = []
+
+    metadata: dict = {
+        "index_fields": [
+            "surface_text",
+        ],
+        "identity_fields": [
+            "source_chunk_id",
+            "surface_text",
+            "occurrence_index",
+        ],
+    }
+
+
+class DefinitionSummary(DataPoint):
+    """
+    Document-scoped semantic vocabulary/context.
+
+    This is a materialized contextual summary, not the canonical source of
+    identity truth.
+
+    Unlike canonical identity resolution, DefinitionSummary should retain
+    important source vocabulary and semantic variants that later chunks may
+    actually use.
+
+    Example:
+
+        NBI — neutral beam injection; also appears as
+              "neutral beam injection system".
+
+    Its initial consumer is expected to be later extraction/resolution
+    stages rather than direct canonical graph traversal.
+    """
+
+    source_document_id: str
+    definitions_text: str
+
+    metadata: dict = {
+        "index_fields": [
+            "definitions_text",
+        ],
+        "identity_fields": [
+            "source_document_id",
+        ],
+    }
+
+    
 class Abbreviation(DataPoint):
     short_form: str = Field(
         description="Abberviation or acronym exactly as used in the text, e.g. VCS."

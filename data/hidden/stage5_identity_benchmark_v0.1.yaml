@@ -1,0 +1,164 @@
+version: "0.1"
+
+document:
+  name: DOC01_helios1_technical_overview_v2
+
+notes:
+  - This benchmark describes expected semantic identity and reference resolution.
+  - It does not prescribe how resolution must be implemented.
+  - chunk_hint values refer to the current 1000-token chunking and are not authoritative.
+  - Units and physical-quantity symbols such as MW, MA, T, and kHz are intentionally excluded.
+
+cases:
+
+  # ------------------------------------------------------------
+  # Entity identity
+  # ------------------------------------------------------------
+
+  - id: ID01_VCS
+    type: entity_identity
+    kind: acronym
+    canonical_name: Vertical Control System
+    forms:
+      - VCS
+      - Vertical Control System
+      - vertical-control system
+    expected: equivalent
+
+  - id: ID02_AFRL
+    type: entity_identity
+    kind: acronym
+    canonical_name: Aurora Fusion Research Laboratory
+    forms:
+      - AFRL
+      - Aurora Fusion Research Laboratory
+    expected: equivalent
+
+  - id: ID03_H1
+    type: entity_identity
+    kind: alias
+    canonical_name: Helios-1
+    forms:
+      - H-1
+      - Helios 1
+      - Helios-1
+    expected: equivalent
+
+  - id: ID04_NBI
+    type: entity_identity
+    kind: terminology_variant
+    canonical_name: Neutral Beam Injection
+    forms:
+      - NBI
+      - Neutral Beam Injection
+      - Neutral Beam Injection System
+      - neutral beam injection
+    expected: equivalent
+
+  - id: ID05_ECH
+    type: entity_identity
+    kind: terminology_variant
+    canonical_name: Electron Cyclotron Heating
+    forms:
+      - ECH
+      - Electron Cyclotron Heating
+      - Electron Cyclotron Heating System
+      - electron cyclotron heating
+    expected: equivalent
+
+  - id: ID06_EDC
+    type: entity_identity
+    kind: acronym
+    canonical_name: Edge Density Controller
+    forms:
+      - EDC
+      - Edge Density Controller
+    expected: equivalent
+
+
+  # ------------------------------------------------------------
+  # Context-dependent references
+  # ------------------------------------------------------------
+
+  - id: REF01_VCS_CONTROLLER
+    type: contextual_reference
+
+    source:
+      surface: "the controller"
+      contains: "the controller reduced vertical motion"
+      chunk_hint: 2
+
+    expected_referent:
+      canonical_name: Vertical Control System
+      acceptable_forms:
+        - VCS
+        - Vertical Control System
+
+    expected_semantics:
+      subject: Vertical Control System
+      predicate_concept: reduce_vertical_motion
+      object: vertical motion
+      qualifiers:
+        during: current ramp
+
+    diagnostic_keywords:
+      - reduce
+      - vertical
+      - motion
+      - ramp
+
+  - id: REF02_EDC_CONTROLLER
+    type: contextual_reference
+
+    source:
+      surface: "the controller"
+      contains: "the controller increased gas flow as the edge density fell"
+      chunk_hint: 2
+
+    expected_referent:
+      canonical_name: Edge Density Controller
+      acceptable_forms:
+        - EDC
+        - Edge Density Controller
+
+    expected_semantics:
+      subject: Edge Density Controller
+      predicate_concept: increase_gas_flow
+      object: gas flow
+      qualifiers:
+        condition: edge density fell
+
+    diagnostic_keywords:
+      - increase
+      - gas
+      - flow
+      - density
+
+
+  # ------------------------------------------------------------
+  # Negative / ambiguity cases
+  # ------------------------------------------------------------
+
+  - id: NEG01_AURORA
+    type: distinct_entities
+    forms_a:
+      - Aurora Fusion Research Laboratory
+      - AFRL
+    forms_b:
+      - Aurora Reconstruction Suite
+    expected: distinct
+    reason: >
+      The organization and the reconstruction software suite must not
+      be merged merely because they share the surface term Aurora.
+
+  - id: NEG02_HELIOS
+    type: distinct_entities
+    forms_a:
+      - Helios program
+    forms_b:
+      - Helios-1
+      - H-1
+    expected: distinct
+    reason: >
+      The research program and the physical tokamak are related but
+      are not the same entity.

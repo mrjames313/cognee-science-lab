@@ -10,6 +10,7 @@ from cognee.infrastructure.databases.relational import (get_relational_engine,)
 from cognee.modules.engine.operations.setup import setup
 
 from cognee_lab.models import Facility
+from cognee_lab.graph_snapshot import load_graph_snapshot
 
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -33,8 +34,7 @@ async def main():
     # Change this to display more or fewer nodes / edges
     display_max = 10
 
-    
-    nodes, edges = await graph_engine.get_graph_data()
+    nodes, edges = await graph_engine.get_graph_data()    
 
     # Nodes and node types
     type_counts = Counter(
@@ -177,8 +177,6 @@ async def main():
 
 
     ## TEMP
-    nodes, edges = await graph_engine.get_graph_data()
-
     print("\nAbbreviation nodes:")
 
     for node_id, props in nodes:

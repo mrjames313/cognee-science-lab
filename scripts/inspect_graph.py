@@ -15,7 +15,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from sqlalchemy import text as sql_text
 
-GRAPH_OUTPUT_PATH = Path("outputs/stage4_graph.html").resolve()
+GRAPH_OUTPUT_PATH = Path("outputs/stage5_graph.html").resolve()
 
 
 async def main():
