@@ -10,3 +10,4 @@ outputs/*
 .cognee_system/
 .cognee_data/
 .cognee_cache/
+.obsidian/

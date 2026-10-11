@@ -39,7 +39,7 @@ Cases:
 - `ID06_EDC`
 
 ### Contextual references
-
+5.2
 These test source phrases such as:
 
 ```text
@@ -2164,3 +2164,1297 @@ This establishes the representation needed for the next questions.
 **Stage 5.4** will investigate resolution timing, document versus corpus scope, and graph evolution as documents are added, updated, or removed.
 
 **Stage 6** will then move these manually demonstrated structures into an actual processing pipeline with explicit source spans, automatic evidence extraction, identity reconciliation, hierarchical context, and lifecycle-aware graph updates.
+
+
+
+
+## Stage 5.3 — Unified Entity Roles and Identity-Aware Recall
+
+### Objective
+
+Stage 5.3 tested whether identity reconciliation could be moved into the semantic layer itself, while preserving the non-destructive support/provenance structures introduced in Stage 5.2.
+
+The goals were to:
+
+- represent canonical entities, reusable variants, and source-specific mentions using a unified `Entity` abstraction;
+- add direct semantic `resolves_to` relationships between Entity representations;
+- preserve Stage-5.2 `IdentityResolution`, `AbbreviationObservation`, and mention helper objects as a separate support/provenance layer;
+- perform identity-aware semantic recall without physically merging Entity nodes;
+- test query-time resolution of reusable shorthand and context-dependent references;
+- verify that ambiguous references do not trigger broad or incorrect recall.
+
+The design intentionally avoids treating identity reconciliation as destructive graph normalization. Original extracted representations and relationships remain in place.
+
+---
+
+### 5.3.0 — Unified Entity Representation
+
+The working semantic representation uses a single `Entity` class with three roles:
+
+```text
+canonical
+variant
+mention
+```
+
+The intended semantics are:
+
+```text
+canonical
+    Preferred semantic representation within some applicable scope.
+
+variant
+    Reusable non-canonical representation whose interpretation can
+    apply throughout an applicable scope.
+
+mention
+    A particular source occurrence whose interpretation depends on
+    the context of that occurrence.
+```
+
+Role and scope are independent.
+
+All three Entity roles may participate in ordinary semantic relationships. No role-specific restriction is placed on which semantic edges an Entity may carry.
+
+Identity navigation is represented directly in the semantic layer:
+
+```text
+variant --resolves_to--> canonical
+
+mention --resolves_to--> canonical
+```
+
+The relationship is stored directionally, but an already-established identity relationship can be traversed bidirectionally during semantic recall.
+
+This is distinct from query-time resolution: a historical mention such as `"the controller"` resolving to VCS does not make `"the controller"` a reusable global alias.
+
+---
+
+### Scope and Source Location
+
+The design discussion separated two concepts that had previously been partially conflated:
+
+```text
+semantic scope
+    where a representation's interpretation is applicable
+
+source location
+    where a particular occurrence appeared
+```
+
+The current intended Entity fields are therefore conceptually:
+
+```python
+class Entity(CogneeEntity):
+    entity_role: str | None = None
+    graph_layer: str = "semantic"
+
+    scope_kind: str | None = None
+    scope_anchor_id: str | None = None
+
+    source_document_id: str | None = None
+    source_chunk_id: str | None = None
+    source_chunk_index: int | None = None
+
+    start_char: int | None = None
+    end_char: int | None = None
+    occurrence_index: int | None = None
+```
+
+Current scope kinds under consideration are:
+
+```text
+global
+corpus
+document
+subdocument
+chunk
+occurrence
+```
+
+The current graph still contains some earlier experimental scope field names. Those were not migrated merely for this experiment; the cleaner field separation is intended for subsequent pipeline work.
+
+---
+
+### Representation Overlay
+
+The Stage-5.3 representation experiment added direct semantic identity structure on top of the Stage-5.2 graph.
+
+Starting graph:
+
+```text
+154 nodes
+365 edges
+```
+
+After applying the Entity-layer changes:
+
+```text
+160 nodes
+377 edges
+```
+
+The delta consisted of:
+
+- four previously absent reusable variant Entity nodes;
+- two semantic mention Entity nodes;
+- nine variant-to-canonical `resolves_to` edges;
+- one resolved mention-to-canonical `resolves_to` edge;
+- two temporary `materializes_as` links from Stage-5.2 mention-support records to semantic mention Entities.
+
+The graph inventory after the overlay included:
+
+```text
+Entity                  87
+EntityType              25
+AbbreviationObservation 23
+IdentityResolution       9
+TextSummary              6
+DocumentChunk            6
+Mention                  2
+TextDocument             1
+DefinitionSummary        1
+```
+
+and:
+
+```text
+10 Entity --resolves_to--> Entity
+2  Mention --materializes_as--> Entity
+1  Mention --resolves_to--> Entity
+```
+
+The final `Mention --resolves_to--> Entity` edge above belongs to the older Stage-5.2 support representation and is not part of the semantic identity graph.
+
+---
+
+### Logical Graph Layers
+
+Stage 5.3 reinforced the usefulness of distinguishing logical graph layers.
+
+```text
+SEMANTIC LAYER
+    Entity
+    ordinary semantic relationships
+    resolves_to
+
+SUPPORT / PROVENANCE LAYER
+    IdentityResolution
+    AbbreviationObservation
+    current Mention helper records
+    later MentionResolution / evidence structures
+
+SOURCE / CONTEXT LAYER
+    TextDocument
+    DocumentChunk
+    TextSummary
+    DefinitionSummary
+```
+
+Semantic recall should operate primarily on the semantic layer.
+
+Support and source layers remain available for explanation, maintenance, invalidation, debugging, and provenance queries.
+
+The current `materializes_as` edge is transitional glue between the Stage-5.2 mention helper and the semantic `Entity(role=mention)`. It is not intended as a long-term domain identity relationship.
+
+---
+
+## 5.3.1 — Identity-Aware Semantic Recall
+
+The first recall experiment assumed that a query had already been resolved to a known semantic Entity.
+
+The retrieval procedure was:
+
+```text
+seed Entity
+    ↓
+semantic resolves_to closure
+    ↓
+union semantic neighborhoods across all representations
+    ↓
+canonicalize Entity endpoints
+    ↓
+group equivalent logical facts
+    ↓
+retain original raw graph edges as support
+```
+
+Only semantic:
+
+```text
+Entity --resolves_to--> Entity
+```
+
+edges participate in identity closure.
+
+The older support-layer:
+
+```text
+Mention --resolves_to--> Entity
+```
+
+relationship is deliberately excluded.
+
+This prevents support/provenance helper nodes from leaking into semantic retrieval.
+
+---
+
+### NBI Identity Component
+
+The NBI component contained:
+
+```text
+canonical  neutral beam injection
+variant    nbi
+variant    neutral beam injection system
+```
+
+Identity closure was consistent regardless of the starting representation.
+
+The component contained:
+
+```text
+8 raw semantic incident edges
+7 logical semantic facts after identity normalization
+```
+
+The resulting logical neighborhood included:
+
+```text
+helios-1 --has_auxiliary_heating--> neutral beam injection
+
+helios-1 --has_installed_capacity--> neutral beam injection
+    raw source:
+        helios-1 --has_installed_capacity--> nbi
+
+helios-1 --uses--> neutral beam injection
+    raw source:
+        helios-1 --uses--> neutral beam injection system
+
+neutral beam injection --authorized_for--> campaign a
+
+neutral beam injection --is_a--> heating system
+
+neutral beam injection --is_a--> system
+    raw sources:
+        nbi --is_a--> system
+        neutral beam injection system --is_a--> system
+
+neutral beam injection --provided_power_during--> campaign a
+```
+
+This demonstrates two important behaviors.
+
+First, facts attached to different equivalent Entity representations become available through one logical identity neighborhood without rewriting the original graph.
+
+Second, duplicate logical facts can be suppressed while retaining multiple raw supports.
+
+For example:
+
+```text
+nbi --is_a--> system
+neutral beam injection system --is_a--> system
+```
+
+becomes one logical:
+
+```text
+neutral beam injection --is_a--> system
+```
+
+with both underlying assertions retained.
+
+---
+
+### VCS Identity Component
+
+After excluding the Stage-5.2 helper node from semantic closure, the VCS component contained:
+
+```text
+canonical  vertical control system
+variant    VCS
+mention    the controller
+```
+
+The resolved mention therefore participates in the same semantic identity component as the canonical Entity and reusable abbreviation.
+
+The logical semantic neighborhood contained 15 facts, including:
+
+```text
+vertical control system --commands--> vertical-control coils
+vertical control system --receives_estimates_from--> magnetic probe array
+vertical control system --reduces_vertical_motion_in--> helios-1
+vertical control system --uses_gain_schedule_for--> current ramp
+vertical control system --uses_gain_schedule_for--> flat-top operation
+vertical control system --uses_gain_schedule_for--> startup
+```
+
+In the current corpus the mention Entity does not carry a unique semantic relation of its own. Cognee had already attached the relevant source assertion directly to the canonical VCS Entity.
+
+Therefore this experiment validates mention participation in identity closure, but does not yet demonstrate recovery of a fact that exists only on a mention node.
+
+That behavior is deferred until later pipeline experiments provide naturally occurrence-attached semantic assertions.
+
+---
+
+### Recall Result
+
+Stage 5.3.1 demonstrated that a semantic identity component can act as a non-destructive recall view:
+
+```text
+multiple stored representations
+        ↓
+identity closure
+        ↓
+one logical semantic neighborhood
+```
+
+without physically merging the graph.
+
+This supports the architecture in which identity reconciliation is represented explicitly rather than implemented as graph rewriting.
+
+---
+
+## 5.3.2 — Query-Time Entity Resolution
+
+The next experiment addressed a separate problem:
+
+> How should conversational or query-time shorthand be resolved before semantic recall?
+
+This is particularly important because conversational input is likely to contain more shorthand and contextual references than structured scientific documents.
+
+The key design principle is:
+
+```text
+canonical / variant representation
+    may define reusable identity mappings
+
+historical mention representation
+    does not automatically define a reusable mapping
+```
+
+For example:
+
+```text
+NBI
+    reusable variant
+    -> neutral beam injection
+```
+
+while:
+
+```text
+the controller
+```
+
+must be resolved from the current context even if an earlier occurrence of `"the controller"` resolved to VCS.
+
+---
+
+### Query Resolution Pipeline
+
+The tested pipeline was:
+
+```text
+query mention
+    ↓
+exact reusable lookup over canonical + variant Entities
+    ↓
+if unique:
+    resolve immediately
+
+otherwise:
+    ↓
+build contextual candidate scores
+    ↓
+resolved / ambiguous
+    ↓
+semantic recall only after successful resolution
+```
+
+Historical mention Entity names are excluded from reusable surface-form lookup.
+
+---
+
+### Candidate Profiles
+
+A lightweight lexical-semantic profile was constructed for each explicitly marked canonical Entity using:
+
+- canonical name and description;
+- reusable variant names and descriptions;
+- semantic relationship names;
+- neighboring semantic Entity names and descriptions;
+- semantic facts attached anywhere in the resolved identity component.
+
+Historical mention surface strings are intentionally excluded from reusable vocabulary.
+
+A simple TF-IDF-like overlap score was then used as an interpretable baseline for contextual disambiguation.
+
+This was intended as a mechanism test rather than a production-quality resolver.
+
+---
+
+### Query-Time Resolution Benchmark
+
+Five cases were tested.
+
+#### QRY01 — reusable abbreviation
+
+```text
+mention:
+    NBI
+
+context:
+    How much auxiliary heating power can NBI provide?
+```
+
+Result:
+
+```text
+resolved -> neutral beam injection
+mechanism -> reusable_variant
+PASS
+```
+
+---
+
+#### QRY02 — reusable alias
+
+```text
+mention:
+    H-1
+
+context:
+    What is the nominal toroidal field of H-1?
+```
+
+Result:
+
+```text
+resolved -> helios-1
+mechanism -> reusable_variant
+PASS
+```
+
+---
+
+#### QRY03 — contextual controller reference: VCS
+
+```text
+mention:
+    the controller
+
+context:
+    During the current ramp, the controller reduced vertical motion
+    and used magnetic estimates to command the coils.
+```
+
+Top candidates:
+
+```text
+vertical control system     18.330
+helios-1                    13.825
+edge density controller      5.569
+electron cyclotron heating   5.387
+```
+
+Result:
+
+```text
+resolved -> vertical control system
+mechanism -> contextual
+PASS
+```
+
+---
+
+#### QRY04 — contextual controller reference: EDC
+
+```text
+mention:
+    the controller
+
+context:
+    As edge density fell, the controller increased commanded gas flow.
+```
+
+Top candidates:
+
+```text
+edge density controller     10.691
+helios-1                     8.438
+vertical control system      2.896
+electron cyclotron heating   1.336
+```
+
+Result:
+
+```text
+resolved -> edge density controller
+mechanism -> contextual
+PASS
+```
+
+---
+
+#### QRY05 — insufficient context
+
+```text
+mention:
+    the controller
+
+context:
+    What does the controller do?
+```
+
+The top four candidates all matched only the generic `control` concept with identical score:
+
+```text
+vertical control system      1.336
+electron cyclotron heating   1.336
+helios-1                     1.336
+edge density controller      1.336
+```
+
+Result:
+
+```text
+status -> ambiguous
+canonical entity -> none
+PASS
+```
+
+Critically, the existing historical:
+
+```text
+the controller -> vertical control system
+```
+
+mention resolution did not incorrectly cause the new query occurrence to resolve to VCS.
+
+Overall result:
+
+```text
+5 / 5 PASS
+```
+
+---
+
+### Observed Candidate Centrality Bias
+
+The contextual tests revealed one likely future resolver issue.
+
+`helios-1` ranked second in both controller-resolution cases despite not being the intended referent.
+
+This appears to result from the entity's broad semantic neighborhood:
+
+```text
+high-degree / central Entity
+    -> broad lexical profile
+    -> increased chance of contextual overlap
+```
+
+Possible future mitigations include degree normalization, relation weighting, narrower candidate generation, embeddings, or an LLM resolver.
+
+No correction was introduced at this stage because the benchmark passed and there is not yet evidence that the bias causes practical failures.
+
+This is recorded as a deferred resolver refinement.
+
+---
+
+## 5.3.3 — End-to-End Resolution and Recall
+
+The final Stage-5.3 experiment composed the two independently tested mechanisms:
+
+```text
+query-time entity resolution
+        +
+identity-aware semantic recall
+```
+
+The resulting end-to-end path is:
+
+```text
+query mention
+    ↓
+reusable-name lookup or contextual resolution
+    ↓
+canonical Entity
+    ↓
+bidirectional semantic identity closure
+    ↓
+union semantic neighborhoods
+    ↓
+canonicalize Entity endpoints
+    ↓
+logical facts + retained raw support
+```
+
+Semantic recall is explicitly blocked if query-time resolution remains ambiguous.
+
+---
+
+### End-to-End NBI Recall
+
+Query:
+
+```text
+How much auxiliary heating power can NBI provide?
+```
+
+Resolution:
+
+```text
+NBI
+    -> neutral beam injection
+    mechanism: reusable_variant
+```
+
+Identity component:
+
+```text
+neutral beam injection
+nbi
+neutral beam injection system
+```
+
+Recall:
+
+```text
+8 raw semantic edges
+7 logical semantic facts
+```
+
+Facts stored on `nbi` and `neutral beam injection system` were successfully surfaced as facts about the canonical `neutral beam injection` Entity while retaining their original raw edge support.
+
+---
+
+### End-to-End Contextual VCS Recall
+
+Query context:
+
+```text
+During the current ramp, the controller reduced vertical motion
+and used magnetic estimates to command the coils.
+```
+
+Resolution:
+
+```text
+the controller
+    -> vertical control system
+```
+
+Identity component:
+
+```text
+vertical control system
+VCS
+the controller [resolved occurrence]
+```
+
+Recall produced 15 logical semantic facts, including:
+
+```text
+vertical control system --commands--> vertical-control coils
+vertical control system --receives_estimates_from--> magnetic probe array
+vertical control system --reduces_vertical_motion_in--> helios-1
+vertical control system --uses_gain_schedule_for--> current ramp
+```
+
+---
+
+### End-to-End Contextual EDC Recall
+
+Query context:
+
+```text
+As edge density fell, the controller increased commanded gas flow.
+```
+
+The same surface form:
+
+```text
+the controller
+```
+
+resolved instead to:
+
+```text
+edge density controller
+```
+
+The resulting EDC identity component contained:
+
+```text
+edge density controller
+EDC
+```
+
+and recall returned nine semantic facts, including:
+
+```text
+edge density controller --adjusts--> gas injection
+edge density controller --commissioned_before--> campaign a
+edge density controller --enabled_after--> march
+edge density controller --is_a--> system
+```
+
+This demonstrates that the current query occurrence is resolved before graph activation rather than activating all historical nodes with the same surface string.
+
+---
+
+### Ambiguous Query Behavior
+
+Query:
+
+```text
+What does the controller do?
+```
+
+Resolution remained:
+
+```text
+ambiguous
+```
+
+and the pipeline explicitly stopped:
+
+```text
+RECALL SKIPPED:
+query mention was not resolved to a canonical Entity
+```
+
+This is an important architectural result.
+
+The system does not:
+
+```text
+find every historical "the controller" mention
+    -> activate all associated Entities
+    -> attempt to resolve ambiguity afterward
+```
+
+Instead:
+
+```text
+resolve current mention first
+    -> activate semantic memory only after resolution
+```
+
+This ordering is likely important for conversational recall, where shorthand and contextual references may be more frequent than in curated scientific documents.
+
+---
+
+## Mention Clustering Investigation
+
+During Stage 5.3, a possible future optimization was considered for cases where large numbers of occurrence-level mention Entities resolve to the same canonical Entity.
+
+A candidate representation would cluster mentions using approximately:
+
+```text
+(normalized surface form, resolved canonical Entity)
+```
+
+for example:
+
+```text
+"the controller" + VCS
+```
+
+rather than materializing a separate semantic mention node for every occurrence.
+
+The design was intentionally deferred.
+
+The key problem is that semantic relationships currently attached to individual mention occurrences implicitly preserve occurrence-level provenance.
+
+If relationships are moved onto a shared cluster node:
+
+```text
+cluster --relation--> object
+```
+
+the system must independently retain which source occurrence or occurrences supported that relation.
+
+If relationships remain attached to individual mention nodes, clustering does not substantially reduce semantic retrieval fan-out.
+
+Therefore meaningful mention clustering appears to depend on a stronger relation/assertion provenance abstraction, for example:
+
+```text
+semantic assertion
+    +
+supporting source occurrences
+```
+
+or equivalent provenance-bearing semantic edges.
+
+No clustering changes were made in Stage 5.3.
+
+If mention fan-out becomes a practical problem before richer assertion provenance exists, retrieval indexing/filtering should be preferred over premature graph-model changes.
+
+---
+
+## Stage 5.3 Conclusions
+
+Stage 5.3 supports the following architecture:
+
+```text
+QUERY / SOURCE EXPRESSION
+        ↓
+contextual or reusable identity resolution
+        ↓
+SEMANTIC ENTITY
+        ↓
+identity closure
+        ↓
+logical semantic recall
+        ↓
+raw provenance retained underneath
+```
+
+Key findings:
+
+1. A unified semantic `Entity` representation with `canonical`, `variant`, and `mention` roles is workable.
+
+2. Entity role and semantic scope should remain separate concepts.
+
+3. Canonical and variant representations may define reusable mappings within an applicable scope.
+
+4. Mention resolution is occurrence-dependent and should not automatically create a reusable alias.
+
+5. Direct semantic:
+
+```text
+Entity --resolves_to--> Entity
+```
+
+relationships provide a useful identity-navigation layer without physically merging original Entities.
+
+6. Identity closure can be traversed bidirectionally during recall after resolution has already been established.
+
+7. Facts distributed across multiple equivalent Entity representations can be recalled as one logical neighborhood.
+
+8. Duplicate logical facts can be suppressed while preserving multiple raw graph assertions as support.
+
+9. Support/provenance nodes must be explicitly excluded from ordinary semantic identity traversal.
+
+10. Query-time resolution should occur before semantic recall.
+
+11. An ambiguous query reference should not activate all historical mentions sharing the same surface text.
+
+12. A simple graph-derived lexical contextual resolver was sufficient for the current benchmark, producing:
+
+```text
+5 / 5 PASS
+```
+
+13. Highly central Entities may receive artificially high contextual scores because of broad semantic neighborhoods. Degree/centrality normalization is recorded as a future refinement but was not required in the current benchmark.
+
+14. Mention clustering is deferred until relation/assertion-level provenance is represented well enough that semantic facts can be compacted without losing source attribution.
+
+15. The current Stage-5.2 `Mention` helper and `materializes_as` relationship should be treated as transitional support-layer structures. The longer-term model should make the semantic `Entity(role=mention)` the source occurrence and represent resolution justification separately, likely through a `MentionResolution` or equivalent support object.
+
+Overall, Stage 5.3 demonstrates that **query-time contextual resolution and non-destructive identity-aware recall can be composed into a coherent semantic-memory path without rewriting Cognee's original graph.**
+
+The next stage should evaluate how these mechanisms behave when knowledge evolves across documents and time, beginning with ingestion of DOC02 and inspection of the resulting graph delta before applying custom reconciliation.
+
+# Cognee Science Lab — Stage 5.4 Investigation Results
+
+**Project:** `cognee-science-lab`  
+**Results consolidated:** 2026-10-11  
+**Primary code baseline:** Cognee 1.6.2  
+**Experimental backends:** Ladybug graph; LanceDB vector  
+**Status:** 5.4.1–5.4.4 complete enough for architecture selection; 5.4.5 investigation planned.
+
+This note consolidates the completed experiments, source inspections, and architectural decisions from Stage 5.4. It does not report a new run of the experiments. Graph counts and benchmark scores refer to recorded experimental snapshots, not the current live database.
+
+## 1. Purpose and revised investigation structure
+
+Stage 5.4 began with questions about identity-resolution timing, scope, and graph evolution. It was reframed around Cognee's operational semantics because a durable identity representation cannot be selected independently of construction, maintenance, retrieval, update, and deletion behavior.
+
+The refined sequence is:
+
+| Phase | Investigation | Status |
+|---|---|---|
+| 5.4.1 | Incremental / overlapping-ingest baseline | Complete |
+| 5.4.2 | Operational and extension map | Complete enough to proceed |
+| 5.4.3 | Retrieval semantics and extensions | Complete enough to proceed |
+| 5.4.4 | Lifecycle and persistence integration | Complete enough for architecture selection |
+| 5.4.5 | Mutation characterization, ownership, architecture, and operational invariants | Planned; current next work |
+
+“Complete enough” means the investigation supports the next architectural step. It does not mean all relevant behavior has been experimentally characterized or production code implemented.
+
+Three kinds of conclusions are distinguished below:
+
+- **Measured:** observed in controlled project runs.
+- **Source-inspected:** established through review of implementation or extension contracts.
+- **Design decision:** the preferred project approach derived from those findings.
+
+## 2. Stage 5.4.1 — Overlapping-ingest baseline
+
+### Question
+
+What happens to the existing semantic graph and Stage-5.3 identity overlay when another document with overlapping entities is processed through ordinary Cognify?
+
+### Experiment
+
+DOC02 was added and Cognified over the existing DOC01 / Stage-5.3 graph.
+
+This was a test of overlapping ingestion through Cognify. It was **not** a test of the native incremental `update()` engine.
+
+The existing graph contained experimental canonical/variant/mention roles, direct `resolves_to` links, and support structures such as `IdentityResolution` and `AbbreviationObservation`.
+
+### Measured results
+
+| Metric | Before | After | Change |
+|---|---:|---:|---:|
+| Nodes | 160 | 281 | +121 |
+| Edges | 377 | 761 | +384 |
+| Stage-5.3 query-resolution benchmark | 5/5 | 0/5 | All five cases regressed |
+
+Additional diff findings:
+
+- No pre-existing edges were removed or modified in the recorded comparison.
+- Properties on **30 pre-existing Entity nodes** were rewritten.
+- Rewritten properties included project annotations such as `entity_role` / `graph_layer`, as well as some names and descriptions.
+- The direct `resolves_to` identity topology survived.
+- The query resolver nevertheless failed because it depended on the overwritten annotations.
+
+The earlier successful behavior included reusable NBI alias resolution, contextual resolution of “the controller” to VCS or EDC, and preservation of ambiguity when context was insufficient.
+
+### Interpretation
+
+Cognify is additive in some respects, but it is **not append-only for existing node properties**.
+
+The failure separated two concerns:
+
+1. The identity relationships remained in the graph.
+2. The metadata needed to interpret and select those relationships was no longer reliable.
+
+A graph can therefore retain its identity topology while losing operational identity behavior.
+
+### Architectural constraint
+
+Important project state must not depend on arbitrary properties on Cognee-owned Entity nodes remaining intact across later Cognify runs.
+
+Possible responses include separately owned metadata, dedicated identity structures, or a hybrid representation. The experiment did not select among those options.
+
+The observed survival of existing edges is limited to this run; it is not a general persistence guarantee for Cognify, Improve, Update, or Forget.
+
+## 3. Stage 5.4.2 — Operational and extension map
+
+### Question
+
+Which Cognee mechanisms can support custom identity and scientific-memory behavior while preserving useful native behavior and minimizing dependence on private internals?
+
+### Source-inspected operational map
+
+| Operation | Relevant behavior | Extension implications |
+|---|---|---|
+| Add / Remember | Source ingestion; standard permanent Remember proceeds through Add and Cognify | Preserve native ingestion and lifecycle bookkeeping |
+| Cognify | Task-based construction and persistence | Configure extraction and customize construction sequencing |
+| Improve | Ordered built-in maintenance stages | Understand the full orchestrator before assuming mutation isolation |
+| Memify | Task-based extraction/enrichment over existing data or graph state | Suitable for replayable reconciliation and graph maintenance |
+| Recall / Search | Retrieval routing and registered retrievers | Put project retrieval semantics behind a custom Retriever/SearchType |
+| Update | Separate incremental and full-rebuild paths | Customized construction must have compatible update behavior |
+| Forget | Fixed deletion and cleanup orchestration | Custom artifact cleanup depends on compatible ownership/provenance or explicit repair |
+
+### Preferred extension surfaces
+
+| Surface | Finding / intended use |
+|---|---|
+| `DataPoint` | Custom persisted structures; deterministic identity and nested relationships |
+| `graph_model` | Extraction configuration; Stage 4 showed that a custom top-level model replaces normal semantic extraction rather than automatically augmenting it |
+| `Task` and custom pipelines | Explicit extraction/construction sequencing |
+| Custom Memify Tasks | Reconciliation, normalization, consolidation, and derived-state maintenance |
+| Registered `Retriever` / `SearchType` | Identity-aware and domain-specific retrieval |
+| `GraphDBInterface` and vector interfaces | Backend-independent graph/index access |
+
+Importability alone does not make a function a stable extension contract.
+
+Private Hybrid methods, dependence on `brute_force_triplet_search` as a public interface, direct Ladybug manipulation, and patching `recall()` / `search()` were judged fragile approaches.
+
+### Improve / Memify findings
+
+In pinned 1.6.2, Improve has a fixed ordered stage registry:
+
+1. Feedback weights.
+2. Session QA persistence.
+3. Agent trace persistence.
+4. Agent context extraction.
+5. Session distillation.
+6. User preference updates.
+7. Truth-subspace construction.
+8. Triplet enrichment.
+9. Global-context indexing.
+
+There is no public dynamic stage-registration hook in that reviewed implementation.
+
+The triplet-enrichment stage exposes the intended custom Memify seam through arguments including `extraction_tasks`, `enrichment_tasks`, `data`, and `node_type`. Supplying custom Tasks bypasses the normal graph-change watermark shortcut for that work.
+
+A custom Task can read and write graph structures selected by its own logic, including reconciliation/support objects. Logical membership in the support layer does not itself prevent mutation.
+
+**Not yet established:** which arbitrary project structures the built-in Improve stages actually select, traverse, modify, or re-index. Custom Task capability must not be mistaken for evidence about default Improve behavior.
+
+### Representation candidates retained
+
+| Candidate | Physical organization |
+|---|---|
+| A | Augment Cognee's semantic graph |
+| B | Separate identity subgraph |
+| C | Auxiliary identity structures/store |
+| D | Hybrid |
+
+These are representation alternatives. They are distinct from the lifecycle A/B alternatives in Section 5.
+
+No final physical representation was selected. The project intends to preserve useful native Cognee identity behavior while adding explicit resolution and provenance where needed.
+
+## 4. Stage 5.4.3 — Retrieval semantics and extensions
+
+### Question
+
+Do native retrieval modes interpret identity links in the way required by the Stage-5.3 model?
+
+### Native retrieval characterization
+
+| Retrieval mode | Relevant behavior |
+|---|---|
+| `RAG_COMPLETION` | Primarily source/chunk-vector retrieval |
+| `GRAPH_COMPLETION` | Vector-selected graph evidence, graph projection/neighborhood work, ranked edges/triplets, and context rendering |
+| `HYBRID_COMPLETION` | Passage retrieval combined with entity/fact neighborhoods |
+
+Native graph retrieval does **not** give `resolves_to` special identity semantics merely because a relationship has that name.
+
+Some apparent native alias-resolution success was attributable to lexical redundancy rather than an explicit identity operation. The presence of an identity edge is therefore insufficient to guarantee identity-aware recall.
+
+### Design direction
+
+Use a registered custom Retriever/SearchType for project identity semantics:
+
+```text
+query
+    -> query-time entity/mention resolution
+    -> scope-aware canonical / identity expansion
+    -> union of semantic neighborhoods
+    -> logical fact deduplication
+    -> source-attributed retrieval context
+```
+
+Required behavior:
+
+- Resolve conversational shorthand before broad semantic activation.
+- Preserve ambiguity when context does not justify one interpretation.
+- Treat identity traversal differently from ordinary semantic distance.
+- Retrieve relevant facts attached to equivalent representations without physically merging original nodes.
+- Exclude support/reconciliation objects from ordinary semantic recall.
+- Retain raw edges and supporting sources when logically deduplicating facts.
+- Allow explanation/provenance retrieval to inspect support structures when requested.
+
+Identity is logically navigable in both directions, but that does not justify activating every reverse-linked mention indiscriminately.
+
+### Extension boundary
+
+Use Cognee's retriever registry and graph/vector interfaces. A custom retrieval type is preferable to silently changing the semantics of built-in Graph or Hybrid retrieval.
+
+Keep native RAG as a reference and fallback. Source chunks remain valuable when the semantic graph omits, fragments, or misrepresents information.
+
+The Stage-5.3 script demonstrates the intended behavior; packaging it as the production custom Retriever remains Stage-6 work.
+
+## 5. Stage 5.4.4 — Lifecycle and persistence integration
+
+### Question
+
+How can custom extraction/construction Tasks participate in native Remember and Update without creating a parallel lifecycle implementation?
+
+### Source lifecycle versus derived maintenance
+
+Two kinds of customization need different homes:
+
+| Kind of work | Appropriate location |
+|---|---|
+| Changes to extraction, intermediate outputs, or construction order | Inside the Cognify Task sequence |
+| Reconciliation, normalization, and suitable derived materialization | Replayable Memify/Improve Tasks |
+
+The custom graph-model experiments already demonstrated that some project behavior affects extraction itself. It would therefore be too restrictive to require every customization to run after ordinary Cognify.
+
+Conversely, adding a Cognify hook is not a reason to put all derived maintenance inside construction.
+
+### Native Update findings
+
+Cognee 1.6.2 has separate incremental and full-rebuild paths.
+
+The incremental path uses a chunk-oriented diff/replacement mechanism. It can preserve unchanged chunk identities, replace affected chunks and summaries, remove affected graph/index state according to native ownership/orphan rules, and extract replacement chunks.
+
+Its eligibility is constrained by extraction configuration; custom graph-model/prompt cases do not use the ordinary incremental route in the reviewed implementation.
+
+The full-rebuild path uses native lifecycle machinery:
+
+```text
+resolve existing data_id
+    -> forget(memory_only=True)
+    -> reset appropriate pipeline status
+    -> add replacement with pinned data_id
+    -> cognify()
+```
+
+The incremental path does **not** call Cognify.
+
+These findings describe native mechanics. Correct handling of arbitrary custom support structures under those mechanics remains unverified.
+
+### Lifecycle alternatives compared
+
+| Criterion | A — project lifecycle wrappers | B — Cognify task-transform extension |
+|---|---|---|
+| Cognee source changes | None | Small patch |
+| Construction ordering | Project controls custom pipeline | Transform native construction Tasks |
+| Remember lifecycle | Wrapper reproduces/composes behavior | Native lifecycle retained |
+| Update bookkeeping | Project must track/reproduce relevant internals | Native lifecycle retained |
+| Upgrade burden | Wrapper tracks changing lifecycle semantics | Patch tracks Task-list seam |
+| Main risk | Divergence from native lifecycle | Maintaining a small extension patch |
+| Decision | Viable fallback | **Preferred direction** |
+
+Wrapper duplication would include data-ID resolution, pinned replacement, status handling, route checks, chunk-budget behavior, results, and error/rollback semantics.
+
+### Preferred B proposal
+
+Conceptual API:
+
+```python
+cognify_task_transform: Callable[[list[Task]], list[Task]] | None = None
+```
+
+Core placement:
+
+```text
+cognify()
+    -> build native STANDARD Tasks
+    -> apply optional task-list transform
+    -> build tasks_by_route
+    -> calculate pipeline needs, including needs_llm
+    -> execute native cognify_pipeline
+```
+
+The transform receives already-configured native Tasks and can insert, replace, remove, or append project Tasks. This retains upstream default sequencing changes where the transform leaves them intact.
+
+Proposed changes:
+
+- **Cognify:** expose and apply the transform before route-task mapping and pipeline-needs calculation.
+- **Remember:** forward the argument through the normal permanent-memory Cognify kwargs path.
+- **Update:** a non-null transform forces the native full-rebuild path; forward the same transform into the rebuild's Cognify call.
+
+The full-rebuild rule is semantic: Cognee's separate incremental updater cannot assume that its native chunk processing is equivalent to an arbitrary customized construction sequence.
+
+**Implementation status:** B is preferred and specified, but the patch has not been implemented or validated in these investigations.
+
+### Scope and limitations
+
+- Local Python first; Python callables are not serializable through the HTTP API.
+- Transform only `CognifyRoute.STANDARD` initially.
+- Leave DLT/code/special routes native unless deliberately supported later.
+- Define unsupported combinations explicitly.
+- Reject custom-transform dry runs initially, or clearly state that native estimates exclude custom costs.
+- Custom Tasks must obey Task-chain input/output contracts.
+- Preserve native pipeline naming, runtime/routing, data-ID/status handling, and result construction.
+- Native rollback for native artifacts does not guarantee cleanup of arbitrary custom side effects.
+- Define idempotence, replay, and cleanup for project writes separately.
+- The patch does not automatically arrange post-update reconciliation.
+
+### Cognify call-path review
+
+The reviewed architecturally relevant call paths were:
+
+| Entry point | Reaches core Cognify? | Implication |
+|---|---|---|
+| Direct local SDK Cognify | Yes | Core seam supports direct construction |
+| Standard permanent-memory Remember | Yes, after Add | Forward transform argument |
+| Full-rebuild Update | Yes | Forward transform; retain bookkeeping |
+| Incremental Update | No | Disable this branch when transform supplied |
+| HTTP POST `/api/v1/cognify` | Yes, on server | Requires server-side extension configuration |
+| Remote SDK Cognify | Forwards to server before local Task construction | Client-side callable cannot implement server customization |
+
+Not every Remember mode goes through STANDARD Cognify. Sessions, typed memories, and specialized code/import paths require separate treatment.
+
+No additional comparable top-level production lifecycle caller was identified in that review. This was a scoped call-path finding, not a claim that examples or tests never invoke Cognify.
+
+### Upgrade-resilience assessment
+
+The reviewed 1.6.2 code and then-current main both constructed route-specific Task lists before executing the Cognify pipeline. This made the Task-list boundary a promising conceptual patch anchor.
+
+That is evidence for a relatively small maintenance surface, not a guarantee of future compatibility. Recheck it when changing the project pin.
+
+## 6. Persistence, provenance, and deletion constraints
+
+The lifecycle review also identified concerns that remain relevant to the final architecture:
+
+- Native Cognify uses the stable `cognify_pipeline` name for completion tracking.
+- A separate custom pipeline name has independent status semantics.
+- Native single-data `forget(memory_only=True)` resets Cognify status; it does not understand arbitrary project pipeline names.
+- Native Forget coordinates graph/vector cleanup, session invalidation, relational edge-evidence removal, and pipeline-status handling.
+- Graph interfaces expose source-ref and pipeline-run provenance mechanisms, but custom writes must use them deliberately and compatibly.
+- Manual graph-engine edges observed earlier had a thinner metadata envelope than normal DataPoint relationships.
+- `add_data_points()` is graph persistence plus indexing, not merely isolated object creation; reuse of IDs can interact with existing objects.
+
+None of these mechanisms establishes that custom `IdentityResolution`, observations, definitions, or future Claim/Evidence structures will survive, update, or delete correctly by default.
+
+Forget remains a compatibility/repair concern with lower architectural priority than construction, maintenance, retrieval, and Update. A documented small cleanup/replay path may be acceptable where native deletion is insufficient.
+
+## 7. Conclusions established so far
+
+1. **Mutable Cognee Entity properties are not a safe home for durable project state.** The overlapping-ingest experiment demonstrated the failure directly.
+2. **Identity topology and operational identity behavior are separate.** Surviving links did not prevent the benchmark regression.
+3. **Native retrieval does not supply the required identity semantics.** A registered custom Retriever is the preferred extension.
+4. **Extraction customization and derived maintenance need separate extension seams.** Use transformed Cognify for the former and replayable Memify/Improve Tasks for the latter.
+5. **Prefer lifecycle B:** a small Cognify task-transform patch with native Remember/Update orchestration.
+6. **Customized Update initially requires full rebuild.** Incremental compatibility needs a future explicit contract.
+7. **Physical identity representation remains open.** The lifecycle decision does not settle representation A/B/C/D.
+8. **Logical graph layers are not established native mutation boundaries.** Ownership policy must be grounded in actual operation selection and write behavior.
+
+## 8. Remaining investigation — Stage 5.4.5
+
+No new 5.4.5 experiment results are reported here.
+
+The next work is to characterize actual mutation/persistence behavior across:
+
+- Cognee semantic nodes and edges;
+- project identity representations and `resolves_to`;
+- reconciliation/support objects;
+- source/context structures;
+- provenance, source refs, and pipeline-run metadata;
+- graph/vector indexes;
+- representative future scientific structures.
+
+Test persistence, overlapping Cognify, default Improve, direct/custom Memify, incremental and full-rebuild Update, Forget, and deletion. Treat Recall/Search as a read-path control while distinguishing graph/index mutations from session or other bookkeeping writes.
+
+Use isolated/reset fixtures and before/after snapshots. Record write path, operation eligibility, selectors, property/edge changes, source/run metadata, evidence/status, and index changes.
+
+The particularly important unresolved question is:
+
+> Which built-in Improve stages can select, traverse, modify, or re-index reconciliation/support structures, and by what mechanism?
+
+A custom no-op Task does not imply that its enclosing Improve run is a no-op.
+
+Only after this characterization should we finalize ownership, choose the physical representation, specify lifecycle orchestration, and turn the resulting invariants into Stage-6 requirements.
+
+The agreed architecture check-in remains **after Stage 6**.
+
+## 9. Reference anchors
+
+Companion project documents:
+
+- `cognee_science_lab_ROADMAP.md` — revised 2026-10-11.
+- `cognee_extension_architecture_reference_v1.6.2.md` — detailed extension/lifecycle reference.
+
+Primary implementation anchors used in the earlier investigations:
+
+- [Cognify — v1.6.2](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/api/v1/cognify/cognify.py)
+- [Remember — v1.6.2](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/api/v1/remember/remember.py)
+- [Update — v1.6.2](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/api/v1/update/update.py)
+- [Forget — v1.6.2](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/api/v1/forget/forget.py)
+- [Improve — v1.6.2](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/api/v1/improve/improve.py)
+- [Improve registry — v1.6.2](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/modules/improve/registry.py)
+- [Improve stages — v1.6.2](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/modules/improve/stages.py)
+
+Main-branch documentation and design materials are context, not substitutes for the pinned runtime:
+
+- [Custom Tasks and pipelines example](https://github.com/topoteretes/cognee/blob/main/examples/guides/custom_tasks_and_pipelines.py)
+- [Memify design discussion](https://github.com/topoteretes/cognee/issues/3389)

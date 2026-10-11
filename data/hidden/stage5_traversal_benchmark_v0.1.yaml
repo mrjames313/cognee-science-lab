@@ -1,0 +1,114 @@
+version: "0.1"
+stage: "5.3"
+
+purpose: >
+  Evaluate identity-aware semantic traversal without physically merging
+  Entity nodes or exposing support/provenance nodes during ordinary
+  semantic retrieval.
+
+semantic_layer:
+  node_types:
+    - Entity
+
+  identity_relationship:
+    - resolves_to
+
+support_layer:
+  node_types:
+    - IdentityResolution
+    - AbbreviationObservation
+    - Mention
+
+source_context_layer:
+  node_types:
+    - TextDocument
+    - DocumentChunk
+    - TextSummary
+    - DefinitionSummary
+
+identity_cases:
+
+  - id: TRV01_NBI
+    canonical: "neutral beam injection"
+    members:
+      - name: "NBI"
+        role: variant
+      - name: "neutral beam injection system"
+        role: variant
+      - name: "neutral beam injection"
+        role: canonical
+
+  - id: TRV02_ECH
+    canonical: "electron cyclotron heating"
+    members:
+      - name: "ECH"
+        role: variant
+      - name: "electron cyclotron heating system"
+        role: variant
+      - name: "electron cyclotron heating"
+        role: canonical
+
+  - id: TRV03_VCS
+    canonical: "vertical control system"
+    members:
+      - name: "VCS"
+        role: variant
+      - name: "vertical control system"
+        role: canonical
+
+  - id: TRV04_EDC
+    canonical: "edge density controller"
+    members:
+      - name: "EDC"
+        role: variant
+      - name: "edge density controller"
+        role: canonical
+
+  - id: TRV05_AFRL
+    canonical: "aurora fusion research laboratory"
+    members:
+      - name: "AFRL"
+        role: variant
+      - name: "aurora fusion research laboratory"
+        role: canonical
+    must_not_include:
+      - "aurora reconstruction suite"
+
+  - id: TRV06_HELIOS1
+    canonical: "helios-1"
+    members:
+      - name: "H-1"
+        role: variant
+      - name: "Helios 1"
+        role: variant
+      - name: "helios-1"
+        role: canonical
+
+mention_cases:
+
+  - id: TRV07_CONTROLLER_VCS
+    source_chunk_index: 2
+    surface_text: "the controller"
+    occurrence_index: 0
+    role: mention
+    expected_canonical: "vertical control system"
+
+  - id: TRV08_CONTROLLER_UNRESOLVED
+    source_chunk_index: 2
+    surface_text: "the controller"
+    occurrence_index: 1
+    role: mention
+    expected_canonical: null
+
+semantic_retrieval_requirements:
+  identity_closure_is_bidirectional: true
+  union_semantic_neighborhoods: true
+  preserve_original_edges: true
+  suppress_duplicate_facts: true
+  exclude_support_nodes: true
+  exclude_source_nodes_unless_requested: true
+
+explanation_retrieval_requirements:
+  identity_resolution_recoverable: true
+  supporting_observations_recoverable: true
+  source_chunks_recoverable: true

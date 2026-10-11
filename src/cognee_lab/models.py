@@ -3,8 +3,50 @@ from pydantic import BaseModel, Field, model_validator
 
 from cognee.infrastructure.engine import DataPoint
 from cognee.modules.chunking.models import DocumentChunk
+from cognee.modules.engine.models.Entity import Entity as CogneeEntity
 from cognee.shared.data_models import KnowledgeGraph
 
+
+ENTITY_ROLES = (
+    "canonical",
+    "variant",
+    "mention",
+)
+
+ENTITY_SCOPE_KINDS = (
+    "global",
+    "corpus",
+    "document",
+    "subdocument",
+    "chunk",
+    "occurrence",
+)
+
+
+class Entity(CogneeEntity):
+    # Semantic identity role.
+    entity_role: str | None = None
+
+    # Logical layer.
+    graph_layer: str = "semantic"
+
+    # Scope in which this representation has its semantic interpretation.
+    scope_kind: str | None = None
+    scope_anchor_id: str | None = None
+
+    # Source coordinates. Primarily relevant to occurrence-level mentions.
+    source_document_id: str | None = None
+    source_chunk_id: str | None = None
+    source_chunk_index: int | None = None
+
+    start_char: int | None = None
+    end_char: int | None = None
+
+    # Temporary fallback/debug coordinate until exact spans are reliable.
+    occurrence_index: int | None = None
+
+
+# NOTE: much of the below is soon (stage 5.3) to be deprecated
 
 # ---------------------------------------------------------------------------
 # Stage 5 identity vocabulary

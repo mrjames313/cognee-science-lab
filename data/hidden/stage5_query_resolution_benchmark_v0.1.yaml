@@ -1,0 +1,38 @@
+cases:
+  - id: QRY01
+    mention: "NBI"
+    context: "How much auxiliary heating power can NBI provide?"
+    expected: "neutral beam injection"
+    expected_status: resolved
+    mechanism: reusable_variant
+
+  - id: QRY02
+    mention: "H-1"
+    context: "What is the nominal toroidal field of H-1?"
+    expected: "helios-1"
+    expected_status: resolved
+    mechanism: reusable_variant
+
+  - id: QRY03
+    mention: "the controller"
+    context: >
+      During the current ramp, the controller reduced vertical motion
+      and used magnetic estimates to command the coils.
+    expected: "vertical control system"
+    expected_status: resolved
+    mechanism: contextual
+
+  - id: QRY04
+    mention: "the controller"
+    context: >
+      As edge density fell, the controller increased commanded gas flow.
+    expected: "edge density controller"
+    expected_status: resolved
+    mechanism: contextual
+
+  - id: QRY05
+    mention: "the controller"
+    context: "What does the controller do?"
+    expected: null
+    expected_status: ambiguous
+    mechanism: contextual
