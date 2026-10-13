@@ -2,7 +2,8 @@
 
 **Project context:** `cognee-science-lab`  
 **Pinned Cognee version:** 1.6.2  
-**Review date:** 2026-10-10  
+**Original review date:** 2026-10-10  
+**Identity-design update:** 2026-10-13  
 **Purpose:** Reusable reference for identity management and future Cognee integrations. This note focuses on extension boundaries, lifecycle behavior, and version-resilient design rather than one specific identity representation.
 
 ## 1. Design objective
@@ -279,7 +280,7 @@ For our integrations, the unanswered practical question is how custom nodes/edge
 
 ## 8. Forget / deletion model — compatibility constraint, not design driver
 
-Per project decision, Forget has lower priority and should not disproportionately determine representation architecture.
+Forget remains a compatibility/lifecycle concern without dictating the entire representation. The recorded identity proposal now requires explicit original-source → generated-source retirement and shared contribution repair for the admitted workflows; this is not a universal deletion framework.
 
 For single-data `forget(memory_only=True)`, pinned 1.6.2 does:
 
@@ -393,26 +394,34 @@ Evaluate every new capability against these questions:
 10. **Transport independence:** does it work only in local Python, or also through remote/server APIs?
 11. **Version resilience:** does it depend on documented contracts or private method structure?
 
-## 13. Immediate implications for Stage 5.4
+## 13. Immediate implications for Stage 5.4 — updated 2026-10-13
 
-Before choosing identity representation A/B/C/D, Stage 5.4 should use these operational facts as constraints:
+Broad mutation/persistence characterization is complete in cognee_stage5_4_5_1_initial_findings.md. Initial ownership/representation choices are recorded in cognee_stage5_4_5_identity_representation_proposal.md; current work is operation walkthroughs toward the lifecycle contract.
 
-- Do not require default RAG to understand identity.
-- A custom Cognee Retriever is acceptable and intended when graph retrieval needs domain semantics.
-- Prefer identity/scientific reconciliation that is replayable as graph-maintenance Tasks rather than permanently attached ad-hoc properties.
-- Do not assume custom graph artifacts survive or are deleted correctly; characterize them after choosing their write path and provenance semantics.
-- Native 1.6.2 incremental Update cannot operate with a custom graph model/prompt; full rebuild is expected in that case.
-- Therefore update resilience is best achieved first through **replayable transformations**, not by modifying the incremental update engine.
-- Forget correctness is useful but secondary.
+The selected initial direction uses registered generated identity sources, durable structured assignments, ordinary Entity nodes with explicit occurrence IDs, persistent mention markers, and contribution-bearing resolution edges. Identity groups consist of variants without a privileged canonical member. It avoids added authoritative Entity fields and does not require assignment support nodes.
 
-## 14. Remaining questions for controlled tests
+- Do not require default RAG or generic graph traversal to enforce identity semantics; use the custom Retriever.
+- calculate_chunk_graphs can compute deterministic graphs but is not a reference-only existing-endpoint publication contract.
+- A custom source-bound loading Task must carry ID-based custom_edges, deliberately attach existing endpoint retention and preserve full contribution collections.
+- Native document-level ownership is the initial retention granularity; original-input dependency and applicability remain separate.
+- Keep replayable project maintenance and full-source rebuild as the initial lifecycle direction; forwarded customization is not automatic in native Update.
+- Verify derived-source retirement, shared edge property repair and failure/read eligibility instead of assuming native owner cleanup handles them.
 
-1. When custom Memify Tasks write nodes/edges through standard `add_data_points` or graph interfaces, what provenance/run metadata is attached automatically versus only when explicitly supplied?
-2. After native full-rebuild `update()`, does running custom Improve/Memify reliably recreate an intended secondary/augmented graph without interfering with Cognee's newly extracted entities?
-3. Under default incremental update, which shared node/edge properties are mutated when only one source chunk changes?
-4. Can reconciliation Tasks be efficiently scoped to the changed document/chunks, or is corpus-level replay initially simpler/safer?
-5. What is the clean registration/deployment mechanism for custom Improve/Memify Tasks when running Cognee remotely?
-6. Which extension contracts remain unchanged in the next Cognee minor version before upgrading the project pin?
+The preferred B Task-list transform remains proposed and unimplemented. This direction neither implements it nor establishes which routing/loader wiring is sufficient.
+
+## 14. Remaining questions for controlled tests — current design
+
+The earlier source-context, native deletion, incremental property and watermark questions now have scoped results in the characterization report. The combined new identity form is untested. Focus further checks on:
+
+1. Publishing a new explicit-ID Entity and an ID-based edge to an existing Entity without rewriting the existing fields, while intentionally retaining both endpoints.
+2. Edge-only publication and contribution collection serialization/aggregation under multiple source owners.
+3. Distinct same-text mention Entities, persistent mention markers and unresolved-to-resolved replay.
+4. Original-source Update/Forget triggering derived-source maintenance; generated-source full rebuild recreating solely owned endpoints and markers.
+5. Failure/retry and reader eligibility across incomplete publication.
+6. Default/selected native operations, consolidation/remapping admission, and graph/vector readers consuming this representation.
+7. Remote deployment/transport and version-upgrade compatibility only when those profiles are admitted.
+
+No new runtime test or traversal benchmark was run for this documentation update.
 
 ## 15. Source anchors
 
@@ -560,3 +569,21 @@ Therefore the patch's conceptual anchor is stable even if exact line numbers cha
   - https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/api/v1/update/update.py
 - Current main Cognify still uses route-specific task lists and the same Cognify pipeline-name/run-pipeline structure, supporting the patch's conceptual rebase stability.
   - https://github.com/topoteretes/cognee/blob/main/cognee/api/v1/cognify/cognify.py
+
+## 17. Identity-source publication seams — source-inspected, 2026-10-13
+
+The detailed representation and preliminary ownership matrix live in [the proposal](cognee_stage5_4_5_identity_representation_proposal.md); this section records the extension implications.
+
+| Seam | What it supplies | What it does not supply automatically |
+|---|---|---|
+| Registered Data item | Native source lifecycle and chunks for generated identity material | A dependency cascade from the original input document |
+| calculate_chunk_graphs | Deterministic replacement of standard text LLM graph extraction | Existing-node reference-only writes, custom loading, or persisted routing through Update |
+| Explicit Entity id | Ordinary ID-keyed node persistence with distinct IDs for identical names | Protection from optional consolidation/remapping |
+| add_data_points custom_edges + real source ctx | ID-based relationships with source-bound document ownership | Existing endpoint retention, per-assignment property merging, or chunk-to-edge evidence |
+| attach_node_source_refs | Intentional retention of matched existing nodes without field replacement | Applicability or original-input provenance |
+| Custom Retriever | Project-specific identity-group/mention traversal and output policy | Equivalent behavior in native retrieval/triplet indexing |
+
+Keep computation separate from publication: callbacks can calculate intent, but the loading Task must control new-node writes, existing-node ref attachment, full edge contribution payloads and checks. Native full-rebuild Update does not accept arbitrary callback kwargs as a durable route. Determine the loader/routing sequence under the B extension during .4; the small core patch, derived-source orchestration and this combined publication workflow remain unimplemented.
+
+No guarantees are added for every backend, optional maintenance stage, remote path or access-control configuration.
+

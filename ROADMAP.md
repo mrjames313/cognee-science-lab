@@ -1,9 +1,9 @@
 # Cognee Science Lab Roadmap
 
-**Last revised:** 2026-10-11  
+**Last revised:** 2026-10-13  
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
-**Current work:** Stage 5.4.5 — architecture and operational invariants, beginning with graph-wide mutation/persistence characterization. Experiments have not yet started.
+**Current work:** Stage 5.4.5.2–.3 — initial ownership and identity representation direction recorded; next, operation walkthroughs toward the 5.4.5.4 lifecycle contract. Stage 5.4.5.1 characterization remains complete. Schema/routing, lifecycle validation, final invariants and Stage-6 implementation remain pending.
 
 This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
 
@@ -19,7 +19,7 @@ This revision reconciles the previously saved roadmap with the later project dis
 | 5.4.2 | Complete enough to proceed | Operational map and preferred extension seams |
 | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
 | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
-| 5.4.5 | Current; planned investigation | Mutation matrix → ownership → physical representation → lifecycle → invariants |
+| 5.4.5 | In progress | .1 complete; .2–.3 initial ownership/representation proposal recorded; operation walkthroughs, lifecycle and handoff next |
 | 6 | Planned | Implement the chosen processing/retrieval architecture, then reassess |
 | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
 
@@ -55,73 +55,48 @@ Important extraction outputs should remain inspectable even when later processin
 
 Do not physically merge equivalent Entity nodes as the default strategy. Preserve original extracted nodes and represent reconciliation explicitly.
 
-### Unified Entity roles — demonstrated logical model; physical storage still open
+### Singleton, identity group and mention — selected initial direction
 
-The Stage-5.3 experiment uses one `Entity` concept with three roles. These logical distinctions remain useful, but their durable physical representation is a Stage-5.4.5 decision:
+Use **singleton** and **identity group** terminology going forward. An identity group consists of reusable variants connected by applicable variant relationships; it has no privileged canonical Entity. A singleton is an ordinary Entity outside such a group, excluding marked mentions. Historical Stage-5.3 references to canonical/variant/mention roles describe the earlier experiment.
 
-- `canonical` — the preferred semantic representation within an applicable resolution scope;
-- `variant` — a reusable non-canonical representation whose interpretation may apply generally within a declared scope;
-- `mention` — an occurrence-specific representation whose interpretation depends on the context of that source occurrence.
+A mention is a distinct occurrence Entity. It receives an explicit deterministic occurrence UUID and a generated identity DocumentChunk → Entity has_identity_mention marker. Classification persists when no accepted resolution exists. A reusable variant Entity must not also serve as a mention.
 
-Role and scope are independent. Canonicality is scope-relative rather than inherently global. Any Entity role may participate in ordinary semantic relation edges.
+Do not add authoritative identity fields to ordinary Entity properties. Store resolution kind, applicability and current contributions on identity edges, and retain structured assignments/original-input provenance independently in generated identity sources. Do not introduce singleton or variant markers, or a graph support node per assignment, in the initial design.
 
-The earlier distinction between `lexical_variant` and `extracted_variant` is intentionally collapsed into `variant`; how an Entity entered the graph belongs in provenance rather than in its semantic role.
-
-Semantic scope and source location are distinct concepts. The following describes logical metadata, not a requirement to place these fields on Cognee-owned nodes:
-
-```text
-entity_role: canonical | variant | mention
-
-scope_kind: global | corpus | document | subdocument | chunk | occurrence
-scope_anchor_id: optional anchor for semantic applicability
-
-source_document_id / source_chunk_id / start_char / end_char:
-    source coordinates for occurrence-level Entities
-```
-
-A mention's exact source coordinates are relative to a specific text-bearing anchor, currently the `DocumentChunk`. `occurrence_index` remains only a temporary/fallback disambiguator until exact spans are reliably available.
+The proposal groups document-local assignments into one generated Data item per original document and uses native document-level owners to retain all required endpoints. Original-input dependency, native ownership and applicability remain distinct. See [the recorded proposal](cognee_stage5_4_5_identity_representation_proposal.md) for the preliminary ownership matrix, edge contents, evidence boundaries and remaining decisions.
 
 ### Project state must survive native mutation
 
-Stage 5.4.1 showed that later Cognify can rewrite properties on existing Cognee-owned Entity nodes, including experimental `entity_role` / `graph_layer` annotations. Important project state cannot depend on those mutable properties remaining intact. Separate project-owned metadata, dedicated identity structures, and a hybrid representation remain candidates until Stage 5.4.5 characterizes the broader mutation surface.
+Stage 5.4.1 showed that later Cognify can replace existing Entity properties, including experimental entity_role/graph_layer annotations. The initial direction therefore places authoritative identity state in structured generated sources and project identity relationships.
 
-Logical layer boundaries are design intent, not native mutation barriers. The selection and write behavior of each built-in operation must be established for support, source, and reconciliation structures as well as semantic Entities.
+Edges are not generically protected: same-triple upserts can replace their ordinary properties, endpoint deletion removes incident relationships, and optional consolidation can remap endpoints. Identity maintenance must aggregate contributions explicitly and handle source lifecycle changes. Existing endpoint retention is attached through native source refs without rewriting ordinary Entity properties.
+
+Logical layers and distinct IDs are not native mutation barriers. Selected operation contracts and actively consumed index/backend-reference behavior remain to be checked for this exact publication path.
 
 ### Direct semantic identity navigation
 
-The semantic layer should move toward direct Entity-to-Entity identity links:
+Keep direct Entity-to-Entity resolves_to relationships, with a stored resolution_kind distinguishing:
 
-```text
-variant --resolves_to--> canonical
-mention --resolves_to--> canonical
-```
+- variant: bidirectional equivalence under applicable contributions;
+- mention: a directed occurrence-specific reference into a singleton or identity group.
 
-`resolves_to` is stored directionally from a non-canonical representation toward a canonical representation, but semantic identity is logically navigable in both directions. Retrieval should not equate bidirectionality with blindly expanding every reverse edge; query-time resolution and retrieval ranking/indexing determine which identity-related representations are activated.
+Resolve query context before semantic activation. Follow applicable variant paths transitively; a mention may enter the group through any member. Mention links do not create equivalence groups and must not become unrestricted reverse expansion or bridges between groups.
+
+Current contribution collections supply edge applicability. Original-document provenance does not itself determine applicability scope. Native readers and triplet text do not automatically implement these traversal rules.
 
 ### Logical graph layers
 
-The experiments distinguish three logical layers within one physical graph. Stage 5.4.5 will select their durable physical arrangement:
+Keep semantic, source/context and provenance functions distinct without requiring a graph support node for each assignment:
 
-```text
-SEMANTIC LAYER
-    Entity
-    ordinary semantic relations
-    resolves_to
+| Function | Initial arrangement |
+|---|---|
+| Semantic graph | Ordinary Entity nodes and domain relationships |
+| Identity navigation | resolves_to edges carrying variant/mention kind and current applicability contributions |
+| Mention classification | Generated identity chunk → Entity has_identity_mention marker |
+| Durable identity/provenance | Registered generated Data sources retaining structured assignments, original-input provenance and readable descriptions |
+| Original source/context | Native documents/chunks/summaries and relevant observation/definition inputs |
 
-SUPPORT / PROVENANCE LAYER
-    IdentityResolution
-    AbbreviationObservation
-    mention-resolution support records
-    future evidence/conflict/invalidation structures
-
-SOURCE / CONTEXT LAYER
-    TextDocument
-    DocumentChunk
-    TextSummary
-    DefinitionSummary
-```
-
-Helper/support nodes exist primarily for graph construction, provenance, debugging, explanation, update/invalidation, and truth maintenance. They should not automatically participate in ordinary semantic retrieval.
+Earlier IdentityResolution/Mention helpers remain experimental history, not required durable forms. Final storage of observations/DefinitionSummary and transition from prototype helpers remain open. Exclude identity/source/provenance structures from normal subject-matter output; expose them when requested for explanation or maintenance.
 
 ### Retrieval modes
 
@@ -129,7 +104,7 @@ Planned logical retrieval modes:
 
 1. **semantic** — Entity nodes, ordinary semantic relations, and identity navigation; support nodes excluded by default;
 2. **source-aware** — semantic results plus relevant source/context nodes;
-3. **explanation / provenance** — semantic results plus IdentityResolution, observations, evidence, and source support;
+3. **explanation / provenance** — semantic results plus saved assignments, edge contributions, observations and original/generated source support;
 4. **graph-management** — full support/dependency structure for maintenance, update, deletion, reconciliation, and debugging.
 
 ---
@@ -271,6 +246,8 @@ Resolution states to support include:
 
 ### 5.2 Non-destructive identity representation — COMPLETE
 
+**Historical representation experiment:** the helper-node forms below remain measured prototype results. The 2026-10-13 initial direction does not require per-assignment IdentityResolution support nodes.
+
 Implemented and tested:
 
 - `IdentityResolution` helper nodes;
@@ -316,13 +293,15 @@ Manual graph-engine edges have a thinner metadata envelope than Cognee-generated
 
 #### 5.3.0 Representation experiment — COMPLETE for the benchmark subset
 
+**Historical terminology:** canonical/variant/mention and Entity annotations below describe the demonstration. Current design uses singleton/identity group/mention, edge metadata and saved assignments.
+
 Implemented the logical roles `canonical`, `variant`, and `mention`, with scope independent of role. Materialized missing reusable variants and occurrence-specific mention Entities, added direct `resolves_to` links, and retained Stage-5.2 support/provenance helpers.
 
 The resulting experimental snapshot had **160 nodes / 377 edges**. The annotations used in this experiment are not a durable storage decision: 5.4.1 later exposed their vulnerability to native Cognify writes.
 
-Representation rules retained:
+Representation rules demonstrated at that time:
 
-- canonicality is scope-relative;
+- canonicality was scope-relative;
 - all roles may carry ordinary semantic edges;
 - extraction history belongs in provenance;
 - semantic applicability (`scope_kind`, `scope_anchor_id`) differs from occurrence source coordinates;
@@ -377,7 +356,7 @@ Keep logical fact reconciliation modest: equivalent Entity representations shoul
 
 Do **not** implement mention clustering yet. Occurrence-level mention Entities currently provide straightforward relation provenance: a semantic edge attached to a mention is automatically tied to the source occurrence represented by that mention.
 
-A future cluster such as `(surface form, resolved canonical Entity)` is only useful if semantic relations can be collapsed without losing occurrence-level provenance. That likely requires a stronger relation/assertion provenance abstraction, for example a materialized semantic relation plus a support object linking one or more source occurrences to that assertion.
+A future mention cluster is only useful if semantic relations can be collapsed without losing occurrence-level provenance. Its resolved target would be a singleton or identity group under the current terminology. Compaction remains deferred until ownership/provenance and update/delete semantics are clear.
 
 Until evidence shows mention fan-out is a real problem, prefer simple retrieval/indexing mitigations over a model rewrite. Revisit clustering only after relation/assertion provenance is explicit enough to preserve source support under compaction.
 
@@ -474,86 +453,97 @@ The reviewed call paths include direct local SDK Cognify, standard Remember, ful
 
 Keep **derived maintenance separate**: use idempotent Memify/Improve Tasks for reconciliation, normalization, and suitable semantic materialization. How maintenance is invoked after each source mutation remains part of 5.4.5/Stage 6; merely adding the Cognify transform does not wire this automatically.
 
-#### 5.4.5 Architecture and operational invariants — CURRENT; INVESTIGATION PLANNED
+#### 5.4.5 Architecture and operational invariants — IN PROGRESS; INITIAL REPRESENTATION RECORDED
 
 Consolidate 5.4.1–5.4.4 into an implementable architecture. Begin with evidence of **actual Cognee mutation behavior across the whole graph**, then derive ownership rules. Do not treat desired ownership or logical graph layers as facts about existing Cognee mechanics.
 
-##### 5.4.5.1 Cognee mutation surface
+##### 5.4.5.1 Cognee mutation surface — COMPLETE FOR EXPLORATION
 
-Build an operation × artifact matrix using source inspection and controlled before/after experiments. Separate built-in behavior from behavior selected by custom Tasks, and label each conclusion as observed, source-inspected, inferred, or untested, with version/backend and write path recorded.
+Completed pinned Cognee 1.6.2 source inspection, graph/vector/relational baselines, isolated adapter/planner checks, public-operation clone probes, a minimal custom Claim/Measurement/Evidence fixture, and final operation × artifact synthesis. Detailed evidence and the measured/source-inspected/untested labels are retained in `cognee_stage5_4_5_1_initial_findings.md`.
 
-Operations to characterize:
+Runtime coverage:
 
-- Cognify, including overlapping ingest;
-- `add_data_points()` and normal graph/vector persistence, including reuse of existing IDs;
-- default Improve stages;
-- Memify and custom extraction/enrichment Tasks, both directly and through Improve;
-- native incremental Update and native full-rebuild Update;
-- `forget(memory_only=True)`, single-data deletion, and dataset deletion;
-- Recall/Search as a read-path control, distinguishing graph/index changes from session, feedback, or other bookkeeping writes.
-
-| Artifact class | Representative structures |
+| Operation/profile | Established result |
 |---|---|
-| Cognee semantic | Entity, EntityType, ordinary semantic edges |
-| Project semantic | Canonical/variant/mention representations, `resolves_to` |
-| Support/reconciliation | IdentityResolution, AbbreviationObservation, mention-resolution records |
-| Source/context | TextDocument, DocumentChunk, TextSummary, DefinitionSummary |
-| Provenance/ownership | Source refs, pipeline-run metadata, support/dependency links, edge evidence |
-| Derived indexes | Node/triplet embeddings, vector collections, global-context indexes |
-| Future scientific structures | Representative Claim/Measurement/Evidence and conflict/supersession probes; no full scientific model required yet |
+| Overlapping Cognify | Existing Entity property replacement is observed; project annotations can be overwritten |
+| DataPoint persistence / custom Tasks | Full property upsert differs from patch; prior relationships can remain; run/dataset context alone is insufficient ownership |
+| Default Improve / direct Memify | Default triplet indexing includes support and other-dataset relationships in shared storage; direct default/empty-list Memify refreshes existing Triplets |
+| Native incremental Update | Diagnostic default-model profile bypasses core Cognify, preserves unchanged chunks, and exposes evidence/index/watermark gaps |
+| Project-model full rebuild | Routes through memory-only Forget, Add, and Cognify; project maintenance is not replayed automatically |
+| Source and dataset Forget | Last-owner cleanup and shared survival work; unowned helpers and detached-edge Triplet orphans remain |
+| Minimal scientific fixture | Explicit source binding stamps the written subtree; nested supersession also co-owns old objects; ownership removal does not restore historical values |
+| Recall/Search controls | Tested graph/index/evidence state unchanged; history, operation rows, cached QA and session vectors have profile-specific writes |
 
-For each cell establish whether the operation creates, reuses/merges by ID, updates properties, adds/removes edges, deletes, traverses indirectly, re-indexes, or ignores the artifact. Identify selection criteria and differences caused by source refs, shared support, node type, and pipeline-run ownership.
+Concrete measured findings:
 
-**Improve-specific question:** which built-in stages select or mutate non-semantic reconciliation/support structures, and how? Custom Tasks can select and write arbitrary graph structures through the graph interface; their capability does not tell us what default Improve actually does. Determine the read/write scope of each relevant built-in stage and any resulting index or materialization effects.
+- Baseline: 281 nodes / 761 edges; 35 project support nodes and 62 support-incident edges have no native owner; all 90 support field-vector rows exist.
+- Enabled no-session Improve indexes all 761 shared graph relationships, including 62 support relationships and 286 DOC01-only relationships despite a DOC02 dataset call.
+- DOC01 source or dataset deletion removes 74 nodes / 329 edges, preserves 45 shared nodes / 19 shared edges with DOC02 ownership, and leaves 35 stale helpers, 14 isolated helpers, and 43 detached-edge orphan Triplets.
+- Same-dataset priming proves that enabled Improve skips after an incremental write and leaves 71 new-edge Triplets absent in the follow-up. Incremental evidence retains 93 rows naming retired chunks, including 79 rows for absent graph edges in the first Update probe.
+- Full dataset Forget removes the dataset, Data row, and clone-managed source files; memory-only dataset Forget retains them and clears both Add/Cognify status entries. Both invalidate seeded attributed cached QAs/session vectors; session registry/history rows remain.
+- Custom Tasks require a concrete source Data anchor for native ownership. Lifecycle ownership, assertion evidence, scalar source fields, vector attribution, and historical values are distinct contracts.
+- DOC01-requested retrieval uses one DOC01 chunk plus two DOC02 chunks in this access-control-disabled shared-store configuration. Dataset labels do not establish source-confined retrieval.
+- All 15 custom-fixture checks and all 25 closure-control checks passed. No repair implementation was added to finish characterization.
 
-Controlled experiment plan:
+**Coverage boundary:** runtime probes use Ladybug/LanceDB/SQLite, access control disabled, two documents in separate datasets sharing storage. Dataset deletion includes DOC01's one-document dataset; read controls use CHUNKS/RAG_COMPLETION, a fresh session, automatic feedback off, and last-access tracking off. Session-enabled/opt-in Improve stages, other isolation/backend configurations, and broader session-invalidation paths retain their source-inspected or untested labels. The default-model incremental profile is diagnostic, not the lab's project-model production path.
 
-1. Create a small fixture with one representative from each logical layer, shared and source-local support, and distinguishable sentinel properties/edges. Record its persistence path and provenance stamping.
-2. Capture nodes/properties, edges/metadata, source refs, pipeline-run records, relational evidence/status, and vector/index state.
-3. Run each operation from an equivalent isolated/reset baseline: second-document Cognify; default Improve; read/no-op custom Task; targeted custom mutation; incremental Update; full rebuild; Forget; deletion controls. A Task no-op is not assumed to make its enclosing Improve run a no-op.
-4. Compare snapshots and report changes and selection mechanisms. Record incremental/fallback eligibility so an Update test cannot silently measure the wrong branch. Keep session/conversation state controlled.
-5. Test custom artifacts written through DataPoint persistence versus graph-interface writes, with/without compatible source/run metadata, and verify survival/removal when one of multiple supporting sources disappears.
+The completed matrix covers semantic, project semantic, support/reconciliation, source/context, native ownership, assertion evidence, graph indexes, and session/history/accounting artifacts. No production scientific schema or physical identity representation is selected by the fixture.
 
-Reuse the 5.4.1 diff as existing evidence. Do not run destructive probes against the sole working benchmark graph. Forget remains lower priority than construction, maintenance, and Update, but must have a documented compatibility/repair contract.
+**Handoff:** design identity storage/source binding and maintenance next. Helper cleanup and replay remain required for the selected identity workflows. Index/backend-reference consistency applies to stores consumed by enabled retrieval/provenance paths; unused diagnostic stores do not force immediate repair. These are later implementation obligations, not unfinished characterization tasks.
 
-##### 5.4.5.2 Artifact ownership / provenance model
+##### 5.4.5.2 Artifact ownership / provenance model — INITIAL CHOICES RECORDED
 
-For each artifact record creator, mutable authority, source support, source-local versus shared/derived ownership, native mutation exposure, re-Cognify survival, rebuild/replay behavior, and removal/invalidation when support disappears. Source references and pipeline-run membership must be understood operationally rather than treated as interchangeable labels.
+The six outcome requirements remain in cognee_stage5_4_5_requirements_review.md. The initial ownership choices are:
 
-Required output: an ownership matrix grounded in 5.4.5.1, including support/reconciliation structures and indexes, not only Entity nodes.
+- preserve structured assignments and original-input provenance independently of materialized edges;
+- group document-local assignments into a generated Data source per original document;
+- use native document-level generated-source ownership initially;
+- deliberately retain both existing and new Entity endpoints required by assignments, attaching refs to existing nodes without property replacement;
+- distinguish original-input dependency, generated-source ownership, applicability and run attribution;
+- recompute shared edge contributions when assignments are withdrawn, rather than relying on owner retention to restore properties.
 
-##### 5.4.5.3 Stable physical representation
+The preliminary matrix is in cognee_stage5_4_5_identity_representation_proposal.md. Complete the original-source → generated-source dependency/lifecycle mapping and actively consumed index/backend-reference ownership before declaring .2 finished. Cached QA/session vectors remain conditional on enabling reuse.
 
-Choose among representation A/B/C/D using the mutation evidence. Resolve whether logical canonical/variant/mention roles remain ordinary Cognee Entities with separately owned metadata, move into dedicated project structures, or use a hybrid with selected semantic links materialized into Cognee's graph.
+**Scientific reasoning boundary:** provenance and retention ownership do not establish scientific support. Scientific justification remains Stage 8; no claim/evidence inference policy is adopted here.
 
-Preserve useful native identity behavior. Retain scope-relative canonicality, non-destructive reconciliation, and distinct semantic/support/source layers. No representation is locked yet.
+##### 5.4.5.3 Stable physical representation — INITIAL DIRECTION SELECTED
 
-##### 5.4.5.4 Write / reconcile / read / update lifecycle
+The selected initial direction uses ordinary Entity nodes, identity-group variant relationships without a privileged canonical member, occurrence-specific mention Entities, and explicit mention markers from native generated identity chunks.
+
+Resolution edges store resolution_kind and current contributions. Separate singleton/variant markers and per-assignment graph support nodes are omitted. Structured assignments are sufficient to reproduce exact graph intent; ordinary LLM parsing of identity descriptions is not relied on for faithful reconstruction.
+
+Deterministic occurrence UUIDs override Entity's default name-based identity. A custom loading Task must publish ID-based edges and intentionally attach existing endpoint refs without passing populated existing Entities through recursive persistence. calculate_chunk_graphs is a computation seam, not a complete reference-only loader/routing solution.
+
+Remaining outputs: structured-source serialization and stable IDs, exact edge schemas/scope conventions, loader/routing, treatment of current prototype helpers, and compatibility with operations that delete/remap endpoints. No combined runtime validation is claimed.
+
+##### 5.4.5.4 Write / reconcile / read / update lifecycle — OPERATION WALKTHROUGHS NEXT
+
+Start with one generated source publishing a new Entity and an edge to an existing Entity. Then cover edge-only publication, unresolved-to-resolved mentions, overlapping contributions, original-source Update/Forget, generated-source rebuild, failure/retry and selected native endpoint mutation. These are design-dependent follow-ups, not a restart of the completed .1 characterization.
 
 Specify which Tasks belong inside transformed Cognify and which belong in Memify/Improve; when maintenance runs; how failed or stale derived state is detected; and what a custom Retriever accepts as usable state.
 
 | Lifecycle phase | Proposed seam | Remaining contract |
 |---|---|---|
-| Ingest | Native Remember/direct Cognify + B transform | Construction Tasks, special-route behavior, provenance |
-| Reconcile | Idempotent custom Memify/Improve Tasks | Selection, replay scope, interaction with default stages |
-| Read | Registered custom Retriever/SearchType | Resolution, identity expansion, layer filtering, deduplication, attribution |
-| Update | Native full rebuild when transform supplied, then maintenance | Equivalent derived state, shared support, status/failure behavior |
-| Delete | Native Forget where sufficient, cleanup/repair where required | Removal/invalidation of source-dependent versus shared artifacts |
+| Ingest | Native Remember/direct Cognify + proposed B transform/custom loading Task | Register/routable identity Data, deterministic publication, source ctx, existing endpoint retention |
+| Reconcile | Idempotent project Tasks at the selected seam | Contribution aggregation, marker/resolution consistency, replay scope, selected native stages |
+| Read | Registered custom Retriever/SearchType | Identity groups, scoped directed mentions, contribution checks, deduplication, attribution |
+| Update | Project full-rebuild path with customization forwarded, then maintenance | Original/generated-source dependencies, endpoint recreation, usable-state/failure behavior |
+| Delete | Native Forget plus derived-source retirement/contribution repair | Surviving inputs/owners, original dependency cleanup, indirect edge/index removal |
 
 ##### 5.4.5.5 Operational invariants and Stage-6 handoff
 
 Candidate invariants to finalize from evidence:
 
 - source text remains authoritative;
-- reconciliation is non-destructive and canonicality is scope-relative;
+- reconciliation is non-destructive; identity-group equivalence is applicable-context-dependent, without a privileged canonical member;
 - identity, provenance, and source applicability are distinct;
 - query-time resolution precedes broad semantic activation;
 - identity hops differ from ordinary semantic hops;
-- support nodes are excluded from normal semantic recall;
+- identity markers/links and provenance structures are excluded from normal subject-matter output;
 - ambiguous mentions remain ambiguous rather than being forced;
-- project state does not depend on mutable Cognee-owned properties;
+- authoritative identity state does not depend on added ordinary Entity fields; shared edge properties are deliberately maintained;
 - derived structures are replayable/idempotent, with explicit invalidation;
-- rebuild + maintenance reproduces equivalent logical derived state, without requiring identical LLM outputs or node UUIDs;
+- replay on captured assignments preserves their explicit occurrence/endpoint IDs; source changes can regenerate occurrence identities, and fresh LLM extraction need not produce identical outputs;
 - logical fact deduplication preserves source attribution;
 - selected built-in maintenance stages have an explicit, tested interaction contract with project structures.
 
@@ -571,18 +561,11 @@ The superseded 5.4A/5.4B topics remain work to resolve through 5.4.5 and Stage 6
 - allow contradictions and scope-specific meanings to coexist;
 - exercise DOC01-only, DOC01+DOC02, and updated/removed-DOC01 corpus states.
 
-Desired support chain remains:
-
-```text
-source document/chunk
-    -> observation/mention evidence
-    -> IdentityResolution
-    -> semantic resolves_to relationship
-```
-
-This supplies a basis for update/truth maintenance without committing to a full truth-maintenance system now.
+The current source/identity chain is: original document/chunk inputs produce saved assignments in a generated identity Data source; its native chunks anchor mention markers, and deterministic publication materializes scope-bearing resolution edges. Original-input provenance remains independent of native generated-source retention. The earlier IdentityResolution helper chain is historical, not a required representation.
 
 ---
+
+
 
 ## Stage 6 — Custom processing architecture — PLANNED
 
@@ -590,7 +573,7 @@ Goal: move manually demonstrated representations into actual Cognee processing t
 
 ### 6.1 Explicit source/intermediate representations
 
-Retain source occurrences and extraction decisions explicitly.
+Retain source occurrences and extraction decisions explicitly. Implement durable generated identity sources initially grouped per original document; preserve structured assignments and original-input provenance outside materialized graph edges. Use explicit deterministic occurrence UUIDs for mention Entities, and persist classification on has_identity_mention edges rather than Entity role fields.
 
 For mentions, move from temporary occurrence indices to exact source coordinates where possible:
 
@@ -614,14 +597,7 @@ chunk
     -> mention candidates
 ```
 
-Then:
-
-```text
-observations + existing document/corpus context
-    -> identity resolver
-    -> IdentityResolution
-    -> materialized semantic resolves_to links
-```
+Then resolve observations/occurrences against existing identity context, save structured assignments, and publish exact mention markers and contribution-bearing resolves_to links. Treat singleton identities and variant groups without privileging one member. Roles are stored as explicit mention classification and relationship kind; historical mention strings do not become reusable aliases.
 
 ### 6.3 DefinitionSummary generation and hierarchical context
 
@@ -643,6 +619,9 @@ Implement the lifecycle selected in 5.4.4 and finalized in 5.4.5:
 - keep native pipeline name, route/runtime handling, data-ID/status/result behavior;
 - place extraction-time custom work within transformed Cognify;
 - implement derived reconciliation as idempotent Memify/Improve Tasks with explicit replay and selection rules;
+- implement a source-bound loader for explicit-ID new Entities and custom_edges, with intentional existing-endpoint ownership attachment;
+- aggregate all surviving assignments for a shared edge instead of allowing separate publishers to replace each other's applicability;
+- retire/regenerate generated sources after original-input changes and handle temporary endpoint loss during generated-source rebuild;
 - verify metadata attached automatically by DataPoint persistence versus metadata requiring explicit graph-interface writes.
 
 The exact Task order must follow the 5.4.5 decision. A likely division is document vocabulary/context + mixed generic/typed extraction inside construction, followed by source-grounded identity reconciliation and selected semantic materialization as maintenance. Do not force every transformation into one pipeline.
@@ -653,7 +632,7 @@ Lifecycle validation should cover direct Cognify, standard Remember, overlapping
 
 ### 6.5 Registered identity-aware retrieval
 
-Package the Stage-5.3 proof of concept behind a custom Retriever/SearchType using Cognee graph/vector interfaces. Perform query-time resolution before scope-aware identity expansion and semantic-neighborhood union. Preserve provenance under logical fact deduplication and provide semantic, source-aware, explanation, and graph-management modes as warranted.
+Package the Stage-5.3 proof of concept behind a custom Retriever/SearchType using Cognee graph/vector interfaces. Perform query-time resolution before scope-aware identity expansion and semantic-neighborhood union. Adapt privileged canonical selection to singleton/identity-group handling; check edge contributions, follow mention references directionally and preserve unresolved mention classification. Native retrieval does not acquire these rules automatically. Preserve provenance under logical fact deduplication and provide semantic, source-aware, explanation, and graph-management modes as warranted.
 
 Keep RAG as a reference/fallback and control conversation/session state during comparisons. Restore and strengthen the Stage-5.3 benchmark so it remains correct after subsequent source ingestion and maintenance.
 
@@ -667,13 +646,18 @@ Turn 5.4.5's matrices/invariants into focused regression scenarios:
 - remove one source while retaining facts/links supported by another;
 - preserve ambiguity and negative/non-equivalence controls;
 - preserve source attribution across logical duplicates and identity closure;
-- document stale-state detection/repair and differences between native incremental Update and customized full rebuild.
+- document stale-state detection/repair and differences between native incremental Update and customized full rebuild;
+- store two identically named occurrences as distinct Entity IDs, with deterministic replay;
+- retain mention classification after resolution removal and exclude unresolved mentions from singleton lookup;
+- withdraw one contribution from a shared edge and verify remaining applicability/owners;
+- retain an existing endpoint without rewriting its fields and recreate a solely generated-source-owned endpoint after rebuild;
+- test or exclude optional consolidation/remapping for occurrence Entities.
 
 ### Post-Stage-6 checkpoint
 
 Stop and reassess the architecture before moving into stronger schemas/ontologies. Review:
 
-- selected physical identity representation and logical Entity roles;
+- selected identity source/edge representation, singleton/identity-group semantics and mention classification;
 - semantic/support/source graph layers and ownership/mutation contract;
 - identity resolution quality;
 - retrieval modes;
@@ -711,7 +695,9 @@ Develop stronger scientific semantics for:
 - evidence/provenance;
 - temporal validity and supersession.
 
-This stage should build on the support/provenance layer rather than conflating claims with canonical semantic entities.
+This stage should build on source/provenance structures rather than conflating scientific claims with ordinary semantic Entities.
+
+Scientific assertion justification belongs here: the representation of supporting evidence and derivations, scientific support/entailment checks, evidence weighing and confidence policies. Stage 5.4.5 establishes only that provenance/ownership alone do not provide scientific support; the earlier fixtures do not select a scientific reasoning model.
 
 ---
 
@@ -750,19 +736,22 @@ Expected concerns include:
 
 # Current immediate work
 
-Current stage: **5.4.5**. Immediate next subphase: **5.4.5.1 Cognee mutation surface**.
+Current stage: **5.4.5**. Initial ownership and representation choices for **.2–.3** are recorded; the next activity is the operation-by-operation lifecycle walkthrough toward **.4**.
 
-5.4.1–5.4.4 are complete enough to proceed. B is the preferred lifecycle integration direction; its implementation and the final physical identity representation are still pending. The expanded mutation investigation has been agreed but not executed.
+The chosen direction is documented in cognee_stage5_4_5_identity_representation_proposal.md. Neither .2 nor .3 is marked complete: schema, source dependency handling, loader/routing and the consumed-index matrix still need finalization. The preferred B Cognify extension remains unimplemented.
 
 Immediate sequence:
 
-1. Finish this bookkeeping revision; use the companion architecture reference for detailed code/extension context.
-2. Characterize built-in mutation/selectivity across semantic, support/reconciliation, source, provenance, and index artifacts, starting with persistence, Cognify, and default Improve/Memify.
-3. Run controlled lifecycle probes with isolated/reset baselines and compare graph plus index/evidence/status state.
-4. Derive ownership rules and choose the stable physical identity representation.
-5. Specify extraction-time versus maintenance Tasks, custom retrieval behavior, update replay, and cleanup/repair contracts.
-6. Finalize operational invariants and Stage-6 requirements; implement Stage 6 only after this handoff.
-7. Keep mention compaction and a general predicate ontology deferred; retain the post-Stage-6 architecture check-in.
+1. Walk through a generated identity source publishing a new Entity and a relationship to an existing Entity, including exact persistence/ownership operations.
+2. Cover edge-only publication, unresolved/resolved mentions and shared contribution aggregation.
+3. Cover original/generated-source Update/Forget, full rebuild, endpoint mutation and failure/retry; schedule targeted checks where this design relies on untested behavior.
+4. Finalize the schema/ownership matrix, supported operation contracts, active retrieval/index list and .5 invariants/Stage-6 handoff.
+5. Implement Stage 6; preserve the architecture check-in afterward.
+6. Keep mention compaction, a general predicate ontology and scientific reasoning deferred to their existing stages.
+
+**Stage impact:** no new stages or renumbering. The proposal narrows the choices in .2–.3 and specifies Stage-6 source/loader/retriever work. Broad .1 characterization is complete; combined publication behavior and performance remain unvalidated.
+
+
 
 ## Revision record — 2026-10-11
 
@@ -773,3 +762,34 @@ Immediate sequence:
 - Expanded 5.4.5 to investigate Cognee's actual behavior on support/reconciliation and other graph artifacts before assigning ownership or locking representation.
 - Updated architecture principles and Stage-6 sequencing/retrieval/lifecycle requirements; retained the Stage-6 checkpoint and planned Stages 7–10.
 - Did not mark the B patch, 5.4.5 experiments, or final representation as implemented.
+
+## Revision record — 2026-10-12
+
+- Marked 5.4.5.1 complete for the agreed characterization scope and moved immediate work to 5.4.5.2.
+- Incorporated source/vector/relational baselines, Improve/Memify, both Update routes, watermark visibility, source/dataset deletion, custom source-bound scientific fixtures, and read/bookkeeping controls.
+- Recorded shared-store retrieval scope, stale helper/evidence/index behavior, recursive ownership propagation, and cached-session cleanup versus registry/history retention.
+- Retained explicit measured/source-inspected/untested boundaries; one default-model Update profile is diagnostic and the scientific classes are prototypes.
+- Kept authority/provenance decisions, representation, lifecycle/invariants, the preferred B extension, and cleanup/replay/index/evidence repairs in their later substages. Stage 5.4.5 as a whole and Stage 6 remain unfinished.
+
+### Requirements review update — 2026-10-12
+
+- Created a persistent requirements review record for the first two principles, revised proposed wording, validation criteria, and eight pending review items.
+- Added the node/relationship mutation inventory and label-versus-identity distinction to the findings report, with source-only optional deletion/rewiring/migration profiles explicitly marked.
+- Stage 5.4.5.1 remains complete for its scoped characterization; 5.4.5.2 remains in review. No physical representation or operation enforcement implementation has been chosen or applied.
+
+### Requirements scope correction — 2026-10-12
+
+- Applied the user's boundary: provenance/ownership do not establish scientific support, with scientific justification requirements deferred to Stage 8.
+- Kept 5.4.5 focused on operational authority, source/run attribution, lifecycle ownership, mechanical dependencies, source/version identity, and backend metadata/reference maintenance.
+- Narrowed review item 4 accordingly; no scientific assertion/evidence or reasoning policy is being adopted now.
+
+## Revision record — 2026-10-13
+
+- Recorded the initial generated-source/edge representation and preliminary ownership matrix in a dedicated proposal.
+- Adopted singleton and identity group terminology for current design; retained canonical terminology only as historical experiment descriptions.
+- Omitted separate singleton/variant markers and per-assignment support nodes; kept an explicit persistent mention marker and distinct occurrence UUIDs.
+- Selected generated-source document-level endpoint retention and contribution-bearing shared resolution edges.
+- Advanced .2–.3 together without declaring their final deliverables complete; made operation walkthroughs toward .4 the immediate work.
+- Updated Stage-6 implementation/regression tasks without adding stages or moving the post-Stage-6 checkpoint. Scientific support remains Stage 8.
+- Recorded no implementation, combined runtime compatibility result or traversal performance benchmark.
+
