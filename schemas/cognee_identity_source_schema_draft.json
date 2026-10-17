@@ -1,0 +1,860 @@
+{
+  "$defs": {
+    "Accepted": {
+      "additionalProperties": false,
+      "properties": {
+        "group_ref": {
+          "minLength": 1,
+          "title": "Group Ref",
+          "type": "string"
+        },
+        "input_refs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "producer_ref": {
+          "minLength": 1,
+          "title": "Producer Ref",
+          "type": "string"
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "status": {
+          "const": "accepted",
+          "title": "Status",
+          "type": "string"
+        },
+        "target_entity_id": {
+          "format": "uuid",
+          "title": "Target Entity Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group_ref",
+        "input_refs",
+        "producer_ref",
+        "status",
+        "target_entity_id"
+      ],
+      "title": "Accepted",
+      "type": "object"
+    },
+    "Ambiguous": {
+      "additionalProperties": false,
+      "properties": {
+        "group_ref": {
+          "minLength": 1,
+          "title": "Group Ref",
+          "type": "string"
+        },
+        "input_refs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "producer_ref": {
+          "minLength": 1,
+          "title": "Producer Ref",
+          "type": "string"
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "status": {
+          "const": "ambiguous",
+          "title": "Status",
+          "type": "string"
+        },
+        "candidate_entity_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Entity Ids"
+        }
+      },
+      "required": [
+        "group_ref",
+        "input_refs",
+        "producer_ref",
+        "status"
+      ],
+      "title": "Ambiguous",
+      "type": "object"
+    },
+    "ChunkInput": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "chunk",
+          "title": "Kind",
+          "type": "string"
+        },
+        "document_ref": {
+          "minLength": 1,
+          "title": "Document Ref",
+          "type": "string"
+        },
+        "chunk_id": {
+          "format": "uuid",
+          "title": "Chunk Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "kind",
+        "document_ref",
+        "chunk_id"
+      ],
+      "title": "ChunkInput",
+      "type": "object"
+    },
+    "CorpusObjectInput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "corpus_object",
+          "title": "Kind",
+          "type": "string"
+        },
+        "dataset_id": {
+          "format": "uuid",
+          "title": "Dataset Id",
+          "type": "string"
+        },
+        "entity_id": {
+          "format": "uuid",
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "selected_fields": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Selected Fields",
+          "type": "array"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "dataset_id",
+        "entity_id",
+        "selected_fields",
+        "content_sha256"
+      ],
+      "title": "CorpusObjectInput",
+      "type": "object"
+    },
+    "CorpusScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "corpus",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "CorpusScope",
+      "type": "object"
+    },
+    "DocumentScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "document",
+          "title": "Kind",
+          "type": "string"
+        },
+        "document_ref": {
+          "minLength": 1,
+          "title": "Document Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "document_ref"
+      ],
+      "title": "DocumentScope",
+      "type": "object"
+    },
+    "Group": {
+      "additionalProperties": false,
+      "properties": {
+        "entity_id": {
+          "format": "uuid",
+          "title": "Entity Id",
+          "type": "string"
+        },
+        "document_ref": {
+          "minLength": 1,
+          "title": "Document Ref",
+          "type": "string"
+        },
+        "occurrences": {
+          "items": {
+            "$ref": "#/$defs/Occurrence"
+          },
+          "minItems": 1,
+          "title": "Occurrences",
+          "type": "array"
+        },
+        "chunk_refs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Chunk Refs",
+          "type": "array"
+        },
+        "input_refs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "producer_ref": {
+          "minLength": 1,
+          "title": "Producer Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entity_id",
+        "document_ref",
+        "occurrences",
+        "chunk_refs",
+        "input_refs",
+        "producer_ref"
+      ],
+      "title": "Group",
+      "type": "object"
+    },
+    "Occurrence": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text"
+      ],
+      "title": "Occurrence",
+      "type": "object"
+    },
+    "Producer": {
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "enum": [
+            "rules",
+            "llm",
+            "decision_model",
+            "captured_fixture"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "implementation": {
+          "minLength": 1,
+          "title": "Implementation",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "configuration": {
+          "additionalProperties": true,
+          "title": "Configuration",
+          "type": "object"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "method",
+        "implementation",
+        "version",
+        "configuration"
+      ],
+      "title": "Producer",
+      "type": "object"
+    },
+    "Range": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "Range",
+      "type": "object"
+    },
+    "Recipe": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "description"
+      ],
+      "title": "Recipe",
+      "type": "object"
+    },
+    "SavedRecordInput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "saved_record",
+          "title": "Kind",
+          "type": "string"
+        },
+        "dataset_id": {
+          "format": "uuid",
+          "title": "Dataset Id",
+          "type": "string"
+        },
+        "identity_data_id": {
+          "format": "uuid",
+          "title": "Identity Data Id",
+          "type": "string"
+        },
+        "record_id": {
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "representation_revision": {
+          "minimum": 1,
+          "title": "Representation Revision",
+          "type": "integer"
+        },
+        "content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Content Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "dataset_id",
+        "identity_data_id",
+        "record_id",
+        "representation_revision",
+        "content_sha256"
+      ],
+      "title": "SavedRecordInput",
+      "type": "object"
+    },
+    "SourceTextInput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "source_text",
+          "title": "Kind",
+          "type": "string"
+        },
+        "dataset_id": {
+          "format": "uuid",
+          "title": "Dataset Id",
+          "type": "string"
+        },
+        "data_id": {
+          "format": "uuid",
+          "title": "Data Id",
+          "type": "string"
+        },
+        "text_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Text Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "dataset_id",
+        "data_id",
+        "text_sha256"
+      ],
+      "title": "SourceTextInput",
+      "type": "object"
+    },
+    "TextScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "text_spans",
+          "title": "Kind",
+          "type": "string"
+        },
+        "document_ref": {
+          "minLength": 1,
+          "title": "Document Ref",
+          "type": "string"
+        },
+        "ranges": {
+          "items": {
+            "$ref": "#/$defs/Range"
+          },
+          "minItems": 1,
+          "title": "Ranges",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "document_ref",
+        "ranges"
+      ],
+      "title": "TextScope",
+      "type": "object"
+    },
+    "TextSpanInput": {
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "minimum": 0,
+          "title": "Start",
+          "type": "integer"
+        },
+        "end": {
+          "exclusiveMinimum": 0,
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "text_span",
+          "title": "Kind",
+          "type": "string"
+        },
+        "document_ref": {
+          "minLength": 1,
+          "title": "Document Ref",
+          "type": "string"
+        },
+        "text_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Text Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "kind",
+        "document_ref",
+        "text_sha256"
+      ],
+      "title": "TextSpanInput",
+      "type": "object"
+    },
+    "Unresolved": {
+      "additionalProperties": false,
+      "properties": {
+        "group_ref": {
+          "minLength": 1,
+          "title": "Group Ref",
+          "type": "string"
+        },
+        "input_refs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "producer_ref": {
+          "minLength": 1,
+          "title": "Producer Ref",
+          "type": "string"
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "status": {
+          "const": "unresolved",
+          "title": "Status",
+          "type": "string"
+        },
+        "candidate_entity_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Entity Ids"
+        }
+      },
+      "required": [
+        "group_ref",
+        "input_refs",
+        "producer_ref",
+        "status"
+      ],
+      "title": "Unresolved",
+      "type": "object"
+    },
+    "Variant": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "accepted",
+          "title": "Status",
+          "type": "string"
+        },
+        "source_entity_id": {
+          "format": "uuid",
+          "title": "Source Entity Id",
+          "type": "string"
+        },
+        "target_entity_id": {
+          "format": "uuid",
+          "title": "Target Entity Id",
+          "type": "string"
+        },
+        "applicability": {
+          "discriminator": {
+            "mapping": {
+              "corpus": "#/$defs/CorpusScope",
+              "document": "#/$defs/DocumentScope",
+              "text_spans": "#/$defs/TextScope"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CorpusScope"
+            },
+            {
+              "$ref": "#/$defs/DocumentScope"
+            },
+            {
+              "$ref": "#/$defs/TextScope"
+            }
+          ],
+          "title": "Applicability"
+        },
+        "input_refs": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "producer_ref": {
+          "minLength": 1,
+          "title": "Producer Ref",
+          "type": "string"
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        }
+      },
+      "required": [
+        "status",
+        "source_entity_id",
+        "target_entity_id",
+        "applicability",
+        "input_refs",
+        "producer_ref"
+      ],
+      "title": "Variant",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "cognee_identity_source",
+      "title": "Kind",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.1-draft",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "dataset_id": {
+      "format": "uuid",
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "identity_data_id": {
+      "format": "uuid",
+      "title": "Identity Data Id",
+      "type": "string"
+    },
+    "revision": {
+      "minimum": 1,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "original_input_ref": {
+      "minLength": 1,
+      "title": "Original Input Ref",
+      "type": "string"
+    },
+    "inputs": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "chunk": "#/$defs/ChunkInput",
+            "corpus_object": "#/$defs/CorpusObjectInput",
+            "saved_record": "#/$defs/SavedRecordInput",
+            "source_text": "#/$defs/SourceTextInput",
+            "text_span": "#/$defs/TextSpanInput"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SourceTextInput"
+          },
+          {
+            "$ref": "#/$defs/ChunkInput"
+          },
+          {
+            "$ref": "#/$defs/TextSpanInput"
+          },
+          {
+            "$ref": "#/$defs/CorpusObjectInput"
+          },
+          {
+            "$ref": "#/$defs/SavedRecordInput"
+          }
+        ]
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Inputs",
+      "type": "object"
+    },
+    "producers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Producer"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Producers",
+      "type": "object"
+    },
+    "entity_constructions": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Recipe"
+      },
+      "propertyNames": {
+        "format": "uuid"
+      },
+      "title": "Entity Constructions",
+      "type": "object"
+    },
+    "mention_groups": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Group"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Mention Groups",
+      "type": "object"
+    },
+    "mention_resolutions": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "accepted": "#/$defs/Accepted",
+            "ambiguous": "#/$defs/Ambiguous",
+            "unresolved": "#/$defs/Unresolved"
+          },
+          "propertyName": "status"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/Accepted"
+          },
+          {
+            "$ref": "#/$defs/Unresolved"
+          },
+          {
+            "$ref": "#/$defs/Ambiguous"
+          }
+        ]
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Mention Resolutions",
+      "type": "object"
+    },
+    "variant_assignments": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Variant"
+      },
+      "propertyNames": {
+        "minLength": 1
+      },
+      "title": "Variant Assignments",
+      "type": "object"
+    }
+  },
+  "required": [
+    "kind",
+    "schema_version",
+    "dataset_id",
+    "identity_data_id",
+    "revision",
+    "original_input_ref",
+    "inputs",
+    "producers",
+    "entity_constructions",
+    "mention_groups",
+    "mention_resolutions",
+    "variant_assignments"
+  ],
+  "title": "Cognee identity source — implementation draft 0.1",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Draft serialization of approved identity concepts. Cross-reference, range, source-validity and graph-currentness checks require publisher validation; JSON Schema alone is insufficient."
+}

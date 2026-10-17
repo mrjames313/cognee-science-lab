@@ -398,7 +398,7 @@ Evaluate every new capability against these questions:
 
 Broad mutation/persistence characterization is complete in cognee_stage5_4_5_1_initial_findings.md. Initial ownership/representation choices are recorded in cognee_stage5_4_5_identity_representation_proposal.md; current work is operation walkthroughs toward the lifecycle contract.
 
-The selected initial direction uses registered generated identity sources, durable structured assignments, ordinary Entity nodes with explicit occurrence IDs, persistent mention markers, and contribution-bearing resolution edges. Identity groups consist of variants without a privileged canonical member. It avoids added authoritative Entity fields and does not require assignment support nodes.
+The selected initial direction uses registered generated identity sources, durable structured assignments, ordinary Entity nodes with explicit local reference-group IDs, persistent mention markers, and contribution-bearing resolution edges. Identity groups consist of variants without a privileged canonical member. It avoids added authoritative Entity fields and does not require assignment support nodes.
 
 - Do not require default RAG or generic graph traversal to enforce identity semantics; use the custom Retriever.
 - calculate_chunk_graphs can compute deterministic graphs but is not a reference-only existing-endpoint publication contract.
@@ -576,14 +576,350 @@ The detailed representation and preliminary ownership matrix live in [the propos
 
 | Seam | What it supplies | What it does not supply automatically |
 |---|---|---|
-| Registered Data item | Native source lifecycle and chunks for generated identity material | A dependency cascade from the original input document |
+| Registered Data item | Native source lifecycle; a TextDocument graph anchor can be published without generated identity chunks | A dependency cascade from the original input document |
 | calculate_chunk_graphs | Deterministic replacement of standard text LLM graph extraction | Existing-node reference-only writes, custom loading, or persisted routing through Update |
 | Explicit Entity id | Ordinary ID-keyed node persistence with distinct IDs for identical names | Protection from optional consolidation/remapping |
 | add_data_points custom_edges + real source ctx | ID-based relationships with source-bound document ownership | Existing endpoint retention, per-assignment property merging, or chunk-to-edge evidence |
 | attach_node_source_refs | Intentional retention of matched existing nodes without field replacement | Applicability or original-input provenance |
 | Custom Retriever | Project-specific identity-group/mention traversal and output policy | Equivalent behavior in native retrieval/triplet indexing |
 
-Keep computation separate from publication: callbacks can calculate intent, but the loading Task must control new-node writes, existing-node ref attachment, full edge contribution payloads and checks. Native full-rebuild Update does not accept arbitrary callback kwargs as a durable route. Determine the loader/routing sequence under the B extension during .4; the small core patch, derived-source orchestration and this combined publication workflow remain unimplemented.
+Keep computation separate from publication: callbacks can calculate intent, but the loading Task must control new-node writes, existing-node ref attachment, full edge contribution payloads and checks. Native full-rebuild Update does not accept arbitrary callback kwargs as a durable route. The initial chunkless identity-source path uses custom Tasks directly; calculate_chunk_graphs remains an optional seam for chunk-based extensions. Determine the loader/routing sequence under the B extension during .4; the small core patch, derived-source orchestration and this combined publication workflow remain unimplemented.
 
 No guarantees are added for every backend, optional maintenance stage, remote path or access-control configuration.
+
+## 18. Reusable knowledge integration methodology and findings — 2026-10-13
+
+The project is developing a methodology for turning selected information into graph-structured knowledge that Cognee, with selected extensions, can maintain and use over time. Identity is the first worked example. The recurring activities are:
+
+| Activity | Concrete responsibility |
+|---|---|
+| Describe | Interpret source information using a defined representation and save a structured description of the intended knowledge, references, applicability and provenance. For identity, this produces the durable identity source. |
+| Publish | Integrate that description into existing graph structures using exact IDs, controlled reference/write/retention actions and verified persistence. calculate_chunk_graphs is a computation seam; a source-bound loading Task completes publication. |
+| Maintain | Keep assignments, graph structures and consumed derived representations current after input or graph changes; define shared retention, retirement, replay and failure eligibility. |
+| Retrieve | Interpret the structures under the right query context and expose useful knowledge with attribution, appropriate traversal and ambiguity handling. |
+
+### 18.1 Representation meaning and rules: possible ontology connection
+
+The concepts, relationship meanings and domain rules can constitute a small domain ontology. For identity, examples include occurrence-specific mentions, reusable variants, scoped equivalence and directed reference. A graph schema additionally describes how these concepts are encoded and validated. Storage IDs, native retention refs, publication/update procedures and operational eligibility also need explicit integration rules; calling the whole package an ontology does not supply those procedures.
+
+**Investigation topic, not a new prerequisite:** determine whether a lightweight vocabulary/schema, a formal ontology, or a combination best expresses the selected domain concepts and constraints. Investigate how that description could guide structured knowledge generation, graph publication, validation and retrieval. Separate domain semantics from Cognee persistence/lifecycle behavior. Do not adopt a formalism or inference engine merely from this framing.
+
+Stage 7 is the primary ontology/schema investigation point. Capture concrete identity examples now, carry them through the post-Stage-6 review, and use them to assess later measurement/scientific structures in Stage 8. Scientific justification policies remain deferred.
+
+### 18.2 Reusable integration findings register
+
+The Activities column identifies where each finding is directly relevant, not the Task or API that implements it. Maintain includes the lifecycle of actively consumed indexes/backend references and enabled answer reuse. Several findings cross activity boundaries.
+
+| Concrete lesson / cross-cutting finding | Reusable integration finding | Activities | Evidence / design status |
+|---|---|---|---|
+| Distinct same-text local bindings need explicit IDs | Define object identity explicitly; a display name need not be a deduplication key. Several validated references in one local binding may share an ID. | Describe, Publish, Maintain, Retrieve | Explicit-ID precedence and prototype occurrence construction are source-inspected; the new combined workflow remains untested. |
+| Referencing, retaining and rewriting an endpoint are separate actions | A publication plan must distinguish existing-node references, intentional retention ownership and property writes. | Describe, Publish, Maintain | Recursive rewrite/co-ownership is measured in fixtures; reference-only custom edges and deliberate ref attachment are source-inspected. |
+| Describe must distinguish what to create from what to reference, including intended edges | Save explicit graph intent; keep domain interpretation in Describe while Publish executes declared persistence/aggregation rules and selected programmatic steps. | Describe, Publish, Maintain | Architecture refinement, not an implemented DTO, universal graph language or runtime result. |
+| Shared native ownership does not merge application metadata | Define aggregation or replacement semantics for shared structures, then keep applicability consistent with surviving assignments. | Describe, Publish, Maintain, Retrieve | Native shared retention is measured; ordinary edge replacement is source-inspected. Contribution aggregation is proposed, not implemented. |
+| Generated identity sources depend on original inputs | Retain explicit original-to-derived dependencies and define retirement/regeneration after input changes. | Describe, Publish, Maintain | Separate source-owner mechanics are characterized; the proposed derived-source orchestration is unimplemented. |
+| Mention references and variant equivalence require different traversal | Define relationship interpretation and context eligibility, and implement retrieval that honors them. | Describe, Publish, Retrieve | Earlier identity-aware retrieval is demonstrated; contribution-aware group/mention traversal remains proposed. |
+| Occurrence identity and classification can persist while its resolution changes | Preserve an occurrence-specific Entity ID and mention marker independently of accepted resolution; replace or withdraw resolution relationships explicitly. | Describe, Publish, Maintain, Retrieve | Accepted initial representation behavior; combined lifecycle and reader eligibility remain untested. |
+| Lifecycle modifications primarily belong to Maintain | Maintain owns change detection, affected-set selection and replacement/retirement/reconstruction; it may reuse Publish's controlled persistence primitives. | Publish, Maintain | Responsibility clarification; no separate mutation engine or implementation is selected. |
+| Maintain must decide what propagates into saved records | Separate validated source changes and accepted interpretation changes from native property drift, remapping and materialization failures; update durable descriptions only under the declared policy. | Describe, Maintain | Responsibility/design clarification; no automatic graph-to-source synchronization is implemented. |
+| Multi-document interpretations require operational use of input provenance | Use dependencies to select affected assignments and preserve independent sources; document grouping alone does not establish independence. | Describe, Maintain, Retrieve | Functional/test refinement; external-context dependency handling remains unimplemented. |
+| Describe relates document identities to eligible corpus identities | Candidate discovery and contextual interpretation produce exact reuse/create/link intent; occurrence-ID preservation is separate from interpretation reuse. New corpus arrivals can make earlier unresolved records worth reconsidering under Maintain. | Describe, Maintain, Retrieve | Intended scope and test refinement; candidate algorithms, reconsideration triggers and stability policy remain unimplemented. |
+| Make representation meaning and rules explicit | Define concepts, relationship meanings, valid combinations and context. Investigate which parts constitute a domain ontology and which are schemas or operational rules. | Describe, Publish, Maintain, Retrieve | Cross-cutting design finding and investigation topic; no ontology formalism is selected. |
+| Preserve durable descriptions independently of graph materialization | Save sufficient structured input, endpoint references and provenance to rebuild the intended graph and maintain source dependencies. | Describe, Publish, Maintain, Retrieve | Selected initial architecture; storage layout and combined rebuild/explanation behavior remain unvalidated. |
+| Verify every integration boundary and consumed derived representation | Check description fidelity, publication effects, lifecycle results, retrieval interpretation and the graph/vector/evidence/cache representations actually consumed. | Describe, Publish, Maintain, Retrieve | Methodological finding. Existing scoped results are retained; validation of the new package remains future work. |
+
+The three final rows make explicit the additional cross-cutting concerns: representation semantics, durable description versus materialization, and verification. They are architectural/methodological findings, not newly measured runtime results or an expanded list of universal requirements.
+
+### 18.3 Carrying findings to the next knowledge type
+
+For each remaining identity operation walkthrough, record the concrete identity solution and the reusable finding it establishes. Retain the pinned mechanism, applicable activities, evidence status, tested conditions, extension needed and unresolved limitations. Amend existing findings as evidence changes rather than treating this initial table as final.
+
+During Stage 6, attach implementation and targeted validation results to the relevant findings. At the post-Stage-6 checkpoint, distinguish demonstrated reusable mechanisms from identity-specific assumptions. Use the register as starting questions for Stage 7's ontology/schema investigation and Stage 8's measurement/scientific worked example.
+
+The recurring activities can transfer to measurements: describe values/units/context, publish measurement records linked to existing instruments/facilities, maintain revisions/calibrations and retrieve under conditions. Their domain rules are not copied from identity equivalence. A second worked example should determine which mechanisms generalize; no generic plugin/package runtime or universal ontology framework is being implemented now.
+
+This documentation update adds no runtime result, stage or renumbering. Operation walkthroughs toward 5.4.5.4 remain the immediate work.
+
+### 18.4 Explicit descriptions and bounded publication — refinement, 2026-10-13
+
+Describe specifies graph intent, including the edges to publish, exact endpoint references, new-node construction information, relationship interpretation/applicability and retention intent. It must not leave Publish to guess whether a same-name Entity is an existing object to link or a new object to create.
+
+Publish performs validation and persistence mechanics, including stable-ID replay, intentional endpoint retention, contribution aggregation, selected programmatic steps and read-back verification. The assignment supplies its own intended contribution; the publisher assembles the complete current shared-edge payload rather than treating the description as a stale database snapshot.
+
+Some behavior will be programmatic. Make that behavior explicit in the selected publisher/Task configuration and replay path. Do not silently turn generic publication into another round of domain inference. Exact serialized operation forms and how named publication rules are dispatched remain to be decided.
+
+This refinement applies to Describe, Publish and Maintain and has been added to the findings register. It adds no implementation or runtime result; the next operation walkthrough considers two existing endpoints.
+
+### 18.5 Publish and Maintain responsibilities — clarification, 2026-10-13
+
+Publish primarily materializes a supplied description into the graph, including initial insertion, integration with existing endpoints and explicitly requested replay. It must understand declared creation/reference/retention intent and apply controlled writes, but it does not independently discover or decide lifecycle changes.
+
+Maintain primarily handles later changes: detection of changed or retired inputs, selection of affected records, recomputation of interpretations and shared contributions, explicit withdrawal/replacement, original/generated-source lifecycle orchestration, and usable-state/failure handling. It can invoke Describe again to regenerate a description and reuse Publish's persistence routines to apply the resulting plan.
+
+The same low-level create/update/delete/ref-attachment code may serve both activities. Classify the finding by the responsibility involved, rather than by the function that happens to write the graph. Initial shared-edge integration involves Publish; recomputing that edge after contributor retirement primarily involves Maintain.
+
+The accepted mention walkthrough illustrates this distinction: occurrence Entity identity and its marker can persist while Maintain changes or withdraws its accepted resolution. A generated-source full rebuild may physically recreate them at the recorded IDs. Changing the original occurrence still requires validation/regeneration; no automatic cross-revision occurrence tracking is promised. Incoming-object omission does not remove obsolete relationships, so retirement must remain explicit.
+
+This clarification adds no separate maintenance engine, implementation, atomicity guarantee or runtime result.
+
+### 18.6 Saved-record propagation under Maintain — clarification, 2026-10-13
+
+Maintain must decide which changes update the durable occurrence/assignment description and which call for graph repair, explicit remapping or temporary invalidation. It manages both the saved knowledge state and its materialization.
+
+Update the saved description when identity processing accepts a changed interpretation, withdraws a resolution, or validates changed original inputs. Do not automatically infer a knowledge change from a missing edge, an overwritten Entity description or a temporarily absent endpoint. A known ID migration may justify a validated reference update; an unexplained missing endpoint does not justify choosing a same-name substitute.
+
+Captured occurrence information and derived interpretation have different update sources: original text/coordinates come from verified original input; accepted target/applicability/derivation information comes from identity processing. Interpretation changes preserve occurrence identity, while source-occurrence changes require validation/regeneration.
+
+Saved-record modification can succeed while graph publication fails. Preserve the intended state for retry and keep affected retrieval unavailable until the current description and required graph materialization agree. The exact status/revision/transaction implementation remains to be selected under the lifecycle contract.
+
+The detailed occurrence policy is in proposal section 2.3. The reusable finding is tagged Describe and Maintain; resulting graph writes use Publish's shared routines. This policy does not require an archive, indiscriminate graph-to-source copying or a universal reaction to every Cognee mutation.
+
+### 18.7 Operation sequences as regression scenarios — 2026-10-13
+
+Each reviewed sequence and expected output is also input to a planned test suite. Capture initial fixture, initiating operation, saved-record result, graph IDs/properties/native refs, retrieval eligibility/applicability, active derived-store checks, failure points and replay result. Proposal section 11 contains the scenario matrix; roadmap 6.6 carries implementation.
+
+Use deterministic captured extraction/identity decisions for lifecycle tests, actual isolated backend/source contexts for persistence integration, and end-to-end maintenance/retrieval plus failure-injection cases. Separate interpretation-quality benchmarks from orchestration assertions. These are planned tests; none has been implemented or run for the new representation.
+
+The accepted shared-source withdrawal adds concrete checks to existing findings: native owner survival does not remove obsolete contribution properties; surviving assignment Y need not change when X is retired; source-bound repair must not reattach the retired source; and a retained physical edge with no accepted contributions must not be treated as a current identity relationship.
+
+### 18.8 Multi-document preservation and Describe variability — 2026-10-13
+
+Updating one document must preserve other documents' independently supported interpretations, even when they share Entity IDs. Use input/contributor provenance in selection, retirement, shared-edge aggregation and contextual retrieval; simply storing it or preserving the shared node is insufficient. Other sources' records must be reevaluated when they actually consumed changed document/candidate/assignment context. Generated-source grouping is not dependency isolation.
+
+Record supplied Describe context as operational inputs; do not pretend to determine an LLM's causal use of each snippet. Context references/content validation support conservative invalidation and reproducible experiments. Ordinary native Entity field changes do not themselves authorize overwriting saved source-specific interpretations.
+
+Proposal section 12 specifies independent/dependent multi-document regressions and Describe consistency investigations: repeated identical inputs, meaning-preserving edits, meaning-changing edits and an end-to-end profile. Freeze candidate graphs/chunks/context first to distinguish model variability from upstream extraction variability. Compare corresponding occurrences, exact targets and fixed benchmark identity groups, statuses, scope and unrelated changes; assess correctness separately from agreement.
+
+These investigations extend the activity-tagged findings and Stage-6 validation plan. No Describe consistency measurement or stabilization/automatic-acceptance policy is selected by this documentation update.
+
+### 18.9 Describe includes corpus identity resolution — clarification, 2026-10-13
+
+Describe identifies document forms/occurrences and relates them to relevant current corpus singletons and identity groups. It chooses the proposed exact existing references, necessary new nodes, variant/mention relationships, applicability and unresolved outcomes. Publish executes this declared graph intent. Candidate retrieval need not scan every Entity, but a purely document-local inventory is insufficient.
+
+On modification, occurrence-ID validation/regeneration and interpretation reevaluation are separate operations. Unchanged occurrence IDs do not justify skipping changed document/corpus context. Preserve independent other-source interpretations; record supplied external context and use it for maintenance selection.
+
+A new document's links to existing identities belong to Describe. Selecting older unresolved/ambiguous assignments for reconsideration after new corpus knowledge arrives belongs to Maintain, which can invoke Describe. Previously absent candidates are not captured by positive dependency links; trigger/selection design remains open rather than assuming those links cover all updates.
+
+Proposal section 2.4 records the full scope and corresponding test cases. No corpus-resolution implementation, exhaustive-candidate guarantee or automatic whole-corpus replay is claimed.
+
+### 18.10 Shared stored-representation mutation interface — agreed direction
+
+Add a shared interface for reading and applying guarded changes to saved descriptions/records, explicit source-level replacement/retirement and change reporting. Domain helpers enforce meaning; generic storage persists intent. Distinguish interpretation withdrawal, occurrence retirement, representation revision and original-input revision. Keep graph publication explicit and coordinated by Maintain. The adapter/API implementation is still open; illustrative method names are not native Cognee APIs.
+
+### 18.11 Saved-state/publication failure coordination — proposed next review
+
+Proposal sections 13–14 record the accepted storage-interface direction and a proposed per-affected-source completion protocol. Commit intended description, reconcile graph/active indexes, verify and acknowledge the exact current revision. Acknowledge neither failed nor superseded publication as current. Reuse saved decisions during graph retry; regenerating Describe can introduce a new interpretation and is a separate action.
+
+On shared structures, preserve eligible surviving contributors while excluding pending/retired ones, subject to required object/index validity. Recording saved state and graph state are separate failure boundaries; no automatic cross-store transaction or historical-property rollback is promised. This protocol remains under review and unimplemented.
+
+### 18.12 A/B generation staging and extensible recovery — proposed, 2026-10-13
+
+Evaluate a coherent full-store candidate generation for the initial lab: copy the active graph/saved descriptions and required source, relational/provenance and vector/evidence state; execute all changes in the candidate; validate; then select the candidate as active. Original source updates must also be staged. Shared endpoints and native indexes prevent assuming an isolated one-source graph copy.
+
+Existing clone probes establish isolated subprocess operation execution, not coherent live snapshot or promotion semantics. Ladybug checkpoint makes prior graph writes durable but does not synchronize SQLite/LanceDB/source records. Audit path rebinding and native read-side bookkeeping. First serialize writes to promotion-copied state, flush/close handles and reopen readers/processes against the selected generation; do not copy over open live files.
+
+Keep preparation, execution, validation, promotion and recovery policy separate. Retain candidate/base identifiers, description revisions, captured intent, phase/error and validation evidence. Extend retry/repair/rebuild/reject handlers as real failure classes are observed. A failed candidate leaves active A selected; interrupted/superseded promotion requires actual-selector checks.
+
+Proposal section 15 and roadmap 6.4/6.6 contain the pending feasibility/test work. This is not native Cognee multi-store transaction support, a measured promotion result or a required general version archive. A/B generation labels do not refer to the earlier option B Cognify patch.
+
+### 18.13 A/B complexity boundary — 2026-10-13
+
+A/B staging is optional for the first iteration and is not a Stage-6 handoff prerequisite. Track its practical complexity as basic publication and maintenance are implemented: coherent copying, shared-store scope, source-path/adapter rebinding, native bookkeeping, promotion and storage/time costs. Defer it if that work outweighs its initial benefit.
+
+Keep the pending-state/captured-intent retry approach as a viable baseline and retain narrow separation of execution, validation and recovery policy so staging can be added later. No general snapshot framework or mandatory concurrent-generation service is selected.
+
+### 18.14 Structured sources and optional prose/chunks — accepted identity simplification, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain, Retrieve.
+
+For identity, one authoritative JSON document is registered as a generated Cognee Data item. Publish consumes structured records through custom Tasks and publishes its TextDocument graph node as the mention-marker anchor. Original DocumentChunks remain source occurrence locators. Generated identity prose/chunks are unnecessary until a specific retrieval or LLM consumer requires them; render explanations on demand and retain substantive explanations only where useful.
+
+Source inspection supports the parts: the text loader accepts JSON, document classification maps JSON to TextDocument and uses Data.id as its document ID, and add_data_points accepts ordinary DataPoints plus ID-based custom edges under a source context without requiring chunks. add registration alone is not semantic graph publication. The combined chunkless identity workflow is not live-tested. calculate_chunk_graphs remains a valid computation seam for chunk-based processing; it is not required for this direct custom-Task path.
+
+General lesson: separate the authoritative structured description, the native source/ownership graph anchor, and optional textual retrieval material. A text-bearing anchor does not imply the description must be parsed again by an LLM or split into chunks. Carry this distinction to later knowledge types without assuming their retrieval needs match identity's.
+
+Source anchors: cognee/infrastructure/loaders/core/text_loader.py; cognee/tasks/documents/classify_documents.py; cognee/modules/data/processing/document_types/Document.py; cognee/tasks/storage/add_data_points.py, at the pinned Cognee 1.6.2 checkout.
+
+### 18.15 Reference grouping and graph materialization granularity — initial decision, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain, Retrieve.
+
+Identity initially uses paragraph-local reference groups: multiple exact ranges sharing one interpretation feed one saved record and mention Entity, marker and resolution. A deliberate selection policy avoids assuming all pronouns must be materialized. This reduces potential object counts while retaining the Entity/resolves_to integration; no scaling measurement is claimed.
+
+Separate input reference granularity, saved-record granularity and graph object granularity. More compact objects require retained member positions, range-level applicability and a defined split/merge maintenance policy. A grouped mention endpoint alone cannot attribute every incident semantic edge to a single occurrence. Context passages inform interpretation but are not blanket resolution scope.
+
+The previous one-occurrence-per-node recommendation is superseded for the initial identity design. Detailed individual records with compact graph, property/contribution-based references, saved-record-only mentions and wider contexts remain alternatives; broader semantic-edge compaction is not selected. Proposal section 17 records decision/rationale/options and validation scenarios. Carry this granularity/cost distinction forward to other knowledge types without assuming they should share identity's grouping unit.
+
+### 18.16 Saved interpretation separated from captured references — agreed direction, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain, Retrieve.
+
+Keep captured local reference groups separate from their interpretation records. Mention-resolution records identify the group, exact accepted target, status, applicability, supplied inputs and producing process; a stable record ID also identifies the published contribution. Unresolved/ambiguous records can retain candidates without accepted graph edges. The source envelope supplies source identity/revision.
+
+Retarget an entire group by changing its resolution; retarget some occurrences by splitting the group first. Withdrawal does not automatically retire captured references or classification. Variant relationship records share assignment/provenance machinery with two exact reusable endpoints and explicit applicability, without a mention-group reference.
+
+General lesson: source object identity, captured inputs and derived interpretation can have different lifecycles. A shared mutation API must preserve those distinctions while coordinating materialization. Proposal section 18 contains the agreed identity forms; these are structured records, not graph support nodes, and exact serialization remains open.
+
+### 18.17 Durable construction fallback for borrowed corpus endpoints — revised proposal, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain.
+
+An existing endpoint reference plus current native ownership does not guarantee future replay. A generated source can become its last owner after another source is removed; rebuilding that generated source can temporarily delete the endpoint. Store minimal corpus-backed construction recipes for required endpoints even when they already exist. Existing-node publication bypasses construction and attaches refs; valid missing-node publication reconstructs exact IDs from saved intent.
+
+Distinguish recipe availability from permission to reconstruct: retired inputs or invalid assignments require maintenance rather than blind resurrection. The recipe supplies initial node fields, not complete semantic relationships or current property authority. Different source recipes need no merge when the Entity already exists. Supported writer coordination must prevent the native upsert path from turning create-if-missing into unintended replacement.
+
+Identity's last-owner lifecycle sequence belongs in Stage-6 tests and should carry forward as a replay lesson for other knowledge types. Proposal section 19 captures the initial policy; no implementation or new live result is claimed.
+
+### 18.18 Publication state separate from saved knowledge — agreed initial design, 2026-10-14
+
+**Applies to:** Publish, Maintain, Retrieve; Describe supplies captured intent consumed by the protocol.
+
+Identity selects a small project-owned SQLite ledger keyed by dataset + generated source Data ID. It tracks pending/current/failed, target/published revisions, current attempt and optional diagnostic references. JSON remains authoritative for knowledge. Invalidate before affected supported writes; publish and verify required graph/index structures; acknowledge only the still-current saved revision and attempt. A repair can apply unchanged saved knowledge in a new attempt.
+
+Initially withhold the pending source's identity contributions and preserve unaffected contributions only where their required shared objects/indexes remain valid. Native lifecycle/status/retrieval do not automatically participate: integrate supported wrappers/Tasks and the custom identity reader explicitly. SQLite coordination is not a cross-store transaction; guards, invalidation hooks and validation still require implementation. A/B remains optional.
+
+Carry forward the distinction between durable interpretation and verified materialization. Other knowledge types can reuse the shared interface/protocol while selecting their own required representations and affected sets. Proposal section 20 records the agreed identity baseline and regression boundaries.
+
+### 18.19 Describe baseline: native behavior, representative approaches and model-neutral decisions — source review, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain; Retrieve consumes resulting scope/provenance.
+
+**Evidence:** source-inspected Cognee 1.6.2 checkout at ba3631f2ed363a6ea50d649c34c56885af6b36fe. No new runtime accuracy test or model adoption. The user requests grounding in existing code and standard approaches, and a longer-term decision-model alternative to an LLM. The latter is a design goal; the boundaries below are recommendations for the next review.
+
+#### Native mechanisms actually found
+
+| Mechanism | What the inspected code does | Implication for this project |
+|---|---|---|
+| Default Cognify | Classify documents, chunk, extract_graph_and_summarize, then add_data_points; optional provenance/contradiction stages | Reuse Task/persistence infrastructure; the default list does not include a separate coreference/corpus entity-linker |
+| extract_graph_from_data + extract_content_graph | Calls structured LLM extraction for each chunk, passing chunk.text and prompt/model; can accept precomputed graphs through calculate_chunk_graphs | Coreference is initially folded into generative graph extraction rather than explicit span/cluster decisions |
+| Default graph prompt | Instructs the model to use the most complete identifier when aliases/pronouns refer to one entity | A request for normalization is not measured coreference correctness, nor saved occurrence provenance |
+| Generic KnowledgeGraph | Node ID/name/type/description plus relationship endpoints/text; no explicit mention ranges, coreference clusters or scored existing-corpus candidate list | Normalized extracted graphs alone do not supply the planned precise source/reference records |
+| Entity construction | Usually Entity.id_for(name); repeated same-name nodes with different graph-local IDs within one extracted graph instead get chunk/ordinal-scoped IDs; shared batch dictionary reuses constructed Entity IDs | Deterministic ID matching supports reuse but does not decide contextual equivalence; do not say all same-name nodes always collapse |
+| Chunk contains/provenance | Links chunks to constructed Entities and records extracted semantic edge identities/text | Useful coarse source grounding; not exact pronoun spans or a local reference-group binding |
+| Optional consolidate_entities_pipeline | Loads Entity graph data; embeds names; groups normalized-name matches or thresholded name-vector similarity via union-find, with type guards; merge picks a representative, redirects edges, unions descriptions and deletes duplicates/vectors | A separate physical consolidation path, not the selected scoped/non-destructive identity design or contextual pronoun resolver; keep excluded/adapted |
+| Optional ontology resolver | Canonicalizes matched extracted classes/individuals to ontology names and attaches ontology structure | Ontology vocabulary/individual matching is distinct from general corpus candidate ranking |
+| Optional extractor='gliner_demo' | Local GLiNER entity/relation extraction supplies precomputed KnowledgeGraphs through the callback and Tasks marked needs_llm=False | An existing non-generative extraction integration pattern; not a ready-made corpus linker/coreference system |
+| GLiNER generic mapper | Runtime requests spans/confidence; mapper uses positions to choose competing detections, then discards them from generic Nodes and deduplicates by type/name; relation endpoints match normalized strings or unambiguous containment | To preserve our ranges/bindings, adapt before this lossy mapping rather than infer them from final graph nodes |
+
+Default extraction does not explicitly pass an existing-corpus candidate catalogue into its normal per-chunk LLM call. Existing-edge lookup later checks edge identities for storage/retention; it is not entity candidate disambiguation. Optional resolver/custom callbacks may add behavior, so this characterization is bounded to the inspected default and named optional paths.
+
+#### Representative established approaches (limited review)
+
+Coreference detects textual mentions and groups those sharing a referent. Discriminative systems score spans/antecedents or assign mentions to evolving clusters. Maverick (ACL 2024) illustrates learned mention detection and clustering without a general-purpose autoregressive LLM. These results do not establish scientific-corpus accuracy. [Paper](https://aclanthology.org/2024.acl-long.722/), [method](https://arxiv.org/html/2407.21489v1), [authors' implementation](https://github.com/SapienzaNLP/maverick-coref).
+
+Entity linking maps a mention/context to catalogue identities. BLINK illustrates two stages: independently encode context/entity descriptions to retrieve candidates, then jointly encode each candidate with context to rank them. This separates candidate coverage from selection quality. It does not directly implement our dynamic singleton/group scope or uncertainty policy. [Paper](https://aclanthology.org/2020.emnlp-main.519/), [authors' implementation](https://github.com/facebookresearch/BLINK).
+
+These are representative architecture patterns, not a 2026 leaderboard, exhaustive survey, pretrained-model recommendation or installation request. Our non-destructive, scoped corpus identities and lifecycle maintenance still need project logic.
+
+#### Proposed implementation-neutral Describe boundary
+
+Use replaceable inference functions for mention detection/grouping, candidate retrieval and identity decision. They may be backed by an LLM, discriminative encoder/ranker/classifier, rules or a combination; do not require a trained backend to emit prose, prompt text or JSON directly. An adapter normalizes native outputs, and deterministic assembly/validation produces the saved record forms and explicit publication intent.
+
+Inputs include exact source text/version and paragraph/section context, grounded mention spans/groups, eligible candidate Entity/group references plus names/descriptions/source information, and relevant prior records for maintenance. A joint backend can perform several steps; the conceptual split is not a requirement for three separate models or passes.
+
+Outputs can include token/character spans, grouping assignments, candidate/action IDs, optional scores and accepted/unresolved/ambiguous decisions. For existing candidates, use a finite candidate key mapped by code to exact UUIDs; for new identities, code allocates the ID and assembles the minimal corpus-backed recipe. Code validates native token offsets against original document coordinates, reference keys, scope and role exclusions, and supplies revisions/contributions/ownership instructions. It must not silently substitute a same-name endpoint or infer a decision that was not produced.
+
+No mandatory natural-language justification, fixed score threshold, calibration or universal feature vector is selected. Scores from different models are not assumed comparable. Preserve producer/model/version/configuration and the actual supplied candidate set/context plus normalized decisions. Candidate retrieval is also replaceable; a downstream scorer cannot select a correct target excluded from its candidates.
+
+Paragraph bounds are the initial storage/grouping unit, not the maximum reasoning context. A coreference backend may use document-level context and output wider clusters; an adapter can project validated references into paragraph-local groups, retaining exact ranges and broader supplied-input dependencies. This avoids forcing a decision model to resolve a pronoun with insufficient context or treating its whole-document cluster as global variant equivalence.
+
+For eventual training/evaluation, retain actual candidates (including alternatives) and distinguish model proposals from validated labels/benchmark truth. Candidate recall, mention/grouping quality, final linking/abstention and replay consistency should be evaluated separately. No training pipeline or label correctness guarantee is implemented now; document-held-out evaluation and review-derived labels are possible later.
+
+#### Pinned source anchors
+
+- [Cognify default Task list](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/api/v1/cognify/cognify.py)
+- [Per-chunk extraction and callback integration](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/tasks/graph/extract_graph_from_data.py)
+- [Structured LLM invocation](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/infrastructure/llm/extraction/knowledge_graph/extract_content_graph.py)
+- [Default coreference instructions](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/infrastructure/llm/prompts/generate_graph_prompt.txt)
+- [Generic graph schema](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/shared/data_models.py)
+- [Entity ID construction and chunk contains links](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/modules/graph/utils/expand_with_nodes_and_edges.py)
+- [Optional duplicate detection/physical merge](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/tasks/memify/consolidate_entities.py)
+- [Consolidation pipeline entry point](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/memify_pipelines/consolidate_entities.py)
+- [Local extractor Task integration](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/tasks/graph/gliner_demo/tasks.py)
+- [GLiNER span handling and graph mapping](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/tasks/graph/gliner_demo/mapping.py)
+- [Ontology individual/name canonicalization](https://github.com/topoteretes/cognee/blob/v1.6.2/cognee/modules/ontology/construct_data_points_and_edges_with_ontology.py)
+
+### 18.20 Graph-visible contextual bindings — selected clarification, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain, Retrieve.
+
+Identity retains pronoun/context-only local groups as graph mention nodes with exact saved ranges, stable UUIDs, source markers and accepted scoped mention resolves_to edges. A preferred noun phrase is not required. Use the existing ordinary Entity + relationship classification representation; do not create global aliases for common words or introduce a distinct graph support node.
+
+The saved-only default proposed in conversation is superseded. Grouped nodes reduce object counts while keeping bindings available to graph traversal and providing endpoints for domain facts. Durable records remain necessary for replay/provenance; discovery of a binding should not require parsing its source passage.
+
+Semantic edges on group nodes need explicit integration and exact original-source attribution. Native graph extraction does not automatically target the group's explicit UUID, and partial group retargeting must not move unrelated facts. Preserve directed mention semantics rather than turning local references into variant equivalence. Proposal section 22 records the identity-specific contract and planned cases; no new runtime evidence is claimed.
+
+### 18.21 Seeded description and representative full-pipeline fixtures — selected direction, 2026-10-14
+
+**Applies to:** Describe; fixture milestone spans Describe, Publish, Maintain, Retrieve.
+
+The user selects seed discovery before downstream contextual decisions: names/proposed reusable forms, explicit abbreviation definitions and generated initials first; then seeded semantic matching, shortenings and finally pronouns/contextual references. Earlier results inform later passes. Candidate providers and inference backends remain replaceable; conceptual passes need not map one-to-one to model calls or graph writes.
+
+Parenthetical patterns and initial-letter candidates provide practical first seeds. Keep pattern evidence, proposed interpretations and published applicability distinct: an initials match does not automatically establish a reusable identity relationship. Scope/collisions and local-only descriptions still need handling.
+
+The initial goal is a working integration demonstrated by a small set of each relevant type plus selected negative/ambiguous and lifecycle cases. Defer comprehensive linguistic coverage and algorithm perfection. Hidden benchmark answers remain evaluation fixtures rather than inputs to inference; captured decisions can isolate persistence tests from Describe accuracy. Carry forward this representative end-to-end milestone approach to later knowledge-integration packages.
+
+Proposal section 23 and roadmap 6.2 contain the initial order and fixture direction. Existing native Tasks/extraction may supply inputs; no new model, first-backend implementation or live accuracy result is claimed.
+
+### 18.22 Routing discriminator and fact-endpoint binding — investigation, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain, Retrieve.
+
+The user requests further investigation of generated-source routing and discussion of local semantic fact placement. Source inspection establishes:
+
+1. JSON maps to TextDocument/STANDARD; content kind and external_metadata do not themselves control Cognify routing.
+2. Native routing is per item, based on persisted system_metadata/extension and document classification. The dataset runner accepts a Task resolver; Cognify supplies built-in-route policy. A uniform STANDARD Task transform alone does not distinguish identity JSON from ordinary text.
+3. Re-add replaces system route metadata from current content/item, including none. A valid identity discriminator needs regeneration/preservation on admitted Update/rebuild and reload. Existing loader-result stamps are a useful native precedent.
+4. A custom publication pipeline can isolate writes but does not alone guard a later standard Cognify/Update. Investigate resolver integration and validate with mixed-source/restart/update probes before choosing the final patch.
+5. Dataset orchestration includes reentrant lock handling. Do not assume nesting deadlocks, or that it is otherwise automatically correct across contexts/rollback.
+6. Native extraction/edge evidence preserves graph endpoints, edge identities, source chunks/runs and optional generated edge text, not exact subject/object reference spans. The best-effort audit ledger is not mandatory exact occurrence evidence.
+
+The user's graph-visible mention groups need explicit fact-to-group endpoint binding when contextual semantic facts attach there. Local-M fact storage and direct-A storage have different retargeting/source-contribution costs. Native graphs can be reused where mappings are grounded and unambiguous; same-name or chunk-level blanket rewrites are unsafe.
+
+The prior native-complete-then-Describe order remains provisional. Source-aware extraction/conversion before final semantic persistence may be needed. Do not adopt a universal fact rewrite or a new scientific support schema in this review. Proposal section 24 records the evidence, options, small routing probe and retrieval implications.
+
+Pinned anchors: modules/cognify/routing.py; tasks/documents/classify_documents.py; tasks/ingestion/ingest_data.py; api/v1/update/update.py; api/v1/cognify/cognify.py; modules/pipelines/operations/pipeline.py and run_tasks.py; modules/graph/utils/expand_with_nodes_and_edges.py; shared/data_models.py; modules/provenance/edge_evidence/models.py and buffer.py; tasks/provenance/record_provenance.py.
+
+### 18.23 Custom identity-aware relation extraction before persistence — clarification, 2026-10-14
+
+**Applies to:** Describe, Publish; Maintain reuses it on affected inputs and Retrieve consumes the graph.
+
+The user accepts local-node anchoring for contextual facts and asks who generates new facts after mention/variant discovery. Assign text-grounded semantic generation to an identity-aware relation-extraction Task consuming original text plus explicit identity bindings. Identity Tasks establish local groups/reusable forms; assembly maps endpoint keys to IDs; Publish writes supplied relationships. Node creation or resolves_to publication does not trigger semantic extraction by itself.
+
+The native STANDARD seam is appropriate: classify -> chunk -> extract_graph_and_summarize -> add_data_points. Insert identity preparation and replace/adapt graph extraction/conversion before final persistence. Reuse summarization/storage where their contracts fit. A custom Task list works in a project pipeline; native Cognify/Remember/Update integration and per-item identity JSON routing remain extension work.
+
+A calculation callback alone does not preserve arbitrary extracted Node IDs as Entity UUIDs: the generic converter normally derives IDs from names. Bind known mention/variant/existing endpoint keys in an identity-aware converter and use deliberate reference attachment plus ID-based edges. Make document-level context available across native streaming chunk batches.
+
+For contextual text, facts attach to M and M references its reusable target. For explicit variant text, facts may attach to the variant node. Extract new relationships from source passages, rather than copying all known group facts to a new alias. Preserve original-source provenance and capture outputs for retries; exact semantic-output storage/ownership sequencing remains an integration detail. The previous completed-native-graph-first order is superseded as a mandatory sequence.
+
+Proposal section 25 records the agreed anchoring, recommended Task split, example and unresolved integration details. This is ordinary source-grounded relation extraction, not the later scientific-support phase. No implementation or new runtime validation is claimed.
+
+### 18.24 Native factual coverage versus binding/provenance improvements — deferred measurement, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain, Retrieve.
+
+The user notes that native LLM extraction may already generate facts needed by the custom identity-aware process. Measure overlap and differences on the initial Stage-6 examples before assuming all custom output is newly discovered knowledge. Distinguish factual coverage from endpoint binding, qualifiers/scope and original-source attribution. Preserve producer/run lineage separately from original source statements; repeated extraction can produce duplicate representations of one statement.
+
+Use controlled isolated/captured comparisons and validated identity/scope mappings, not raw graph-edge identity alone. Results can guide native extraction reuse/adaptation, duplicate handling and provenance design. No experiment or further investigation is requested now; no new result, scientific-support rule or implementation gate is asserted. Proposal section 26 contains the deferred comparison.
+
+### 18.25 Preserve native semantic fact representation and provenance — goal and compatibility findings, 2026-10-14
+
+**Applies to:** Describe, Publish, Maintain, Retrieve.
+
+Start with the user's goal of using Cognee's normal relationship representation, source attribution, native ownership/deletion and configured indexing for ordinary facts generated through identity-aware extraction. Identity changes how exact endpoints are chosen; it does not by itself justify a separate semantic-fact graph/provenance framework.
+
+In pinned 1.6.2, native conversion records each original chunk's produced relationship identities and extracted-edge evidence before deduplication. add_data_points derives chunk owner refs from that record and reachable DocumentChunks; already-existing facts gain the new chunk's ownership/evidence without necessarily rewriting the edge. Edge-evidence capture defaults on, subject to configuration. It records source Data/chunk/run/edge, not exact subject/object mention bindings. The independent hash-chained audit ledger remains opt-in/best-effort.
+
+Keep original document chunks as the baseline owners/evidence sources for semantic facts, including facts whose endpoints are locally grouped mentions or newly declared variants. Generated identity Data remains the owner of its identity assignments; original source, producer/run, applicability and retention are distinct.
+
+| Finding | Activities | Integration consequence |
+|---|---|---|
+| Stored Entity UUIDs are selected during conversion, not by blindly copying graph-local Node.id | Describe, Publish | Bind saved mention/variant/existing keys to exact IDs before normal persistence. |
+| Nested existing DataPoints can enter ordinary node upserts | Publish, Maintain | Reference/retention adapter must preserve chunk attribution without unnecessary field rewriting. |
+| custom_edges is a separate document-owned write path | Publish, Maintain | It is not a drop-in equivalent of extracted chunk relationships/evidence. Preserve native produced-edge and evidence bookkeeping. |
+| Native evidence lacks exact local-group endpoint/range bindings | Describe, Maintain | Keep minimal captured extraction bindings for replay/splits; use native provenance for ordinary source attribution. |
+| Original chunks may retain M/facts after its generated source's marker is removed | Publish, Maintain, Retrieve | Explicitly test independent source lifetimes and settle classification/repair before admitting that sequence. No marker ownership change is chosen yet. |
+| ID-only edges can miss optional Triplet embeddings when endpoints are absent from the current node batch | Publish, Maintain, Retrieve | Verify configured derived indexes independently of graph success. |
+| One physical source/name/target edge can have several owners but one ordinary property bag | Describe, Publish, Maintain, Retrieve | Begin with native ordinary-fact behavior; add a focused extension only for a demonstrated loss. Identity contribution collections do not automatically generalize to every fact. |
+
+Proposal section 27 records the native baseline, source-inspected seams and planned real-backend sequences. Exact captured-output placement, reference-only adapter and cross-source mention classification lifetime remain open. No new runtime result is claimed and the native-versus-custom extraction coverage experiment remains deferred.
 

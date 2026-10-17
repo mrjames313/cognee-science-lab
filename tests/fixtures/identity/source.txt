@@ -1,0 +1,1 @@
+Helios controller (HC) regulates plasma heating. The controller adjusts coil current; it limits oscillations.

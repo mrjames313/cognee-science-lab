@@ -1,0 +1,110 @@
+{
+  "kind": "cognee_identity_source",
+  "schema_version": "0.1-draft",
+  "dataset_id": "d3147944-769c-5ddf-8e38-0f487b129b99",
+  "identity_data_id": "718efce2-4251-5f6f-8318-417bb4dd3525",
+  "revision": 1,
+  "original_input_ref": "doc01",
+  "inputs": {
+    "doc01": {
+      "kind": "source_text",
+      "dataset_id": "d3147944-769c-5ddf-8e38-0f487b129b99",
+      "data_id": "50d5313b-0fee-5945-b1d5-5c1d37a6f880",
+      "text_sha256": "7c21fbfdd7e16f28cace089933071c5c280b42dc7a346cd23c523f1c6d8dd4d5"
+    },
+    "chunk01": {
+      "start": 0,
+      "end": 110,
+      "kind": "chunk",
+      "document_ref": "doc01",
+      "chunk_id": "2e57c22b-e0d2-51cb-85e2-aa6831e6c2a6"
+    },
+    "existing_A": {
+      "kind": "corpus_object",
+      "dataset_id": "d3147944-769c-5ddf-8e38-0f487b129b99",
+      "entity_id": "8b4bff50-907b-56b6-bc80-3b0a7018714a",
+      "selected_fields": [
+        "name",
+        "description"
+      ],
+      "content_sha256": "0b18264e951811764573a88e8d285233eba234ab025e9111b18074a801e2d33f"
+    }
+  },
+  "producers": {
+    "fixture": {
+      "method": "captured_fixture",
+      "implementation": "identity-handoff-example",
+      "version": "0.1",
+      "configuration": {
+        "context_policy": "paragraph-v1"
+      }
+    }
+  },
+  "entity_constructions": {
+    "8b4bff50-907b-56b6-bc80-3b0a7018714a": {
+      "name": "Helios controller",
+      "description": "Reusable controller identity."
+    },
+    "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88": {
+      "name": "HC",
+      "description": "Abbreviated reusable form in DOC01."
+    },
+    "233cb019-3986-5864-88bc-91f334a64372": {
+      "name": "The controller; it",
+      "description": "Paragraph-local reference group g01."
+    }
+  },
+  "mention_groups": {
+    "g01": {
+      "entity_id": "233cb019-3986-5864-88bc-91f334a64372",
+      "document_ref": "doc01",
+      "occurrences": [
+        {
+          "start": 49,
+          "end": 63,
+          "text": "The controller"
+        },
+        {
+          "start": 86,
+          "end": 88,
+          "text": "it"
+        }
+      ],
+      "chunk_refs": [
+        "chunk01"
+      ],
+      "input_refs": [
+        "doc01"
+      ],
+      "producer_ref": "fixture"
+    }
+  },
+  "mention_resolutions": {
+    "r01": {
+      "group_ref": "g01",
+      "input_refs": [
+        "doc01",
+        "existing_A"
+      ],
+      "producer_ref": "fixture",
+      "status": "accepted",
+      "target_entity_id": "8b4bff50-907b-56b6-bc80-3b0a7018714a"
+    }
+  },
+  "variant_assignments": {
+    "v01": {
+      "status": "accepted",
+      "source_entity_id": "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88",
+      "target_entity_id": "8b4bff50-907b-56b6-bc80-3b0a7018714a",
+      "applicability": {
+        "kind": "document",
+        "document_ref": "doc01"
+      },
+      "input_refs": [
+        "doc01",
+        "existing_A"
+      ],
+      "producer_ref": "fixture"
+    }
+  }
+}

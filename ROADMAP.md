@@ -1,9 +1,9 @@
 # Cognee Science Lab Roadmap
 
-**Last revised:** 2026-10-13  
+**Last revised:** 2026-10-14  
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
-**Current work:** Stage 5.4.5.2–.3 — initial ownership and identity representation direction recorded; next, operation walkthroughs toward the 5.4.5.4 lifecycle contract. Stage 5.4.5.1 characterization remains complete. Schema/routing, lifecycle validation, final invariants and Stage-6 implementation remain pending.
+**Current work:** Stage 5.4.5.4 — initial saved identity forms, reconstruction coverage, publication ledger and seeded Describe direction selected. Identity-aware semantic facts will use native relationships/provenance as the baseline. Next: captured semantic-output placement and independent source lifetimes, initial Maintain policy, then Retrieve contracts. Stage 5.4.5.1 characterization remains complete. Exact serialization/routing, combined runtime validation, final invariants and Stage-6 implementation remain pending.
 
 This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
 
@@ -59,7 +59,7 @@ Do not physically merge equivalent Entity nodes as the default strategy. Preserv
 
 Use **singleton** and **identity group** terminology going forward. An identity group consists of reusable variants connected by applicable variant relationships; it has no privileged canonical Entity. A singleton is an ordinary Entity outside such a group, excluding marked mentions. Historical Stage-5.3 references to canonical/variant/mention roles describe the earlier experiment.
 
-A mention is a distinct occurrence Entity. It receives an explicit deterministic occurrence UUID and a generated identity DocumentChunk → Entity has_identity_mention marker. Classification persists when no accepted resolution exists. A reusable variant Entity must not also serve as a mention.
+A mention is a locally scoped reference-group Entity containing one or more exact text occurrences sharing one interpretation. It receives an explicit saved group UUID and a generated identity TextDocument → Entity has_identity_mention marker. Classification persists when no accepted resolution exists. A reusable variant Entity must not also serve as a mention.
 
 Do not add authoritative identity fields to ordinary Entity properties. Store resolution kind, applicability and current contributions on identity edges, and retain structured assignments/original-input provenance independently in generated identity sources. Do not introduce singleton or variant markers, or a graph support node per assignment, in the initial design.
 
@@ -92,7 +92,7 @@ Keep semantic, source/context and provenance functions distinct without requirin
 |---|---|
 | Semantic graph | Ordinary Entity nodes and domain relationships |
 | Identity navigation | resolves_to edges carrying variant/mention kind and current applicability contributions |
-| Mention classification | Generated identity chunk → Entity has_identity_mention marker |
+| Mention classification | Generated identity source document → Entity has_identity_mention marker |
 | Durable identity/provenance | Registered generated Data sources retaining structured assignments, original-input provenance and readable descriptions |
 | Original source/context | Native documents/chunks/summaries and relevant observation/definition inputs |
 
@@ -352,13 +352,11 @@ Historical mention records may supply evidence. Bare unresolved surface text mus
 
 Keep logical fact reconciliation modest: equivalent Entity representations should yield a coherent logical neighborhood, while raw edges remain available for provenance. Broader verification belongs in the custom Retriever and Stage-6 regressions. The available progress record does not establish completion of a separate general relation-reconciliation implementation.
 
-### Deferred optimization — mention clustering / compaction
+### Local reference groups selected; broader graph compaction deferred
 
-Do **not** implement mention clustering yet. Occurrence-level mention Entities currently provide straightforward relation provenance: a semantic edge attached to a mention is automatically tied to the source occurrence represented by that mention.
+The 2026-10-14 decision replaces the initial one-node-per-occurrence proposal with locally scoped reference groups, initially paragraph-bounded. One saved record and mention Entity can cover several exact ranges sharing one interpretation. A deliberate selection policy avoids assuming every pronoun needs an identity record; the exact selection policy remains to be specified.
 
-A future mention cluster is only useful if semantic relations can be collapsed without losing occurrence-level provenance. Its resolved target would be a singleton or identity group under the current terminology. Compaction remains deferred until ownership/provenance and update/delete semantics are clear.
-
-Until evidence shows mention fan-out is a real problem, prefer simple retrieval/indexing mitigations over a model rewrite. Revisit clustering only after relation/assertion provenance is explicit enough to preserve source support under compaction.
+This groups references during description/publication. It does not authorize merging existing native mention nodes, collapsing semantic relations or losing their source attribution. If semantic relations are attached to grouped mention nodes, occurrence-level attribution must be retained explicitly; it cannot be inferred merely from the endpoint node. Broader post-publication graph compaction remains deferred.
 
 ### 5.4 — Operational semantics, architecture, and graph evolution — IN PROGRESS
 
@@ -508,7 +506,7 @@ The preliminary matrix is in cognee_stage5_4_5_identity_representation_proposal.
 
 ##### 5.4.5.3 Stable physical representation — INITIAL DIRECTION SELECTED
 
-The selected initial direction uses ordinary Entity nodes, identity-group variant relationships without a privileged canonical member, occurrence-specific mention Entities, and explicit mention markers from native generated identity chunks.
+The selected initial direction uses ordinary Entity nodes, identity-group variant relationships without a privileged canonical member, local reference-group mention Entities, and explicit mention markers from the generated identity source's TextDocument graph node.
 
 Resolution edges store resolution_kind and current contributions. Separate singleton/variant markers and per-assignment graph support nodes are omitted. Structured assignments are sufficient to reproduce exact graph intent; ordinary LLM parsing of identity descriptions is not relied on for faithful reconstruction.
 
@@ -516,7 +514,7 @@ Deterministic occurrence UUIDs override Entity's default name-based identity. A 
 
 Remaining outputs: structured-source serialization and stable IDs, exact edge schemas/scope conventions, loader/routing, treatment of current prototype helpers, and compatibility with operations that delete/remap endpoints. No combined runtime validation is claimed.
 
-##### 5.4.5.4 Write / reconcile / read / update lifecycle — OPERATION WALKTHROUGHS NEXT
+##### 5.4.5.4 Write / reconcile / read / update lifecycle — IN REVIEW
 
 Start with one generated source publishing a new Entity and an edge to an existing Entity. Then cover edge-only publication, unresolved-to-resolved mentions, overlapping contributions, original-source Update/Forget, generated-source rebuild, failure/retry and selected native endpoint mutation. These are design-dependent follow-ups, not a restart of the completed .1 characterization.
 
@@ -547,7 +545,7 @@ Candidate invariants to finalize from evidence:
 - logical fact deduplication preserves source attribution;
 - selected built-in maintenance stages have an explicit, tested interaction contract with project structures.
 
-Deliverables: mutation/persistence matrix, ownership matrix, architecture diagram, lifecycle contract, finalized invariants, and a Stage-6 implementation/checklist with validation criteria. Stage 5.4.5 is not complete until these decisions are grounded and written down.
+Deliverables: mutation/persistence matrix, ownership matrix, architecture diagram, lifecycle contract, finalized invariants, a reusable integration findings register tagged by Describe/Publish/Maintain/Retrieve, and a Stage-6 implementation/checklist with validation criteria. Stage 5.4.5 is not complete until these decisions are grounded and written down.
 
 #### Retained scope, timing, and evolution questions
 
@@ -561,7 +559,7 @@ The superseded 5.4A/5.4B topics remain work to resolve through 5.4.5 and Stage 6
 - allow contradictions and scope-specific meanings to coexist;
 - exercise DOC01-only, DOC01+DOC02, and updated/removed-DOC01 corpus states.
 
-The current source/identity chain is: original document/chunk inputs produce saved assignments in a generated identity Data source; its native chunks anchor mention markers, and deterministic publication materializes scope-bearing resolution edges. Original-input provenance remains independent of native generated-source retention. The earlier IdentityResolution helper chain is historical, not a required representation.
+The current source/identity chain is: original document/chunk inputs produce saved assignments in a generated identity Data source; its TextDocument graph node anchors mention markers, and deterministic publication materializes scope-bearing resolution edges. Original-input provenance remains independent of native generated-source retention. The earlier IdentityResolution helper chain is historical, not a required representation.
 
 ---
 
@@ -573,7 +571,7 @@ Goal: move manually demonstrated representations into actual Cognee processing t
 
 ### 6.1 Explicit source/intermediate representations
 
-Retain source occurrences and extraction decisions explicitly. Implement durable generated identity sources initially grouped per original document; preserve structured assignments and original-input provenance outside materialized graph edges. Use explicit deterministic occurrence UUIDs for mention Entities, and persist classification on has_identity_mention edges rather than Entity role fields.
+Retain source occurrences and extraction decisions explicitly. Define and implement a shared guarded API for reading/changing saved representations, explicit retirement/full replacement and reporting affected records, with domain helpers above common storage mechanics. Implement durable generated identity sources initially grouped per original document; preserve structured assignments and original-input provenance outside materialized graph edges. Use explicit saved local reference-group UUIDs for mention Entities, and persist classification on has_identity_mention edges rather than Entity role fields.
 
 For mentions, move from temporary occurrence indices to exact source coordinates where possible:
 
@@ -588,16 +586,18 @@ These should remain observable even if later relation extraction fails.
 
 ### 6.2 Automatic observation and identity extraction
 
-Integrate Stage-4 typed extraction directly into the pipeline:
+Build the initial Describe backend as seeded passes:
 
-```text
-chunk
-    -> generic semantic graph
-    -> AbbreviationObservation / other typed observations
-    -> mention candidates
-```
+1. Pull out names and reusable-form candidates; recognize explicit abbreviation definitions and generate straightforward initial-letter candidates.
+2. Use those seeds for local/lexical/vector corpus lookup and contextual semantic matching.
+3. Expand to shortenings and descriptive noun phrases.
+4. Resolve pronouns/contextual references using earlier results and document/section context; materialize retained local groups, including pronoun-only groups, as graph mentions.
 
-Then resolve observations/occurrences against existing identity context, save structured assignments, and publish exact mention markers and contribution-bearing resolves_to links. Treat singleton identities and variant groups without privileging one member. Roles are stored as explicit mention classification and relationship kind; historical mention strings do not become reusable aliases.
+Reuse native semantic extraction and Stage-4 typed observations as useful inputs, without requiring the old prototype observation/support classes as durable graph records. Supply exact existing-node references, necessary construction recipes for required corpus-backed endpoints, variant/mention assignments, applicability and supplied-input provenance. Save the selected source forms and use controlled publication.
+
+Prioritize representative cases through the entire integration before refining the algorithm. Existing abbreviation/variant/controller benchmarks supply evaluation fixtures, with hidden answers excluded from Describe inputs. Add small passages for missing types. Exercise saved JSON, graph ownership/contributions, identity-aware retrieval and selected update/replay cases. Initial accuracy thresholds, comprehensive language coverage and a future trained backend are not prerequisites for the first working iteration.
+
+On source modification, validate/regenerate group/occurrence continuity separately from reevaluating interpretation. Maintain selects older records for reconsideration, invoking Describe; exact discovery triggers remain a lifecycle decision. Keep singleton/variant identities without a privileged member, persistent mention classification and explicit relationship kind. Historical mention strings do not become reusable aliases.
 
 ### 6.3 DefinitionSummary generation and hierarchical context
 
@@ -612,6 +612,10 @@ Compare:
 
 ### 6.4 Pipeline sequencing and lifecycle integration
 
+Treat proposal section 15's A/B full-store staging as an optional experiment for the first iteration, not a prerequisite: construct and validate a coherent candidate generation including original source updates, saved descriptions, graph/native ownership, relational paths and active indexes; promote through a guarded active-generation selection and reader/process handoff. Begin with serialized writes to promotion-copied state. Separate prepare/execute/validate/promote from extensible failure-policy handlers; existing clone probes do not establish live-snapshot or promotion guarantees. This remains a feasibility/design item, not an implemented replacement for native lifecycle orchestration.
+
+Implement proposal sections 13–14 and 20: the guarded stored-representation API and project-owned SQLite publication ledger are selected at the design level. Test retry from captured intent after graph failure, exact revision/attempt completion guards and eligibility of valid surviving sources; exact transactions/hooks remain implementation work.
+
 Implement the lifecycle selected in 5.4.4 and finalized in 5.4.5:
 
 - implement the small B `cognify_task_transform` patch at the native STANDARD Task-list seam;
@@ -624,7 +628,7 @@ Implement the lifecycle selected in 5.4.4 and finalized in 5.4.5:
 - retire/regenerate generated sources after original-input changes and handle temporary endpoint loss during generated-source rebuild;
 - verify metadata attached automatically by DataPoint persistence versus metadata requiring explicit graph-interface writes.
 
-The exact Task order must follow the 5.4.5 decision. A likely division is document vocabulary/context + mixed generic/typed extraction inside construction, followed by source-grounded identity reconciliation and selected semantic materialization as maintenance. Do not force every transformation into one pipeline.
+The exact Task order must follow the 5.4.5 decision. Proposal section 25 refines the first sequence: prepare text/chunks, run identity Describe, extract semantic relations with explicit bindings, then assemble/save and publish. Identity-aware extraction/conversion replaces the relevant native Task before final persistence. Maintain reuses these functions for affected inputs; original-versus-generated publication contexts and cross-batch document state must be tested.
 
 Lifecycle validation should cover direct Cognify, standard Remember, overlapping ingest, transformed full-rebuild Update, maintenance replay, and cleanup after source removal. Test no-transform native behavior and unsupported combinations for the B patch. Verify custom side effects explicitly rather than assuming native rollback handles them.
 
@@ -638,7 +642,15 @@ Keep RAG as a reference/fallback and control conversation/session state during c
 
 ### 6.6 Replay, mutation, and lifecycle regressions
 
-Turn 5.4.5's matrices/invariants into focused regression scenarios:
+Add explicit multi-document interpretation tests: updating DOC01 preserves independent DOC02 assignments/owners and contextual traversal, while DOC02 assignments that used DOC01 context are correctly identified for reevaluation. Use input provenance in maintenance and retrieval; generated-source grouping alone does not prove independence.
+
+Separately investigate model-assisted Describe consistency using repeated identical inputs, meaning-preserving edits, definition/referent changes and end-to-end processing. Freeze graph/chunk/candidate context for isolated Describe runs. Compare benchmark-aligned occurrences, target/group agreement, resolution status, applicability, correctness and unrelated-assignment churn. Proposal section 12 records the plan; no consistency result or stabilization policy is claimed.
+
+Design regression suites directly from 5.4.5's operation sequences and expected outputs. Each case records its fixture, initiating operation, intermediate/failure eligibility and expected saved records, graph properties/IDs/owners, applicable traversal and consumed-index results. Use captured extraction/resolution outputs for deterministic lifecycle assertions rather than requiring fresh LLM runs to agree.
+
+Organize coverage into description/plan checks, real-backend publication/ownership integration, and maintenance-plus-retrieval scenarios. Fault injection and replay exercise partial writes and saved-record/graph consistency. Proposal section 11 records the initial scenario matrix. These tests are planned for implementation in Stage 6; none is added or reported passing by this documentation update.
+
+Turn the matrices/invariants into focused regression scenarios:
 
 - re-ingest a source and rerun maintenance without duplicate derived objects;
 - add an overlapping source without losing identity/reconciliation state;
@@ -651,11 +663,20 @@ Turn 5.4.5's matrices/invariants into focused regression scenarios:
 - retain mention classification after resolution removal and exclude unresolved mentions from singleton lookup;
 - withdraw one contribution from a shared edge and verify remaining applicability/owners;
 - retain an existing endpoint without rewriting its fields and recreate a solely generated-source-owned endpoint after rebuild;
-- test or exclude optional consolidation/remapping for occurrence Entities.
+- test or exclude optional consolidation/remapping for occurrence Entities;
+- relate a new document to existing corpus singletons/groups while preserving same-surface non-equivalence;
+- preserve a validated occurrence ID while reconsidering its resolution under changed document/corpus context;
+- exercise declared selection of older unresolved mentions after a relevant new corpus arrival;
+- reject conflicting saved-representation updates and preserve unrelated records;
+- inject saved-state, graph, index and completion-recording failures; retry without regenerating unchanged interpretation or adding duplicate contributions;
+- ensure superseded publication cannot mark a newer description current, and valid other-source contributions remain eligible during an affected-source failure;
+- verify A/B candidate path isolation and coherent graph/saved-record/relational/vector state, and that failed candidates leave the active generation unchanged;
+- reject promotion from a stale base and inject failures around generation selection/acknowledgement and adapter rebinding;
+- test extensible recovery handlers without changing core coordinator behavior, including preservation of captured Describe output.
 
 ### Post-Stage-6 checkpoint
 
-Stop and reassess the architecture before moving into stronger schemas/ontologies. Review:
+Stop and reassess the architecture before moving into stronger schemas/ontologies. Review the reusable integration findings in section 18 of cognee_extension_architecture_reference_v1.6.2.md: attach identity implementation/evidence to Describe/Publish/Maintain/Retrieve findings and identify which mechanisms are demonstrated versus identity-specific. Review:
 
 - selected identity source/edge representation, singleton/identity-group semantics and mention classification;
 - semantic/support/source graph layers and ownership/mutation contract;
@@ -671,6 +692,10 @@ This remains the agreed **check-in after Stage 6**, before proceeding to Stages 
 
 ## Stage 7 — JSON-schema-generated models and ontology grounding — PLANNED
 
+Investigate whether each knowledge representation's concepts, relationship meanings and domain rules should be expressed as a domain ontology, a lightweight vocabulary/schema, or a combination. Examine how those semantics guide Describe/Publish/Maintain/Retrieve while keeping native storage IDs, ownership and lifecycle procedures explicit. This is an investigation, not a prerequisite for the current identity integration or a commitment to an ontology formalism.
+
+Use identity examples and the activity-tagged findings register in the extension reference as concrete inputs.
+
 Explore:
 
 - generating DataPoint/extraction structures from JSON Schema or ontology-derived schemas;
@@ -682,6 +707,8 @@ Explore:
 ---
 
 ## Stage 8 — Scientific Claim / Measurement / Evidence model — PLANNED
+
+Use measurements/scientific records as a second worked example of Describe/Publish/Maintain/Retrieve. Carry forward the integration findings from identity; verify which ID, publication, dependency, maintenance and retrieval mechanisms transfer before generalizing. Measurement semantics and scientific support policies need their own domain decisions.
 
 Develop stronger scientific semantics for:
 
@@ -736,16 +763,16 @@ Expected concerns include:
 
 # Current immediate work
 
-Current stage: **5.4.5**. Initial ownership and representation choices for **.2–.3** are recorded; the next activity is the operation-by-operation lifecycle walkthrough toward **.4**.
+Current stage: **5.4.5**. Initial ownership and representation choices for **.2–.3** and several **.4** lifecycle decisions are recorded. The current review is the native integration of identity-aware semantic facts; Maintain policy and Retrieve contracts follow.
 
 The chosen direction is documented in cognee_stage5_4_5_identity_representation_proposal.md. Neither .2 nor .3 is marked complete: schema, source dependency handling, loader/routing and the consumed-index matrix still need finalization. The preferred B Cognify extension remains unimplemented.
 
 Immediate sequence:
 
-1. Walk through a generated identity source publishing a new Entity and a relationship to an existing Entity, including exact persistence/ownership operations.
-2. Cover edge-only publication, unresolved/resolved mentions and shared contribution aggregation.
-3. Cover original/generated-source Update/Forget, full rebuild, endpoint mutation and failure/retry; schedule targeted checks where this design relies on untested behavior.
-4. Finalize the schema/ownership matrix, supported operation contracts, active retrieval/index list and .5 invariants/Stage-6 handoff.
+1. Settle minimal captured semantic-output placement and native chunk publication with exact endpoint IDs. Work through original semantic facts surviving removal/rebuild of the generated identity source so mention classification remains valid or safely unavailable.
+2. Review initial Maintain triggers, occurrence/group continuity, split/retarget/retirement behavior and corresponding saved-record changes, reusing the selected publication ledger and captured-intent retry.
+3. Finalize Retrieve's eligibility/scope/currentness checks, variant expansion, eligible local-mention facts, logical deduplication and actual consumed indexes.
+4. Consolidate the schema/ownership matrix, admitted operation sequences, .5 invariants and Stage-6 fixtures, including native routing/reload/update, shared owners, endpoint preservation and failure/retry. A/B remains optional. Capture reusable findings with their Describe/Publish/Maintain/Retrieve activities and evidence status.
 5. Implement Stage 6; preserve the architecture check-in afterward.
 6. Keep mention compaction, a general predicate ontology and scientific reasoning deferred to their existing stages.
 
@@ -792,4 +819,122 @@ Immediate sequence:
 - Advanced .2–.3 together without declaring their final deliverables complete; made operation walkthroughs toward .4 the immediate work.
 - Updated Stage-6 implementation/regression tasks without adding stages or moving the post-Stage-6 checkpoint. Scientific support remains Stage 8.
 - Recorded no implementation, combined runtime compatibility result or traversal performance benchmark.
+
+
+### Integration-methodology framing update — 2026-10-13
+
+- Recorded Describe/Publish/Maintain/Retrieve as the recurring knowledge-integration activities in extension-reference section 18.
+- Added an activity-tagged findings register, including explicit representation semantics, durable descriptions independent of graph materialization, and boundary/consumed-representation verification.
+- Noted the possible ontology connection as a Stage-7 investigation, with identity examples retained now and a second measurement/scientific worked example in Stage 8.
+- Added findings transfer to the Stage-6 checkpoint. No new stage, universal integration framework, ontology choice or runtime result is claimed.
+
+
+### Sequence-driven regression planning — 2026-10-13
+
+- Plan test suites around each reviewed operation sequence and its expected saved-record, graph/ownership, retrieval and consumed-index results.
+- Use deterministic captured inputs, isolated real-backend integration fixtures, and failure/retry cases; do not require repeated fresh LLM extraction to be identical.
+- Keep test implementation in Stage 6, with design-dependent probes in .4 where needed. No tests or runtime results were added here.
+
+
+### Multi-document and Describe consistency update — 2026-10-13
+
+- Added paired independent/dependent multi-document regressions so provenance must be used in selection, retirement and retrieval.
+- Added a Describe variability investigation separate from deterministic publication/lifecycle fixtures, with repeated same inputs and controlled small edits.
+- Retained the distinction between stable occurrence identity and changing interpretation; no requirement for fresh LLM outputs to be identical or new acceptance policy is adopted.
+
+
+### Describe corpus scope clarification — 2026-10-13
+
+- Made corpus candidate discovery and contextual identity linkage explicit responsibilities of Describe for new and modified documents.
+- Separated occurrence identity preservation from interpretation reuse; captured candidate/context inputs remain maintenance dependencies.
+- Assigned older-record reconsideration to Maintain and recorded the open triggering question for newly available candidates.
+- Added corresponding Stage-6 tests without selecting algorithms or automatic whole-corpus replay.
+
+
+### Stored representation API and completion review — 2026-10-13
+
+- Recorded a shared saved-description mutation API as an agreed direction, with domain-specific helpers above common guarded record operations.
+- Made failure/retry coordination the next .4 review, including captured-intent retry, exact-revision completion and unaffected-contributor eligibility.
+- Added API/fault-injection regression scenarios; no implementation, atomicity guarantee or newly passed tests are claimed.
+
+
+### A/B staging and recovery extensibility proposal — 2026-10-13
+
+- Added whole-store candidate-generation staging as an initial feasibility proposal, including source updates and consumed derived stores rather than copying only one identity record/subgraph.
+- Distinguished validated generation selection from overwriting open database files, and record revision from corpus generation.
+- Added snapshot/path/reader/promotion tests and modular recovery handlers driven by observed failures.
+- Retained prior failure responses within candidates and the in-place option where needed. No live-snapshot, atomic promotion or runtime recovery implementation is claimed.
+
+
+### A/B complexity boundary — 2026-10-13
+
+- A/B is optional for the first iteration and does not block architecture handoff or basic publication/maintenance implementation.
+- Keep pending-state/captured-intent retry as a viable baseline; reassess A/B against actual complexity and copying costs, and defer it if warranted.
+- Preserve narrow extensibility points rather than requiring a general snapshot/promotion framework now.
+
+### Chunkless identity-source simplification — 2026-10-14
+
+The initial generated identity source is one authoritative JSON document registered as Cognee Data. Its TextDocument graph node anchors mention markers; original document chunks locate occurrences. Generated identity prose, generated DocumentChunks and generated chunk IDs are unnecessary initially. Publish consumes structured records through custom Tasks; calculate_chunk_graphs remains an optional chunk-processing seam rather than the required identity loading path.
+
+Finalize the saved occurrence/relationship/construction forms and coordinator completion metadata during the current review. Stage 6 must live-test this combined chunkless source-document/marker publication, replay and source lifecycle path. This simplifies the representation without changing the six requirements or adding a new stage.
+
+### Local reference grouping decision — 2026-10-14
+
+Select paragraph-local reference groups with multiple exact text ranges, one saved group record and one mention Entity, combined with a deliberate reference-selection policy. This supersedes one node per pronoun/occurrence as the initial default; it is not a measured scaling result. Preserve different bindings, exact range applicability and original-source attribution. Range shifts, partial retargeting/group splits and unresolved-group continuity become explicit Stage-6 scenarios. Larger groups, detailed saved occurrences with a compact graph, edge/contribution-only positions and saved-record-only mentions remain alternatives. Proposal section 17 records the rationale and alternatives; no new stage is added. Existing semantic-edge compaction remains deferred.
+
+### Saved interpretation records agreed — 2026-10-14
+
+Keep local reference-group records separate from mention-resolution records. A resolution has a stable assignment ID, group reference, accepted/unresolved/ambiguous status, exact target when accepted, applicability, input references and derivation provenance. Whole-group retargeting replaces its contribution; partial retargeting first splits the group. Only accepted interpretations publish resolution edges; markers persist after withdrawal. Variant relationship records specify two reusable Entity IDs, variant kind and scope through the same contribution/provenance machinery. Proposal section 18 records these forms; exact JSON serialization, source envelope/construction placement and completion metadata remain under review.
+
+### Construction fallback for matched Entities — 2026-10-14
+
+Revise the initial recipe rule: retain minimal corpus-backed construction data for every required Entity the generated source is intended to create/retain, including matched existing nodes. Existing endpoints bypass construction and receive native retention attachment without field rewriting. Valid missing endpoints can be reconstructed at their saved UUID, subject to current input/assignment validity.
+
+This closes the last-owner rebuild gap: DOC01 ownership can disappear while I02 retains an Entity; if a subsequent I02 rebuild temporarily deletes it, I02 can reconstruct from saved intent. Add that sequence to Stage-6 lifecycle tests. Recipes do not authorize resurrecting retired/invalid endpoints, restoring arbitrary native semantic edges or treating initial field values as authoritative current properties. Controlled existence-check/create coordination remains to be implemented. Proposal section 19 records the revised direction.
+
+### Publication ledger selected — 2026-10-14
+
+Use a project-owned SQLite ledger keyed by dataset + generated identity Data ID, with pending/current/failed state, target and last verified published revisions, current attempt ID and optional diagnostics. Keep content authoritative in JSON. Mark pending before affected supported mutations; publish/reconcile and verify required graph/index state; acknowledge only the matching current revision/attempt. Same-revision repair is supported. Retry persistence from captured saved intent.
+
+Initially disable the pending source's identity contributions; preserve valid unaffected sources, including shared-edge contributions whose required representations remain valid. Exact hooks/guards/checks remain Stage-6 work. Native pipeline status and retrievers do not supply this behavior automatically. A/B remains optional. Proposal section 20 records the selected baseline. Initial storage/publication-state review is complete at the design level; next review covers Describe, lifecycle integration and retrieval.
+
+### Describe grounding and decision-model goal — 2026-10-14
+
+The user requires understanding the pinned native extraction/resolution mechanisms and representative standard approaches before choosing Describe implementation, with a longer-term decision model alternative to an LLM.
+
+Source review distinguishes per-chunk prompt-based normalization/name IDs from optional destructive consolidation, ontology matching and local GLiNER extraction. Native GLiNER integration demonstrates a non-generative Task/callback pattern but its generic mapper does not retain exact reference ranges or solve corpus linking.
+
+Propose replaceable mention/grouping, candidate and identity-decision backends with adapters into the saved records; do not require generated prose/JSON. Code validates spans/IDs/scope and compiles explicit publication intent. Paragraph-local groups may use wider reasoning context. Preserve actual candidate/context inputs, producer versions and decisions for replay and future training, separating proposals from validated labels. Architecture reference section 18.19 and proposal section 21 record source evidence, limited standard-method references and remaining evaluation choices. No model is selected or trained; scientific reasoning remains deferred.
+
+### Context-only reference groups remain graph mentions — 2026-10-14
+
+Retain pronoun/context-only local reference groups as mention nodes with has_identity_mention classification and accepted directed mention resolves_to edges. A group may contain a list of exact pronoun/contextual-reference ranges without a preferred noun phrase. Under the selected physical schema it remains an ordinary Entity with an explicit group UUID/construction recipe; its label is not a reusable alias.
+
+This supersedes the conversational saved-only default. Grouping is the initial graph-size mitigation, while graph-visible bindings allow traversal and semantic relationships attached to mentions. Exact fact attribution and explicit mapping from native semantic extraction to group endpoints still require implementation/tests; grouping does not authorize wholesale fact transfer or physical node merging. Proposal section 22 records the clarification and rationale.
+
+### Seeded Describe and examples-first implementation — 2026-10-14
+
+Select staged Describe passes: (1) names/reusable-form candidates plus explicit parenthetical definitions and generated initials; (2) seeded semantic/corpus matching; (3) shortenings/descriptive references; (4) pronouns/contextual references using established referents and broader context. Local/lexical/vector candidate generation supplies these passes. Generated acronyms seed searches and do not automatically become global aliases.
+
+Prioritize a small fixture set exercising representative reference types through Describe, saved JSON, controlled graph publication, retrieval and selected maintenance/replay. Use existing abbreviation/variant/controller benchmarks as evaluation expectations, not inference inputs; add small passages where a needed type is absent. Improve extraction/resolution after the first whole pipeline works. Comprehensive coverage, final thresholds, backtracking and a trained decision model are not initial prerequisites. Proposal section 23 records the selected order and milestone.
+
+### Identity-aware semantic fact generation — 2026-10-14
+
+Local-node anchoring is selected for facts expressed through contextual references. Refine the proposed pipeline: identity Describe supplies explicit mention/variant bindings to a custom semantic extraction/conversion Task before final graph persistence. That Task generates new relations from original text; the publisher materializes them. Entity creation alone does not generate facts.
+
+Replace/adapt the native extract_graph_and_summarize portion of the STANDARD list through the selected Task extension, reusing useful native components. A project custom Task pipeline can establish the first examples while native entrypoint/routing integration is implemented. Do not require a completed ordinary native graph before all identity work. Preserve exact IDs in conversion and document-level seeds across chunk batches.
+
+First fixtures must include newly generated semantic relations from a newly described mention/variant, not merely identity links over existing facts. Explicit variant facts can attach directly to that variant; contextual facts attach locally. Capture source bindings/provenance and semantic outputs for replay; exact durable artifact/owner sequencing remains to test. Proposal section 25 records responsibilities and implementation boundaries.
+
+### Deferred native factual-coverage comparison — 2026-10-14
+
+During the first Stage-6 fixtures, compare native semantic extraction with the identity-aware path. Measure shared/new/missed/misinterpreted facts, distinguish endpoint changes from new content, and inspect source/occurrence and producer provenance. Use controlled isolated/captured outputs and validated scope-aware interpretation; native and mention-anchored edges need not have identical IDs to express the same source fact. Let the findings inform extraction reuse, deduplication and provenance. This is recorded for later work, not investigated now, and does not add a prerequisite before the first pipeline example. Proposal section 26 records the comparison boundary.
+
+### Native-first semantic relationship/provenance goal — 2026-10-14
+
+Use ordinary Cognee Entity relationships, original-document/chunk attribution, native ownership/deletion and the configured native indexes for identity-aware semantic facts wherever possible. The identity extraction/conversion adapter chooses exact mention/variant/existing endpoint IDs; it should preserve native chunk production and evidence bookkeeping rather than introduce a separate semantic-fact representation.
+
+Pinned-source inspection identifies concrete Stage-6 checks: exact UUID conversion; existing endpoint retention without field rewriting; custom_edges document ownership versus normal chunk ownership/evidence; exact local-group bindings beyond native coarse chunk evidence; mention classification surviving or being safely retired when the generated identity source is removed while original facts survive; configured optional Triplet indexing; and normal shared-edge/property behavior. Preserve already-existing edges' additional native source owners/evidence without unnecessary property rewrites.
+
+Proposal section 27 and extension-reference section 18.25 record the baseline and findings. The next review should settle minimal captured semantic-output placement and the independent-source mention-lifetime case, then initial Maintain triggers/continuity and Retrieve's local-fact contract. Routing and the first real-backend fixtures remain implementation/probe work. Update the existing Stage-6 sequence suites; no new stage, full semantic-fact ledger, runtime compatibility result or native-coverage measurement is added.
 
