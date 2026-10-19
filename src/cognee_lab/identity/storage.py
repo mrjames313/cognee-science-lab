@@ -100,6 +100,25 @@ class RecordStore:
             )
             return [json.loads(r.details) for r in rows]
 
+    async def assert_pending(self, source, attempt):
+        row = next(
+            (
+                r
+                for r in await self.rows(source.dataset_id)
+                if r["source"] == str(source.identity_data_id)
+            ),
+            None,
+        )
+        if (
+            row is None
+            or row["state"] != "pending"
+            or row["attempt"] != attempt
+            or IdentitySource.model_validate_json(row["description"]) != source
+        ):
+            raise IntentError(
+                "stale_attempt", "Graph write does not match saved pending intent"
+            )
+
     async def begin(
         self,
         source: IdentitySource,
@@ -154,6 +173,46 @@ class RecordStore:
                 raise IntentError(
                     "recovery_choice", "Retry the failed withdrawal explicitly"
                 )
+            if (
+                row
+                and row.state == "failed"
+                and json.loads(row.plan).get("operation") == "identity_replace"
+                and method != "replace"
+            ):
+                raise IntentError(
+                    "recovery_choice", "Reconcile the saved replacement plan explicitly"
+                )
+            if row and source.revision != actual_revision:
+                if method != "replace" or row.state != "current":
+                    raise IntentError(
+                        "recovery_choice",
+                        "Advance a current revision through replacement",
+                    )
+            if method == "replace" and row is None:
+                raise IntentError(
+                    "source_missing", "Replacement requires an existing publication"
+                )
+            if method == "replace" and row is not None:
+                prior_plan = json.loads(row.plan)
+                if plan.get("operation") != "identity_replace":
+                    raise IntentError(
+                        "recovery_plan",
+                        "Replacement requires a durable replacement plan",
+                    )
+                if row.state == "current" and source.revision != actual_revision + 1:
+                    raise IntentError(
+                        "revision_sequence",
+                        "Replacement must advance exactly one revision",
+                    )
+                if row.state == "failed" and (
+                    prior_plan.get("operation") != "identity_replace"
+                    or plan.get("previous_description")
+                    != prior_plan.get("previous_description")
+                ):
+                    raise IntentError(
+                        "recovery_plan",
+                        "Preserve the saved replacement retirement plan",
+                    )
             payload = source.model_dump_json()
             if row and source.revision == actual_revision:
                 if json.loads(payload) != json.loads(row.description):
@@ -242,7 +301,7 @@ class RecordStore:
                     "origin": origin or json.loads(row.plan).get("origin", "runtime"),
                     "runtime_profile": json.loads(row.plan).get("runtime_profile", {}),
                     "operation": json.loads(row.plan).get("method", "publish"),
-                    "integration_version": "stage6-m2-withdrawal",
+                    "integration_version": "stage6-m3-replacement",
                     "resolved_at": None,
                 }
             )

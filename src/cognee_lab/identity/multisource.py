@@ -118,6 +118,21 @@ def read_sources(root):
     }
 
 
+async def current_sources(root, publisher):
+    sources = read_sources(root)
+    rows = {r["source"]: r for r in await publisher.records.rows()}
+    return {
+        label: (
+            IdentitySource.model_validate_json(
+                rows[str(source.identity_data_id)]["description"]
+            )
+            if str(source.identity_data_id) in rows
+            else source
+        )
+        for label, source in sources.items()
+    }
+
+
 async def publish_one(
     publisher,
     source,
@@ -173,7 +188,8 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
 
     first = sources["doc01"]
-    variant = first.variant_assignments["v01"]
+    # Keep the original shared edge/controller visible after doc01 retargets.
+    variant = sources["doc02"].variant_assignments["v01"]
     shared = await edge_metadata(
         publisher.graph,
         variant.source_entity_id,
@@ -203,6 +219,9 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         recovery_events=await publisher.records.events(first.dataset_id),
     )
     for label, source in sources.items():
+        from .registered import read_registered
+
+        registered = await read_registered(source)
         mid = source.mention_groups["g01"].entity_id
         unresolved = source.mention_groups["g02"].entity_id
         chunk = source.inputs["chunk01"].chunk_id
@@ -216,6 +235,13 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         result["sources"][label] = dict(
             identity_data_id=str(source.identity_data_id),
             state=rows[str(source.identity_data_id)]["state"],
+            saved_revision=source.revision,
+            verified_revision=rows[str(source.identity_data_id)]["verified_revision"],
+            registered_revision=registered.revision,
+            registered_matches_saved=registered == source,
+            resolution_target_entity_id=str(
+                source.mention_resolutions["r01"].target_entity_id
+            ),
             mention_entity_id=str(mid),
             original_marker_present=await publisher.graph.has_edge(
                 str(chunk), str(mid), "has_identity_mention"
@@ -267,7 +293,7 @@ async def run(args, root):
         publisher = await Publisher.configured()
         args._fixture_publisher = publisher
         sources = (
-            read_sources(root)
+            await current_sources(root, publisher)
             if (root / "multi-fixture-info.json").exists()
             else {
                 "doc01": IdentitySource.model_validate_json(
@@ -291,15 +317,34 @@ async def run(args, root):
             ctx = await context_for(
                 selected.inputs[selected.original_input_ref].data_id
             )
-            await publish_one(
-                publisher,
-                selected,
-                await load_chunks(selected, ctx),
-                ctx,
-                root,
-                args.source,
-                reconcile=True,
+            row = next(
+                r
+                for r in await publisher.records.rows(selected.dataset_id)
+                if r["source"] == str(selected.identity_data_id)
             )
+            if (
+                row["state"] == "failed"
+                and row["plan"].get("operation") == "identity_replace"
+            ):
+                from .revisions import replace_one
+
+                await replace_one(
+                    publisher,
+                    selected,
+                    root,
+                    args.source,
+                    expected_revision=selected.revision,
+                )
+            else:
+                await publish_one(
+                    publisher,
+                    selected,
+                    await load_chunks(selected, ctx),
+                    ctx,
+                    root,
+                    args.source,
+                    reconcile=True,
+                )
     if len(sources) == 1:
         result = dict(
             result=await retrieve(publisher, selected.dataset_id, args.query),

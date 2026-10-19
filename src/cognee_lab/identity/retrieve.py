@@ -41,6 +41,13 @@ async def valid_sources(publisher, dataset_id, rows):
             continue
         source = IdentitySource.model_validate_json(row["description"])
         try:
+            from .registered import read_registered
+
+            if await read_registered(source) != source:
+                raise IntentError(
+                    "generated_source_changed",
+                    "Registered identity snapshot differs from saved current intent",
+                )
             texts, chunks = {}, {}
             async with get_relational_engine().get_async_session() as session:
                 for key, item in source.inputs.items():

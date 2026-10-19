@@ -1,0 +1,89 @@
+"""Generated JSON snapshots through Cognee's Data, ingestion and file interfaces."""
+
+from .models import IdentitySource
+from .validation import IntentError
+
+
+async def read_registered(source):
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+    from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.modules.ingestion.data_types import TextData
+
+    async with get_relational_engine().get_async_session() as session:
+        data = await session.get(Data, source.identity_data_id)
+        if data is None or data.dataset_id != source.dataset_id:
+            raise IntentError(
+                "source_missing", "Registered identity Data item is missing"
+            )
+    try:
+        async with open_data_file(
+            data.raw_data_location, mode="r", encoding="utf-8"
+        ) as f:
+            text = f.read()
+            result = IdentitySource.model_validate_json(text)
+        if TextData(text).get_metadata()["content_hash"] != data.raw_content_hash:
+            raise ValueError("Raw content hash does not match registered bytes")
+    except (OSError, ValueError) as exc:
+        raise IntentError(
+            "generated_source_changed",
+            "Registered identity snapshot is unreadable or invalid",
+        ) from exc
+    return result
+
+
+async def write_registered(source, ctx):
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.ingestion.ingest_data import ingest_data
+    from cognee.modules.ingestion.data_types import TextData
+    import json
+    from copy import deepcopy
+
+    old = ctx.data_item
+    node_set = old.node_set
+    if isinstance(node_set, str):
+        node_set = json.loads(node_set)
+    external = deepcopy(old.external_metadata) if old.external_metadata else None
+    # This generated snapshot is now managed from saved intent, rather than
+    # reloaded from the previous caller's file URI.
+    if external and isinstance(external.get("_cognee"), dict):
+        external["_cognee"].pop("source_uri", None)
+    payload = source.model_dump_json(indent=2) + "\n"
+    items = await ingest_data(
+        DataItem(
+            data=payload,
+            data_id=source.identity_data_id,
+            label=old.label,
+            external_metadata=external,
+            system_metadata=old.system_metadata,
+        ),
+        dataset_name=ctx.dataset.name,
+        dataset_id=source.dataset_id,
+        user=ctx.user,
+        node_set=node_set,
+        importance_weight=(
+            old.importance_weight if old.importance_weight is not None else 0.5
+        ),
+        ctx=ctx,
+    )
+    if len(items) != 1 or items[0].id != source.identity_data_id:
+        raise IntentError(
+            "generated_source_changed",
+            "Ingestion did not preserve generated Data identity",
+        )
+    ctx.data_item = items[0]
+    metadata = TextData(payload).get_metadata()
+    if (
+        ctx.data_item.content_hash != metadata["content_hash"]
+        or ctx.data_item.raw_content_hash != metadata["content_hash"]
+        or ctx.data_item.data_size != metadata["file_size"]
+    ):
+        raise IntentError(
+            "generated_source_changed",
+            "Registered identity content metadata is inconsistent",
+        )
+    if await read_registered(source) != source:
+        raise IntentError(
+            "generated_source_changed",
+            "Registered snapshot does not match saved intent",
+        )

@@ -1,4 +1,4 @@
-# Stage 6: identity publication, retrieval and shared-source withdrawal
+# Stage 6: identity publication, retrieval and lifecycle fixtures
 
 Implemented on 2026-10-17 against Cognee 1.6.2. This is the agreed first checkpoint (record validation and a deterministic end-to-end fixture), not the complete Stage 6 integration. The reviewed handoff remains the design authority for later milestones.
 
@@ -60,9 +60,9 @@ Focused tests cover invalid records, UUID-use conflict, repeated Unicode chunks,
 
 The native run exposed a mismatch between `get_edges`' interface annotation and its actual legacy return shape/direction on this path. The integration uses `get_edge_delete_data` for exact edge/provenance reads and `iter_bounded_neighborhood` for uniform directed EdgeData, without an adapter-specific workaround. Default neighborhood implementations on some backends can read more than the returned cap; actual backend work bounds need separate admission tests.
 
-Remaining work includes revision replacement, coordinated original/generated Data removal and full document lifecycle, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
+Remaining work includes text/occurrence-changing revision replacement, coordinated original/generated Data removal and full document lifecycle, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
 
-The saved authoritative JSON is serialized in the project relational row; the initial registered generated Data item contains the matching JSON snapshot. This slice rejects description revision replacement rather than allowing those representations to diverge. A later maintenance milestone must implement the coordinated saved-source update path.
+The saved authoritative JSON is serialized in the project relational row, with a matching snapshot in the registered generated Data item. The [unchanged-text replacement checkpoint](stage6_identity_revision_replacement.md) coordinates advancing those representations and the graph. Pending/failed replacements are withheld until verified; text/occurrence changes remain unsupported.
 
 No live lab corpus was changed, no native dependency source was patched, and no backend-specific query/storage implementation was added. Comprehensive replay, whole-store A/B copies, model-driven Describe, automatic repair and size/density tooling remain deferred.
 
@@ -110,3 +110,7 @@ uv run python -m cognee_lab.identity withdraw --root outputs/stage6_shared_failu
 Other injection boundaries are `withdraw_owners` and `withdraw_verification`. Deliberate retirement is absent from `unavailable_sources`; failed/pending publication is now reported there with any unresolved recovery-event identifier. The isolated CLI closes supported engine lifecycle handles before interpreter teardown, including handled operation failures. Existing-root fixture errors now give an argparse message instead of a raw traceback.
 
 The native test matrix covers both removal orders, repeated withdrawal before/after another retirement, shared payload/native owner survival, independent singleton retention, private/last-owner graph and vector cleanup, unresolved-marker retention, original fact ownership/evidence preservation, and caught failures after payload mutation and native deletion. Tests also retire the independent source between a failure and its retry. Hard process crashes, arbitrary native writes during a project mutation, coordinated native Data deletion, all-backend admission and corpus-wide identity traversal remain outside this checkpoint.
+
+## Step 4: identity revision replacement
+
+See [the revision replacement guide](stage6_identity_revision_replacement.md) for a captured doc01 correction from revision 1 to 2, native registered-Data updates, stale-revision guards and explicit recovery. This is the first part of M3 / accepted step 4. Original text, chunk mappings and mention groups remain unchanged.

@@ -95,6 +95,32 @@ class Publisher:
             fault_stage=fault_stage,
         )
 
+    async def replace(
+        self,
+        source,
+        *,
+        texts,
+        chunks,
+        ctx,
+        expected_revision,
+        origin="runtime",
+        fault_stage=None,
+        verify_semantics=None,
+    ):
+        from .replace import replace
+
+        return await replace(
+            self,
+            source,
+            texts=texts,
+            chunks=chunks,
+            ctx=ctx,
+            expected_revision=expected_revision,
+            origin=origin,
+            fault_stage=fault_stage,
+            verify_semantics=verify_semantics,
+        )
+
     @classmethod
     async def configured(cls):
         from cognee.infrastructure.databases.graph import get_graph_engine
@@ -120,7 +146,9 @@ class Publisher:
             ),
         )
 
-    async def preflight(self, source, texts, chunks, ctx):
+    async def preflight(
+        self, source, texts, chunks, ctx, *, registered_source=None, saved_revision=None
+    ):
         from cognee.modules.data.methods.get_data import get_data
         from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
@@ -168,17 +196,10 @@ class Publisher:
             raise IntentError(
                 "source_missing", "Generated identity Data item is not registered"
             )
-        async with open_data_file(
-            generated.raw_data_location, mode="r", encoding="utf-8"
-        ) as f:
-            try:
-                registered = IdentitySource.model_validate_json(f.read())
-            except ValueError as exc:
-                raise IntentError(
-                    "generated_source_kind",
-                    "Registered Data is not an identity description",
-                ) from exc
-        if registered != source:
+        from .registered import read_registered
+
+        registered = await read_registered(source)
+        if registered != (registered_source or source):
             raise IntentError(
                 "generated_source_changed",
                 "Registered identity description differs from selected intent",
@@ -207,9 +228,10 @@ class Publisher:
             ),
             None,
         )
-        if previous and previous["revision"] != source.revision:
+        if previous and previous["revision"] != (saved_revision or source.revision):
             raise IntentError(
-                "not_admitted", "Revision replacement/withdrawal is a later milestone"
+                "not_admitted",
+                "Use the guarded replacement operation to advance a revision",
             )
         for entity_id in source.entity_constructions:
             node = await self.graph.get_node(str(entity_id))
@@ -229,15 +251,22 @@ class Publisher:
         semantic_writer=None,
         verify_semantics=None,
     ):
-        from cognee.infrastructure.databases.provenance import (
-            EdgeIdentity,
-            make_chunk_source_ref_key,
-            make_source_ref_key,
+        row = next(
+            (
+                r
+                for r in await self.records.rows(source.dataset_id)
+                if r["source"] == str(source.identity_data_id)
+            ),
+            None,
         )
-        from cognee.modules.engine.models import Entity
-        from cognee.modules.graph.utils import ensure_default_edge_properties
-        from cognee.tasks.storage import add_data_points
-
+        if (
+            row
+            and row["state"] == "failed"
+            and row["plan"].get("operation") == "identity_replace"
+        ):
+            raise IntentError(
+                "recovery_choice", "Reconcile the saved replacement plan explicitly"
+            )
         await self.preflight(source, texts, chunks, ctx)
         wanted = identity_edges(source)
         markers = [
@@ -261,6 +290,48 @@ class Publisher:
             origin=origin,
             method="reconcile" if expected_revision else "publish",
         )
+        return await self._apply_pending(
+            source,
+            texts=texts,
+            chunks=chunks,
+            ctx=ctx,
+            attempt=attempt,
+            fault_stage=fault_stage,
+            semantic_writer=semantic_writer,
+            verify_semantics=verify_semantics,
+            origin=origin,
+        )
+
+    async def _apply_pending(
+        self,
+        source,
+        *,
+        texts,
+        chunks,
+        ctx,
+        attempt,
+        fault_stage=None,
+        semantic_writer=None,
+        verify_semantics=None,
+        after_write=None,
+        origin="runtime",
+    ):
+        from cognee.infrastructure.databases.provenance import (
+            EdgeIdentity,
+            make_chunk_source_ref_key,
+            make_source_ref_key,
+        )
+        from cognee.modules.engine.models import Entity
+        from cognee.modules.graph.utils import ensure_default_edge_properties
+        from cognee.tasks.storage import add_data_points
+
+        await self.records.assert_pending(source, attempt)
+        wanted = identity_edges(source)
+        markers = [
+            (str(source.inputs[key].chunk_id), str(group.entity_id), key)
+            for group in source.mention_groups.values()
+            for key in group.chunk_refs
+        ]
         stage, created, referenced = "validation", [], []
         try:
             # Repeat after taking the project writer reservation.
@@ -351,6 +422,10 @@ class Publisher:
                     "injected_failure", "Injected failure after identity edges"
                 )
 
+            if after_write is not None:
+                stage = "replacement_cleanup"
+                await after_write()
+
             stage = "verification"
             for entity_id in source.entity_constructions:
                 sid = str(entity_id)
@@ -398,6 +473,13 @@ class Publisher:
             await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
             if verify_semantics is not None:
                 await verify_semantics()
+            from .registered import read_registered
+
+            if await read_registered(source) != source:
+                raise IntentError(
+                    "generated_source_changed",
+                    "Registered snapshot differs at publication verification",
+                )
             if fault_stage == stage:
                 raise IntentError(
                     "injected_failure", "Injected failure before acknowledgement"

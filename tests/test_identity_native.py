@@ -214,3 +214,107 @@ def test_application_code_has_no_concrete_backend_access():
                 )
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 assert node.func.attr not in {"query", "execute_sql", "connect"}, path
+
+
+@pytest.mark.integration
+def test_native_revision_replacement_preserves_other_source_and_local_facts(tmp_path):
+    root = tmp_path / "revisions"
+    command(root, "multi-fixture")
+    before = json.loads((root / "multisource_result.json").read_text())
+    stale = command(root, "revise", "--expected-revision", "0", expect=1)
+    assert "Saved revision changed" in stale.stdout
+    command(root, "revise", "--expected-revision", "1")
+    after = json.loads((root / "revision_result.json").read_text())
+    a = after["sources"]["doc01"]
+    b = after["sources"]["doc02"]
+    assert (
+        a["saved_revision"] == a["verified_revision"] == a["registered_revision"] == 2
+    )
+    assert (
+        b["saved_revision"] == b["verified_revision"] == b["registered_revision"] == 1
+    )
+    assert a["registered_matches_saved"] and b["registered_matches_saved"]
+    assert a["resolution_target_entity_id"] != b["resolution_target_entity_id"]
+    assert not a["private_singleton_present"] and not a["private_singleton_indexed"]
+    assert after["shared_singleton_present"] and after["shared_singleton_indexed"]
+    assert after["borrowed_entity"] == before["borrowed_entity"]
+    expected = [
+        c
+        for c in before["shared_variant"]["contributions"]
+        if c["identity_data_id"] == b["identity_data_id"]
+    ]
+    assert after["shared_variant"]["contributions"] == expected
+    assert len(after["shared_variant"]["owners"]) == 1
+    old_facts = {f["source_id"]: f for f in before["result"]["facts"]}
+    assert len(after["result"]["facts"]) == 2
+    for fact in after["result"]["facts"]:
+        previous = old_facts[fact["source_id"]]
+        assert fact["edge_id"] == previous["edge_id"]
+        assert fact["evidence"] == previous["evidence"]
+        assert fact["target_id"] == previous["target_id"]
+    corrected = after["corrected_entity_result"]["facts"]
+    assert len(corrected) == 1 and corrected[0]["source_id"] == a["mention_entity_id"]
+    assert (
+        corrected[0]["identity"]["target_entity_id"] == a["resolution_target_entity_id"]
+    )
+    assert after["recovery_events"] == []
+    # Stale callers cannot replace or republish revision 1 after revision 2.
+    stale = command(root, "revise", "--expected-revision", "1", expect=1)
+    assert "Saved revision changed" in stale.stdout
+    command(root, "reconcile", "--source", "doc01")
+    current = json.loads((root / "multisource_result.json").read_text())
+    assert current["result"]["facts"] == after["result"]["facts"]
+    assert current["recovery_events"] == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "stage",
+    ["replace_saved", "replace_registered", "replace_published", "replace_retired"],
+)
+def test_native_failed_replacement_withholds_one_source_and_reconciles(tmp_path, stage):
+    root = tmp_path / "revision_failure"
+    command(root, "multi-fixture")
+    command(
+        root, "revise", "--expected-revision", "1", "--fault-stage", stage, expect=1
+    )
+    withheld = json.loads(command(root, "retrieve").stdout)
+    assert len(withheld["facts"]) == 1
+    assert (
+        withheld["facts"][0]["identity"]["identity_data_id"]
+        == "ca84d73d-ee72-5dd2-8e33-4117bb6cac36"
+    )
+    assert withheld["unavailable_sources"][0]["reason"] == "publication_failed"
+    status = json.loads(command(root, "status").stdout)
+    row = next(
+        r
+        for r in status["publications"]
+        if r["source"] == "718efce2-4251-5f6f-8318-417bb4dd3525"
+    )
+    assert (
+        row["revision"] == 2
+        and row["verified_revision"] == 1
+        and row["state"] == "failed"
+    )
+    assert row["plan"]["previous_description"]
+    command(root, "reconcile", "--source", "doc01")
+    recovered = json.loads((root / "multisource_result.json").read_text())
+    source = recovered["sources"]["doc01"]
+    assert source["state"] == "current"
+    assert (
+        source["saved_revision"]
+        == source["verified_revision"]
+        == source["registered_revision"]
+        == 2
+    )
+    assert source["registered_matches_saved"]
+    assert len(recovered["result"]["facts"]) == 2
+    assert len(recovered["shared_variant"]["contributions"]) == 1
+    assert not source["private_singleton_present"]
+    assert (
+        source["original_fact_owned_by_chunk"] and source["original_evidence_present"]
+    )
+    assert len(recovered["recovery_events"]) == 1
+    event = recovered["recovery_events"][0]
+    assert event["operation"] == "replace" and event["outcome"] == "restored"
+    assert event["resolved_at"] and event["resolving_revision"] == 2
