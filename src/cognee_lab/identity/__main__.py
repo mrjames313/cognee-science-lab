@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import inspect
 import os
 from pathlib import Path
 
@@ -52,16 +53,44 @@ def configure(root: Path, endpoint: str):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=["fixture", "retrieve", "status", "reconcile"]
+        "command",
+        choices=[
+            "fixture",
+            "multi-fixture",
+            "withdraw",
+            "retrieve",
+            "status",
+            "reconcile",
+        ],
     )
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--query", default="What does HC limit?")
     parser.add_argument(
-        "--fault-stage", choices=["nodes", "identity_edges", "verification"]
+        "--source",
+        choices=["doc01", "doc02"],
+        default="doc01",
+        help="Selected original document in the isolated fixture",
+    )
+    parser.add_argument(
+        "--fault-stage",
+        choices=[
+            "nodes",
+            "identity_edges",
+            "verification",
+            "withdraw_contributions",
+            "withdraw_owners",
+            "withdraw_verification",
+        ],
     )
     args = parser.parse_args()
     root = args.root.resolve()
-    if args.command == "fixture":
+    if args.fault_stage and args.fault_stage.startswith("withdraw_") != (
+        args.command == "withdraw"
+    ):
+        parser.error("Fault stage does not match the selected operation")
+    if args.command in {"fixture", "multi-fixture"}:
+        if root.exists():
+            parser.error("Fixture root already exists; choose a new directory")
         root.mkdir(parents=True, exist_ok=False)
         (root / "stage6-fixture.json").write_text(
             json.dumps({"kind": "stage6-isolated-fixture"})
@@ -70,10 +99,30 @@ def main():
         parser.error("Root is not an isolated Stage 6 fixture directory")
     with FixtureEmbeddings() as endpoint:
         configure(root, endpoint)
-        from .fixture import run
+        if args.command in {"multi-fixture", "withdraw"} or (
+            args.command == "reconcile" and (root / "multi-fixture-info.json").exists()
+        ):
+            from .multisource import run
+        else:
+            from .fixture import run
+
+        async def execute():
+            try:
+                return await run(args, root)
+            finally:
+                publisher = getattr(args, "_fixture_publisher", None)
+                if publisher is not None:
+                    # This CLI owns the isolated stores. Close before interpreter
+                    # teardown; never rely on object-finalizer order for durability.
+                    for engine in (publisher.vector, publisher.graph):
+                        close = getattr(engine, "close", None)
+                        if close is not None:
+                            closing = close()
+                            if inspect.isawaitable(closing):
+                                await closing
 
         try:
-            result = asyncio.run(run(args, root))
+            result = asyncio.run(execute())
         except Exception as exc:
             print(json.dumps({"error": type(exc).__name__, "message": str(exc)}))
             raise SystemExit(1) from exc

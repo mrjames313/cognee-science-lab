@@ -3,7 +3,7 @@
 **Last revised:** 2026-10-17
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
-**Current work:** Stage 6 — first deterministic identity publication/retrieval slice implemented. See [the first-slice guide](docs/stage6_identity_first_slice.md) for verified behavior, tests, recovery visibility and remaining boundaries. Earlier investigation entries below retain their historical wording; the reviewed handoff governs the selected design.
+**Current work:** Stage 6 — deterministic publication/retrieval plus multi-source identity withdrawal implemented. See [the fixture guide](docs/stage6_identity_first_slice.md) for tests, recovery visibility and remaining boundaries. Revision replacement and full original-document removal remain next lifecycle work. Earlier investigation entries below retain their historical wording; the reviewed handoff governs the selected design.
 
 This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
 
@@ -20,7 +20,7 @@ This revision reconciles the previously saved roadmap with the later project dis
 | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
 | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
 | 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
-| 6 | In progress | First native deterministic fixture demonstrated; next independent multi-source support/withdrawal, then broader lifecycle and standard wiring |
+| 6 | In progress | Native fixtures cover shared contributions, singleton retention, selected identity-source withdrawal and retries; next revision replacement/original-source lifecycle, then standard wiring |
 | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
 
 

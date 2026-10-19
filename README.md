@@ -34,10 +34,10 @@ Status: planned
 Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
 
 ### Stage 6 — Custom pipeline and intermediate representations
-Status: first deterministic identity publication/retrieval slice implemented; broader integration in progress
+Status: deterministic publication/retrieval and shared-source withdrawal implemented; broader integration in progress
 Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
 
-See [the Stage 6 first-slice guide](docs/stage6_identity_first_slice.md) for isolated fixture commands, focused tests, recovery-event visibility and the remaining implementation boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
+See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/two-source fixtures, selected identity-source withdrawal, focused tests, recovery-event visibility and remaining boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
 
 
 ## Setup and running the code

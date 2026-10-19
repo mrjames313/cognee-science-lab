@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
-from .native import edge_metadata
+from .native import edge_metadata, require_graph_methods
 from .storage import RecordStore, encode
 from .validation import IntentError, validate_inputs, validate_uses
 
@@ -82,6 +82,19 @@ class Publisher:
         self.graph, self.vector, self.records = graph, vector, records
         self.runtime_profile = runtime_profile or {}
 
+    async def withdraw(
+        self, source, *, expected_revision, origin="runtime", fault_stage=None
+    ):
+        from .withdraw import withdraw
+
+        return await withdraw(
+            self,
+            source,
+            expected_revision=expected_revision,
+            origin=origin,
+            fault_stage=fault_stage,
+        )
+
     @classmethod
     async def configured(cls):
         from cognee.infrastructure.databases.graph import get_graph_engine
@@ -108,9 +121,6 @@ class Publisher:
         )
 
     async def preflight(self, source, texts, chunks, ctx):
-        from cognee.infrastructure.databases.graph.graph_db_interface import (
-            GraphDBInterface,
-        )
         from cognee.modules.data.methods.get_data import get_data
         from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
@@ -120,10 +130,7 @@ class Publisher:
             "get_node_delete_data",
             "get_edge_delete_data",
         ]
-        for method in required:
-            implementation = getattr(type(self.graph), method, None)
-            if implementation is getattr(GraphDBInterface, method, None):
-                raise IntentError("unsupported_capability", f"Graph lacks {method}")
+        require_graph_methods(self.graph, required)
         if (
             ctx.user is None
             or str(ctx.dataset.id) != str(source.dataset_id)
@@ -296,6 +303,10 @@ class Publisher:
                 ref = make_chunk_source_ref_key(
                     source.dataset_id, doc.data_id, chunk_input.chunk_id
                 )
+                # A marker must retain its mention endpoint even without a fact.
+                # Native source removal may otherwise delete M and cascade the
+                # original-owned marker when generated identity support ends.
+                await self.graph.attach_node_source_refs([mention_id], [ref])
                 await self.graph.add_edges(
                     ensure_default_edge_properties(
                         [(chunk_id, mention_id, "has_identity_mention", {})]

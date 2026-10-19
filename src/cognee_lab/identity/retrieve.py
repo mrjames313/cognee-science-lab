@@ -16,8 +16,28 @@ async def valid_sources(publisher, dataset_id, rows):
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
 
     valid, unavailable = [], []
+    events = await publisher.records.events(dataset_id)
     for row in rows:
         if row["state"] != "current" or row["revision"] != row["verified_revision"]:
+            if row["state"] != "withdrawn":
+                incident = next(
+                    (
+                        e
+                        for e in reversed(events)
+                        if e["identity_data_id"] == row["source"]
+                        and e.get("resolved_at") is None
+                    ),
+                    None,
+                )
+                unavailable.append(
+                    dict(
+                        identity_data_id=row["source"],
+                        reason="publication_" + row["state"],
+                        recovery_event_id=(
+                            incident["recovery_event_id"] if incident else None
+                        ),
+                    )
+                )
             continue
         source = IdentitySource.model_validate_json(row["description"])
         try:
@@ -111,11 +131,25 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
 
     rows = await publisher.records.rows(dataset_id)
     current, unavailable = await valid_sources(publisher, dataset_id, rows)
+    # Original-owned markers can outlive generated-source withdrawal/failure.
+    # Their local labels must never become reusable vector query aliases.
     mention_ids = {
-        str(g.entity_id) for s, _ in current for g in s.mention_groups.values()
+        str(g.entity_id)
+        for row in rows
+        for g in IdentitySource.model_validate_json(
+            row["description"]
+        ).mention_groups.values()
     }
     if not await publisher.vector.has_collection("Entity_name"):
-        return dict(facts=[], identity_expansion_limited=False, identity_work=0)
+        return dict(
+            facts=[],
+            identity_expansion_limited=False,
+            identity_work=0,
+            fact_candidates_limited=False,
+            seed_entity_ids=[],
+            unavailable_sources=unavailable,
+            identity_guide="Accepted links identify the scoped referent; ownership and provenance do not establish scientific support.",
+        )
     candidates = await publisher.vector.search(
         "Entity_name",
         query_text=query,

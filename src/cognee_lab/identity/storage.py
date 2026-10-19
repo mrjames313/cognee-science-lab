@@ -140,6 +140,20 @@ class RecordStore:
                     "pending_attempt",
                     "Inspect abandoned pending publication explicitly",
                 )
+            if row and row.state == "withdrawn" and method != "withdraw":
+                raise IntentError(
+                    "withdrawn_source",
+                    "Withdrawn source requires explicit new publication intent",
+                )
+            if (
+                row
+                and row.state == "failed"
+                and json.loads(row.plan).get("operation") == "identity_withdraw"
+                and method != "withdraw"
+            ):
+                raise IntentError(
+                    "recovery_choice", "Retry the failed withdrawal explicitly"
+                )
             payload = source.model_dump_json()
             if row and source.revision == actual_revision:
                 if json.loads(payload) != json.loads(row.description):
@@ -228,7 +242,7 @@ class RecordStore:
                     "origin": origin or json.loads(row.plan).get("origin", "runtime"),
                     "runtime_profile": json.loads(row.plan).get("runtime_profile", {}),
                     "operation": json.loads(row.plan).get("method", "publish"),
-                    "integration_version": "stage6-m0-m1",
+                    "integration_version": "stage6-m2-withdrawal",
                     "resolved_at": None,
                 }
             )
@@ -267,8 +281,13 @@ class RecordStore:
             await session.commit()
         return event_id
 
-    async def complete(self, source, attempt):
+    async def complete(self, source, attempt, *, state="current"):
+        if state not in {"current", "withdrawn"}:
+            raise ValueError("Unsupported completion state")
         dataset, sid = str(source.dataset_id), str(source.identity_data_id)
+        values = {"state": state}
+        if state == "current":
+            values["verified_revision"] = source.revision
         async with self.session_factory() as session:
             result = await session.execute(
                 update(Publication)
@@ -279,7 +298,7 @@ class RecordStore:
                     Publication.attempt == attempt,
                     Publication.state == "pending",
                 )
-                .values(state="current", verified_revision=source.revision)
+                .values(**values)
             )
             if result.rowcount != 1:
                 raise IntentError(
@@ -306,7 +325,7 @@ class RecordStore:
                         resolved_at=now(),
                         resolving_attempt=attempt,
                         resolving_revision=source.revision,
-                        outcome="restored",
+                        outcome="withdrawn" if state == "withdrawn" else "restored",
                     )
                     if info.get("recovery_attempts"):
                         info["recovery_attempts"][-1]["outcome"] = "verified"

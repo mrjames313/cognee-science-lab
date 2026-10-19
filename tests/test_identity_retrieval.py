@@ -46,3 +46,33 @@ async def test_no_eligible_candidate_returns_no_seed():
         await select_seed_entities(graph, [SimpleNamespace(id="missing")], set(), "HC")
         == set()
     )
+
+
+def test_capability_check_sees_through_transparent_engine_handle():
+    from cognee.infrastructure.databases.graph.graph_db_interface import (
+        GraphDBInterface,
+    )
+    from cognee_lab.identity.native import require_graph_methods
+    from cognee_lab.identity.validation import IntentError
+
+    class Unsupported(GraphDBInterface):
+        pass
+
+    class Handle:
+        @property
+        def __class__(self):
+            return Unsupported
+
+    with pytest.raises(IntentError, match="remove_node_source_refs"):
+        require_graph_methods(Handle(), ["remove_node_source_refs"])
+
+    class Supported(Unsupported):
+        async def remove_node_source_refs(self, *args):
+            pass
+
+    class SupportedHandle:
+        @property
+        def __class__(self):
+            return Supported
+
+    require_graph_methods(SupportedHandle(), ["remove_node_source_refs"])

@@ -125,7 +125,7 @@ async def verify_semantics(publisher, source, chunks, ctx):
         raise IntentError("verify_index", "Original chunk vector missing")
 
 
-async def prepare(root):
+async def prepare(root, *, multi=False):
     import cognee
     from cognee.modules.engine.models import Entity
     from cognee.tasks.ingestion.data_item import DataItem
@@ -171,6 +171,10 @@ async def prepare(root):
     template["inputs"]["chunk01"].update(
         chunk_id=str(chunks[0].id), start=start, end=end
     )
+    if multi:
+        from .multisource import add_lifecycle_records
+
+        add_lifecycle_records(template, "doc01", text)
     await add_data_points(chunks, ctx=original_ctx)
     source = IdentitySource.model_validate_json(json.dumps(template))
     (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
@@ -208,6 +212,7 @@ async def run(args, root):
         chunks = await load_chunks(source, original_ctx)
         publisher = await Publisher.configured()
     dataset_id = source.dataset_id
+    args._fixture_publisher = publisher
     if args.command == "status":
         return dict(
             publications=await publisher.records.rows(dataset_id),

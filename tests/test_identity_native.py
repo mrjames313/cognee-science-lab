@@ -91,12 +91,114 @@ def test_native_failure_is_unavailable_and_explicitly_recovered(tmp_path):
     assert "recovery_event_id=" in failed.stdout
     query = command(root, "retrieve")
     assert '"facts": []' in query.stdout
+    withheld = json.loads(query.stdout)
+    assert withheld["unavailable_sources"][0]["reason"] == "publication_failed"
+    assert withheld["unavailable_sources"][0]["recovery_event_id"]
     command(root, "reconcile")
     result = json.loads((root / "result.json").read_text())
     assert result["result"]["facts"]
     assert len(result["recovery_events"]) == 1
     assert result["recovery_events"][0]["resolved_at"]
     assert result["recovery_events"][0]["origin"] == "test/fault_injection"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("first", ["doc01", "doc02"])
+def test_native_two_source_withdrawal_in_both_orders(tmp_path, first):
+    root = tmp_path / "shared"
+    command(root, "multi-fixture")
+    initial = json.loads((root / "multisource_result.json").read_text())
+    assert len(initial["result"]["facts"]) == 2
+    assert len(initial["shared_variant"]["contributions"]) == 2
+    assert len(initial["shared_variant"]["owners"]) == 2
+    assert initial["shared_singleton_present"]
+    for value in initial["sources"].values():
+        assert value["unresolved_entity_present"] and value["unresolved_marker_present"]
+    other = "doc02" if first == "doc01" else "doc01"
+    # Reopen stores for each selected operation, including repeated withdrawal.
+    command(root, "withdraw", "--source", first)
+    one = json.loads((root / "multisource_result.json").read_text())
+    assert one["sources"][first]["state"] == "withdrawn"
+    assert one["sources"][other]["state"] == "current"
+    assert not one["sources"][first]["private_singleton_present"]
+    assert one["sources"][other]["private_singleton_present"]
+    assert one["shared_singleton_present"]
+    assert one["shared_singleton_indexed"]
+    assert one["borrowed_entity"] == initial["borrowed_entity"]
+    assert one["borrowed_entity"]["fixture_sentinel"] == "preserve me"
+    assert not one["sources"][first]["private_singleton_indexed"]
+    assert len(one["shared_variant"]["owners"]) == 1
+    assert [c["identity_data_id"] for c in one["shared_variant"]["contributions"]] == [
+        one["sources"][other]["identity_data_id"]
+    ]
+    expected = [
+        c
+        for c in initial["shared_variant"]["contributions"]
+        if c["identity_data_id"] == one["sources"][other]["identity_data_id"]
+    ]
+    assert one["shared_variant"]["contributions"] == expected
+    assert {
+        k: v
+        for k, v in one["shared_variant"]["properties"].items()
+        if k != "identity_contributions"
+    } == {
+        k: v
+        for k, v in initial["shared_variant"]["properties"].items()
+        if k != "identity_contributions"
+    }
+    assert [f["source_id"] for f in one["result"]["facts"]] == [
+        one["sources"][other]["mention_entity_id"]
+    ]
+    command(root, "withdraw", "--source", first)
+    command(root, "withdraw", "--source", other)
+    # A later retirement ends that source's historical survival obligations.
+    command(root, "withdraw", "--source", first)
+    both = json.loads((root / "multisource_result.json").read_text())
+    assert not both["shared_variant"]["present"]
+    assert not both["shared_singleton_present"]
+    assert not both["shared_singleton_indexed"]
+    assert both["borrowed_entity"] == initial["borrowed_entity"]
+    assert both["result"]["facts"] == []
+    assert both["result"]["unavailable_sources"] == []
+    assert both["recovery_events"] == []
+    for value in both["sources"].values():
+        assert value["state"] == "withdrawn"
+        assert value["original_marker_present"] and value["original_fact_present"]
+        assert (
+            value["original_fact_owned_by_chunk"] and value["original_evidence_present"]
+        )
+        assert value["unresolved_entity_present"] and value["unresolved_marker_present"]
+        assert not value["private_singleton_present"]
+        assert not value["private_singleton_indexed"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("stage", ["withdraw_contributions", "withdraw_owners"])
+def test_native_withdrawal_failure_preserves_other_source_and_retries(tmp_path, stage):
+    root = tmp_path / "retirement_failure"
+    command(root, "multi-fixture")
+    command(root, "withdraw", "--source", "doc01", "--fault-stage", stage, expect=1)
+    query = json.loads(command(root, "retrieve").stdout)
+    assert len(query["facts"]) == 1
+    assert (
+        query["facts"][0]["identity"]["identity_data_id"]
+        == "ca84d73d-ee72-5dd2-8e33-4117bb6cac36"
+    )
+    assert query["unavailable_sources"][0]["reason"] == "publication_failed"
+    rejected = command(root, "reconcile", "--source", "doc01", expect=1)
+    assert "Retry the failed withdrawal explicitly" in rejected.stdout
+    # Retire the other source before retry: the original durable plan must
+    # tolerate that legitimate independent change.
+    command(root, "withdraw", "--source", "doc02")
+    command(root, "withdraw", "--source", "doc01")
+    recovered = json.loads((root / "multisource_result.json").read_text())
+    assert recovered["result"]["facts"] == []
+    assert not recovered["shared_variant"]["present"]
+    assert not recovered["shared_singleton_present"]
+    assert len(recovered["recovery_events"]) == 1
+    incident = recovered["recovery_events"][0]
+    assert incident["outcome"] == "withdrawn" and incident["resolved_at"]
+    assert incident["recovery_attempts"][-1]["method"] == "withdraw"
 
 
 def test_application_code_has_no_concrete_backend_access():
