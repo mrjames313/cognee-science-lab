@@ -1,2 +1,4 @@
 cognee<1.7,>=1.6
 pydantic>=2.13.5
+rfc8785==0.1.2
+sqlalchemy<3,>=2

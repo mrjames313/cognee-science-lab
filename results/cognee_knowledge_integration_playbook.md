@@ -127,3 +127,9 @@ Start from the artifact checklist and known pinned native seams instead of repea
 At the post-Stage-6 checkpoint, attach actual identity code/tests to G01–G18 and mark each as demonstrated, partial, rejected or still untested. The first measurement fixture then tests those reusable candidates rather than assuming them. This is the evidence for a reusable package; a documentation analogy alone is insufficient.
 
 No measurement schema, scientific reasoning model, generic runtime framework or additional project stage is selected by this consolidation.
+
+## First implementation evidence — 2026-10-17
+
+The first identity fixture uses configured native graph/vector/relational interfaces, captured decisions and local deterministic embeddings. Its focused/native tests exercise publication, original-source evidence, explicit reconciliation and recovery visibility. This is partial evidence for the reusable lessons rather than completion of all lifecycle/retrieval requirements. See ../docs/stage6_identity_first_slice.md for commands and limits.
+
+A concrete interface lesson: verify actual read shapes/direction as well as method availability. The legacy get_edges result differed from its interface annotation on the tested path. The integration uses get_edge_delete_data and iter_bounded_neighborhood through the common interfaces, without backend-specific queries.

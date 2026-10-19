@@ -189,7 +189,8 @@
         "content_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Content Sha256",
-          "type": "string"
+          "type": "string",
+          "description": "SHA-256 lowercase hex of RFC 8785 JCS UTF-8 of selected supplied field/value object; missing fields fail."
         }
       },
       "required": [
@@ -442,7 +443,8 @@
         "content_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Content Sha256",
-          "type": "string"
+          "type": "string",
+          "description": "SHA-256 lowercase hex of JCS UTF-8 complete supplied record, excluding enclosing source/revision."
         }
       },
       "required": [
@@ -477,7 +479,8 @@
         "text_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Text Sha256",
-          "type": "string"
+          "type": "string",
+          "description": "SHA-256 lowercase hex of exact extracted document string encoded as UTF-8, without normalization."
         }
       },
       "required": [
@@ -545,7 +548,8 @@
         "text_sha256": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Text Sha256",
-          "type": "string"
+          "type": "string",
+          "description": "SHA-256 lowercase hex of UTF-8 document_text[start:end], excluding offsets and parent digest."
         }
       },
       "required": [
@@ -768,7 +772,8 @@
         "minLength": 1
       },
       "title": "Inputs",
-      "type": "object"
+      "type": "object",
+      "description": "Shared inputs/locators. Per-record input_refs declare actual reasoning dependencies."
     },
     "producers": {
       "additionalProperties": {
@@ -788,7 +793,8 @@
         "format": "uuid"
       },
       "title": "Entity Constructions",
-      "type": "object"
+      "type": "object",
+      "description": "Each entry declares an Entity this source intends to retain, including supported singletons and existing endpoints, and supplies minimal creation values. All required endpoints need entries. Existing nodes bypass property writes; a recipe does not authorize reconstructing a missing reasoning input or retired intent."
     },
     "mention_groups": {
       "additionalProperties": {
@@ -836,7 +842,8 @@
         "minLength": 1
       },
       "title": "Variant Assignments",
-      "type": "object"
+      "type": "object",
+      "description": "Relationships independently established by this source, not a cached identity-graph walk."
     }
   },
   "required": [
@@ -856,5 +863,5 @@
   "title": "Cognee identity source — implementation draft 0.1",
   "type": "object",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Draft serialization of approved identity concepts. Cross-reference, range, source-validity and graph-currentness checks require publisher validation; JSON Schema alone is insufficient."
+  "description": "Schema generated from runtime models. Cross-reference, exact text/range, dependency, UUID-use and publication checks also run in Python."
 }

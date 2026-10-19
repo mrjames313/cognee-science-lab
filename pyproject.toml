@@ -7,6 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "cognee>=1.6,<1.7",
     "pydantic>=2.13.5",
+    "rfc8785==0.1.2",
+    "sqlalchemy>=2,<3",
 ]
 
 [build-system]
@@ -19,3 +21,18 @@ module-root = "src"
 
 [tool.uv.extra-build-dependencies]
 cognee-science-lab = ["setuptools"]
+
+[dependency-groups]
+dev = [
+    "jsonschema>=4,<5",
+    "pytest>=8,<10",
+    "pytest-asyncio>=0.24,<2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: fresh native Cognee graph/vector/relational fixture (no LLM)"]
+asyncio_mode = "auto"
+
+[tool.black]
+target-version = ["py312"]

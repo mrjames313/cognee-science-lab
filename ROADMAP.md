@@ -1,9 +1,9 @@
 # Cognee Science Lab Roadmap
 
-**Last revised:** 2026-10-14  
+**Last revised:** 2026-10-17
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
-**Current work:** Stage 5.4.5.4 — initial saved identity forms, reconstruction coverage, publication ledger and seeded Describe direction selected. Identity-aware semantic facts will use native relationships/provenance as the baseline. Next: captured semantic-output placement and independent source lifetimes, initial Maintain policy, then Retrieve contracts. Stage 5.4.5.1 characterization remains complete. Exact serialization/routing, combined runtime validation, final invariants and Stage-6 implementation remain pending.
+**Current work:** Stage 6 — first deterministic identity publication/retrieval slice implemented. See [the first-slice guide](docs/stage6_identity_first_slice.md) for verified behavior, tests, recovery visibility and remaining boundaries. Earlier investigation entries below retain their historical wording; the reviewed handoff governs the selected design.
 
 This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
 
@@ -19,8 +19,8 @@ This revision reconciles the previously saved roadmap with the later project dis
 | 5.4.2 | Complete enough to proceed | Operational map and preferred extension seams |
 | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
 | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
-| 5.4.5 | In progress | .1 complete; .2–.3 initial ownership/representation proposal recorded; operation walkthroughs, lifecycle and handoff next |
-| 6 | Planned | Implement the chosen processing/retrieval architecture, then reassess |
+| 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
+| 6 | In progress | First native deterministic fixture demonstrated; next independent multi-source support/withdrawal, then broader lifecycle and standard wiring |
 | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
 
 
@@ -565,7 +565,9 @@ The current source/identity chain is: original document/chunk inputs produce sav
 
 
 
-## Stage 6 — Custom processing architecture — PLANNED
+## Stage 6 — Custom processing architecture — IN PROGRESS
+
+The first implementation checkpoint covers validated saved forms and a tiny custom-Task publication/retrieval path through configured native stores. It uses native source ownership/evidence and backend-neutral integration code. Standard Cognify/Remember/Update wiring, complete maintenance/retrieval and the wider sequence test suite remain. See [commands, evidence and limits](docs/stage6_identity_first_slice.md).
 
 Goal: move manually demonstrated representations into actual Cognee processing tasks/pipelines and ensure they participate in lifecycle/provenance behavior.
 

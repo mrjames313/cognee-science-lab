@@ -2,7 +2,7 @@
 
 **Consolidated:** 2026-10-15 (America/Detroit).  
 **Baseline:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`; Ladybug/LanceDB/SQLite, shared physical storage.  
-**Status:** consolidated approved behavior plus explicitly labeled draft serialization/implementation choices. No new end-to-end native integration result is claimed.
+**Status:** handoff review completed 2026-10-17. The first deterministic implementation slice now has native fixture evidence (section 12); full lifecycle, standard entry-point integration and broader retrieval remain in progress.
 
 ## 1. Authority, scope and first build
 
@@ -299,7 +299,7 @@ Verify by returned IDs/content and source refs, not collection existence, row co
 
 ## 10. Sequence-driven test suite
 
-These are planned implementation tests. The JSON example was structurally checked; none of these native integration cases has been run for the new representation.
+This is the broader planned implementation suite. Section 12 records the first implemented subset and native evidence; a passing tiny fixture does not establish all cases below.
 
 | ID | Sequence and expected observation | Requirements | Reusable lesson |
 |---|---|---|---|
@@ -355,14 +355,16 @@ Assertions cover saved revisions/records, exact graph IDs and untouched properti
 
 ## 11. Build order and unresolved engineering work
 
-| Milestone | Concrete output |
+Build order accepted 2026-10-17; the first reviewable deliverable covers M0–M1. Implement relevant sequence tests alongside each step rather than making the entire inventory an upfront gate.
+
+| Milestone / accepted step | Concrete output and current boundary |
 |---|---|
-| M0 | Validate schema/example/profile; implement guarded saved records, ledger, minimal change plan and recovery-event storage/listing |
-| M1 | One deterministic fixture through custom Tasks -> publish -> useful retrieval -> explicit identity reconciliation; exercise a failure/event and explicit recovery. Inspect actual ownership/evidence early |
-| M2 | Exact-ID semantic conversion/native chunk bookkeeping plus representative name/variant/mention facts; expand overlap and multi-source tests |
-| M3 | B Task-transform integration and supported original/generated lifecycle hooks; full-rebuild Update and source/dataset removal |
-| M4 | Complete bounded traversal, grouped delivery and shared-code identity diagnostics; run mutation/failure/index suites |
-| M5 | Seeded model/rule Describe examples through the same pipeline; improve accuracy after whole-path examples work |
+| M0 / 1 | Validated runtime records/schema, exact native chunk mapping and portable bookkeeping/publication capability checks. First implementation exists; only the initial backend profile is tested |
+| M1 / 2 | Tiny captured-decision custom Task pipeline -> real publication -> useful mention-anchored fact retrieval/original evidence -> explicit identity reconciliation. First native fixture demonstrated; this is not registered public SearchType or standard Cognify wiring |
+| M2 / 3 | Multi-source overlap/support and withdrawal, plus broader exact-ID semantic conversion. Test both removal orders, shared contributions, singleton retention and unresolved mentions |
+| M3 / 4 | Selected document changes, dependent-input maintenance, rechunking, retargeting and explicit failure recovery. Basic ledger/events and caught-failure reconciliation exist; broad lifecycle and abrupt-crash recovery remain |
+| M4 / 5 | Complete B Task-transform wiring for standard Cognify/Remember/full Update/removal, consumed-store admission and broader context-sensitive traversal/delivery/offline diagnostics |
+| M5 / 6 | Seeded rules/model Describe examples through the same pipeline, including abbreviations, shortenings and contextual references; separate consistency/model-quality evaluation |
 | Checkpoint | Review R1–R6 evidence and G01–G18 transfer status before Stages 7–8 |
 
 Resolve these engineering details during the smallest fixtures, without opening another broad policy review: exact Data registration/discriminator routing; safe existing-endpoint conversion; serialized writer/expected-revision and file/ledger ordering; attempt cleanup; concrete admitted collection names/configuration; shared edge-property serialization through the graph interface (first tested on Ladybug); source-bound marker publication and chunk-offset mappings. If a fixture contradicts a selected invariant, record the mismatch and make the smallest explicit adaptation rather than silently weaken it.
@@ -383,4 +385,16 @@ Show corpus totals, per-source median/p95/maximum and growth relative to source-
 
 [cognee_knowledge_integration_playbook.md](cognee_knowledge_integration_playbook.md) maps the concrete choices to reusable lessons with Describe/Publish/Maintain/Retrieve applicability and measurement transfer questions. During Stage 6, attach actual source/test results to that register. Extract only demonstrated common mechanics; leave identity grouping/equivalence/range rules in its adapter.
 
-Validation performed for this consolidation: generated a draft JSON Schema from Pydantic models; validated the example through those models and JSON round-trip; checked source SHA-256/exact occurrence slices; rejected six malformed examples (missing accepted target, unresolved with accepted target, absent endpoint recipe, missing group, overlapping spans and competing current group records). Cross-record/source checks are not all expressible in JSON Schema. A separate JSON-Schema-engine validation and native Cognee execution were not run. No repository implementation was changed.
+At the initial 2026-10-15 consolidation, validation performed was: generated a draft JSON Schema from Pydantic models; validated the example through those models and JSON round-trip; checked source SHA-256/exact occurrence slices; rejected six malformed examples (missing accepted target, unresolved with accepted target, absent endpoint recipe, missing group, overlapping spans and competing current group records). Cross-record/source checks are not all expressible in JSON Schema. At that point a separate JSON-Schema-engine validation and native Cognee execution had not been run and no repository implementation had been changed. The following checkpoint supersedes that implementation status.
+
+### First implementation checkpoint — 2026-10-17
+
+Repository code now lives in src/cognee_lab/identity, with a generated schema in schemas, exact source/example fixtures in tests/fixtures/identity and commands/limits documented in docs/stage6_identity_first_slice.md. The initial source is registered as a real Cognee Data item; publication uses real source contexts and configured interfaces. Bookkeeping stores the serialized JSON/currentness/minimal plan in backend-neutral relational project tables; the first registered generated source contains its matching JSON snapshot. Revision replacement is refused until a coordinated source-update path is implemented.
+
+The first fixture preserves a borrowed Entity's differing ordinary fields/sentinel, creates the exact variant/M UUIDs, publishes chunk-owned mention markers and a mention-anchored limits->oscillations fact, and returns original native evidence plus the accepted scoped identity annotation. Retrieval demonstrably seeds HC, follows its document-applicable variant link and then the accepted local mention. A fresh process can reopen the stores and explicit same-revision reconciliation is idempotent.
+
+Validation evidence: 22 pytest cases passed, including real configured Ladybug/LanceDB/SQLite subprocess fixtures with local deterministic embeddings, injected-failure withholding/reconciliation, changed consumed-field invalidation with a recovery event, portable ledger/revision guards, failed-recovery incident deduplication, strict forms, exact repeated Unicode positions, RFC 8785 hashing and JSON-Schema-engine validation. No paid model/API extraction or lab-corpus mutation was used. No native dependency source was modified. These are fixture results, not complete T01–T20/P01–P16 coverage or demonstrated compatibility with other backends.
+
+A native interface mismatch was observed: legacy get_edges returns a shape/direction that differs from its interface annotation on this path. The project uses get_edge_delete_data for exact edge/provenance properties and iter_bounded_neighborhood for uniform EdgeData, without backend-specific queries. Record this as a reusable seam lesson; actual work bounds still depend on the configured adapter's implementation.
+
+Remaining first-slice limits are explicit: no revision replacement/withdrawal lifecycle, standard entry-point transform or public SearchType yet; document-context retrieval is fixture-scoped and declines span-applicable variant expansion; complete multi-source traversal, unresolved/ambiguous passage delivery and offline diagnostics remain. Caught failures and dependency invalidation produce incidents, but a hard crash can still leave the writer reserved: pending-attempt inspection/explicit abandonment is later recovery work. Comprehensive semantic capture/replay, autonomous repair, A/B staging and metrics tooling remain deferred.
