@@ -72,6 +72,11 @@ async def write_semantics(publisher, source, chunks, ctx):
         await index_data_points([node], vector_engine=publisher.vector)
     elif target.get("type") != "Entity":
         raise IntentError("incompatible_type", "Fact endpoint is not an Entity")
+    else:
+        # Reusing an endpoint must retain it for this original chunk too.
+        # Owning the incident fact alone does not protect the endpoint from
+        # another document's removal and the resulting cascade.
+        await publisher.graph.attach_node_source_refs([str(OSCILLATIONS_ID)], [ref])
     await publisher.graph.attach_node_source_refs([str(group.entity_id)], [ref])
     edge = (
         str(group.entity_id),

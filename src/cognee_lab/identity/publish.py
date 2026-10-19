@@ -106,6 +106,8 @@ class Publisher:
         origin="runtime",
         fault_stage=None,
         verify_semantics=None,
+        text_change=None,
+        semantic_writer=None,
     ):
         from .replace import replace
 
@@ -119,6 +121,8 @@ class Publisher:
             origin=origin,
             fault_stage=fault_stage,
             verify_semantics=verify_semantics,
+            text_change=text_change,
+            semantic_writer=semantic_writer,
         )
 
     @classmethod
@@ -147,7 +151,15 @@ class Publisher:
         )
 
     async def preflight(
-        self, source, texts, chunks, ctx, *, registered_source=None, saved_revision=None
+        self,
+        source,
+        texts,
+        chunks,
+        ctx,
+        *,
+        registered_source=None,
+        saved_revision=None,
+        prepared_text=False,
     ):
         from cognee.modules.data.methods.get_data import get_data
         from cognee.infrastructure.files.utils.open_data_file import open_data_file
@@ -180,7 +192,7 @@ class Publisher:
                         "source_missing", "Original Data item is not registered"
                     )
                 key = next(k for k, value in source.inputs.items() if value is item)
-                if key in texts:
+                if key in texts and not prepared_text:
                     async with open_data_file(
                         record.raw_data_location, mode="r", encoding="utf-8"
                     ) as f:
@@ -204,7 +216,7 @@ class Publisher:
                 "generated_source_changed",
                 "Registered identity description differs from selected intent",
             )
-        for chunk_id, chunk in chunks.items():
+        for chunk_id, chunk in (() if prepared_text else chunks.items()):
             stored = await self.graph.get_node(chunk_id)
             if stored is None or stored.get("text") != chunk.text:
                 raise IntentError(

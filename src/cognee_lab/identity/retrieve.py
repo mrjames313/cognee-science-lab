@@ -135,6 +135,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     """
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from cognee.modules.engine.utils import generate_edge_object_id
+    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 
     rows = await publisher.records.rows(dataset_id)
     current, unavailable = await valid_sources(publisher, dataset_id, rows)
@@ -260,11 +261,26 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
                 own_evidence = [e for e in evidence if str(e.data_id) == document_id]
                 checked = []
                 for e in own_evidence:
-                    chunk = await publisher.graph.get_node(str(e.chunk_id))
-                    if chunk is None:
+                    # Old evidence rows are not a version authority. Only the
+                    # checked current chunk mapping and native fact owner admit it.
+                    if str(e.chunk_id) not in {
+                        str(i.chunk_id)
+                        for i in source.inputs.values()
+                        if isinstance(i, ChunkInput)
+                    }:
                         continue
-                    # This is evidence from the active original source. Current
-                    # whole-document version is checked below through native Data.
+                    chunk = await publisher.graph.get_node(str(e.chunk_id))
+                    fact = await edge_metadata(publisher.graph, a, b, relation)
+                    owner = make_chunk_source_ref_key(
+                        source.dataset_id, e.data_id, e.chunk_id
+                    )
+                    if (
+                        chunk is None
+                        or fact is None
+                        or owner not in fact.source_ref_keys
+                        or e.chunk_index != chunk.get("chunk_index")
+                    ):
+                        continue
                     checked.append(
                         dict(
                             data_id=document_id,

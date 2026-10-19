@@ -151,14 +151,12 @@ async def publish_one(
     ctx = await context_for(source.identity_data_id)
 
     async def task(items, ctx=None):
+        from .text_changes import read_original
+
         for item in items:
             await publisher.publish(
                 item,
-                texts={
-                    "doc01": (
-                        root / ("source.txt" if label == "doc01" else "source02.txt")
-                    ).read_text()
-                },
+                texts={item.original_input_ref: await read_original(item, ctx)},
                 chunks={str(c.id): c for c in chunks},
                 ctx=ctx,
                 expected_revision=source.revision if reconcile else 0,
@@ -269,6 +267,13 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
                 )
             ),
         )
+    for row in rows.values():
+        if row["plan"].get("text_change") and row["state"] == "current":
+            from .text_fixture import transition_summary
+
+            result.setdefault("text_changes", []).append(
+                await transition_summary(publisher, row)
+            )
     return result
 
 
@@ -326,15 +331,26 @@ async def run(args, root):
                 row["state"] == "failed"
                 and row["plan"].get("operation") == "identity_replace"
             ):
-                from .revisions import replace_one
+                if row["plan"].get("text_change"):
+                    from .text_fixture import maintain_one
+                    from .text_changes import TextChange
 
-                await replace_one(
-                    publisher,
-                    selected,
-                    root,
-                    args.source,
-                    expected_revision=selected.revision,
-                )
+                    await maintain_one(
+                        publisher,
+                        selected,
+                        TextChange(**row["plan"]["text_change"]),
+                        expected_revision=selected.revision,
+                    )
+                else:
+                    from .revisions import replace_one
+
+                    await replace_one(
+                        publisher,
+                        selected,
+                        root,
+                        args.source,
+                        expected_revision=selected.revision,
+                    )
             else:
                 await publish_one(
                     publisher,

@@ -1,4 +1,4 @@
-"""Unchanged-text identity revision replacement with explicit, durable recovery."""
+"""Identity revision replacement with explicit, durable forward recovery."""
 
 from .models import ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
@@ -59,6 +59,8 @@ async def replace(
     origin="runtime",
     fault_stage=None,
     verify_semantics=None,
+    text_change=None,
+    semantic_writer=None,
 ):
     from cognee.infrastructure.databases.provenance import (
         EdgeIdentity,
@@ -128,7 +130,28 @@ async def replace(
             previous_description=old.model_dump_json(),
             runtime_profile=publisher.runtime_profile,
         )
-    unchanged_occurrences(old, source)
+    if retry and plan.get("text_change"):
+        from .text_changes import TextChange
+
+        saved_change = TextChange(**plan["text_change"])
+        if text_change is not None and text_change != saved_change:
+            raise IntentError("recovery_plan", "Use the exact saved text change")
+        text_change = saved_change
+    if text_change is None:
+        unchanged_occurrences(old, source)
+        if semantic_writer is not None:
+            raise IntentError(
+                "not_admitted", "Semantic rebuilding requires a text change"
+            )
+    else:
+        if semantic_writer is None or verify_semantics is None:
+            raise IntentError(
+                "semantic_rebuild",
+                "Text replacement requires explicit semantic writer and verifier",
+            )
+        await text_change.preflight(
+            publisher, old, source, texts, chunks, ctx, retry=retry
+        )
     registered = await read_registered(source)
     if registered not in (old, source):
         raise IntentError(
@@ -147,11 +170,16 @@ async def replace(
         ctx,
         registered_source=registered,
         saved_revision=row["revision"],
+        prepared_text=text_change is not None,
     )
-    if verify_semantics is not None:
+    if verify_semantics is not None and text_change is None:
         await verify_semantics()
     owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
     if not retry:
+        if text_change is not None:
+            from dataclasses import asdict
+
+            plan["text_change"] = asdict(text_change)
         retired_ids = [
             str(i)
             for i in set(old.entity_constructions) - set(source.entity_constructions)
@@ -310,6 +338,8 @@ async def replace(
                 "generated_source_changed",
                 "Registered snapshot changed during replacement",
             )
+        if text_change is not None:
+            await text_change.verify(publisher, old, source, chunks)
 
     try:
         injected(stage)
@@ -319,6 +349,15 @@ async def replace(
             raise IntentError(
                 "generated_source_changed", "Registered identity snapshot changed"
             )
+        if text_change is not None:
+
+            async def boundary(name):
+                nonlocal stage
+                stage = name
+                injected(name)
+
+            stage = "text_removal"
+            await text_change.apply(publisher, old, source, chunks, ctx, boundary)
         stage = "replace_registered"
         await write_registered(source, ctx)
         injected(stage)
@@ -331,6 +370,7 @@ async def replace(
             attempt=attempt,
             origin=origin,
             verify_semantics=verify_semantics,
+            semantic_writer=semantic_writer,
             after_write=retire_and_verify,
             fault_stage=(
                 "verification" if fault_stage == "replace_verification" else fault_stage

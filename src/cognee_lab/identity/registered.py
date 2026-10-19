@@ -33,6 +33,17 @@ async def read_registered(source):
 
 
 async def write_registered(source, ctx):
+    payload = source.model_dump_json(indent=2) + "\n"
+    await write_text(payload, ctx, source.identity_data_id)
+    if await read_registered(source) != source:
+        raise IntentError(
+            "generated_source_changed",
+            "Registered snapshot does not match saved intent",
+        )
+
+
+async def write_text(payload, ctx, data_id):
+    """Update one explicitly selected Data item through the native ingestion Task."""
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.ingest_data import ingest_data
     from cognee.modules.ingestion.data_types import TextData
@@ -44,21 +55,20 @@ async def write_registered(source, ctx):
     if isinstance(node_set, str):
         node_set = json.loads(node_set)
     external = deepcopy(old.external_metadata) if old.external_metadata else None
-    # This generated snapshot is now managed from saved intent, rather than
-    # reloaded from the previous caller's file URI.
+    # The replacement is now managed from saved intent, rather than reloaded
+    # from the previous caller's file URI. This includes original fixture text.
     if external and isinstance(external.get("_cognee"), dict):
         external["_cognee"].pop("source_uri", None)
-    payload = source.model_dump_json(indent=2) + "\n"
     items = await ingest_data(
         DataItem(
             data=payload,
-            data_id=source.identity_data_id,
+            data_id=data_id,
             label=old.label,
             external_metadata=external,
             system_metadata=old.system_metadata,
         ),
         dataset_name=ctx.dataset.name,
-        dataset_id=source.dataset_id,
+        dataset_id=ctx.dataset.id,
         user=ctx.user,
         node_set=node_set,
         importance_weight=(
@@ -66,10 +76,10 @@ async def write_registered(source, ctx):
         ),
         ctx=ctx,
     )
-    if len(items) != 1 or items[0].id != source.identity_data_id:
+    if len(items) != 1 or items[0].id != data_id:
         raise IntentError(
             "generated_source_changed",
-            "Ingestion did not preserve generated Data identity",
+            "Ingestion did not preserve the selected Data identity",
         )
     ctx.data_item = items[0]
     metadata = TextData(payload).get_metadata()
@@ -80,10 +90,5 @@ async def write_registered(source, ctx):
     ):
         raise IntentError(
             "generated_source_changed",
-            "Registered identity content metadata is inconsistent",
-        )
-    if await read_registered(source) != source:
-        raise IntentError(
-            "generated_source_changed",
-            "Registered snapshot does not match saved intent",
+            "Registered content metadata is inconsistent",
         )

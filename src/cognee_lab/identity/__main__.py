@@ -58,6 +58,7 @@ def main():
             "fixture",
             "multi-fixture",
             "revise",
+            "edit-text",
             "withdraw",
             "retrieve",
             "status",
@@ -69,7 +70,7 @@ def main():
     parser.add_argument(
         "--expected-revision",
         type=int,
-        help="Required saved revision guard for the captured correction",
+        help="Required saved revision guard for revision-changing commands",
     )
     parser.add_argument(
         "--source",
@@ -91,20 +92,30 @@ def main():
             "replace_published",
             "replace_retired",
             "replace_verification",
+            "text_removed",
+            "text_registered",
+            "text_chunks",
         ],
     )
     args = parser.parse_args()
     root = args.root.resolve()
-    if args.command == "revise" and args.expected_revision is None:
-        parser.error("revise requires --expected-revision")
+    if args.command in {"revise", "edit-text"} and args.expected_revision is None:
+        parser.error(f"{args.command} requires --expected-revision")
     if args.fault_stage:
+        if args.command == "edit-text":
+            if not args.fault_stage.startswith(("text_", "replace_")):
+                parser.error("Fault stage does not match the selected operation")
+        elif args.fault_stage.startswith("text_"):
+            parser.error("Text failure boundaries require edit-text")
         prefix = (
             "withdraw_"
             if args.command == "withdraw"
             else "replace_" if args.command == "revise" else None
         )
         if (prefix and not args.fault_stage.startswith(prefix)) or (
-            not prefix and args.fault_stage.startswith(("withdraw_", "replace_"))
+            not prefix
+            and args.command != "edit-text"
+            and args.fault_stage.startswith(("withdraw_", "replace_"))
         ):
             parser.error("Fault stage does not match the selected operation")
     if args.command in {"fixture", "multi-fixture"}:
@@ -118,7 +129,9 @@ def main():
         parser.error("Root is not an isolated Stage 6 fixture directory")
     with FixtureEmbeddings() as endpoint:
         configure(root, endpoint)
-        if args.command == "revise":
+        if args.command == "edit-text":
+            from .text_fixture import run
+        elif args.command == "revise":
             from .revisions import run
         elif args.command in {"multi-fixture", "withdraw"} or (
             args.command == "reconcile" and (root / "multi-fixture-info.json").exists()

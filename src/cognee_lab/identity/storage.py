@@ -208,6 +208,7 @@ class RecordStore:
                     prior_plan.get("operation") != "identity_replace"
                     or plan.get("previous_description")
                     != prior_plan.get("previous_description")
+                    or plan.get("text_change") != prior_plan.get("text_change")
                 ):
                     raise IntentError(
                         "recovery_plan",
