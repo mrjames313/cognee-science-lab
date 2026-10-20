@@ -1,0 +1,14 @@
+---
+extends: opening-a-pr
+when: Landing finished work in cognee-science-lab, where reviewed branches merge into main locally and no pull request is opened.
+---
+
+# Landing on main
+
+This repository has one maintainer and no pull requests. A branch lands on `main` by a local merge, after an independent review.
+
+- **Replace** "Work from a git worktree off main." with: Work on a branch off `main`. A worktree has no `.env`, because git ignores it, so fixture runs with `--embedding env` must run in the main checkout.
+- **Replace** "Conventional Commits `type(scope): subject`, no trailing period." with: Use this repository's style, a short plain sentence with no type prefix.
+- **In** "Run `/deslop` over the diff before commit and `/no-comments` before review." add: The review is `/pstack:thermos` over `main..<branch>`. Also run `/pstack:interrogate` when the design is contested. Fix each finding, or dismiss it with a concrete reason, before the merge. If no independent reviewer can run, the merge waits.
+- **Replace** "Open every PR ready, never as a draft." with: Do not open a pull request. After the review passes, run `uv run pytest -q -m 'not integration'` on the branch. Then merge into `main` with `git merge --ff-only <branch>`. Push `main` only when the operator asks.
+- **Replace** "Post the URL and keep building." with: Report the merged commit hash in place of a URL.

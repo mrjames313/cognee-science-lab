@@ -1,0 +1,15 @@
+name: unit-tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --group dev --locked
+      # Integration tests take about 10 minutes and a Linux host has shown an exit hang.
+      - run: uv run pytest -q -m 'not integration'
