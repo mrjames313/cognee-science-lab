@@ -1,6 +1,6 @@
 # Step 4 / M3: source-text edits with a whole-document rebuild
 
-**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md). The creation commands `fixture`, `multi-fixture` and `chunked-fixture` use the `.env` embedding settings by default (`--embedding env`). For an offline root with deterministic embeddings, add `--embedding loopback` to the creation command.
 
 This checkpoint extends guarded identity revision replacement to a captured prefix insertion in doc01. It uses Cognee 1.6.2 through configured interfaces, with no LLM calls or backend-specific storage code. It demonstrates one limited maintenance case. It does not complete step 4 or standard Update wiring.
 

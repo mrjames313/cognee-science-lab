@@ -1,6 +1,6 @@
 # Step 4 / M3: add occurrences and a new local group
 
-**Guide scope:** captured additions through the existing whole-document maintenance path. Start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md) for current status and evidence boundaries. Apply this incremental code/documentation patch after the documentation-handoff update and resolved-group-retirement code.
+**Guide scope:** captured additions through the existing whole-document maintenance path. Start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md) for current status and evidence boundaries. The creation commands `fixture`, `multi-fixture` and `chunked-fixture` use the `.env` embedding settings by default (`--embedding env`). For an offline root with deterministic embeddings, add `--embedding loopback` to the creation command. Apply this incremental code/documentation patch after the documentation-handoff update and resolved-group-retirement code.
 
 ## Captured edit
 
@@ -87,13 +87,13 @@ Before recovery, only doc02's fact returns and doc01 reports `publication_failed
 
 ## Verification profile
 
-The fixture uses Cognee 1.6.2 graph, vector, and relational interfaces. It uses deterministic loopback embeddings and captured decisions. It makes no LLM call. The isolated profile selects LiteLLM's bundled pricing map instead of its unrelated startup network refresh. A longer subprocess allowance accommodates cold native imports. The current handoff and delivery test notes distinguish ordinary CLI results from any host-only test-launcher workaround. None of that launcher is part of application persistence.
+The fixture uses Cognee 1.6.2 graph, vector, and relational interfaces. Its tests use deterministic loopback embeddings and captured decisions. It makes no LLM call. The isolated profile selects LiteLLM's bundled pricing map instead of its unrelated startup network refresh. A longer subprocess allowance accommodates cold native imports. The current handoff and delivery test notes distinguish ordinary CLI results from any host-only test-launcher workaround. None of that launcher is part of application persistence.
 
 The checkpoint passed 81 programmatic tests and all three new native sequence cases. The other 26 native cases were not rerun.
 
 Native assertions used a host-only launcher after ordinary CLI output exposed a Linux interpreter-teardown timeout. The launcher exits only after CLI completion and explicit store closure. It is not application code. These results do not establish clean ordinary CLI exit on this host.
 
-The user independently reproduced ordinary Mac CLI addition, reopened retrieval, healthy reconcile, and `replace_published` failure/recovery. The assistant reviewed those results on 2026-10-20, as detailed below. See the delivery's `TESTS.md` for the exact evidence boundary.
+The user independently reproduced ordinary Mac CLI addition, reopened retrieval, healthy reconcile, and `replace_published` failure/recovery. Those Mac runs predate the 2026-10-20 `.env` fix and used the `.env` NVIDIA embeddings, not loopback. The assistant reviewed those results on 2026-10-20, as detailed below. See the delivery's `TESTS.md` for the exact evidence boundary.
 
 ### Reviewed Mac results
 

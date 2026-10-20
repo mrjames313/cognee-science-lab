@@ -22,7 +22,7 @@ Runtime code is in `src/cognee_lab/identity/`. The implementation includes **cap
 
 The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The next task is the concrete group split/combination review below.
 
-Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was delivered as patches. That hash identifies the generation base. It **does not identify a verified current user/GitHub HEAD**. The original checkout at that hash is not sufficient to resume work. A complete committed checkout must also contain the later code and documents. The generating assistant did not commit or push to the remote repository.
+Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was first delivered as patches. That hash identifies only the generation base. The code and documents are now committed. Before branch `fix/fixture-embedding-profile`, `main` was at `ccc85d6` and in sync with `origin/main`. That branch adds the `.env` fix (commits `ab67118`, `9048b71`, `dbcf727`) and this documentation update. When this update was written, the branch was not pushed.
 
 The following patch order records past deliveries. Use it only to reconstruct an older checkout:
 
@@ -61,9 +61,9 @@ At session start, inspect `git status --short`, `git log -1 --oneline`, the file
 
 The previous resolved-retirement code checkpoint recorded **59 programmatic tests and 7 selected native sequence tests passing (66 distinct cases)**. The native selection was three resolved-retirement sequences, three preceding occurrence-removal sequences and one multi-chunk repeated-edit/reconcile/withdraw sequence. The other 19 native cases were not rerun in that checkpoint. Earlier delivery counts overlap; do not add them or claim a fresh full-suite run.
 
-Tests used Python 3.12.14, Cognee 1.6.2, actual configured Ladybug/LanceDB/SQLite stores, deterministic loopback embeddings and no LLM. Only that native profile is demonstrated. Final code-patch application and affected-file byte equality were checked. The preceding documentation-only update did not rerun the runtime suite.
+Tests used Python 3.12.14, Cognee 1.6.2, actual configured Ladybug/LanceDB/SQLite stores, deterministic loopback embeddings and no LLM. The generation environment had no `.env`, so these tests used loopback. Only that native profile is demonstrated in the generation environment. Final code-patch application and affected-file byte equality were checked. The preceding documentation-only update did not rerun the runtime suite.
 
-The **2026-10-20 addition checkpoint** passed **81 programmatic tests and 3 new native sequence tests (84 distinct cases)**; the other 26 native cases were not rerun. The native selection covers addition/reopen/reconcile/another prefix edit/withdrawal, plus exact forward recovery after `text_chunks` and `replace_published`. User-Mac reproduction is recorded separately below.
+The **2026-10-20 addition checkpoint** passed **81 programmatic tests and 3 new native sequence tests (84 distinct cases)**; the other 26 native cases were not rerun. The native selection covers addition/reopen/reconcile/another prefix edit/withdrawal, plus exact forward recovery after `text_chunks` and `replace_published`. User-Mac reproduction is recorded separately below. The test runs for the `.env` fix were on the user's Mac, not in the generation environment. The [resolved `.env` issue](#resolved-the-repository-env-overrode-the-fixture-profile) records them.
 
 Native assertions used actual configured stores and fresh child processes. A **host-only test launcher** exited after the ordinary CLI returned and its explicit engine-close path completed. This bypassed interpreter finalization.
 
@@ -73,7 +73,7 @@ The application has no forced-exit workaround. The delivery's `TESTS.md` and `su
 
 ### Results verified on the user's Mac
 
-The user ran and supplied terminal output; the assistant reviewed the returned JSON. This is independent reproduction on the user's machine, not execution there by the assistant. Verified sequences include initial publication/reconcile, multi-source withdrawal/retry, unchanged-text correction/recovery, prefix-edit/recovery, and the following latest checkpoints:
+The user ran and supplied terminal output; the assistant reviewed the returned JSON. This is independent reproduction on the user's machine, not execution there by the assistant. These runs predate the `.env` fix. They used the `.env` NVIDIA embeddings (2048 dimensions), not loopback, and wrote raw fixture text into the lab `.cognee_data/`. Their retrieved facts matched expectations, but they do not demonstrate the offline loopback profile. Verified sequences include initial publication/reconcile, multi-source withdrawal/retry, unchanged-text correction/recovery, prefix-edit/recovery, and the following latest checkpoints:
 
 | User-local root(s) | Reviewed result |
 |---|---|
@@ -90,6 +90,53 @@ The addition recovery was reviewed on 2026-10-20, from the run ending approximat
 These Mac results cover successful addition, reopen/healthy reconcile and post-publication recovery. Mac `text_chunks` failure, a subsequent prefix edit and withdrawal after addition have not yet been reviewed. Their generation-environment native tests retain the host-only-launcher qualification above; the Mac results do not establish clean ordinary Linux interpreter teardown.
 
 Raw terminal transcripts were supplied in chat and are not asserted to be committed. This table is the durable verification summary. The roots above are user-local existing stores: reuse them for inspection only, and use new roots for new fixture creation. Dataset IDs vary by root; never substitute IDs from another run.
+
+## Resolved: the repository `.env` overrode the fixture profile
+
+**Found and fixed on 2026-10-20, on branch `fix/fixture-embedding-profile` (commits `ab67118`, `9048b71`, `dbcf727`).**
+
+### What was wrong
+
+Cognee 1.6.2 loads an env file once, on its first import, with `override=True` (`cognee/shared/env_file.py`). If `COGNEE_ENV_FILE` is not set, Cognee loads the repository `.env`. The old CLI set the fixture settings in `__main__.configure()` and imported Cognee after that. The lab `.env` therefore replaced each key that both set. A fixture root used the `.env` NVIDIA embeddings instead of the 64-dimension loopback service, and wrote raw text into the lab `.cognee_data/`. `tests/conftest.py` set the unit-test environment in the same order.
+
+The assistant measured these results on the user's Mac on 2026-10-20, before the fix:
+
+- A new `chunked-fixture` root had no `data/` directory. Two new `text_*.txt` files appeared in the lab `.cognee_data/`. The LanceDB vectors in the root had 2048 dimensions.
+- `uv run pytest -q -m 'not integration'` changed the lab `.cognee_system/databases/cognee_db` (mtime 16:55:12, during the run). That database has rows in `lab_identity_publications` (4), `lab_identity_writers` (1) and `lab_identity_recovery_events` (4). Unit tests such as `tests/test_identity_storage.py` wrote them through the default relational engine.
+
+**The unit-test rows are still in the lab database.** Removing them is the user's decision.
+
+### The fix
+
+- Each root keeps its data, system, cache, graph, vector and relational stores inside the root.
+- The CLI sets `COGNEE_ENV_FILE` to `src/cognee_lab/identity/fixture.env`, which contains only comments. Cognee's import-time load then does not replace the fixture settings. The LLM settings stay fake. No fixture command calls an LLM.
+- The creation commands (`fixture`, `multi-fixture`, `chunked-fixture`) take `--embedding env|loopback`. The default is `env`.
+  - `env` reads `EMBEDDING_*` and `HUGGINGFACE_TOKENIZER` from the repository `.env`, or from the file that `COGNEE_ENV_FILE` names. The values stay in process memory. If the file does not set `EMBEDDING_MODEL` or does not set `EMBEDDING_DIMENSIONS`, creation fails before it makes the root.
+  - `loopback` is the earlier offline service with deterministic 64-dimension embeddings.
+- The root marker `stage6-fixture.json` records `embedding` as `{"profile", "model", "dimensions"}`. It records no key and no endpoint. Later commands read the marker and refuse a different `--embedding` value. For an `env` root, they also refuse a `.env` whose embedding model or dimensions changed.
+- The `result.json` file from the `fixture` command copies `embedding` from the marker. It no longer states that every root used a local deterministic service.
+- pytest keeps the loopback profile. `tests/conftest.py` sets `COGNEE_ENV_FILE` to `fixture.env` and puts the cache root in its temporary directory. The native `command()` helper passes `--embedding loopback`. `tests/test_identity_environment.py` checks that unit tests do not use the lab stores.
+- `python-dotenv` is now a declared dependency.
+
+### Roots made before the fix
+
+A root whose marker has no `embedding` record opens only for `status` and `retrieve`. Those two commands still load `.env`, because `.env` embeddings wrote the vectors of those roots.
+
+One limit predates the fix and the fix does not cause it. A copy of `outputs/stage6_additions` fails `retrieve` with `FileNotFoundError` for a `.cognee_data/text_*.txt` file. The old code (`ccc85d6`) and the new code fail in the same way. Older Mac roots depend on raw text in the lab data directory, and that file no longer exists. `status` still works on the copy.
+
+### Evidence after the fix
+
+The assistant measured these results on the user's Mac after the fix:
+
+- A new root, `outputs/repro_env_after`, ran `chunked-fixture`, then `add-occurrences --source doc01 --expected-revision 1`, then `reconcile --source doc01`, with the default `env` profile. All three commands exited 0. The result had 3 facts, doc01 at saved/registered/verified revision 2/2/2, and no recovery events.
+- The vectors in that root had 2048 dimensions. The marker names `nvidia/nemotron-3-embed-1b`. Raw text was in `<root>/data/`. The lab `.cognee_data/` got no new files, and the lab `cognee_db` mtime did not change. No file under the root contains the API key.
+- `uv run pytest -q -m 'not integration'`: 89 passed.
+- A delegate agent ran the full integration suite: 29 passed in 605 s, with no teardown hang. These tests use the loopback profile.
+- After `dbcf727`, a focused native rerun: 1 passed.
+
+### Verification skill
+
+The draft project verification skill (`.claude/skills/verify/`) found this issue and was paused on it. The fix removes that blocker. The skill's feature map and proof run are not finished. Its grounding-run evidence is in `outputs/verify/20261020T201147Z-grounding/evidence/`. The 24 lab data files that the probe and grounding runs of that session wrote are listed in `outputs/verify/lab-data-leaked-files-2026-10-20.txt`. The lab relational store does not reference them.
 
 ## Original six-step implementation sequence
 
@@ -134,7 +181,7 @@ Paths below are relative to `src/cognee_lab/identity/`.
 | `fixture.py`, `multisource.py`, `captured_chunks.py` | Captured facts, source contexts, exact producing/evidence chunk binding, single/two-source setup and diagnostics |
 | `revisions.py`, `text_fixture.py` | Captured identity correction/prefix edit, shared maintenance callbacks and transition diagnostics |
 | `occurrence_fixture.py`, `occurrence_addition.py`, `resolved_retirement.py` | Captured addition/removal/retirement examples and physical absence/shared-survival checks |
-| `__main__.py`, `fixture_embeddings.py` | Isolated fixture CLI/profile and deterministic local embedding service |
+| `__main__.py`, `fixture.env`, `fixture_embeddings.py` | Fixture CLI, per-root embedding profile and store isolation. Cognee loads the comment-only `fixture.env` instead of `.env`. `fixture_embeddings.py` is the deterministic loopback embedding service |
 
 Tests live in `tests/test_identity*.py`; original forms/text in `tests/fixtures/identity/`; exported schema in `schemas/cognee_identity_source_schema_draft.json`. Module/fixture IDs and phrases in the captured adapters are not a completed generic extraction layer.
 
@@ -160,7 +207,9 @@ uv run python -m cognee_lab.identity add-occurrences --root outputs/stage6_resum
 uv run python -m cognee_lab.identity reconcile --root outputs/stage6_resume_check --source doc01
 ```
 
-Expected: three facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, stable g01 plus fresh g03 and its local fact, g02/shared support present, no recovery incident. The guide has a separate fresh-root `replace_published` failure/recovery sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories.
+`chunked-fixture` uses the default `--embedding env` profile. That profile needs `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in the repository `.env`, and it calls that embedding endpoint. For an offline root, add `--embedding loopback` to the creation command. Later commands read the profile from the root marker, so they do not need the flag. pytest always uses loopback and does not need `.env`.
+
+Expected: three facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, stable g01 plus fresh g03 and its local fact, g02/shared support present, no recovery incident. The guide has a separate fresh-root `replace_published` failure/recovery sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
 
 ## Constraints to preserve
 
@@ -168,9 +217,9 @@ Expected: three facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, stable 
 - Saved descriptions and the publication ledger govern intent/currentness. Graph properties or an old recipe alone do not authorize resurrection. Existing compatible Entities are referenced/retained without ordinary-field overwrite; populated nested existing DataPoints can accidentally enter the write set.
 - Original occurrence chunks own/retain markers; original producing chunks own semantic facts/evidence; generated identity Data owns identity contributions and required-endpoint retention. Attaching a fact owner alone does not protect an unretained endpoint from cascading deletion. Preserve the reused-endpoint retention fix.
 - Occurrence coordinates are exact Unicode code points in the extracted document string, `[start,end)`. Validate source fingerprint, slices and complete native chunk mapping. Never choose the first repeated substring as an implicit locator. Content-derived chunk IDs can recur while positions/indexes change.
-- Use configured Cognee interfaces and backend-neutral relational operations. Ladybug/LanceDB/SQLite are the tested fixture profile; no vendor-specific implementation is authorized. The old NVIDIA tokenizer patch is separate from this isolated no-API fixture.
+- Use configured Cognee interfaces and backend-neutral relational operations. Ladybug/LanceDB/SQLite are the tested fixture profile; no vendor-specific implementation is authorized. The old NVIDIA tokenizer patch is separate from the fixture code. Every fixture root keeps its stores inside the root. The default `env` profile calls the `.env` embedding endpoint. The `loopback` profile calls no external API.
 - Pending/failed sources are withheld; independent valid sources survive. Recovery is explicitly selected forward completion of saved intent, not rollback or automatic retry. Native readers ignoring the ledger can see intermediate graph state. Hard crashes can leave a writer reservation; do not casually clear it or claim general restart recovery.
-- Prefer programmatic validation/publication/traversal. Capture where rules/model judgment is required. Captured fixture decisions and deterministic embeddings establish lifecycle mechanics, not extraction/search quality or scientific support.
+- Prefer programmatic validation/publication/traversal. Capture where rules/model judgment is required. Captured fixture decisions establish lifecycle mechanics with either embedding profile, not extraction/search quality or scientific support.
 - A/B staging, incremental chunk reuse, comprehensive semantic replay/archives, automatic orchestration, all-alias Triplet text and universal scope/ontology frameworks are deferred. Size/density/token-overhead tooling is future evaluation work. Do not enable diagnostic Triplet/cache/optional native stages without admitting their actual lifecycle and consumed-store behavior.
 
 After each next checkpoint update this handoff's baseline, implemented/remaining status and verification table, together with the roadmap and relevant guide/playbook findings. Preserve dates and distinguish generated-here tests, user-reported native reproduction and untested design.

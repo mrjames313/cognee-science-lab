@@ -194,7 +194,7 @@ The first measurement fixture must test these reusable candidates. An analogy in
 
 ## First implementation evidence — 2026-10-17
 
-The initial fixture uses configured native graph/vector/relational interfaces, captured decisions and local deterministic embeddings. Tests cover publication, original evidence, explicit reconciliation and recovery visibility. They provide partial evidence rather than complete lifecycle or retrieval coverage. The [first-slice guide](../docs/stage6_identity_first_slice.md) records commands and limits.
+The initial fixture uses configured native graph/vector/relational interfaces and captured decisions. Its tests use local deterministic embeddings. Since 2026-10-20, each fixture root records its embedding profile: `env` (the default, which uses the `.env` embedding settings) or `loopback` (the local deterministic service). The reviewed Mac fixture runs before that date used the `.env` embeddings. Tests cover publication, original evidence, explicit reconciliation and recovery visibility. They provide partial evidence rather than complete lifecycle or retrieval coverage. The [first-slice guide](../docs/stage6_identity_first_slice.md) records commands and limits.
 
 One interface finding concerns actual read results. Legacy `get_edges` returned shape/direction different from its interface annotation on the tested path. The project uses `get_edge_delete_data` and `iter_bounded_neighborhood` through common interfaces. It adds no backend-specific query.
 

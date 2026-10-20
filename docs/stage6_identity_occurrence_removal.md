@@ -1,6 +1,6 @@
 # Step 4 / M3: reviewed occurrence removal
 
-**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md). The creation commands `fixture`, `multi-fixture` and `chunked-fixture` use the `.env` embedding settings by default (`--embedding env`). For an offline root with deterministic embeddings, add `--embedding loopback` to the creation command.
 
 This checkpoint adds explicit occurrence removal to the native whole-document rebuild. It uses captured identity/semantic review, exact positions, the existing publication ledger and native Cognee 1.6.2 interfaces. It covers only part of step 4.
 

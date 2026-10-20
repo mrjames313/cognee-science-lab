@@ -1,6 +1,6 @@
 # Step 4 / M3: native multi-chunk maintenance
 
-**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md). The creation commands `fixture`, `multi-fixture` and `chunked-fixture` use the `.env` embedding settings by default (`--embedding env`). For an offline root with deterministic embeddings, add `--embedding loopback` to the creation command.
 
 This checkpoint adds a captured multi-chunk fixture to the text-replacement path. It exercises a grouped mention across chunks, a single occurrence split across a boundary, a fact whose literal text spans two chunks, changed boundaries, repeated edits, native evidence indexes, and explicit recovery. Decisions and fact spans are captured test input. This is not a general extraction or coreference algorithm.
 

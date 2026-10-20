@@ -1,6 +1,6 @@
 # Stage 6: identity publication, retrieval and lifecycle fixtures
 
-**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md). The creation commands `fixture`, `multi-fixture` and `chunked-fixture` use the `.env` embedding settings by default (`--embedding env`). For an offline root with deterministic embeddings, add `--embedding loopback` to the creation command.
 
 Implemented on 2026-10-17 against Cognee 1.6.2. This checkpoint validates records and runs a deterministic end-to-end fixture. It does not complete Stage 6 integration. The reviewed handoff remains the design authority for later milestones.
 
@@ -19,7 +19,7 @@ uv run pytest -q
 
 Use a new root for `fixture`. An existing directory is rejected. The other commands require the fixture marker. These commands configure a fresh, isolated test profile before importing Cognee. They do not reset or use the lab's configured corpus. The first tested configuration is Ladybug/LanceDB/SQLite. Providers and paths here are fixture configuration, not direct backend access in the integration.
 
-The fixture uses a loopback OpenAI-compatible service with deterministic token-hash embeddings. Graph, vector and relational storage are real. No extraction/answer LLM or external embedding API is called. Hugging Face offline mode prevents a tokenizer download. This tiny fixture does not evaluate chunk token-budget precision or embedding quality. Environments whose injected HTTP proxy requires optional SOCKS support may need `uv pip install 'httpx[socks]' pysocks` for Cognee startup. This is an environment dependency, not an integration backend dependency.
+On 2026-10-17 the fixture configured a loopback OpenAI-compatible service with deterministic token-hash embeddings. That service is now the `--embedding loopback` profile, and it calls no external embedding API. The default `--embedding env` profile calls the embedding endpoint in `.env`. Graph, vector and relational storage are real, and every store stays inside the fixture root. No extraction/answer LLM is called. Hugging Face offline mode prevents a tokenizer download. This tiny fixture does not evaluate chunk token-budget precision or embedding quality. Environments whose injected HTTP proxy requires optional SOCKS support may need `uv pip install 'httpx[socks]' pysocks` for Cognee startup. This is an environment dependency, not an integration backend dependency.
 
 Expected result: the query seeds the HC Entity, traverses the document-applicable variant relationship to the reusable controller, then finds the accepted local mention and its `limits -> oscillations` fact. Output includes the original document/chunk evidence, exact occurrence positions and accepted identity annotation. The source passage is not replaced with generated identity prose.
 
