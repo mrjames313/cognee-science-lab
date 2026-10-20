@@ -2,8 +2,21 @@
 
 from .models import ChunkInput
 from .validation import IntentError, map_chunks
+from uuid import UUID
 
 FACT_TEXT = "it limits oscillations"
+
+
+def fixture_mention_id(source):
+    """Known captured fixture identity, including after its declaration retires."""
+    group = source.mention_groups.get("g01")
+    if group is not None:
+        return group.entity_id
+    if source.identity_data_id == UUID("718efce2-4251-5f6f-8318-417bb4dd3525"):
+        return UUID("233cb019-3986-5864-88bc-91f334a64372")
+    raise IntentError(
+        "fixture_shape", "Missing primary group outside the captured retirement fixture"
+    )
 
 
 def bind_chunks(payload, text, chunks):
@@ -37,20 +50,9 @@ def fact_chunks(source, chunks):
     Its whole literal span is supplied fixture knowledge. This does not derive
     facts from arbitrary text or assign all group chunks as fact evidence.
     """
-    group = source.mention_groups["g01"]
-    starts = [o.start for o in group.occurrences if o.text == "it"]
-    if len(starts) != 1:
-        raise IntentError(
-            "fixture_shape", "Captured fact requires one explicit 'it' occurrence"
-        )
     ordered = sorted(chunks, key=lambda c: c.chunk_index)
     text = "".join(c.text for c in ordered)
     mapping = map_chunks(text, ordered)
-    start, end = starts[0], starts[0] + len(FACT_TEXT)
-    if text[start:end] != FACT_TEXT:
-        raise IntentError(
-            "fixture_shape", "Captured fact span differs from current text"
-        )
     declared = {
         str(i.chunk_id): (i.start, i.end)
         for i in source.inputs.values()
@@ -60,6 +62,25 @@ def fact_chunks(source, chunks):
         raise IntentError(
             "chunk_mapping",
             "Captured semantics requires the complete checked chunk mapping",
+        )
+    group = source.mention_groups.get("g01")
+    if group is None:
+        fixture_mention_id(source)
+        if FACT_TEXT in text:
+            raise IntentError(
+                "fixture_shape",
+                "Captured fact remains in text without its reviewed group",
+            )
+        return []
+    starts = [o.start for o in group.occurrences if o.text == "it"]
+    if len(starts) != 1:
+        raise IntentError(
+            "fixture_shape", "Captured fact requires one explicit 'it' occurrence"
+        )
+    start, end = starts[0], starts[0] + len(FACT_TEXT)
+    if text[start:end] != FACT_TEXT:
+        raise IntentError(
+            "fixture_shape", "Captured fact span differs from current text"
         )
     return [
         c

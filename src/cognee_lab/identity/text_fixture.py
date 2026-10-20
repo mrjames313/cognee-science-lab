@@ -51,14 +51,18 @@ async def verify_rebuilt_semantics(publisher, source, chunks, ctx):
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
 
     await verify_semantics(publisher, source, chunks, ctx)
-    mid = source.mention_groups["g01"].entity_id
+    from .captured_chunks import fixture_mention_id
+
+    mid = fixture_mention_id(source)
     eid = UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))
     evidence = await get_edge_evidence_records(
         [eid], source.dataset_id, per_edge_limit=100, total_limit=100
     )
     allowed = {c.id for c in chunks}
     own = [e for e in evidence if e.data_id == ctx.data_item.id]
-    if not own or any(e.chunk_id not in allowed for e in own):
+    if ("g01" in source.mention_groups and not own) or any(
+        e.chunk_id not in allowed for e in own
+    ):
         raise IntentError(
             "stale_evidence", "Old document evidence survived the native memory rebuild"
         )
@@ -85,6 +89,10 @@ async def maintain_one(
         await verify_rebuilt_semantics(
             publisher, source, list(chunks.values()), original
         )
+        if "g01" not in source.mention_groups:
+            from .resolved_retirement import verify_retirement
+
+            await verify_retirement(publisher, source)
         # This two-document fixture promises survival of the independent local
         # fact, in addition to the common publisher's identity-owner checks.
         from .fixture import load_chunks, verify_semantics
@@ -129,6 +137,8 @@ async def transition_summary(publisher, row):
 
     old = IdentitySource.model_validate_json(row["plan"]["previous_description"])
     source = IdentitySource.model_validate_json(row["description"])
+    from .captured_chunks import fixture_mention_id
+
     change = TextChange(**row["plan"]["text_change"])
     key = source.original_input_ref
     old_ids = {
@@ -140,7 +150,7 @@ async def transition_summary(publisher, row):
     retired = old_ids - new_ids
     eid = UUID(
         generate_edge_object_id(
-            str(source.mention_groups["g01"].entity_id), str(OSCILLATIONS_ID), "limits"
+            str(fixture_mention_id(source)), str(OSCILLATIONS_ID), "limits"
         )
     )
     evidence = await get_edge_evidence_records(
@@ -153,7 +163,12 @@ async def transition_summary(publisher, row):
         identity_data_id=str(source.identity_data_id),
         original_data_id=str(source.inputs[key].data_id),
         position_unit="Unicode code points; document-relative [start, end)",
-        position_shift=len(change.text) - len(change.previous_text),
+        position_shift=(
+            (len(change.text) - len(change.previous_text))
+            if change.occurrence_retention is None
+            else None
+        ),
+        text_length_delta=len(change.text) - len(change.previous_text),
         previous_text_sha256=old.inputs[key].text_sha256,
         text_sha256=source.inputs[key].text_sha256,
         previous_chunk_ids=sorted(old_ids),
@@ -167,7 +182,10 @@ async def transition_summary(publisher, row):
                 for i in retired
             ]
         ),
-        evidence_uses_current_chunks=bool(own_ids) and own_ids <= new_ids,
+        evidence_uses_current_chunks=(
+            bool(own_ids) or "g01" not in source.mention_groups
+        )
+        and own_ids <= new_ids,
         evidence_chunk_ids=sorted(own_ids),
         mention_ids_preserved=all(
             g.entity_id == old.mention_groups[k].entity_id
@@ -200,7 +218,33 @@ async def transition_summary(publisher, row):
             )
             for k, g in source.mention_groups.items()
         },
-        decision_method="Captured review of unchanged interpretation; programmatic exact offset remap",
+        occurrence_retention=change.occurrence_retention,
+        retired_groups={
+            k: dict(
+                entity_id=str(g.entity_id),
+                previous_occurrences=[o.model_dump() for o in g.occurrences],
+                entity_present=await publisher.graph.get_node(str(g.entity_id))
+                is not None,
+                entity_indexed=bool(
+                    await publisher.vector.retrieve("Entity_name", [str(g.entity_id)])
+                ),
+                marker_present=any(
+                    [
+                        await publisher.graph.has_edge(
+                            c, str(g.entity_id), "has_identity_mention"
+                        )
+                        for c in old_ids | new_ids
+                    ]
+                ),
+            )
+            for k, g in old.mention_groups.items()
+            if k not in source.mention_groups
+        },
+        decision_method=(
+            "Captured survivor review; programmatic exact span validation and whole-document rebuild"
+            if change.occurrence_retention is not None
+            else "Captured review of unchanged interpretation; programmatic exact offset remap"
+        ),
     )
 
 

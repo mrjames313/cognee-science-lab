@@ -196,7 +196,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
-    from .captured_chunks import fact_chunks
+    from .captured_chunks import fact_chunks, fixture_mention_id
     from .models import ChunkInput
     from types import SimpleNamespace
 
@@ -235,9 +235,14 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         from .registered import read_registered
 
         registered = await read_registered(source)
-        mid = source.mention_groups["g01"].entity_id
-        unresolved = source.mention_groups["g02"].entity_id
-        group = source.mention_groups["g01"]
+        mid = fixture_mention_id(source)
+        unresolved_group = source.mention_groups.get("g02")
+        unresolved = (
+            unresolved_group.entity_id
+            if unresolved_group
+            else fixture_id(label + ":unresolved")
+        )
+        group = source.mention_groups.get("g01")
         mapped = [i for i in source.inputs.values() if isinstance(i, ChunkInput)]
         chunks = []
         for item in mapped:
@@ -295,11 +300,14 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             verified_revision=rows[str(source.identity_data_id)]["verified_revision"],
             registered_revision=registered.revision,
             registered_matches_saved=registered == source,
-            resolution_target_entity_id=str(
-                source.mention_resolutions["r01"].target_entity_id
+            resolution_target_entity_id=(
+                str(source.mention_resolutions["r01"].target_entity_id)
+                if "r01" in source.mention_resolutions
+                else None
             ),
             mention_entity_id=str(mid),
-            original_marker_present=all(
+            original_marker_present=group is not None
+            and all(
                 [
                     await publisher.graph.has_edge(
                         str(source.inputs[k].chunk_id), str(mid), "has_identity_mention"
@@ -312,20 +320,22 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             ),
             original_fact_owned_by_chunk=fact is not None
             and refs <= set(fact.source_ref_keys),
-            original_evidence_present={
+            original_evidence_present=bool(selected)
+            and {
                 (e.chunk_id, e.chunk_index)
                 for e in evidence
                 if e.data_id == doc.data_id
             }
             == {(c.id, c.chunk_index) for c in selected},
-            unresolved_marker_present=all(
+            unresolved_marker_present=unresolved_group is not None
+            and all(
                 [
                     await publisher.graph.has_edge(
                         str(source.inputs[k].chunk_id),
                         str(unresolved),
                         "has_identity_mention",
                     )
-                    for k in source.mention_groups["g02"].chunk_refs
+                    for k in unresolved_group.chunk_refs
                 ]
             ),
             unresolved_entity_present=await publisher.graph.get_node(str(unresolved))
@@ -341,11 +351,19 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             ),
             chunk_count=len(mapped),
             chunk_mapping=chunk_checks,
-            mention_marker_chunk_ids=[
-                str(source.inputs[k].chunk_id) for k in group.chunk_refs
-            ],
+            mention_marker_chunk_ids=(
+                [str(source.inputs[k].chunk_id) for k in group.chunk_refs]
+                if group
+                else []
+            ),
             fact_evidence_chunk_ids=[str(c.id) for c in selected],
         )
+        if group is None:
+            from .resolved_retirement import retirement_checks
+
+            result["sources"][label]["resolved_group_retirement"] = (
+                await retirement_checks(publisher, source)
+            )
     for row in rows.values():
         if row["plan"].get("text_change") and row["state"] == "current":
             from .text_fixture import transition_summary

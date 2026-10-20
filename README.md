@@ -41,6 +41,10 @@ See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/
 
 Step 4 includes [guarded identity corrections](docs/stage6_identity_revision_replacement.md) and [captured source-text edits](docs/stage6_identity_text_changes.md). The text-edit slice remaps document positions, rebuilds native chunks/facts/evidence, preserves independent sources and explicitly recovers caught failures. The [multi-chunk checkpoint](docs/stage6_identity_multichunk.md) adds split occurrences, complete fact-continuation evidence, changing boundaries and repeated edits. Arbitrary edits, dependency propagation and standard Update wiring remain incomplete.
 
+The [reviewed occurrence-removal checkpoint](docs/stage6_identity_occurrence_removal.md) adds partial-group continuity and empty unresolved-group retirement through the same rebuild/recovery boundary. Its explicit retention map is captured review input, not automatic text matching or interpretation.
+
+The [resolved-group retirement checkpoint](docs/stage6_identity_resolved_retirement.md) removes the final occurrences of a fact-bearing group, verifies actual node/link/fact/evidence/index cleanup, and preserves doc02's distinct fact plus shared endpoints and relationship-text index. It uses the same guarded replace/rebuild/recovery path.
+
 
 ## Setup and running the code
 

@@ -67,7 +67,7 @@ async def write_semantics(publisher, source, chunks, ctx):
     from .captured_chunks import fact_chunks
 
     selected = fact_chunks(source, chunks)
-    group = source.mention_groups["g01"]
+    group = source.mention_groups.get("g01")
     for chunk in selected:
         await write_fact_chunk(publisher, source, chunk, group, ctx)
     await flush_context_provenance(ctx)
@@ -128,7 +128,9 @@ async def verify_semantics(publisher, source, chunks, ctx):
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
 
-    mid = str(source.mention_groups["g01"].entity_id)
+    from .captured_chunks import fixture_mention_id
+
+    mid = str(fixture_mention_id(source))
     identity = EdgeIdentity(mid, str(OSCILLATIONS_ID), "limits")
     metadata = (await publisher.graph.get_edge_delete_data([identity])).get(identity)
     from .captured_chunks import fact_chunks
@@ -147,10 +149,14 @@ async def verify_semantics(publisher, source, chunks, ctx):
                 and parsed.data_id == ctx.data_item.id
             ):
                 own_refs.add(ref)
-    if metadata is None or own_refs != refs:
+    if (expected and metadata is None) or own_refs != refs:
         raise IntentError(
             "semantic_missing",
             "Original-chunk fact ownership missing; explicitly rebuild",
+        )
+    if not expected and metadata is not None:
+        raise IntentError(
+            "semantic_retirement", "Retired captured fact remains in graph"
         )
     eid = UUID(generate_edge_object_id(mid, str(OSCILLATIONS_ID), "limits"))
     evidence = await get_edge_evidence_records(

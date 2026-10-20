@@ -121,14 +121,16 @@ async def chunk_text(text, ctx, budget=512):
     ]
 
 
-def admit_remap(old, source, before, after):
+def admit_remap(old, source, before, after, occurrence_retention=None):
     """The caller supplies reviewed decisions; this check does not infer identity.
 
-    First slice: a prefix insertion, stable groups and occurrence texts, all
-    offsets shifted by the exact Unicode prefix length. Arbitrary edits and
-    grouping changes require a later Describe/reconsideration implementation.
+    Default: a prefix insertion with exact uniform offsets. The optional
+    retention manifest admits explicit reviewed occurrence removal instead;
+    it is not a text matcher or a semantic reconsideration algorithm.
     """
-    if not before or not after.endswith(before) or after == before:
+    if occurrence_retention is None and (
+        not before or not after.endswith(before) or after == before
+    ):
         raise IntentError(
             "not_admitted", "Text slice requires a nonempty prefix insertion"
         )
@@ -163,6 +165,10 @@ def admit_remap(old, source, before, after):
     if text_digest(before) != a.text_sha256 or text_digest(after) != b.text_sha256:
         raise IntentError(
             "source_changed", "Saved text transition fingerprints disagree"
+        )
+    if occurrence_retention is not None:
+        return admit_occurrence_removal(
+            old, source, before, after, occurrence_retention
         )
     if set(old.mention_groups) != set(source.mention_groups):
         raise IntentError("not_admitted", "This slice preserves group membership")
@@ -215,11 +221,108 @@ def admit_remap(old, source, before, after):
     return delta
 
 
+def admit_occurrence_removal(old, source, before, after, retention):
+    """Validate explicit reviewed continuity; never infer matches from text.
+
+    Every old group maps to ordered zero-based occurrence indices to retain.
+    Empty lists explicitly retire groups. New positions are supplied in the
+    intended source and checked against the new document, independently of
+    identity judgment. This slice preserves the surviving assignment semantics.
+    """
+    if not before or not after or before == after:
+        raise IntentError("not_admitted", "Occurrence removal requires changed text")
+    if not isinstance(retention, dict) or set(retention) != set(old.mention_groups):
+        raise IntentError("occurrence_changed", "Declare retention for every old group")
+    kept = set()
+    retired_entities = set()
+    for key, previous in old.mention_groups.items():
+        indices = retention[key]
+        if (
+            not isinstance(indices, list)
+            or any(
+                type(i) is not int or not 0 <= i < len(previous.occurrences)
+                for i in indices
+            )
+            or indices != sorted(set(indices))
+        ):
+            raise IntentError(
+                "occurrence_changed",
+                "Retained indices must be unique, ordered old occurrence indices",
+            )
+        # Check the previous slices too: fingerprints alone do not validate spans.
+        for o in previous.occurrences:
+            if before[o.start : o.end] != o.text:
+                raise IntentError(
+                    "occurrence_changed", "Previous occurrence does not match text"
+                )
+        if not indices:
+            retired_entities.add(previous.entity_id)
+            continue
+        kept.add(key)
+        current = source.mention_groups.get(key)
+        if (
+            current is None
+            or current.entity_id != previous.entity_id
+            or current.document_ref != previous.document_ref
+            or [o.text for o in current.occurrences]
+            != [previous.occurrences[i].text for i in indices]
+            or any(after[o.start : o.end] != o.text for o in current.occurrences)
+        ):
+            raise IntentError(
+                "occurrence_changed",
+                "Supply exact reviewed surviving occurrences with stable group UUIDs",
+            )
+    if set(source.mention_groups) != kept:
+        raise IntentError(
+            "occurrence_changed", "Only explicitly continuing groups may remain"
+        )
+    if not any(
+        len(retention[k]) < len(g.occurrences) for k, g in old.mention_groups.items()
+    ):
+        raise IntentError(
+            "not_admitted", "This reviewed slice removes at least one occurrence"
+        )
+
+    def decisions(values):
+        return {
+            k: {
+                field: v
+                for field, v in item.model_dump(mode="json").items()
+                if field not in {"producer_ref", "input_refs", "explanation"}
+            }
+            for k, item in values.items()
+        }
+
+    expected_resolutions = {
+        k: r for k, r in old.mention_resolutions.items() if r.group_ref in kept
+    }
+    if (
+        decisions(source.mention_resolutions) != decisions(expected_resolutions)
+        or decisions(source.variant_assignments) != decisions(old.variant_assignments)
+        or source.entity_constructions
+        != {
+            k: v
+            for k, v in old.entity_constructions.items()
+            if k not in retired_entities
+        }
+        or any(
+            v.applicability.kind == "text_spans"
+            for v in source.variant_assignments.values()
+        )
+    ):
+        raise IntentError(
+            "not_admitted",
+            "Preserve continuing decisions and recipes; retire only empty-group declarations",
+        )
+    return None  # An arbitrary reviewed removal has no single global offset shift.
+
+
 @dataclass(frozen=True)
 class TextChange:
     previous_text: str
     text: str
     chunk_budget: int = 512
+    occurrence_retention: dict[str, list[int]] | None = None
 
     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
         from cognee.infrastructure.databases.provenance.markers import (
@@ -227,7 +330,9 @@ class TextChange:
         )
         from cognee.infrastructure.databases.unified import get_unified_engine
 
-        admit_remap(old, source, self.previous_text, self.text)
+        admit_remap(
+            old, source, self.previous_text, self.text, self.occurrence_retention
+        )
         if not 1 <= self.chunk_budget <= 4096:
             raise IntentError("not_admitted", "Invalid captured chunk budget")
         if texts != {source.original_input_ref: self.text}:
