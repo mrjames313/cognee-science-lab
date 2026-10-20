@@ -1,5 +1,7 @@
 # Step 4 / M3: native multi-chunk maintenance
 
+**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+
 This checkpoint adds a captured multi-chunk fixture to the existing text-replacement path. It exercises a grouped mention across chunks, a single occurrence split across a boundary, a fact whose literal text spans two chunks, changed boundaries, repeated edits, native evidence indexes, and explicit recovery. Decisions and fact spans are captured test input; this is not a general extraction or coreference algorithm.
 
 ## Run
@@ -74,8 +76,8 @@ Before recovery, doc01 is failed and withheld; doc02's fact remains available wi
 
 ## Scope and next work
 
-This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. It does not evaluate multi-chunk LLM extraction, semantic interpretation of arbitrary edits, changes in group membership, span-specific aliases, automatic dependent-source reconsideration, generic source removal or standard Cognify/Update task-transform wiring. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
+This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. This prefix profile does not evaluate LLM extraction or changed interpretations. Subsequent removal/retirement profiles cover selected group-membership changes. Additions/regrouping, span-specific aliases, dependent-source reconsideration, generic source removal and standard Task-transform wiring remain beyond the implemented profile. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
 
-The original six-step build order is unchanged. Step 4 has stronger chunk-boundary and evidence coverage; arbitrary occurrence edits and dependency/source lifecycle work remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
+The original six-step build order is unchanged. Step 4 has native chunk-boundary/evidence coverage and subsequent captured removal/retirement cases; additions/regrouping, changed interpretations and dependency/source lifecycle remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
 
 The subsequent [reviewed removal checkpoint](stage6_identity_occurrence_removal.md) supplies explicit survivor indices and new exact spans for partial-group continuity and empty unresolved-group retirement. It retains this native rebuild/recovery path; the prefix profile above remains unchanged.

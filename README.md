@@ -8,6 +8,10 @@ There are multiple experiment stages, each building on the previous.
 
 See the writeups in the `results/` directory for summaries of the current findings and conclusions.
 
+## Continuing this project
+
+**Start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).** It records the delivered code baseline, implementation and Mac-verification status, code map, original six-step sequence, remaining work and next task. [ROADMAP.md](ROADMAP.md) is the stage overview. Dated investigation/checkpoint writeups retain their historical evidence boundaries.
+
 ## Stages
 
 ### Stage 1 — DataPoint mechanics
@@ -23,18 +27,18 @@ We created and ingested the synthetic Helios-1 technical corpus, especially DOC0
 ### Stage 3 — Retrieval methods
 Status: complete
 Goal: understand how Cognee retrieves knowledge from the graph/vector/chunk layers, and whether retrieval compensates for the fragmentation we observed.
-We planned to test queries
+The query experiments and findings are recorded in `results/stage_three.md`.
 
 ### Stage 4 — Custom / mixed graph model
-Status: next
+Status: exploration complete for the Stage-6 handoff
 Goal: investigate how to specify a graph model with a mix of strongly-typed entities / relationships (for example, physical quantites) and open-world graph such as what Cognee generates by default.  The idea is to enforce specificity and precision where it is warranted by the domain, while allowing for the flexibility and extensibility of open-world extraction.
 
 ### Stage 5 — Identity, relation semantics, and schema evolution
-Status: planned
+Status: scoped identity/operational investigation and architecture handoff complete; implementation continues in Stage 6
 Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
 
 ### Stage 6 — Custom pipeline and intermediate representations
-Status: deterministic publication/retrieval, shared-source withdrawal, unchanged-text identity correction and captured source-text edits with multi-chunk provenance implemented; broader integration in progress
+Status: steps 1–2 and bounded portions of steps 3–4 implemented; captured publication/retrieval, shared-source withdrawal, corrections, native text/chunk rebuilding and occurrence/group retirement verified; additions, dependencies, full source lifecycle and steps 5–6 remain
 Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
 
 See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/two-source fixtures, selected identity-source withdrawal, focused tests, recovery-event visibility and remaining boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
@@ -50,8 +54,7 @@ The [resolved-group retirement checkpoint](docs/stage6_identity_resolved_retirem
 
 Will run in a single-user mode and use local storage for Cognee.
 
-LLMs for processing inputs, and creating embeddings are API calls and require
-authentication.
+The historical lab extraction/embedding profile uses external API credentials. The isolated Stage-6 fixtures use captured decisions and a loopback deterministic embedding service; they need no LLM or external embedding API credentials. Follow the handoff and fixture guides before opening or changing lab stores.
 
 Install dependencies:
 
@@ -67,7 +70,7 @@ cp .env.example .env
 
 
 
-### Model configuration
+### Historical lab model configuration
 
 Stage 1 experiments are all local.
 
@@ -75,5 +78,3 @@ Stage 2 uses OpenAI GPT-5.6 Luna for Cognee's LLM-based graph extraction.
 
 It also uses Nvidia's (free) embedding API, which should provide better
 performance than the local embeddings, and affects chunking as well.
-
-

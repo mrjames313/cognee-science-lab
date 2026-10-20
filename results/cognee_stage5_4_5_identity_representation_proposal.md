@@ -3,7 +3,7 @@
 **Recorded:** 2026-10-13 (America/Detroit)  
 **Project:** cognee-science-lab  
 **Baseline:** Cognee 1.6.2, Ladybug/LanceDB/SQLite, shared physical storage.  
-**Status:** Selected initial design direction from the discussion. This is a proposal to implement and validate, not an implemented schema or a runtime compatibility guarantee. Exact serialization, Task sequencing, failure handling and operation contracts remain to be settled.
+**Status reconciled 2026-10-20:** decision record leading to the reviewed Stage-6 contract. Draft forms/serialization, source-bound publisher, contribution aggregation, guarded replacement/withdrawal and explicit caught-failure recovery are implemented for bounded native fixtures. Earlier dated proposals below retain rationale; they are not a current unfinished-work list. See [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) and the [Stage-6 contract](cognee_identity_stage6_handoff.md) for current status and supersessions.
 
 This record supersedes the current design's earlier privileged canonical/variant model and the proposal for one graph support node per assignment. Earlier Stage-5 demonstrations remain historical evidence. The six requirements in [the requirements review](cognee_stage5_4_5_requirements_review.md) remain outcome constraints; the choices here are one proposed way to satisfy them.
 
@@ -29,7 +29,7 @@ Retain the structured assignments and their original-input provenance independen
 
 Initially, use one generated identity Data item for the document-local assignments derived from one original document: I01 for DOC01, I02 for DOC02. Each assignment has its own stable identifier within that grouping. Changing one assignment can therefore require republishing its generated source's set. Cross-document assignments are not assigned a grouping policy yet.
 
-The source must be registered through Cognee's Data lifecycle. Merely creating a text-bearing graph node does not make it a Data item eligible for native Cognify/Update/Forget orchestration. Use one authoritative JSON document registered as the generated Data item. It contains the structured records, source references, revision and enough construction data for replay. Exact record schemas remain under review. It must survive graph rebuild rather than exist only on generated graph nodes.
+The source must be registered through Cognee's Data lifecycle. Merely creating a text-bearing graph node does not make it a Data item eligible for native Cognify/Update/Forget orchestration. Use one authoritative JSON document registered as the generated Data item. It contains the structured records, source references, revision and enough construction data for replay. The draft runtime schemas are implemented in identity/models.py and the exported JSON Schema; future extensions remain subject to validation. It must survive graph rebuild rather than exist only on generated graph nodes.
 
 At minimum, saved assignments retain the information needed for exact publication and maintenance:
 
@@ -230,7 +230,7 @@ No new Cognee runtime probe or performance benchmark was run while recording thi
 
 ## 11. Sequence-driven regression-suite plan — 2026-10-13
 
-**Status:** planned validation design, not implemented tests. The user requested test suites around the operation sequences and expected outputs, in addition to using those sequences to specify functionality.
+**Status:** broader validation inventory, partially implemented. Native and programmatic sequence tests now cover the admitted fixtures; this list is not a claim that every case has passed. The user requested tests alongside the operation sequences. Current coverage and evidence provenance are recorded in SESSION_HANDOFF.md.
 
 Use each walkthrough as a scenario specification: initial original/generated sources and captured assignments; exact operation; expected saved-record changes; graph IDs/properties/native refs; retrieval applicability; actively consumed index results; partial-failure behavior; and replay outcome. Preserve original Entity properties where the sequence promises reference-only publication.
 
@@ -317,13 +317,13 @@ Validate the chosen schema and required provenance. Distinguish withdrawing a re
 
 A representation revision identifies edits to the generated description; source revision/fingerprint identifies its original input. They are different. The API persists supplied intent, rather than deciding whether a graph change warrants an interpretation change. Identity helpers such as set_resolution/withdraw_resolution enforce domain rules and use the shared storage interface.
 
-An accepted saved change creates an explicit publication requirement. Maintain coordinates graph effects and completion; generic storage calls must not hide uncontrolled domain inference or graph mutation. Actual serialization, adapter, command forms, guard mechanics and publication coordination remain to be designed and implemented.
+An accepted saved change creates an explicit publication requirement. Maintain coordinates graph effects and completion; generic storage calls must not hide uncontrolled domain inference or graph mutation. Draft JSON forms, registered/relational adapters, fixture commands, revision/attempt guards and publication coordination are implemented for admitted paths. General record APIs, dependent-source maintenance and standard entry-point hooks remain broader work.
 
 Add tests for conflicting revisions, unrelated-record preservation, explicit full replacement/retirement, distinction between occurrence retirement and resolution withdrawal, replay, and saved-record success followed by graph failure.
 
 ## 14. Failure/retry completion protocol — selected initial baseline
 
-This section is the selected pending-state/retry baseline, not an implemented lifecycle. Section 20 records the agreed project-owned SQLite publication ledger. Section 15 adds the optional A/B candidate-generation alternative: these retry/verification responses still apply inside the candidate, while the active prior generation can remain coherent. Keep coordination scoped to supported operations.
+This section defines the pending-state/retry baseline, now implemented for admitted Stage-6 fixtures. Section 20 records the publication ledger; the runtime uses backend-neutral relational operations through the configured Cognee session, with SQLite only in the tested profile. Section 15 adds the optional A/B candidate-generation alternative: these retry/verification responses still apply inside the candidate, while the active prior generation can remain coherent. Keep coordination scoped to supported operations.
 
 1. Before changing inputs or applying maintenance, mark affected identity material unavailable/currentness pending. Preserve unaffected sources whose required objects and consumed representations remain valid.
 2. Describe and commit the intended current representation through the shared API. Retain its revision and the relevant old/new publication identifiers.
@@ -331,7 +331,7 @@ This section is the selected pending-state/retry baseline, not an implemented li
 4. Verify intended nodes/edges/refs, retirement of obsolete contributions, and enabled derived representations.
 5. Record publication completion for that exact saved revision and restore current retrieval eligibility only if it is still the current intended description with valid inputs.
 
-If a newer description arrives, an older job must not mark that source current. Guard completion against the latest revision and current attempt; coordinate project writers. The project-owned SQLite ledger and initial source-level eligibility are selected in section 20; exact transactions, verification checks and lifecycle hooks still require implementation.
+If a newer description arrives, an older job must not mark that source current. Guard completion against the latest revision and current attempt; coordinate project writers. The portable relational ledger, exact revision/attempt acknowledgement and verification checks are implemented for supported fixture operations; general dependency/source lifecycle and standard hooks remain. There is no cross-store transaction.
 
 | Failure point | Recovery expectation |
 |---|---|
@@ -396,9 +396,9 @@ Cost scales with copied store size. The initial lab can evaluate whole-store sta
 
 ## 16. Structured identity source without generated chunks — accepted simplification, 2026-10-14
 
-The generated identity source is initially one authoritative JSON document registered as a Cognee Data item. Data.id identifies this generated source; dataset context remains part of operations. Stable record IDs address individual records within it. The JSON retains original-input references, its representation revision, records and corpus-backed construction information for required Entity endpoints, including existing ones. Record contents are selected at the design level; exact serialization remains open. Coordinator state storage is selected in section 20.
+The generated identity source is initially one authoritative JSON document registered as a Cognee Data item. Data.id identifies this generated source; dataset context remains part of operations. Stable record IDs address individual records within it. The JSON retains original-input references, its representation revision, records and corpus-backed construction information for required Entity endpoints, including existing ones. Record contents and draft serialization are implemented in the runtime models and exported schema. Coordinator state storage is selected in section 20.
 
-Publish consumes the structured description directly through custom Tasks. Generated-source publication creates its TextDocument and required resolution relationships/endpoint retention under its real generated-source context. The document node uses the generated Data ID but does not anchor has_identity_mention. Original-source publication creates chunk-to-mention markers under the original chunks' native ownership, coordinated with the saved identity description. Native mechanisms were source-inspected; this combined workflow is not yet live-tested.
+Publish consumes the structured description directly through custom Tasks. Generated-source publication creates its TextDocument and required resolution relationships/endpoint retention under its real generated-source context. The document node uses the generated Data ID but does not anchor has_identity_mention. Original-source publication creates chunk-to-mention markers under the original chunks' native ownership, coordinated with the saved identity description. This combined custom-Task publication/ownership workflow now has bounded native fixture evidence. Standard Cognify/Remember/Update routing remains unimplemented; see the session handoff.
 
 No required consumer currently needs generated identity prose. Explanations can be rendered from saved records on demand; optional substantive explanations may be retained as record data. Deterministic rendered prose need not be duplicated in the saved representation. Text embeddings or LLM-facing descriptions may be added later if a specific retrieval consumer needs them.
 
@@ -449,11 +449,11 @@ Occurrence/group keys are identifiers, not current offsets. Text inserted earlie
 
 Measure saved-record/node/edge counts and retrieval work on representative corpus text; no measured savings or thresholds are claimed. Include repeated references sharing a target, same-surface references with different targets in one paragraph, boundary-crossing references, overlapping chunk views, unresolved bindings, range shifts after edits, partial-group retargeting/splits and source Update/Forget/replay. Test that the ranges—not the whole context—control applicability, and that relation attribution is not lost.
 
-Construction data remains a minimal recipe for required corpus-backed Entity endpoints, including matched existing Entities: explicit Entity UUID, ordinary Entity model, name, required description and only deliberately selected optional fields. It is used for initial creation or validated missing-node reconstruction; existing nodes bypass construction. Do not blindly rewrite existing Entity properties, store populated existing endpoints inside that recipe, or recreate a retired/invalid endpoint merely because a stale record referenced it. Marker/resolution/provenance data remain outside ordinary Entity fields. The exact record schemas and reconstruction authorization policy remain under review.
+Construction data remains a minimal recipe for required corpus-backed Entity endpoints, including matched existing Entities: explicit Entity UUID, ordinary Entity model, name, required description and only deliberately selected optional fields. It is used for initial creation or validated missing-node reconstruction; existing nodes bypass construction. Do not blindly rewrite existing Entity properties, store populated existing endpoints inside that recipe, or recreate a retired/invalid endpoint merely because a stale record referenced it. Marker/resolution/provenance data remain outside ordinary Entity fields. Draft record schemas and bounded creation/rebuild authorization are implemented; unexpected loss of a consumed reasoning input is not general permission to reconstruct it.
 
 ## 18. Saved resolution and variant relationship records — agreed direction, 2026-10-14
 
-Keep the interpretation record separate from the local reference-group record and its captured occurrences. These are saved structured records, not additional graph support nodes. Exact JSON field names and serialization remain open.
+Keep the interpretation record separate from the local reference-group record and its captured occurrences. These are saved structured records, not additional graph support nodes. Draft JSON field names and serialization now exist in the runtime models/exported schema; this section records their semantic responsibilities.
 
 | Mention resolution information | Purpose |
 |---|---|
@@ -506,7 +506,7 @@ Add the last-owner regression: publish DOC01 + I02; remove DOC01 support and ver
 
 ## 20. Publication ledger — agreed initial design, 2026-10-14
 
-Use a small project-owned SQLite ledger, separate from the authoritative JSON description and from Cognee's native pipeline status. This implements the pending-state/retry baseline; A/B copies are not required for the first iteration. It is an architecture choice, not existing native Cognee behavior or an implemented table.
+Use the implemented project-owned relational ledger and registered JSON snapshot, distinct from Cognee's native pipeline status. Backend-neutral tables/operations use Cognee's configured session; SQLite is the tested profile, not a separate provider-specific implementation. Pending-state/retry does not require A/B copies.
 
 | Field | Meaning |
 |---|---|
@@ -539,7 +539,7 @@ The ledger is not a graph/vector/file transaction. Exact SQL schema, compare-and
 
 Add failure injection before/after invalidation, saved JSON, graph/index writes and acknowledgement; same-revision repair; older-attempt rejection; newer-revision rejection; shared-edge surviving-source eligibility; and restart recovery from durable pending state. If A/B staging is introduced later, its ledger/currentness must correspond to the selected coherent store generation.
 
-Storage and publication-state review is complete at the initial design level. Exact record serialization remains implementation work. Next review: concrete Describe inputs/candidate selection and repeatability, native lifecycle integration, then the Retrieve contract and Stage-6 handoff.
+Storage/publication and subsequent Describe/lifecycle/Retrieve contract review are complete for the initial design. Draft serialization and bounded runtime coordination are implemented. Current work is partial Stage-6 step 4; candidate algorithms/quality, general dependency lifecycle and broader retrieval remain separately tracked.
 
 ## 21. Describe grounding and future decision-model support — review findings and proposed boundary, 2026-10-14
 
@@ -1095,7 +1095,7 @@ Measure shared explanation/per-binding annotation tokens relative to substantive
 
 Plan deterministic fixtures for accepted/singleton, unresolved/ambiguous query/local references, inconsistent/pending/failed bindings, independently valid other-source evidence, empty evidence, accepted binding with limited identity expansion and an unfinished required identity check. Verify one annotation source drives all delivery modes without contradictory labels, plus separate model-consumer comprehension checks and original provenance. These are planned tests, not runtime results.
 
-Section 41 selects the minimal document-level Maintain/reconsideration boundary. Remaining work is consolidated Stage-6 schema/operation/index/retry-capture/fixture handoff. Retrieve's initial policy review is complete at the design level; implementation and combined validation remain open. Retrieval evidence suggesting missing resolves_to relationships remains a noted Describe/Maintain follow-up, without automatic acceptance or publication.
+Section 41 selects the minimal document-level Maintain/reconsideration boundary. The consolidated Stage-6 handoff, draft forms and bounded publication/maintenance/retrieval fixtures now exist. Retrieve's initial policy review is complete; broader corpus traversal/delivery, source/dependency lifecycle and general extraction remain implementation work. Retrieval evidence suggesting missing resolves_to relationships remains a noted Describe/Maintain follow-up, without automatic acceptance or publication.
 
 ## 39. Bounded identity expansion and offline identity-graph diagnostics — agreed 2026-10-15
 

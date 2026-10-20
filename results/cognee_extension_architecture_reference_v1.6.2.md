@@ -4,6 +4,8 @@
 **Pinned Cognee version:** 1.6.2  
 **Original review date:** 2026-10-10  
 **Identity-design update:** 2026-10-13  
+**Current implementation pointer (2026-10-20):** [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the delivered baseline, tests/Mac reproduction and next task. This reference retains pinned source findings and dated design evolution; historical evidence limits do not negate later bounded runtime fixtures.
+
 **Purpose:** Reusable reference for identity management and future Cognee integrations. This note focuses on extension boundaries, lifecycle behavior, and version-resilient design rather than one specific identity representation.
 
 ## 1. Design objective
@@ -20,7 +22,7 @@ Recommended dependency order, strongest first:
 6. `GraphDBInterface` / vector-engine abstractions.
 7. Selected subclass points on built-in retrievers when necessary.
 8. Internal utilities/private methods only as a last resort.
-9. Backend-specific Ladybug/LanceDB details only when unavoidable.
+9. Keep backend-specific implementation inside native adapters; project integrations use configured interfaces and refuse unsupported capabilities. Source inspection of an adapter does not authorize a vendor-specific project fallback.
 
 A Python function being importable is not the same as being a stable extension API.
 
@@ -409,9 +411,9 @@ The selected initial direction uses registered generated identity sources, durab
 
 The preferred B Task-list transform remains proposed and unimplemented. This direction neither implements it nor establishes which routing/loader wiring is sufficient.
 
-## 14. Remaining questions for controlled tests — current design
+## 14. Original controlled-test inventory and current coverage
 
-The earlier source-context, native deletion, incremental property and watermark questions now have scoped results in the characterization report. The combined new identity form is untested. Focus further checks on:
+The earlier source-context, native deletion, incremental property and watermark questions now have scoped results in the characterization report. The new identity form was not runtime-validated by this dated source review. Later Stage-6 fixtures demonstrate bounded cases from items 1, 2 and 5 below, plus selected marker, retirement and rebuild cases from items 3 and 4. This is the original test inventory, not a list of wholly unstarted work; the [session handoff](../docs/SESSION_HANDOFF.md) separates implemented cases from the remaining coverage. Broader lifecycle, native-entry-point and retrieval integration remain partial or unimplemented, and item 7 applies only when those profiles are admitted.
 
 1. Publishing a new explicit-ID Entity and an ID-based edge to an existing Entity without rewriting the existing fields, while intentionally retaining both endpoints.
 2. Edge-only publication and contribution collection serialization/aggregation under multiple source owners.
@@ -583,7 +585,7 @@ The detailed representation and preliminary ownership matrix live in [the propos
 | attach_node_source_refs | Intentional retention of matched existing nodes without field replacement | Applicability or original-input provenance |
 | Custom Retriever | Project-specific identity-group/mention traversal and output policy | Equivalent behavior in native retrieval/triplet indexing |
 
-Keep computation separate from publication: callbacks can calculate intent, but the loading Task must control new-node writes, existing-node ref attachment, full edge contribution payloads and checks. Native full-rebuild Update does not accept arbitrary callback kwargs as a durable route. The initial chunkless identity-source path uses custom Tasks directly; calculate_chunk_graphs remains an optional seam for chunk-based extensions. Determine the loader/routing sequence under the B extension during .4; the small core patch, derived-source orchestration and this combined publication workflow remain unimplemented.
+Keep computation separate from publication: callbacks can calculate intent, but the loading Task must control new-node writes, existing-node ref attachment, full edge contribution payloads and checks. Native full-rebuild Update does not accept arbitrary callback kwargs as a durable route. The initial chunkless identity-source path uses custom Tasks directly; calculate_chunk_graphs remains an optional seam for chunk-based extensions. The reviewed direct custom-Task loader/source binding now has native fixtures. The B core patch and standard-entry-point/derived-source orchestration remain unimplemented; they are later implementation work, not another .4 design review.
 
 No guarantees are added for every backend, optional maintenance stage, remote path or access-control configuration.
 
@@ -612,16 +614,16 @@ The Activities column identifies where each finding is directly relevant, not th
 
 | Concrete lesson / cross-cutting finding | Reusable integration finding | Activities | Evidence / design status |
 |---|---|---|---|
-| Distinct same-text local bindings need explicit IDs | Define object identity explicitly; a display name need not be a deduplication key. Several validated references in one local binding may share an ID. | Describe, Publish, Maintain, Retrieve | Explicit-ID precedence and prototype occurrence construction are source-inspected; the new combined workflow remains untested. |
-| Referencing, retaining and rewriting an endpoint are separate actions | A publication plan must distinguish existing-node references, intentional retention ownership and property writes. | Describe, Publish, Maintain | Recursive rewrite/co-ownership is measured in fixtures; reference-only custom edges and deliberate ref attachment are source-inspected. |
-| Describe must distinguish what to create from what to reference, including intended edges | Save explicit graph intent; keep domain interpretation in Describe while Publish executes declared persistence/aggregation rules and selected programmatic steps. | Describe, Publish, Maintain | Architecture refinement, not an implemented DTO, universal graph language or runtime result. |
-| Shared native ownership does not merge application metadata | Define aggregation or replacement semantics for shared structures, then keep applicability consistent with surviving assignments. | Describe, Publish, Maintain, Retrieve | Native shared retention is measured; ordinary edge replacement is source-inspected. Contribution aggregation is proposed, not implemented. |
-| Generated identity sources depend on original inputs | Retain explicit original-to-derived dependencies and define retirement/regeneration after input changes. | Describe, Publish, Maintain | Separate source-owner mechanics are characterized; the proposed derived-source orchestration is unimplemented. |
-| Mention references and variant equivalence require different traversal | Define relationship interpretation and context eligibility, and implement retrieval that honors them. | Describe, Publish, Retrieve | Earlier identity-aware retrieval is demonstrated; contribution-aware group/mention traversal remains proposed. |
-| Occurrence identity and classification can persist while its resolution changes | Preserve an occurrence-specific Entity ID and mention marker independently of accepted resolution; replace or withdraw resolution relationships explicitly. | Describe, Publish, Maintain, Retrieve | Accepted initial representation behavior; combined lifecycle and reader eligibility remain untested. |
-| Lifecycle modifications primarily belong to Maintain | Maintain owns change detection, affected-set selection and replacement/retirement/reconstruction; it may reuse Publish's controlled persistence primitives. | Publish, Maintain | Responsibility clarification; no separate mutation engine or implementation is selected. |
+| Distinct same-text local bindings need explicit IDs | Define object identity explicitly; a display name need not be a deduplication key. Several validated references in one local binding may share an ID. | Describe, Publish, Maintain, Retrieve | Explicit-ID precedence and prototype occurrence construction are source-inspected; the later bounded custom-Task workflow is native-tested; broader extraction/conversion is not established. |
+| Referencing, retaining and rewriting an endpoint are separate actions | A publication plan must distinguish existing-node references, intentional retention ownership and property writes. | Describe, Publish, Maintain | Recursive rewrite/co-ownership is measured in fixtures; safe existing-node reference/retention without ordinary-field overwrite is now native-tested in the Stage-6 fixtures. |
+| Describe must distinguish what to create from what to reference, including intended edges | Save explicit graph intent; keep domain interpretation in Describe while Publish executes declared persistence/aggregation rules and selected programmatic steps. | Describe, Publish, Maintain | Draft IdentitySource records and controlled publication of explicit intent are implemented; no universal graph language is claimed. |
+| Shared native ownership does not merge application metadata | Define aggregation or replacement semantics for shared structures, then keep applicability consistent with surviving assignments. | Describe, Publish, Maintain, Retrieve | Native shared retention is measured; ordinary edge replacement is source-inspected. Source-specific contribution aggregation/replacement/withdrawal is implemented and native-tested in Stage 6. |
+| Generated identity sources depend on original inputs | Retain explicit original-to-derived dependencies and define retirement/regeneration after input changes. | Describe, Publish, Maintain | Bounded original-text rebuild/generated-snapshot coordination is implemented; dependent-source propagation and full Data-removal orchestration remain incomplete. |
+| Mention references and variant equivalence require different traversal | Define relationship interpretation and context eligibility, and implement retrieval that honors them. | Describe, Publish, Retrieve | Contribution-aware document-context group/mention fixture traversal is implemented; broader corpus traversal/delivery remains incomplete. |
+| Occurrence identity and classification can persist while its resolution changes | Preserve an occurrence-specific Entity ID and mention marker independently of accepted resolution; replace or withdraw resolution relationships explicitly. | Describe, Publish, Maintain, Retrieve | Captured retarget/removal/reconcile/recovery and ledger-based reader eligibility are native-tested; general changed-meaning reconsideration remains incomplete. |
+| Lifecycle modifications primarily belong to Maintain | Maintain owns change detection, affected-set selection and replacement/retirement/reconstruction; it may reuse Publish's controlled persistence primitives. | Publish, Maintain | Fixture Maintain uses common Publisher.replace/withdraw and TextChange; broader affected-source selection is not implemented. |
 | Maintain must decide what propagates into saved records | Separate validated source changes and accepted interpretation changes from native property drift, remapping and materialization failures; update durable descriptions only under the declared policy. | Describe, Maintain | Responsibility/design clarification; no automatic graph-to-source synchronization is implemented. |
-| Multi-document interpretations require operational use of input provenance | Use dependencies to select affected assignments and preserve independent sources; document grouping alone does not establish independence. | Describe, Maintain, Retrieve | Functional/test refinement; external-context dependency handling remains unimplemented. |
+| Multi-document interpretations require operational use of input provenance | Use dependencies to select affected assignments and preserve independent sources; document grouping alone does not establish independence. | Describe, Maintain, Retrieve | Input validation and known dependent-edit refusal are implemented; external-context propagation/reconsideration remains incomplete. |
 | Describe relates document identities to eligible corpus identities | Candidate discovery and contextual interpretation produce exact reuse/create/link intent; occurrence-ID preservation is separate from interpretation reuse. New corpus arrivals can make earlier unresolved records worth reconsidering under Maintain. | Describe, Maintain, Retrieve | Intended scope and test refinement; candidate algorithms, reconsideration triggers and stability policy remain unimplemented. |
 | Make representation meaning and rules explicit | Define concepts, relationship meanings, valid combinations and context. Investigate which parts constitute a domain ontology and which are schemas or operational rules. | Describe, Publish, Maintain, Retrieve | Cross-cutting design finding and investigation topic; no ontology formalism is selected. |
 | Preserve durable descriptions independently of graph materialization | Save sufficient structured input, endpoint references and provenance to rebuild the intended graph and maintain source dependencies. | Describe, Publish, Maintain, Retrieve | Selected initial architecture; storage layout and combined rebuild/explanation behavior remain unvalidated. |
@@ -637,7 +639,7 @@ During Stage 6, attach implementation and targeted validation results to the rel
 
 The recurring activities can transfer to measurements: describe values/units/context, publish measurement records linked to existing instruments/facilities, maintain revisions/calibrations and retrieve under conditions. Their domain rules are not copied from identity equivalence. A second worked example should determine which mechanisms generalize; no generic plugin/package runtime or universal ontology framework is being implemented now.
 
-This documentation update adds no runtime result, stage or renumbering. Operation walkthroughs toward 5.4.5.4 remain the immediate work.
+This dated design update itself added no runtime result, stage or renumbering. Subsequent .4/.5 review is complete and bounded Stage-6 runtime evidence is recorded in the session handoff; operation walkthroughs are no longer the immediate task.
 
 ### 18.4 Explicit descriptions and bounded publication — refinement, 2026-10-13
 
@@ -669,7 +671,7 @@ Update the saved description when identity processing accepts a changed interpre
 
 Captured occurrence information and derived interpretation have different update sources: original text/coordinates come from verified original input; accepted target/applicability/derivation information comes from identity processing. Interpretation changes preserve occurrence identity, while source-occurrence changes require validation/regeneration.
 
-Saved-record modification can succeed while graph publication fails. Preserve the intended state for retry and keep affected retrieval unavailable until the current description and required graph materialization agree. The exact status/revision/transaction implementation remains to be selected under the lifecycle contract.
+Saved-record modification can succeed while graph publication fails. Preserve the intended state for retry and keep affected retrieval unavailable until the current description and required graph materialization agree. The current runtime implements portable status/revision/attempt guards, minimal plans and explicit caught-failure coordination for admitted paths; it does not provide a cross-store transaction.
 
 The detailed occurrence policy is in proposal section 2.3. The reusable finding is tagged Describe and Maintain; resulting graph writes use Publish's shared routines. This policy does not require an archive, indiscriminate graph-to-source copying or a universal reaction to every Cognee mutation.
 
@@ -677,7 +679,7 @@ The detailed occurrence policy is in proposal section 2.3. The reusable finding 
 
 Each reviewed sequence and expected output is also input to a planned test suite. Capture initial fixture, initiating operation, saved-record result, graph IDs/properties/native refs, retrieval eligibility/applicability, active derived-store checks, failure points and replay result. Proposal section 11 contains the scenario matrix; roadmap 6.6 carries implementation.
 
-Use deterministic captured extraction/identity decisions for lifecycle tests, actual isolated backend/source contexts for persistence integration, and end-to-end maintenance/retrieval plus failure-injection cases. Separate interpretation-quality benchmarks from orchestration assertions. These are planned tests; none has been implemented or run for the new representation.
+Use deterministic captured extraction/identity decisions for lifecycle tests, actual isolated backend/source contexts for persistence integration, and end-to-end maintenance/retrieval plus failure-injection cases. Separate interpretation-quality benchmarks from orchestration assertions. This is the broader test design; a captured native/programmatic subset is now implemented and passing. Current coverage is recorded in SESSION_HANDOFF.md, without claiming all planned cases or model-quality evaluation.
 
 The accepted shared-source withdrawal adds concrete checks to existing findings: native owner survival does not remove obsolete contribution properties; surviving assignment Y need not change when X is retired; source-bound repair must not reattach the retired source; and a retained physical edge with no accepted contributions must not be treated as a current identity relationship.
 
@@ -703,13 +705,13 @@ Proposal section 2.4 records the full scope and corresponding test cases. No cor
 
 ### 18.10 Shared stored-representation mutation interface — agreed direction
 
-Add a shared interface for reading and applying guarded changes to saved descriptions/records, explicit source-level replacement/retirement and change reporting. Domain helpers enforce meaning; generic storage persists intent. Distinguish interpretation withdrawal, occurrence retirement, representation revision and original-input revision. Keep graph publication explicit and coordinated by Maintain. The adapter/API implementation is still open; illustrative method names are not native Cognee APIs.
+Add a shared interface for reading and applying guarded changes to saved descriptions/records, explicit source-level replacement/retirement and change reporting. Domain helpers enforce meaning; generic storage persists intent. Distinguish interpretation withdrawal, occurrence retirement, representation revision and original-input revision. Keep graph publication explicit and coordinated by Maintain. The project runtime now supplies registered/relational storage and guarded Publisher publish/replace/withdraw operations for admitted paths. A generic fine-grained record-edit API remains broader work; illustrative names here are not native Cognee APIs.
 
 ### 18.11 Saved-state/publication failure coordination — proposed next review
 
 Proposal sections 13–14 record the accepted storage-interface direction and a proposed per-affected-source completion protocol. Commit intended description, reconcile graph/active indexes, verify and acknowledge the exact current revision. Acknowledge neither failed nor superseded publication as current. Reuse saved decisions during graph retry; regenerating Describe can introduce a new interpretation and is a separate action.
 
-On shared structures, preserve eligible surviving contributors while excluding pending/retired ones, subject to required object/index validity. Recording saved state and graph state are separate failure boundaries; no automatic cross-store transaction or historical-property rollback is promised. This protocol remains under review and unimplemented.
+On shared structures, preserve eligible surviving contributors while excluding pending/retired ones, subject to required object/index validity. Recording saved state and graph state are separate failure boundaries; no automatic cross-store transaction or historical-property rollback is promised. The reviewed protocol is implemented for supported fixture operations through the portable ledger and controlled publisher. General source/dependency orchestration and standard hooks remain; no cross-store transaction is claimed.
 
 ### 18.12 A/B generation staging and extensible recovery — proposed, 2026-10-13
 
@@ -757,7 +759,7 @@ Keep captured local reference groups separate from their interpretation records.
 
 Retarget an entire group by changing its resolution; retarget some occurrences by splitting the group first. Withdrawal does not automatically retire captured references or classification. Variant relationship records share assignment/provenance machinery with two exact reusable endpoints and explicit applicability, without a mention-group reference.
 
-General lesson: source object identity, captured inputs and derived interpretation can have different lifecycles. A shared mutation API must preserve those distinctions while coordinating materialization. Proposal section 18 contains the agreed identity forms; these are structured records, not graph support nodes, and exact serialization remains open.
+General lesson: source object identity, captured inputs and derived interpretation can have different lifecycles. A shared mutation API must preserve those distinctions while coordinating materialization. Proposal section 18 contains the agreed identity forms; these are structured records, not graph support nodes, and draft serialization is now implemented in the Stage-6 runtime models/exported schema.
 
 ### 18.17 Durable construction fallback for borrowed corpus endpoints — revised proposal, 2026-10-14
 
@@ -921,5 +923,4 @@ Keep original document chunks as the baseline owners/evidence sources for semant
 | ID-only edges can miss optional Triplet embeddings when endpoints are absent from the current node batch | Publish, Maintain, Retrieve | Verify configured derived indexes independently of graph success. |
 | One physical source/name/target edge can have several owners but one ordinary property bag | Describe, Publish, Maintain, Retrieve | Begin with native ordinary-fact behavior; add a focused extension only for a demonstrated loss. Identity contribution collections do not automatically generalize to every fact. |
 
-Proposal section 27 records the native baseline, source-inspected seams and planned real-backend sequences. Exact captured-output placement, reference-only adapter and cross-source mention classification lifetime remain open. No new runtime result is claimed and the native-versus-custom extraction coverage experiment remains deferred.
-
+Proposal section 27 records the native baseline, source-inspected seams and planned real-backend sequences. Later captured fixtures implement original-owned semantic output/evidence, safe exact-ID references and mention retention across generated-source withdrawal. General semantic conversion/dependency lifecycle remain incomplete. This dated source review itself added no runtime result; the native-versus-custom extraction coverage experiment remains deferred.

@@ -4,7 +4,7 @@
 **Design/source clarification added:** 2026-10-13  
 **Lab checkout:** `4c0cca741a40277229fd2e0a781ac0d4e399a8d3`  
 **Inspected Cognee:** tag `v1.6.2`, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`  
-**Status:** COMPLETE for the agreed characterization scope. Source inspection and the scoped runtime batches cover persistence, overlapping ingestion, default Improve/Memify, custom Tasks/source context, incremental and full-rebuild Update, source/dataset Forget, a minimal scientific fixture, and Recall/Search bookkeeping. The operation × artifact synthesis is complete. Initial 5.4.5.2–.3 ownership/representation choices are now recorded separately; the next activity is operation walkthroughs toward .4. The whole of 5.4.5 remains in progress. The design update adds no runtime result.
+**Status:** COMPLETE for the agreed characterization scope. Source inspection and the scoped runtime batches cover persistence, overlapping ingestion, default Improve/Memify, custom Tasks/source context, incremental and full-rebuild Update, source/dataset Forget, a minimal scientific fixture, and Recall/Search bookkeeping. The operation × artifact synthesis is complete. The subsequent Stage-5.4.5 architecture/handoff review is complete; current implementation is Stage 6, partial step 4. This file retains the pinned investigation results and their original evidence boundaries. Later runtime fixtures do not retroactively repair or rerun those experiments. See [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md).
 
 ## Design handoff update — 2026-10-13
 
@@ -679,7 +679,7 @@ Important limits:
 - full-rebuild Update needs explicit maintenance replay;
 - dataset-wide behavior also depends on provenance mode, ownership scope, and storage isolation.
 
-Public Forget and both Update profiles now confirm these mechanisms for the lab's present unstamped/shared structures. The measured Update runs additionally distinguish true chunk preservation from recreation, confirm the custom-model rebuild gate, and expose incremental evidence maintenance gaps. Maintenance replay and index repair remain unimplemented and untested.
+Public Forget and both Update profiles now confirm these mechanisms for the lab's present unstamped/shared structures. The measured Update runs additionally distinguish true chunk preservation from recreation, confirm the custom-model rebuild gate, and expose incremental evidence maintenance gaps. Maintenance replay and index repair were not implemented/tested in these legacy-helper probes. Later Stage-6 captured source/identity rebuild and cleanup fixtures are recorded separately; they do not establish repair of this historical helper graph.
 
 ## 8. Consolidated operation × artifact matrix
 
@@ -739,7 +739,7 @@ These were the characterization's design inputs. The 2026-10-13 companion propos
 - Read controls use CHUNKS and pinned RAG_COMPLETION, a fresh explicit session, automatic feedback off, last-access tracking off, and one explicit synthetic feedback update.
 - Session-enabled/opt-in Improve stages, global-context rebuilding, automatic feedback analysis, last-access tracking enabled, single-document contamination-chain invalidation, every retrieval lane, other backends, and access-control-enabled isolation remain source-inspected or untested as labeled.
 - Scientific classes are minimal fixtures. Production Claim/Measurement/Evidence modeling, ontology reasoning, immutable history, general contradiction handling, and project identity reconciliation are later work.
-- Indexed-text direct invalidation, cleanup/replay/index/evidence repairs, and the preferred Cognify B extension remain unimplemented. The diagnostic default-model incremental profile does not replace the lab's project-model construction.
+- At this characterization checkpoint, no indexed-text direct invalidation or cleanup/replay/index/evidence repair was implemented. Later Stage-6 bounded rebuild/retirement results are separate; general repairs and the preferred Cognify B extension remain incomplete. The diagnostic default-model incremental profile does not replace the lab's project-model construction.
 - Captures are sequential and targeted, not transactional full-store inventories. Graph-associated ID reads deliberately use pre-deletion scopes to avoid hiding deleted-node/edge leftovers; fixture/session probes track all IDs they observed.
 
 ### Evidence inventory

@@ -1,5 +1,7 @@
 # Step 4 / M3: retire a resolved, fact-bearing group
 
+**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+
 This checkpoint removes every occurrence of doc01's primary resolved group. The existing whole-document rebuild and generated-retention cleanup perform the deletion; no new lifecycle coordinator or source schema is introduced. Identity and semantic decisions are captured fixture input, not model inference.
 
 ## Captured edit and ownership

@@ -1,6 +1,8 @@
 # Step 4 / M3: unchanged-text identity revision replacement
 
-Implemented against pinned Cognee 1.6.2 on 2026-10-19. This is the first portion of accepted step 4, following the publication and multi-source withdrawal fixtures. It is not completion of document edits, rechunking, dependency maintenance or the full lifecycle.
+**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+
+Implemented against pinned Cognee 1.6.2 on 2026-10-19. This guide covers unchanged-text correction, the first portion of accepted step 4. Later guides cover selected text edits, rechunking and group retirement; dependency maintenance and the full lifecycle remain incomplete.
 
 ## Run the captured correction
 
@@ -76,6 +78,6 @@ Retrieval also compares current saved intent with the registered snapshot and na
 
 Pure checks cover captured correction structure, unchanged-occurrence admission, native-owner preservation, expected-revision/pending-intent guards and exact saved-plan reuse. Native tests cover stale callers, coordinated revision/currentness, both query routes, exact local fact/evidence preservation, original borrowed-field preservation, doc02 survival, obsolete singleton/vector removal, reopen/reconcile, and explicit recovery at four write boundaries. Previous publication/withdrawal fixtures remain regression checks.
 
-This fixture establishes neither the quality of the supplied identity correction nor a guarantee that arbitrary previously extracted facts remain valid after a real identity change. The supplied semantic verifier checks the captured unchanged local fact; semantic regeneration and its selection policy remain later work.
+This fixture establishes neither the quality of the supplied identity correction nor a guarantee that arbitrary previously extracted facts remain valid after a real identity change. The supplied semantic verifier checks the captured unchanged local fact; general semantic regeneration/selection after changed meaning remains later work; captured same-binding regeneration now exists in text-change fixtures.
 
 The unchanged-text mode described here does not admit text, group membership, occurrence ranges, chunk boundaries, new context selection or dependent-source maintenance. The later [text-edit checkpoint](stage6_identity_text_changes.md) adds a separate, explicit TextChange mode for a captured prefix insertion, whole-document native rechunking and exact occurrence remapping; arbitrary edit and dependency policies remain incomplete. Standard Cognify/Remember/Update wiring, coordinated native Data removal, hard-crash writer abandonment, public SearchType, complete corpus traversal and all-backend validation remain incomplete. There is no A/B copy, rollback, automatic retry, LLM Describe or comprehensive replay framework.

@@ -1,15 +1,15 @@
 # Stage 5.4.5 — Requirements after scope audit
 
-**Revised:** 2026-10-13 (America/Detroit)  
+**Status reconciled:** 2026-10-20 (America/Detroit); outcome requirements unchanged from the reviewed scope.
 **Project:** cognee-science-lab  
 **Baseline:** Cognee 1.6.2, Ladybug/LanceDB/SQLite, access control disabled, shared physical graph.  
-**Status:** Six outcome requirements retained after scope audit; terminology and reference/ownership wording aligned with the initial identity representation proposal recorded on 2026-10-13. The proposal is a design direction, not an implemented schema or additional runtime validation.
+**Status:** Six outcome requirements retained. Architecture review is complete and draft runtime forms plus bounded Stage-6 publication/maintenance/retrieval fixtures exist. These do not establish complete R1–R6 coverage. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records current implementation and verification status; this document defines outcomes.
 
 ## What this document requires
 
 The target is the lab's identity-processing extension: ingest source text, retain observations, resolve names and mentions, retrieve semantic relationships through the resulting identities, and keep those records usable after source changes.
 
-The initial implementation target is standard text Cognify/Remember, overlapping ingest, project maintenance, project-model full-rebuild Update, source/dataset Forget, and the custom identity-aware retrieval path. These are target workflows, not a claim that the project integration already exists. Native incremental Update is a characterized diagnostic path; enabling it for the project requires demonstrating the same outcomes as the supported update workflow.
+The initial implementation target is standard text Cognify/Remember, overlapping ingest, project maintenance, project-model full-rebuild Update, source/dataset Forget, and the custom identity-aware retrieval path. These are target workflows, not a claim that every native entry point is integrated; bounded custom-Task fixtures already exist. Native incremental Update is a characterized diagnostic path; enabling it for the project requires demonstrating the same outcomes as the supported update workflow.
 
 The requirements apply to those workflows in the pinned lab configuration. They do not promise compatibility with all Cognee operations, optional stages, migrations, backends, or access-control configurations. Adding another workflow requires checking the records and outputs it can affect, not specifying every possible mutation in the SDK.
 
@@ -137,7 +137,7 @@ Any enabled feedback-application stage must be treated as a writer under R1–R5
 
 **Keep as findings:** native writer inventories; the recognized watermark pipeline names; Memify empty-list fallback; cross-dataset native retrieval/indexing; graph-native versus ledger provenance; optional consolidation/migrations; read/history/accounting effects. They guide implementation and targeted tests but do not become independent obligations to modify Cognee.
 
-**Keep as architecture choices:** generated identity sources grouped per original document, native document-level retention for required endpoints, explicit mention marker edges, contribution-bearing resolution edges and occurrence UUIDs. These are recorded in the companion proposal rather than promoted to new universal requirements. Exact storage/routing, Task placement, rebuild sequencing and the active retrieval/index list remain open. These choices must produce R1–R6's outcomes.
+**Keep as architecture choices:** generated identity sources grouped per original document, native document-level retention for required endpoints, explicit mention marker edges, contribution-bearing resolution edges and occurrence UUIDs. These are recorded in the companion proposal rather than promoted to new universal requirements. Draft JSON/relational storage, custom-Task placement, explicit rebuild sequencing and a bounded consumed-store profile are implemented. Standard routing, expanded lifecycle and broader retrieval/store admission remain work. These choices must produce R1–R6's outcomes.
 
 **Do not add now:** all-alias expansion of Triplet text; a new support-layer framework; universal dataset isolation; a history/version-control system; general rollback; production accounting/audit policy; scientific Claim/Measurement/Evidence reasoning. Native provenance and retention ownership do not establish scientific support. Scientific modeling/evaluation remains Stage 8.
 
@@ -147,15 +147,15 @@ The selected direction is recorded in [cognee_stage5_4_5_identity_representation
 
 | Decision | Current direction / remaining concrete output |
 |---|---|
-| Authoritative identity storage | Generated identity sources preserve structured assignments. Final serialization, stable source/assignment IDs and writer entry points remain open. No per-assignment graph support node is required. |
+| Authoritative identity storage | Registered JSON plus relational descriptions, explicit source/record UUIDs and guarded publish/replace/withdraw entry points are implemented. The schema is a draft; automatic Describe/initial-key generation is later work. No per-assignment support node is required. |
 | Source and contributor binding | One generated source per original document's local assignments; native document-level owners retain both endpoints. Complete the ownership/index matrix and original-source → generated-source dependency handling. |
-| Mention representation | Distinct occurrence UUIDs and generated-chunk has_identity_mention edges preserve resolved/unresolved classification. Finalize locator conventions and keep markers/resolutions consistent. |
-| Shared identity links | Store current assignment contributions and scope on the edge. Finalize aggregation/write sequencing and withdrawal behavior; native owner cleanup does not merge custom properties. |
+| Mention representation | Explicit group UUIDs and original occurrence-chunk has_identity_mention edges preserve classification. Document-relative Unicode [start,end) ranges/native chunk mapping are implemented; additions/regrouping remain. |
+| Shared identity links | Source-specific contribution aggregation, scope payloads, guarded replacement and withdrawal are implemented. Native owner cleanup does not merge custom properties; preserve application aggregation. |
 | Maintenance sequence | Walk through publication, overlapping ingest, original/generated-source Update/Forget, rebuild gaps and failure/retry. Define loader/routing and how the resolver excludes incomplete maintenance. |
 | Enabled retrieval paths | Adapt custom traversal for identity groups, directed scoped mentions and contribution eligibility; identify consumed collections and evidence lookups. Native readers do not enforce this model automatically. |
 | Session behavior | Decide QA reuse and feedback application; define invalidation/clear behavior if enabled. |
 
-The initial ownership choices and physical direction advance 5.4.5.2 and .3 together. Their final deliverables remain incomplete. Operation walkthroughs in .4 and invariants/Stage-6 handoff in .5 are next; no stage is added or renumbered.
+The Stage-5.4.5 architecture/handoff review is complete. Runtime generalization and remaining operation coverage are Stage-6 work, currently partial step 4. No stage is added or renumbered.
 
 ## Evidence and validation status
 

@@ -2,7 +2,7 @@
 
 **Consolidated:** 2026-10-15 (America/Detroit).  
 **Baseline:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`; Ladybug/LanceDB/SQLite, shared physical storage.  
-**Status:** handoff review completed 2026-10-17. The first deterministic implementation slice now has native fixture evidence (section 12); full lifecycle, standard entry-point integration and broader retrieval remain in progress.
+**Current status (2026-10-20):** architecture review complete; bounded Stage-6 steps 1–4 have code and native evidence through resolved fact-bearing group retirement. Step 4 is partial; standard entry-point integration and broader retrieval remain. Start a new session with [the current session handoff](../docs/SESSION_HANDOFF.md), which records the exact delivery/verification boundary and next task. Section 12 is dated checkpoint history, not a cumulative list of unfinished work.
 
 ## 1. Authority, scope and first build
 
@@ -12,9 +12,9 @@ R1–R6 in [cognee_stage5_4_5_requirements_review.md](cognee_stage5_4_5_requirem
 |---|---|
 | Environment | Local Python; Ladybug/LanceDB/SQLite is the initial integration-test configuration, not an implementation dependency |
 | Source processing | Local Python, ordinary text STANDARD route, project Tasks |
-| Native entry points | Cognify/standard Remember and project-model full-rebuild Update through the proposed B Task-transform seam |
-| Lifecycle | Overlapping ingest, selected document maintenance, original/generated source removal and dataset cleanup |
-| Retrieval | Registered project Retriever/SearchType, native public request envelope |
+| Native entry points | Target for step 5: Cognify/standard Remember and project-model full-rebuild Update through B Task-transform; current fixtures use custom Tasks and composed native operations |
+| Lifecycle | Target: overlapping ingest, selected maintenance, original/generated source removal and dataset cleanup; current code demonstrates publication/withdrawal, corrections and bounded original-text rebuild/retirement |
+| Retrieval | Target for step 5: registered project Retriever/SearchType; current code is the bounded identity-aware fixture retriever |
 | Maintenance selection | Original documents mapped to generated identity sources; no caller-facing per-assignment/fragment selection |
 | Optional native stages/backends/transport | Admit only after checking their actual mutations and consumed stores; remote callables and native incremental Update are not initial project paths |
 
@@ -89,7 +89,7 @@ These consolidate selected behavior; they do not add a universal SDK contract or
 
 ## 3. Saved forms: implementation draft
 
-[cognee_identity_source_schema_draft.json](cognee_identity_source_schema_draft.json) and [cognee_identity_source_example.json](cognee_identity_source_example.json) make the selected concepts concrete. Field names, the draft version tag, input-kind enumeration and configuration spelling are draft implementation choices, not additional approved semantic requirements or an existing Cognee model.
+[cognee_identity_source_schema_draft.json](../schemas/cognee_identity_source_schema_draft.json) and [cognee_identity_source_example.json](../tests/fixtures/identity/cognee_identity_source_example.json) make the selected concepts concrete. Field names, the draft version tag, input-kind enumeration and configuration spelling are draft implementation choices, not additional approved semantic requirements or an existing Cognee model.
 
 | Draft field | Purpose |
 |---|---|
@@ -141,7 +141,7 @@ Existing names/descriptions need not match recipe values. Reference and delibera
 
 Distinguish missing output from missing reasoning input. A new output, or a gap explicitly covered by a validated captured rebuild/publication plan, can be created with the exact UUID and recipe when the required inputs/intent remain valid. If an existing corpus Entity used as a reasoning input later disappears outside that expected plan, a recipe plus its old fingerprint does not establish continued validity; the digest does not contain the consumed values. Initially leave saved-intent reconciliation unavailable and select the document for reconsideration. Independent reconstruction beyond captured plans needs an explicit future dependency/capture policy. Graph absence alone establishes neither deliberate retirement nor permission to restore. An explicit retirement/replacement plan prevents stale restoration without banning a separately current source's valid independent support.
 
-The current schema supplies much of the input/recipe data, but recipe validation, UUID-use compilation, dependency checks, operation capture, coordinated writer protection and final verification are project implementation work. Native node lookup and source-reference attachment are primitives, not implementations of these domain checks. Unsupported independent mutations are not made safe by a check-before-write alone.
+The current runtime implements recipe validation, UUID-use compilation, supported input checks, minimal operation capture, portable writer/revision guards and final verification for admitted fixture paths. Broader dependency propagation and operation coverage remain implementation work. Native node lookup/source-reference attachment are primitives, not domain checks; unsupported independent mutations are not made safe by a check-before-write alone.
 
 ### Producer bookkeeping — agreed 2026-10-17
 
@@ -355,7 +355,7 @@ Assertions cover saved revisions/records, exact graph IDs and untouched properti
 
 ## 11. Build order and unresolved engineering work
 
-Build order accepted 2026-10-17; the first reviewable deliverable covers M0–M1. Implement relevant sequence tests alongside each step rather than making the entire inventory an upfront gate.
+Build order accepted 2026-10-17. The initial deliverable covered M0–M1; current code extends through the partial M3 boundary below. Implement relevant sequence tests alongside each step rather than making the entire inventory an upfront gate. Current delivered baseline and independently reviewed Mac results are in [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md).
 
 | Milestone / accepted step | Concrete output and current boundary |
 |---|---|
@@ -389,7 +389,7 @@ At the initial 2026-10-15 consolidation, validation performed was: generated a d
 
 ### First implementation checkpoint — 2026-10-17
 
-Repository code now lives in src/cognee_lab/identity, with a generated schema in schemas, exact source/example fixtures in tests/fixtures/identity and commands/limits documented in docs/stage6_identity_first_slice.md. The initial source is registered as a real Cognee Data item; publication uses real source contexts and configured interfaces. Bookkeeping stores the serialized JSON/currentness/minimal plan in backend-neutral relational project tables; the first registered generated source contains its matching JSON snapshot. Revision replacement is refused until a coordinated source-update path is implemented.
+Repository code was introduced in src/cognee_lab/identity, with a generated schema in schemas, exact source/example fixtures in tests/fixtures/identity and commands/limits documented in docs/stage6_identity_first_slice.md. The initial source is registered as a real Cognee Data item; publication uses real source contexts and configured interfaces. Bookkeeping stores the serialized JSON/currentness/minimal plan in backend-neutral relational project tables; the registered generated source contains its matching JSON snapshot. At this first checkpoint revision replacement was refused; subsequent checkpoints below implement guarded replacement and selected text/group changes.
 
 The first fixture preserves a borrowed Entity's differing ordinary fields/sentinel, creates the exact variant/M UUIDs, publishes chunk-owned mention markers and a mention-anchored limits->oscillations fact, and returns original native evidence plus the accepted scoped identity annotation. Retrieval demonstrably seeds HC, follows its document-applicable variant link and then the accepted local mention. A fresh process can reopen the stores and explicit same-revision reconciliation is idempotent.
 
@@ -427,7 +427,7 @@ Native fact construction must retain reused endpoints for every original produci
 
 The edit path refuses other saved sources depending on the edited original; it does not implement their reconsideration. Caught interruptions after original-memory removal, original ingestion, native chunk persistence and graph publication use the exact saved transition for an explicit full-rebuild retry. Pending/failed doc01 interpretation is withheld while doc02 remains usable. No LLM judgment occurs during replay; no rollback, atomic native visibility or hard-crash lock recovery is claimed.
 
-This advances a bounded portion of step 4, not the complete milestone. The native fixture remains one chunk; pure mapping tests include an occurrence split across two chunks. Arbitrary edits, changed meanings/group membership, multi-chunk semantic extraction, span/record dependency remapping, dependent-source propagation, full source removal and standard pipeline wiring remain. The original six-step build order is unchanged. Commands, diagnostics and exact scope: ../docs/stage6_identity_text_changes.md.
+At this prefix-edit checkpoint, the native fixture used one chunk and pure tests split an occurrence across chunks. The subsequent multi-chunk and removal checkpoints supersede its chunk-count/group-removal limits. General extraction, changed meanings, additions/regrouping, span/record and dependent-source maintenance, full source removal and standard pipeline wiring remain. The original six-step build order is unchanged. Commands and exact prefix profile: ../docs/stage6_identity_text_changes.md.
 
 ### Step 4 / M3: native multi-chunk checkpoint — 2026-10-19
 
@@ -443,7 +443,7 @@ The `remove-occurrences` captured example supplies an explicit transition manife
 
 The common whole-document rebuild regenerates the captured surviving local fact and current evidence, rewrites current markers, removes the empty group's saved record/resolution/Entity declaration and retires its now unowned Entity/vector. Existing foreign owners and independent doc02 interpretations must survive. The saved failure plan contains previous/new text, native chunk budget, previous description and explicit retention; recovery reuses those exact inputs without rerunning identity judgment. Diagnostics distinguish net text-length change from a global position shift, and expose retired group/node/index/marker state.
 
-This is not a generic edit or grouping implementation. Occurrence additions, group splits/combinations, changed continuing interpretations and deletion of a resolved group with facts remain unimplemented fixture cases. Broader semantic extraction, dependent-source propagation and original-source removal remain step-4 work. There is no new source-schema field, provider implementation, native Cognee modification or recovery framework. Commands and exact limits: ../docs/stage6_identity_occurrence_removal.md.
+At this removal checkpoint, additions, splits/combinations, changed continuing interpretations and resolved-group fact retirement were outside its fixture. The following resolved-retirement checkpoint implements the last of those cases. Additions/regrouping, broader semantic refresh, dependent-source propagation and original-source removal remain step-4 work. There is no new source-schema field, provider implementation, native Cognee modification or recovery framework. Commands and exact partial-removal profile: ../docs/stage6_identity_occurrence_removal.md.
 
 ### Step 4 / M3: resolved-group retirement checkpoint — 2026-10-19
 
