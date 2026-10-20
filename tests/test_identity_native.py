@@ -19,6 +19,8 @@ def command(root, operation, *args, expect=0):
             operation,
             "--root",
             str(root),
+            "--embedding",
+            "loopback",
             *args,
         ],
         cwd=REPO,
@@ -56,11 +58,9 @@ def test_native_publish_query_and_idempotent_reconcile(tmp_path):
 import asyncio,json,sys
 from pathlib import Path
 from uuid import UUID
-from cognee_lab.identity.fixture_embeddings import FixtureEmbeddings
-from cognee_lab.identity.__main__ import configure
+from cognee_lab.identity.__main__ import fixture_environment
 root=Path(sys.argv[1])
-with FixtureEmbeddings() as endpoint:
- configure(root,endpoint)
+with fixture_environment(root):
  from cognee_lab.identity.publish import Publisher
  from cognee_lab.identity.retrieve import retrieve
  async def check():

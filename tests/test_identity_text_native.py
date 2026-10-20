@@ -158,11 +158,9 @@ def test_native_missing_endpoint_owner_is_refused_before_memory_removal(tmp_path
 import asyncio,sys
 from pathlib import Path
 from uuid import UUID
-from cognee_lab.identity.__main__ import configure
-from cognee_lab.identity.fixture_embeddings import FixtureEmbeddings
+from cognee_lab.identity.__main__ import fixture_environment
 root=Path(sys.argv[1])
-with FixtureEmbeddings() as endpoint:
- configure(root,endpoint)
+with fixture_environment(root):
  from cognee_lab.identity.publish import Publisher
  from cognee_lab.identity.multisource import current_sources
  from cognee_lab.identity.fixture import OSCILLATIONS_ID

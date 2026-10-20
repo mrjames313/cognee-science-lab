@@ -723,6 +723,7 @@ source = { editable = "." }
 dependencies = [
     { name = "cognee" },
     { name = "pydantic" },
+    { name = "python-dotenv" },
     { name = "rfc8785" },
     { name = "sqlalchemy" },
 ]
@@ -738,6 +739,7 @@ dev = [
 requires-dist = [
     { name = "cognee", specifier = ">=1.6,<1.7" },
     { name = "pydantic", specifier = ">=2.13.5" },
+    { name = "python-dotenv", specifier = ">=1.0.1,<2" },
     { name = "rfc8785", specifier = "==0.1.2" },
     { name = "sqlalchemy", specifier = ">=2,<3" },
 ]

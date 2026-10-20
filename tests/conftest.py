@@ -7,10 +7,16 @@ import pytest
 
 def pytest_configure(config):
     # Configure before any lazy Cognee import. No lab store or API is touched.
+    # Subprocess CLIs inherit COGNEE_ENV_FILE, so one that forgets
+    # --embedding loopback fails on creation instead of calling the .env API.
+    from cognee_lab.identity.__main__ import FIXTURE_ENV
+
     root = Path(tempfile.mkdtemp(prefix="cognee-stage6-unit-"))
     for name, value in {
+        "COGNEE_ENV_FILE": str(FIXTURE_ENV),
         "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
         "DATA_ROOT_DIRECTORY": str(root / "data"),
+        "CACHE_ROOT_DIRECTORY": str(root / "cache"),
         "ENABLE_BACKEND_ACCESS_CONTROL": "false",
         "TELEMETRY_DISABLED": "true",
         "CACHING": "false",
