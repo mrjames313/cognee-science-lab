@@ -1,4 +1,3 @@
-import contextlib
 import json
 import os
 import subprocess
@@ -9,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from cognee_lab.identity.environment import MARKER, MARKER_KIND
+from cognee_lab.identity.fixture_embeddings import FixtureEmbeddings
 
 REPO = Path(__file__).resolve().parents[1]
 OPERATOR = {
@@ -90,7 +90,7 @@ def fixture_root(tmp_path, embedding=None) -> Path:
     return root
 
 
-def run(args, env_file, timeout=120):
+def run(args, env_file):
     # Cognee loads its env file once per process, so each case gets a fresh one.
     return subprocess.run(
         [sys.executable, *args],
@@ -98,7 +98,7 @@ def run(args, env_file, timeout=120):
         env=os.environ | {"COGNEE_ENV_FILE": str(env_file)},
         capture_output=True,
         text=True,
-        timeout=timeout,
+        timeout=120,
     )
 
 
@@ -144,16 +144,23 @@ def test_pre_profile_root_loads_the_operator_env_file(tmp_path):
 
 def test_env_creation_records_the_operator_profile_and_no_secret(tmp_path):
     root = tmp_path / "root"
-    # The marker is written before the first embedding call. Cognee retries the
-    # decoy endpoint for minutes, so a timeout or any exit code is acceptable.
-    with contextlib.suppress(subprocess.TimeoutExpired):
-        run(
+    # The operator file names a local service, so the whole env creation runs offline.
+    with FixtureEmbeddings() as endpoint:
+        result = run(
             ["-m", "cognee_lab.identity", "fixture", "--root", str(root)],
-            operator_env(tmp_path),
-            timeout=30,
+            operator_env(
+                tmp_path,
+                EMBEDDING_ENDPOINT=endpoint,
+                EMBEDDING_DIMENSIONS="64",
+                HUGGINGFACE_TOKENIZER=None,
+            ),
         )
+    assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-2000:]
     marker = json.loads((root / MARKER).read_text())
-    assert marker == {"kind": MARKER_KIND, "embedding": ENV_RECORD}
+    assert marker == {
+        "kind": MARKER_KIND,
+        "embedding": {**ENV_RECORD, "dimensions": 64},
+    }
     on_disk = [p for p in root.rglob("*") if p.is_file()]
     assert not any("operator-secret" in p.read_text(errors="ignore") for p in on_disk)
 
