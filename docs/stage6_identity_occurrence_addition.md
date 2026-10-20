@@ -26,7 +26,11 @@ The captured semantic adapter preserves the original `it limits oscillations` fa
 
 For example, `[0, 2]` would mean old occurrence 0 continues as new occurrence 0 and old occurrence 1 continues as new occurrence 2. New index 1 is an addition. Mapping is supplied explicitly even when surface strings repeat. Exact before/after slices and fingerprints are validated programmatically. The new source description declares additional occurrences, new groups, construction recipes and resolution records. The map does not duplicate their contents.
 
-Addition admission preserves all old groups/UUIDs, old occurrence texts, existing resolution/variant decisions and existing construction recipes. New groups require fresh UUIDs, fresh assignment IDs, construction recipes and explicit resolution states. New accepted targets must use already declared reusable recipes in this bounded mode. A new mention UUID already present in the graph is refused before writes. At least one occurrence or group must be added. Removal and addition modes cannot be combined. Splits, combinations, kind changes, new reusable identities and interpretation changes require later admission work. Unchanged-text additions from a new Describe pass are also outside this text-edit slice.
+Addition admission preserves all old groups and UUIDs. It also preserves old occurrence texts, resolution/variant decisions, and construction recipes.
+
+New groups require fresh UUIDs, assignment IDs, construction recipes, and explicit resolution states. In this bounded mode, new accepted targets must use previously declared reusable recipes. Admission refuses a new mention UUID if that UUID already exists in the graph. The change must add at least one occurrence or group.
+
+Removal and addition modes cannot be combined. Splits, combinations, kind changes, new reusable identities, and interpretation changes require later admission work. Unchanged-text additions from a new Describe pass also remain outside this text-edit slice.
 
 The durable replacement plan stores the map, exact intended description, old/new texts and native chunk budget. Reconcile completes that exact intent, reusing the saved new UUID rather than selecting identities again. The default prefix-insertion and explicit removal admissions retain their own boundaries. This adds no saved-source schema, role registry, model call, backend-specific write code or new coordinator.
 
@@ -85,7 +89,11 @@ Before recovery, only doc02's fact returns and doc01 reports `publication_failed
 
 The fixture uses Cognee 1.6.2 graph, vector, and relational interfaces. It uses deterministic loopback embeddings and captured decisions. It makes no LLM call. The isolated profile selects LiteLLM's bundled pricing map instead of its unrelated startup network refresh. A longer subprocess allowance accommodates cold native imports. The current handoff and delivery test notes distinguish ordinary CLI results from any host-only test-launcher workaround. None of that launcher is part of application persistence.
 
-The checkpoint passed 81 programmatic tests and all three new native sequence cases. Native assertions ran with a host-only launcher after ordinary CLI output exposed a Linux interpreter-teardown timeout. This does not establish clean ordinary CLI exit on this host. The launcher exits only after CLI completion and explicit store closure and is not application code. Ordinary Mac CLI addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery were independently reproduced by the user and reviewed on 2026-10-20, as detailed below. The other 26 native cases were not rerun. See the delivery's `TESTS.md` for the exact evidence boundary.
+The checkpoint passed 81 programmatic tests and all three new native sequence cases. The other 26 native cases were not rerun.
+
+Native assertions used a host-only launcher after ordinary CLI output exposed a Linux interpreter-teardown timeout. The launcher exits only after CLI completion and explicit store closure. It is not application code. These results do not establish clean ordinary CLI exit on this host.
+
+The user independently reproduced ordinary Mac CLI addition, reopened retrieval, healthy reconcile, and `replace_published` failure/recovery. The assistant reviewed those results on 2026-10-20, as detailed below. See the delivery's `TESTS.md` for the exact evidence boundary.
 
 ### Reviewed Mac results
 

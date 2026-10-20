@@ -36,7 +36,13 @@ Two newline characters follow the sentence. The prefix has 48 Unicode code point
 | doc01 evidence and original ownership | Previous chunk | Rebuilt under the new original chunk |
 | doc02 fact, evidence, owner and identity interpretation | Existing values | Preserved |
 
-The edit command writes `text_revision_result.json`; reconcile writes `multisource_result.json`. The edit result and immediate failed-edit recovery result include `text_changes` diagnostics with old/new positions, chunk IDs and hashes, retired chunk graph/vector checks and current evidence checks. `identity_doc01_text_revision2.json` and `source_doc01_revision2.txt` are review copies. The initial `source.txt` and `identity.json` remain baseline fixture inputs. Current operations read the saved ledger description and native registered original text, rather than treating those baseline files as current. A later healthy reconcile replaces the completed mutation plan with its own publication plan, so historical transition diagnostics remain in the saved edit-result file rather than being duplicated indefinitely in every subsequent status result.
+The edit command writes `text_revision_result.json`. Reconcile writes `multisource_result.json`.
+
+The edit result and immediate failed-edit recovery result include `text_changes` diagnostics. These report old/new positions, chunk IDs and hashes, retired chunk graph/vector checks, and current evidence checks.
+
+`identity_doc01_text_revision2.json` and `source_doc01_revision2.txt` are review copies. The initial `source.txt` and `identity.json` remain baseline fixture inputs. Current operations instead read the saved ledger description and native registered original text.
+
+A later healthy reconcile replaces the completed mutation plan with its own publication plan. Historical transition diagnostics therefore remain in the saved edit-result file rather than appearing indefinitely in every subsequent status result.
 
 ## Describe, Publish and Maintain responsibilities
 
@@ -44,7 +50,16 @@ The captured Describe step supplies the complete new IdentitySource: exact text 
 
 `TextChange(previous_text, text, chunk_budget=512)` describes the exact original-text transition. Pass it to `Publisher.replace` with the intended next source, prepared native chunks, real generated-source context, expected saved revision, and explicit `semantic_writer` / `verify_semantics` callbacks. These callbacks receive no automatic identity or scientific reasoning. The fixture supplies captured fact generation and verifies the independently supported doc02 fact as well as the rebuilt doc01 fact.
 
-The default prefix-mode admission is deliberately narrow: one original plain-text Data item. A nonempty prefix insertion; stable group IDs, occurrence texts, group membership, assignments and construction recipes; exact shifted ranges. Native TextChunker output and exact tiling. An explicit occurrence-retention manifest now admits the documented removal/retirement modes through the same API. Additions/regrouping, changed interpretation, span-scoped variant remapping, span/record dependencies and additional consumed documents remain outside these modes. A dependent saved identity source referencing the edited original is refused before mutation. Automatic reconsideration of that source is not implemented.
+The default prefix-mode admission applies to one original plain-text Data item. It requires the following conditions:
+
+- The edit inserts a nonempty prefix.
+- Group IDs, occurrence texts, group membership, assignments, and construction recipes remain stable.
+- Occurrence ranges shift by the exact prefix offset.
+- Native TextChunker output tiles the document exactly.
+
+An explicit occurrence-retention manifest also admits the documented removal/retirement modes through the same API. Additions/regrouping, changed interpretation, span-scoped variant remapping, span/record dependencies, and additional consumed documents remain outside these modes.
+
+Admission refuses a dependent saved identity source that references the edited original before mutation begins. Automatic reconsideration of that source is not implemented.
 
 Maintain uses a full rebuild of this original document, even if an incremental update could preserve some chunks. The original default fixture still fits in one native chunk. The later [multi-chunk checkpoint](stage6_identity_multichunk.md) adds a native small-budget profile, split occurrence markers and two-chunk captured fact evidence. General multi-chunk semantic extraction and interpretation remain unevaluated.
 
@@ -61,7 +76,11 @@ This sequence combines native Tasks for removal, ingestion, chunking, storage, a
 
 ### Ownership finding
 
-The first development run exposed a bug in our captured fact writer: when doc02 reused the existing oscillations endpoint, it did not attach doc02's original-chunk source ref to that endpoint. Native doc01 memory removal correctly considered that endpoint unowned, deleted it, and cascaded into doc02's incident fact despite that fact's independent owner. The fixture writer now explicitly retains compatible reused endpoints for each producing chunk. The edit preflight also refuses an endpoint deletion when a bounded neighborhood check finds an incident edge with an owner that would survive. It does not silently repair missing provenance. A limit hit refuses the operation instead of assuming deletion is safe.
+The first development run exposed a bug in the captured fact writer. When doc02 reused the existing oscillations endpoint, the writer omitted doc02's original-chunk source ref from that endpoint.
+
+Native doc01 memory removal then considered the endpoint unowned and deleted it. That deletion cascaded into doc02's incident fact, despite that fact's independent owner. The fixture writer now retains compatible reused endpoints for each producing chunk.
+
+Before an edit, a bounded neighborhood check looks for incident edges with owners that would survive an endpoint deletion. The edit preflight refuses that deletion if it finds such an edge. It does not silently repair missing provenance. If the check reaches its limit, the operation is refused rather than treated as safe.
 
 Fact ownership alone does not preserve its endpoints. This is a custom-write integration obligation, not evidence of a native deletion bug. The endpoint issue was not exercised by previous generated-identity withdrawal tests, because those withdrawals intentionally retained original semantic memory.
 

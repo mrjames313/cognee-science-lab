@@ -65,7 +65,11 @@ Tests used Python 3.12.14, Cognee 1.6.2, actual configured Ladybug/LanceDB/SQLit
 
 The **2026-10-20 addition checkpoint** passed **81 programmatic tests and 3 new native sequence tests (84 distinct cases)**; the other 26 native cases were not rerun. The native selection covers addition/reopen/reconcile/another prefix edit/withdrawal, plus exact forward recovery after `text_chunks` and `replace_published`. User-Mac reproduction is recorded separately below.
 
-Native assertions used actual configured stores and fresh child processes, with a **host-only test launcher** that exits after the ordinary CLI returns and its explicit engine-close path completes, bypassing interpreter finalization. Ordinary CLI publication and reopened retrieval produced the expected three facts, but one reopened retrieval then exceeded the 300-second process-exit allowance on this Linux host. Thus the launcher results establish the tested lifecycle operations/reopen/verification, not clean ordinary interpreter teardown here. The application has no forced-exit workaround. The delivery's `TESTS.md` and `support/host_native_launcher.py` preserve this qualification and local reproduction route. The isolated profile now uses LiteLLM's bundled pricing map to avoid unrelated startup metadata fetching; the lockfile/dependencies are unchanged.
+Native assertions used actual configured stores and fresh child processes. A **host-only test launcher** exited after the ordinary CLI returned and its explicit engine-close path completed. This bypassed interpreter finalization.
+
+Ordinary CLI publication and reopened retrieval produced the expected three facts. However, one reopened retrieval exceeded the 300-second process-exit allowance on this Linux host. The launcher results therefore establish the tested lifecycle operations, reopen, and verification. They do not establish clean ordinary interpreter teardown here.
+
+The application has no forced-exit workaround. The delivery's `TESTS.md` and `support/host_native_launcher.py` record this limitation and the local reproduction procedure. The isolated profile uses LiteLLM's bundled pricing map to avoid unrelated startup metadata fetching. The lockfile and dependencies are unchanged.
 
 ### Results verified on the user's Mac
 

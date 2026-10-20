@@ -47,7 +47,9 @@ The captured fact is the exact literal span `it limits oscillations`, starting a
 
 The fact writer attaches native ownership to the edge and both endpoints for every producing chunk, writes native contains/production bookkeeping, and captures edge evidence through Cognee's existing per-chunk buffer/persistence interfaces. It does not make every mention-marker chunk an owner of every fact. Verification requires the exact original-document fact owner set and exact current `(chunk_id, chunk_index)` evidence set, plus all expected chunk vectors.
 
-The final oscillations chunk supports the fact but contains no mention occurrence. The fixture retriever previously discarded evidence outside the mention-marker chunks, which would truncate this fact. It now requires at least one checked supporting chunk to overlap the group and preserves the complete checked native-owned evidence returned for that fact, including its continuation chunk. These are current-version evidence checks inside the existing bounded fixture route, not a new public fact-source filter or request parameter.
+The final oscillations chunk supports the fact but contains no mention occurrence. Previously, the fixture retriever discarded evidence outside mention-marker chunks. That behavior would truncate this fact.
+
+The retriever now requires at least one checked supporting chunk to overlap the group. It also preserves the complete checked native-owned evidence for the fact, including its continuation chunk. These checks apply to current-version evidence in the bounded fixture route. They do not add a public fact-source filter or request parameter.
 
 Conversely, the earlier “the controller” occurrence supplies an identity marker but is not provenance for this particular captured `it limits oscillations` fact. The native tests assert both distinctions, including absence of markers and fact ownership where they do not belong.
 
@@ -76,7 +78,9 @@ Before recovery, doc01 is failed and withheld. Doc02's fact remains available wi
 
 ## Scope and next work
 
-This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. This prefix profile does not evaluate LLM extraction or changed interpretations. Subsequent removal/retirement profiles cover selected group-membership changes. Additions/regrouping, span-specific aliases, dependent-source reconsideration, generic source removal and standard Task-transform wiring remain beyond the implemented profile. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
+This checkpoint demonstrates native multi-chunk storage, provenance, and maintenance with one captured fact per document. The prefix profile does not evaluate LLM extraction or changed interpretations. Later removal/retirement profiles cover selected group-membership changes.
+
+For this checkpoint, additions/regrouping, span-specific aliases, dependent-source reconsideration, generic source removal, and standard Task-transform wiring remain outside scope. It introduces no backend-specific graph queries, provider code, schema changes, or new dependencies. Native runtime evidence applies only to Cognee 1.6.2 with the configured stores.
 
 The original six-step build order is unchanged. Step 4 has native chunk-boundary/evidence coverage and subsequent captured removal/retirement cases. Additions/regrouping, changed interpretations and dependency/source lifecycle remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
 

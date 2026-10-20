@@ -9,7 +9,7 @@ The [occurrence-removal guide](docs/stage6_identity_occurrence_removal.md) recor
 
 This revision reconciles the roadmap with later project decisions and `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores apply only to their recorded experimental snapshots. They do not describe the current live database. “Complete” means the exploration was sufficient to proceed. It does not mean the capability has a production implementation.
 
-For continuation, code generation/verification status and the exact next task, start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md). Historical revision entries below describe their own dates.
+For continuation, start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md). It records code generation, verification status, and the exact next task. Historical revision entries below describe their own dates.
 
 ## Progress at a glance
 
