@@ -24,7 +24,7 @@ The user's Mac addition, reopened retrieval, healthy reconcile and `replace_publ
 
 Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was delivered as patches. That hash identifies the generation base. It **does not identify a verified current user/GitHub HEAD**. The original checkout at that hash is not sufficient to resume work. A complete committed checkout must also contain the later code and documents. The generating assistant did not commit or push to the remote repository.
 
-Delivered patch order, for provenance or reconstructing an older checkout:
+The following patch order records past deliveries. Use it only to reconstruct an older checkout:
 
 1. Main-compatible initial implementation: `stage6_main_5a17988.patch` (an earlier initial delivery was named `stage6_initial.patch`; do not apply both).
 2. `stage6_seed_selection_fix.patch`.
@@ -38,7 +38,7 @@ Delivered patch order, for provenance or reconstructing an older checkout:
 10. `stage6_occurrence_addition.patch`.
 11. `stage6_occurrence_addition_mac_verification.patch` (documentation only).
 
-These are delivery filenames, not required runtime files or a promise that patch archives are committed. Do not reapply patches to a checkout already containing their changes. The occurrence-removal and resolved-group-retirement code-patch SHA-256 values are respectively `d01d68c99051c4b26cb08ce8f9ed3a240b44b71d16f5076c684004bfb4f5b0c2` and `0086ae816b52cc23803e93cfc932497920d5efe8811c6040189c56c2b28fda60`.
+These are delivery filenames, not required runtime files or a promise that patch archives are committed. Do not reapply patches when the checkout already contains their changes. The occurrence-removal and resolved-group-retirement code-patch SHA-256 values are respectively `d01d68c99051c4b26cb08ce8f9ed3a240b44b71d16f5076c684004bfb4f5b0c2` and `0086ae816b52cc23803e93cfc932497920d5efe8811c6040189c56c2b28fda60`.
 
 At session start, inspect `git status --short`, `git log -1 --oneline`, the files below and CLI commands. Preserve local changes. After you integrate a delivered update, commit and push the relevant source, tests, schema, dependencies and documents. A fresh GitHub checkout must contain the complete baseline. User-local output stores and downloaded chat archives are not substitutes for committed source.
 
