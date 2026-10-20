@@ -3,7 +3,7 @@
 **Last revised:** 2026-10-19
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
-**Current work:** Stage 6 — steps 1–2 have native fixtures; step 3's multi-source withdrawal path is demonstrated; step 4 includes guarded unchanged-text identity corrections and a captured prefix-edit path with whole-document native rechunking, remapped positions and rebuilt fact evidence. See [the fixture guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md) and [text-edit guide](docs/stage6_identity_text_changes.md). Arbitrary edits, context/meaning reconsideration, dependent-source maintenance and full original-document removal remain lifecycle work. Earlier investigation entries retain historical wording; the reviewed handoff governs the design.
+**Current work:** Stage 6 — steps 1–2 have native fixtures; step 3's multi-source withdrawal path is demonstrated; step 4 includes guarded unchanged-text identity corrections and a captured prefix-edit path with whole-document native rechunking, remapped positions and rebuilt fact evidence, including multi-chunk markers and fact continuations. See [the fixture guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md). Arbitrary edits, context/meaning reconsideration, dependent-source maintenance and full original-document removal remain lifecycle work. Earlier investigation entries retain historical wording; the reviewed handoff governs the design.
 
 This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
 
@@ -20,7 +20,7 @@ This revision reconciles the previously saved roadmap with the later project dis
 | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
 | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
 | 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
-| 6 | In progress | Guarded identity correction and captured prefix-edit/rebuild coordinate saved intent, registered originals/identity Data, graph and evidence; next arbitrary edits, multi-chunk semantic extraction, dependency propagation and original-source lifecycle, then standard wiring |
+| 6 | In progress | Guarded identity correction and captured prefix-edit/rebuild coordinate saved intent, registered originals/identity Data, graph and evidence; multi-chunk marker/evidence maintenance now demonstrated; next arbitrary edits, general extraction, dependency propagation and original-source lifecycle, then standard wiring |
 | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
 
 

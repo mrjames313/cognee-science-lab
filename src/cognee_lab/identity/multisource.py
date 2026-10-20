@@ -7,7 +7,7 @@ from .models import IdentitySource
 from .native import edge_metadata
 from .publish import Publisher, contributions
 from .retrieve import retrieve
-from .validation import IntentError, map_chunks, text_digest
+from .validation import IntentError, text_digest
 
 
 def fixture_id(label):
@@ -45,7 +45,7 @@ def add_lifecycle_records(payload, label, text):
     )
 
 
-async def prepare(root):
+async def prepare(root, *, chunked=False):
     import cognee
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
@@ -56,7 +56,20 @@ async def prepare(root):
             "unsupported_version", "First fixture requires inspected Cognee 1.6.2"
         )
 
-    first, chunks1, ctx1, publisher = await prepare_first(root, multi=True)
+    budget = 9 if chunked else 512
+    text = None
+    if chunked:
+        from .fixture import FIXTURES
+
+        text = (
+            (FIXTURES / "source.txt")
+            .read_text()
+            .replace(". The controller", ", the controller")
+            .replace("; it", ", and it")
+        )
+    first, chunks1, ctx1, publisher = await prepare_first(
+        root, multi=True, chunk_budget=budget, source_text=text
+    )
     payload = first.model_dump(mode="json")
     payload["identity_data_id"] = fixture_id("doc02:identity")
     payload["inputs"]["doc01"]["data_id"] = fixture_id("doc02:original")
@@ -72,17 +85,9 @@ async def prepare(root):
         skip_connection_test=True,
     )
     ctx2 = await context_for(fixture_id("doc02:original"))
-    chunks2 = await load_chunks(None, ctx2)
+    chunks2 = await load_chunks(None, ctx2, budget=budget)
     await add_data_points(chunks2, ctx=ctx2)
-    if len(chunks2) != 1:
-        raise IntentError(
-            "fixture_shape", "Two-source example expects one chunk per document"
-        )
-    start, end = map_chunks(text, chunks2)[str(chunks2[0].id)]
     payload["inputs"]["doc01"]["text_sha256"] = text_digest(text)
-    payload["inputs"]["chunk01"].update(
-        chunk_id=str(chunks2[0].id), start=start, end=end
-    )
     old_mid = str(first.mention_groups["g01"].entity_id)
     new_mid = fixture_id("doc02:mention")
     payload["entity_constructions"][new_mid] = payload["entity_constructions"].pop(
@@ -92,6 +97,9 @@ async def prepare(root):
     for key in [fixture_id("doc01:singleton"), fixture_id("doc01:unresolved")]:
         payload["entity_constructions"].pop(key)
     add_lifecycle_records(payload, "doc02", text)
+    from .captured_chunks import bind_chunks
+
+    bind_chunks(payload, text, chunks2)
     second = IdentitySource.model_validate_json(json.dumps(payload))
     (root / "identity02.json").write_text(second.model_dump_json(indent=2) + "\n")
     await cognee.add(
@@ -104,6 +112,10 @@ async def prepare(root):
         sources={"doc01": "identity.json", "doc02": "identity02.json"},
     )
     (root / "multi-fixture-info.json").write_text(json.dumps(info, indent=2))
+    if chunked:
+        (root / "chunked-fixture-info.json").write_text(
+            json.dumps(dict(chunk_budget=budget, prefix="Δ review: "), indent=2)
+        )
     return publisher, {
         "doc01": (first, chunks1, ctx1),
         "doc02": (second, chunks2, ctx2),
@@ -184,6 +196,9 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
+    from .captured_chunks import fact_chunks
+    from .models import ChunkInput
+    from types import SimpleNamespace
 
     first = sources["doc01"]
     # Keep the original shared edge/controller visible after doc01 retargets.
@@ -222,14 +237,57 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         registered = await read_registered(source)
         mid = source.mention_groups["g01"].entity_id
         unresolved = source.mention_groups["g02"].entity_id
-        chunk = source.inputs["chunk01"].chunk_id
+        group = source.mention_groups["g01"]
+        mapped = [i for i in source.inputs.values() if isinstance(i, ChunkInput)]
+        chunks = []
+        for item in mapped:
+            node = await publisher.graph.get_node(str(item.chunk_id))
+            if node is not None:
+                chunks.append(
+                    SimpleNamespace(
+                        id=item.chunk_id,
+                        chunk_index=node["chunk_index"],
+                        text=node["text"],
+                    )
+                )
+        selected = fact_chunks(source, chunks)
         doc = source.inputs[source.original_input_ref]
         fact = await edge_metadata(publisher.graph, mid, OSCILLATIONS_ID, "limits")
-        ref = make_chunk_source_ref_key(source.dataset_id, doc.data_id, chunk)
+        refs = {
+            make_chunk_source_ref_key(source.dataset_id, doc.data_id, c.id)
+            for c in selected
+        }
         evidence = await get_edge_evidence_records(
             [UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))],
             source.dataset_id,
+            per_edge_limit=100,
+            total_limit=100,
         )
+        chunk_checks = []
+        for i in mapped:
+            node = next(c for c in chunks if c.id == i.chunk_id)
+            chunk_ref = make_chunk_source_ref_key(
+                source.dataset_id, doc.data_id, i.chunk_id
+            )
+            chunk_checks.append(
+                dict(
+                    chunk_id=str(i.chunk_id),
+                    start=i.start,
+                    end=i.end,
+                    chunk_index=node.chunk_index,
+                    mention_marker_present=await publisher.graph.has_edge(
+                        str(i.chunk_id), str(mid), "has_identity_mention"
+                    ),
+                    owns_captured_fact=fact is not None
+                    and chunk_ref in fact.source_ref_keys,
+                    evidence_present=any(
+                        e.data_id == doc.data_id
+                        and e.chunk_id == i.chunk_id
+                        and e.chunk_index == node.chunk_index
+                        for e in evidence
+                    ),
+                )
+            )
         result["sources"][label] = dict(
             identity_data_id=str(source.identity_data_id),
             state=rows[str(source.identity_data_id)]["state"],
@@ -241,19 +299,34 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
                 source.mention_resolutions["r01"].target_entity_id
             ),
             mention_entity_id=str(mid),
-            original_marker_present=await publisher.graph.has_edge(
-                str(chunk), str(mid), "has_identity_mention"
+            original_marker_present=all(
+                [
+                    await publisher.graph.has_edge(
+                        str(source.inputs[k].chunk_id), str(mid), "has_identity_mention"
+                    )
+                    for k in group.chunk_refs
+                ]
             ),
             original_fact_present=await publisher.graph.has_edge(
                 str(mid), str(OSCILLATIONS_ID), "limits"
             ),
             original_fact_owned_by_chunk=fact is not None
-            and ref in fact.source_ref_keys,
-            original_evidence_present=any(
-                e.data_id == doc.data_id and e.chunk_id == chunk for e in evidence
-            ),
-            unresolved_marker_present=await publisher.graph.has_edge(
-                str(chunk), str(unresolved), "has_identity_mention"
+            and refs <= set(fact.source_ref_keys),
+            original_evidence_present={
+                (e.chunk_id, e.chunk_index)
+                for e in evidence
+                if e.data_id == doc.data_id
+            }
+            == {(c.id, c.chunk_index) for c in selected},
+            unresolved_marker_present=all(
+                [
+                    await publisher.graph.has_edge(
+                        str(source.inputs[k].chunk_id),
+                        str(unresolved),
+                        "has_identity_mention",
+                    )
+                    for k in source.mention_groups["g02"].chunk_refs
+                ]
             ),
             unresolved_entity_present=await publisher.graph.get_node(str(unresolved))
             is not None,
@@ -266,6 +339,12 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
                     "Entity_name", [fixture_id(label + ":singleton")]
                 )
             ),
+            chunk_count=len(mapped),
+            chunk_mapping=chunk_checks,
+            mention_marker_chunk_ids=[
+                str(source.inputs[k].chunk_id) for k in group.chunk_refs
+            ],
+            fact_evidence_chunk_ids=[str(c.id) for c in selected],
         )
     for row in rows.values():
         if row["plan"].get("text_change") and row["state"] == "current":
@@ -280,8 +359,10 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
 async def run(args, root):
     from .fixture import context_for, load_chunks
 
-    if args.command == "multi-fixture":
-        publisher, prepared = await prepare(root)
+    if args.command in {"multi-fixture", "chunked-fixture"}:
+        publisher, prepared = await prepare(
+            root, chunked=args.command == "chunked-fixture"
+        )
         args._fixture_publisher = publisher
         sources = {label: value[0] for label, value in prepared.items()}
         for label, (source, chunks, ctx) in prepared.items():

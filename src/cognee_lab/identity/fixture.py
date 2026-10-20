@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from .models import IdentitySource
 from .publish import Publisher
 from .retrieve import retrieve
-from .validation import IntentError, map_chunks
+from .validation import IntentError
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tests/fixtures/identity"
 SEED_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:seed-document")
@@ -34,9 +34,18 @@ async def context_for(data_id):
     )
 
 
-async def load_chunks(source, ctx):
+async def load_chunks(source, ctx, *, budget=None):
     from cognee.modules.chunking.TextChunker import TextChunker
     from cognee.modules.data.processing.document_types import TextDocument
+
+    if budget is None:
+        if source is None:
+            budget = 512
+        else:
+            from cognee.infrastructure.databases.graph import get_graph_engine
+            from .captured_chunks import recorded_budget
+
+            budget = await recorded_budget(source, await get_graph_engine())
 
     doc = TextDocument(
         id=ctx.data_item.id,
@@ -45,23 +54,33 @@ async def load_chunks(source, ctx):
         external_metadata=None,
     )
     return [
-        chunk async for chunk in doc.read(chunker_cls=TextChunker, max_chunk_size=512)
+        chunk
+        async for chunk in doc.read(chunker_cls=TextChunker, max_chunk_size=budget)
     ]
 
 
 async def write_semantics(publisher, source, chunks, ctx):
+    from cognee.modules.provenance.edge_evidence.persistence import (
+        flush_context_provenance,
+    )
+
+    from .captured_chunks import fact_chunks
+
+    selected = fact_chunks(source, chunks)
+    group = source.mention_groups["g01"]
+    for chunk in selected:
+        await write_fact_chunk(publisher, source, chunk, group, ctx)
+    await flush_context_provenance(ctx)
+
+
+async def write_fact_chunk(publisher, source, chunk, group, ctx):
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.modules.engine.models import Entity
     from cognee.modules.graph.utils import ensure_default_edge_properties
     from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
-    from cognee.modules.provenance.edge_evidence.persistence import (
-        flush_context_provenance,
-    )
     from cognee.tasks.storage.index_data_points import index_data_points
     from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
-    chunk = chunks[0]
-    group = source.mention_groups["g01"]
     ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunk.id)
     target = await publisher.graph.get_node(str(OSCILLATIONS_ID))
     if target is None:
@@ -98,13 +117,13 @@ async def write_semantics(publisher, source, chunks, ctx):
     chunk._produced_edge_identities = [(edge[0], edge[1], edge[2])]
     chunk._provenance_edges = edges
     await capture_graph_provenance([chunk], [*edges, *contained], ctx)
-    await flush_context_provenance(ctx)
 
 
 async def verify_semantics(publisher, source, chunks, ctx):
     from cognee.infrastructure.databases.provenance import (
         EdgeIdentity,
         make_chunk_source_ref_key,
+        parse_source_ref_key,
     )
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
@@ -112,25 +131,44 @@ async def verify_semantics(publisher, source, chunks, ctx):
     mid = str(source.mention_groups["g01"].entity_id)
     identity = EdgeIdentity(mid, str(OSCILLATIONS_ID), "limits")
     metadata = (await publisher.graph.get_edge_delete_data([identity])).get(identity)
-    ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunks[0].id)
-    if metadata is None or ref not in metadata.source_ref_keys:
+    from .captured_chunks import fact_chunks
+
+    expected = fact_chunks(source, chunks)
+    refs = {
+        make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, c.id)
+        for c in expected
+    }
+    own_refs = set()
+    if metadata is not None:
+        for ref in metadata.source_ref_keys:
+            parsed = parse_source_ref_key(ref)
+            if (
+                parsed.dataset_id == source.dataset_id
+                and parsed.data_id == ctx.data_item.id
+            ):
+                own_refs.add(ref)
+    if metadata is None or own_refs != refs:
         raise IntentError(
             "semantic_missing",
             "Original-chunk fact ownership missing; explicitly rebuild",
         )
     eid = UUID(generate_edge_object_id(mid, str(OSCILLATIONS_ID), "limits"))
-    evidence = await get_edge_evidence_records([eid], source.dataset_id)
-    if not any(
-        e.data_id == ctx.data_item.id and e.chunk_id == chunks[0].id for e in evidence
-    ):
+    evidence = await get_edge_evidence_records(
+        [eid], source.dataset_id, per_edge_limit=100, total_limit=100
+    )
+    own = {
+        (e.chunk_id, e.chunk_index) for e in evidence if e.data_id == ctx.data_item.id
+    }
+    if own != {(c.id, c.chunk_index) for c in expected}:
         raise IntentError(
             "evidence_missing", "Native original evidence missing; explicitly rebuild"
         )
-    if not await publisher.vector.retrieve("DocumentChunk_text", [str(chunks[0].id)]):
-        raise IntentError("verify_index", "Original chunk vector missing")
+    for chunk in chunks:
+        if not await publisher.vector.retrieve("DocumentChunk_text", [str(chunk.id)]):
+            raise IntentError("verify_index", "Original chunk vector missing")
 
 
-async def prepare(root, *, multi=False):
+async def prepare(root, *, multi=False, chunk_budget=512, source_text=None):
     import cognee
     from cognee.modules.engine.models import Entity
     from cognee.tasks.ingestion.data_item import DataItem
@@ -141,7 +179,28 @@ async def prepare(root, *, multi=False):
     )
     original_id = UUID(template["inputs"]["doc01"]["data_id"])
     generated_id = UUID(template["identity_data_id"])
-    (root / "source.txt").write_bytes((FIXTURES / "source.txt").read_bytes())
+    text = (
+        source_text
+        if source_text is not None
+        else (FIXTURES / "source.txt").read_text()
+    )
+    (root / "source.txt").write_text(text)
+    if source_text is not None:
+        from .validation import text_digest
+
+        template["inputs"]["doc01"]["text_sha256"] = text_digest(text)
+        template["mention_groups"]["g01"]["occurrences"] = [
+            dict(
+                start=text.index("the controller"),
+                end=text.index("the controller") + len("the controller"),
+                text="the controller",
+            ),
+            dict(
+                start=text.index("it limits"),
+                end=text.index("it limits") + 2,
+                text="it",
+            ),
+        ]
     (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
     await cognee.add(
         [
@@ -167,19 +226,14 @@ async def prepare(root, *, multi=False):
     await publisher.graph.update_node(str(a), {"fixture_sentinel": "preserve me"})
     # Deliberately different creation values must not overwrite a borrowed node.
     recipe["description"] = "Creation seed only; never overwrite an existing Entity."
-    chunks = await load_chunks(None, original_ctx)
-    if len(chunks) != 1:
-        raise IntentError("fixture_shape", "Tiny fixture expected one native chunk")
-    text = (root / "source.txt").read_text()
-    mapping = map_chunks(text, chunks)
-    start, end = mapping[str(chunks[0].id)]
-    template["inputs"]["chunk01"].update(
-        chunk_id=str(chunks[0].id), start=start, end=end
-    )
+    chunks = await load_chunks(None, original_ctx, budget=chunk_budget)
     if multi:
         from .multisource import add_lifecycle_records
 
         add_lifecycle_records(template, "doc01", text)
+    from .captured_chunks import bind_chunks
+
+    bind_chunks(template, text, chunks)
     await add_data_points(chunks, ctx=original_ctx)
     source = IdentitySource.model_validate_json(json.dumps(template))
     (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
@@ -211,11 +265,8 @@ async def run(args, root):
         source = IdentitySource.model_validate_json(
             (root / "identity.json").read_text()
         )
-        original_ctx = await context_for(
-            source.inputs[source.original_input_ref].data_id
-        )
-        chunks = await load_chunks(source, original_ctx)
         publisher = await Publisher.configured()
+        original_ctx, chunks = None, None
     dataset_id = source.dataset_id
     args._fixture_publisher = publisher
     if args.command == "status":
@@ -225,6 +276,11 @@ async def run(args, root):
         )
     if args.command == "retrieve":
         return await retrieve(publisher, dataset_id, args.query)
+    if chunks is None:
+        original_ctx = await context_for(
+            source.inputs[source.original_input_ref].data_id
+        )
+        chunks = await load_chunks(source, original_ctx)
 
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task

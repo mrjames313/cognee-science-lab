@@ -34,12 +34,12 @@ Status: planned
 Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
 
 ### Stage 6 — Custom pipeline and intermediate representations
-Status: deterministic publication/retrieval, shared-source withdrawal, unchanged-text identity correction and a captured source-text edit/rebuild implemented; broader integration in progress
+Status: deterministic publication/retrieval, shared-source withdrawal, unchanged-text identity correction and captured source-text edits with multi-chunk provenance implemented; broader integration in progress
 Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
 
 See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/two-source fixtures, selected identity-source withdrawal, focused tests, recovery-event visibility and remaining boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
 
-Step 4 includes [guarded identity corrections](docs/stage6_identity_revision_replacement.md) and [captured source-text edits](docs/stage6_identity_text_changes.md). The text-edit slice remaps document positions, rebuilds native chunks/facts/evidence, preserves independent sources and explicitly recovers caught failures. Arbitrary edits, dependency propagation and standard Update wiring remain incomplete.
+Step 4 includes [guarded identity corrections](docs/stage6_identity_revision_replacement.md) and [captured source-text edits](docs/stage6_identity_text_changes.md). The text-edit slice remaps document positions, rebuilds native chunks/facts/evidence, preserves independent sources and explicitly recovers caught failures. The [multi-chunk checkpoint](docs/stage6_identity_multichunk.md) adds split occurrences, complete fact-continuation evidence, changing boundaries and repeated edits. Arbitrary edits, dependency propagation and standard Update wiring remain incomplete.
 
 
 ## Setup and running the code

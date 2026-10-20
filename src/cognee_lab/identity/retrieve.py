@@ -308,16 +308,16 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
                 )
                 if subject in mentions:
                     group, decision, key = mentions[subject]
-                    # Native evidence is per chunk; ensure it actually covers this
-                    # group, not a context-only passage.
+                    # At least one supporting chunk must cover an occurrence.
+                    # Additional checked chunks can hold the rest of the fact.
                     allowed_chunks = {
                         str(source.inputs[k].chunk_id) for k in group.chunk_refs
                     }
-                    entry["evidence"] = [
-                        e for e in checked if e["chunk_id"] in allowed_chunks
-                    ]
-                    if not entry["evidence"]:
+                    if not any(e["chunk_id"] in allowed_chunks for e in checked):
                         continue
+                    # A captured fact can span a marker chunk and a continuation
+                    # chunk. Keep its checked native-owned evidence together;
+                    # continuation evidence does not create a mention marker.
                     entry["identity"] = dict(
                         state="accepted",
                         target_entity_id=str(decision.target_entity_id),

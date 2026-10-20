@@ -7,12 +7,12 @@ from .models import ChunkInput, IdentitySource
 from .multisource import current_sources, snapshot
 from .publish import Publisher
 from .text_changes import TextChange, chunk_text, original_context, read_original
-from .validation import IntentError, map_chunks, text_digest
+from .validation import IntentError, text_digest
 
 PREFIX = "Revision note: Δ calibration schedule updated.\n\n"
 
 
-def describe_prefix_edit(old, text, chunks):
+def describe_prefix_edit(old, text, chunks, *, prefix=PREFIX):
     """Exact remapping for a known edit, with captured review of all local groups.
 
     Not a general Describe algorithm: no nearest-text matching, implicit identity
@@ -22,15 +22,6 @@ def describe_prefix_edit(old, text, chunks):
     payload["revision"] += 1
     key = old.original_input_ref
     payload["inputs"][key]["text_sha256"] = text_digest(text)
-    payload["inputs"] = {
-        k: v for k, v in payload["inputs"].items() if v["kind"] != "chunk"
-    }
-    spans = map_chunks(text, chunks)
-    for i, chunk in enumerate(sorted(chunks, key=lambda c: c.chunk_index), 1):
-        start, end = spans[str(chunk.id)]
-        payload["inputs"][f"chunk{i:02}"] = dict(
-            kind="chunk", document_ref=key, chunk_id=str(chunk.id), start=start, end=end
-        )
     payload["producers"]["text_review"] = dict(
         method="captured_fixture",
         implementation="stage6-captured-prefix-edit",
@@ -40,23 +31,17 @@ def describe_prefix_edit(old, text, chunks):
     )
     for group in payload["mention_groups"].values():
         for occurrence in group["occurrences"]:
-            occurrence["start"] += len(PREFIX)
-            occurrence["end"] += len(PREFIX)
-        group["chunk_refs"] = [
-            k
-            for k, item in payload["inputs"].items()
-            if item["kind"] == "chunk"
-            and any(
-                o["start"] < item["end"] and item["start"] < o["end"]
-                for o in group["occurrences"]
-            )
-        ]
+            occurrence["start"] += len(prefix)
+            occurrence["end"] += len(prefix)
         group["producer_ref"] = "text_review"
     for item in [
         *payload["mention_resolutions"].values(),
         *payload["variant_assignments"].values(),
     ]:
         item["producer_ref"] = "text_review"
+    from .captured_chunks import bind_chunks
+
+    bind_chunks(payload, text, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
@@ -89,11 +74,6 @@ async def maintain_one(
     generated = await context_for(source.identity_data_id)
     original = await original_context(source, generated)
     prepared = await chunk_text(change.text, original, change.chunk_budget)
-    # This tiny captured fact writer is intentionally limited to a single chunk.
-    if len(prepared) != 1:
-        raise IntentError(
-            "fixture_shape", "Captured text fixture expects one native chunk"
-        )
     chunks = {str(c.id): c for c in prepared}
 
     async def write():
@@ -193,6 +173,18 @@ async def transition_summary(publisher, row):
             g.entity_id == old.mention_groups[k].entity_id
             for k, g in source.mention_groups.items()
         ),
+        chunk_budget=change.chunk_budget,
+        previous_chunk_mapping=[
+            dict(chunk_id=str(i.chunk_id), start=i.start, end=i.end)
+            for i in old.inputs.values()
+            if isinstance(i, ChunkInput)
+        ],
+        chunk_mapping=[
+            dict(chunk_id=str(i.chunk_id), start=i.start, end=i.end)
+            for i in source.inputs.values()
+            if isinstance(i, ChunkInput)
+        ],
+        content_ids_present_in_both=sorted(old_ids & new_ids),
         groups={
             k: dict(
                 previous_occurrences=[
@@ -200,6 +192,11 @@ async def transition_summary(publisher, row):
                 ],
                 occurrences=[o.model_dump() for o in g.occurrences],
                 chunk_refs=g.chunk_refs,
+                previous_marker_chunk_ids=[
+                    str(old.inputs[k].chunk_id)
+                    for k in old.mention_groups[k].chunk_refs
+                ],
+                marker_chunk_ids=[str(source.inputs[k].chunk_id) for k in g.chunk_refs],
             )
             for k, g in source.mention_groups.items()
         },
@@ -231,11 +228,20 @@ async def run(args, root):
 
     ctx = await context_for(old.identity_data_id)
     before = await read_original(old, ctx)
-    change = TextChange(previous_text=before, text=PREFIX + before)
+    from .captured_chunks import recorded_budget
+
+    prefix = PREFIX
+    if (root / "chunked-fixture-info.json").exists():
+        prefix = json.loads((root / "chunked-fixture-info.json").read_text())["prefix"]
+    change = TextChange(
+        previous_text=before,
+        text=prefix + before,
+        chunk_budget=await recorded_budget(old, publisher.graph),
+    )
     chunks = await chunk_text(
         change.text, await original_context(old, ctx), change.chunk_budget
     )
-    intended = describe_prefix_edit(old, change.text, chunks)
+    intended = describe_prefix_edit(old, change.text, chunks, prefix=prefix)
     (root / f"identity_doc01_text_revision{intended.revision}.json").write_text(
         intended.model_dump_json(indent=2) + "\n"
     )

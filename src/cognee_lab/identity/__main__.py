@@ -57,6 +57,7 @@ def main():
         choices=[
             "fixture",
             "multi-fixture",
+            "chunked-fixture",
             "revise",
             "edit-text",
             "withdraw",
@@ -118,7 +119,7 @@ def main():
             and args.fault_stage.startswith(("withdraw_", "replace_"))
         ):
             parser.error("Fault stage does not match the selected operation")
-    if args.command in {"fixture", "multi-fixture"}:
+    if args.command in {"fixture", "multi-fixture", "chunked-fixture"}:
         if root.exists():
             parser.error("Fixture root already exists; choose a new directory")
         root.mkdir(parents=True, exist_ok=False)
@@ -133,7 +134,7 @@ def main():
             from .text_fixture import run
         elif args.command == "revise":
             from .revisions import run
-        elif args.command in {"multi-fixture", "withdraw"} or (
+        elif args.command in {"multi-fixture", "chunked-fixture", "withdraw"} or (
             args.command == "reconcile" and (root / "multi-fixture-info.json").exists()
         ):
             from .multisource import run
