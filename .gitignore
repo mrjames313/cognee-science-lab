@@ -12,3 +12,4 @@ outputs/*
 .cognee_cache/
 .obsidian/
 .claude/settings.local.json
+*.egg-info/
