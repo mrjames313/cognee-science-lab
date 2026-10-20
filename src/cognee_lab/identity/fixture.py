@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from .environment import read_embedding
 from .models import IdentitySource
 from .publish import Publisher
 from .retrieve import retrieve
@@ -346,9 +347,7 @@ async def run(args, root):
         cognee_version=cognee.__version__,
         fixture_root=str(root),
         profile="native configured stores; no LLM",
-        embedding=json.loads((root / "stage6-fixture.json").read_text()).get(
-            "embedding"
-        ),
+        embedding=read_embedding(root),
         result=answer,
         recovery_events=await publisher.records.events(dataset_id),
     )

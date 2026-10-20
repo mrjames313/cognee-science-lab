@@ -37,6 +37,11 @@ def test_native_publish_query_and_idempotent_reconcile(tmp_path):
     root = tmp_path / "native"
     command(root, "fixture")
     first = json.loads((root / "result.json").read_text())
+    assert first["embedding"] == {
+        "profile": "loopback",
+        "model": "text-embedding-3-small",
+        "dimensions": 64,
+    }
     fact = next(f for f in first["result"]["facts"] if f["relationship"] == "limits")
     assert fact["source_id"] == "233cb019-3986-5864-88bc-91f334a64372"
     assert (
@@ -58,7 +63,7 @@ def test_native_publish_query_and_idempotent_reconcile(tmp_path):
 import asyncio,json,sys
 from pathlib import Path
 from uuid import UUID
-from cognee_lab.identity.__main__ import fixture_environment
+from cognee_lab.identity.environment import fixture_environment
 root=Path(sys.argv[1])
 with fixture_environment(root):
  from cognee_lab.identity.publish import Publisher

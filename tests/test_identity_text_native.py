@@ -158,7 +158,7 @@ def test_native_missing_endpoint_owner_is_refused_before_memory_removal(tmp_path
 import asyncio,sys
 from pathlib import Path
 from uuid import UUID
-from cognee_lab.identity.__main__ import fixture_environment
+from cognee_lab.identity.environment import fixture_environment
 root=Path(sys.argv[1])
 with fixture_environment(root):
  from cognee_lab.identity.publish import Publisher

@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import subprocess
@@ -7,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from cognee_lab.identity.environment import MARKER, MARKER_KIND
+
 REPO = Path(__file__).resolve().parents[1]
-MARKER = "stage6-fixture.json"
 OPERATOR = {
     "EMBEDDING_PROVIDER": "openai_compatible",
     "EMBEDDING_MODEL": "operator-model",
@@ -27,9 +29,9 @@ LOOPBACK_RECORD = {
     "dimensions": 64,
 }
 RESOLVE = """
-import json,sys
+import json,os,sys
 from pathlib import Path
-from cognee_lab.identity.__main__ import fixture_environment
+from cognee_lab.identity.environment import fixture_environment
 with fixture_environment(Path(sys.argv[1])):
  import cognee
  from cognee.base_config import get_base_config
@@ -40,7 +42,8 @@ with fixture_environment(Path(sys.argv[1])):
   data=base.data_root_directory,system=base.system_root_directory,
   cache=base.cache_root_directory,model=embedding.embedding_model,
   dimensions=embedding.embedding_dimensions,endpoint=embedding.embedding_endpoint,
-  tokenizer=embedding.huggingface_tokenizer,llm_key=llm.llm_api_key)))
+  tokenizer=embedding.huggingface_tokenizer,llm_key=llm.llm_api_key,
+  env_file=os.environ["COGNEE_ENV_FILE"])))
 """
 
 
@@ -80,14 +83,14 @@ def operator_env(tmp_path, **overrides) -> Path:
 def fixture_root(tmp_path, embedding=None) -> Path:
     root = tmp_path / "root"
     root.mkdir()
-    marker = {"kind": "stage6-isolated-fixture"}
+    marker = {"kind": MARKER_KIND}
     if embedding is not None:
         marker["embedding"] = embedding
     (root / MARKER).write_text(json.dumps(marker))
     return root
 
 
-def run(args, env_file):
+def run(args, env_file, timeout=120):
     # Cognee loads its env file once per process, so each case gets a fresh one.
     return subprocess.run(
         [sys.executable, *args],
@@ -95,7 +98,7 @@ def run(args, env_file):
         env=os.environ | {"COGNEE_ENV_FILE": str(env_file)},
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=timeout,
     )
 
 
@@ -132,16 +135,89 @@ def test_loopback_profile_uses_local_embeddings(tmp_path):
     assert config["llm_key"] == "fixture"
 
 
-def test_env_creation_without_operator_embeddings_leaves_no_root(tmp_path):
+def test_pre_profile_root_loads_the_operator_env_file(tmp_path):
+    env_file = operator_env(tmp_path)
+    config = resolved(fixture_root(tmp_path), env_file)
+    assert config["data"] == "/decoy/data"
+    assert config["env_file"] == str(env_file)
+
+
+def test_env_creation_records_the_operator_profile_and_no_secret(tmp_path):
     root = tmp_path / "root"
-    env_file = operator_env(tmp_path, EMBEDDING_MODEL=None)
+    # The marker is written before the first embedding call. Cognee retries the
+    # decoy endpoint for minutes, so a timeout or any exit code is acceptable.
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        run(
+            ["-m", "cognee_lab.identity", "fixture", "--root", str(root)],
+            operator_env(tmp_path),
+            timeout=30,
+        )
+    marker = json.loads((root / MARKER).read_text())
+    assert marker == {"kind": MARKER_KIND, "embedding": ENV_RECORD}
+    on_disk = [p for p in root.rglob("*") if p.is_file()]
+    assert not any("operator-secret" in p.read_text(errors="ignore") for p in on_disk)
+
+
+@pytest.mark.parametrize(
+    "overrides, messages",
+    [
+        (
+            {"EMBEDDING_MODEL": None},
+            ["does not set EMBEDDING_MODEL", "--embedding loopback"],
+        ),
+        ({"EMBEDDING_MODEL": ""}, ["does not set EMBEDDING_MODEL"]),
+        (
+            {"EMBEDDING_DIMENSIONS": "many"},
+            ["operator.env sets EMBEDDING_DIMENSIONS to 'many'", "not an integer"],
+        ),
+    ],
+)
+def test_env_creation_with_bad_operator_embeddings_leaves_no_root(
+    tmp_path, overrides, messages
+):
+    root = tmp_path / "root"
     result = run(
-        ["-m", "cognee_lab.identity", "fixture", "--root", str(root)], env_file
+        ["-m", "cognee_lab.identity", "fixture", "--root", str(root)],
+        operator_env(tmp_path, **overrides),
     )
     assert result.returncode == 2
-    assert "does not set EMBEDDING_MODEL" in result.stderr
-    assert "--embedding loopback" in result.stderr
+    for message in messages:
+        assert message in result.stderr
+    assert "operator-secret" not in result.stderr
+    assert "operator-model" not in result.stderr
     assert not root.exists()
+
+
+def test_creation_refuses_a_cognee_env_file_that_names_no_file(tmp_path):
+    root = tmp_path / "root"
+    absent = tmp_path / "absent.env"
+    result = run(["-m", "cognee_lab.identity", "fixture", "--root", str(root)], absent)
+    assert result.returncode == 2
+    assert f"COGNEE_ENV_FILE={absent} does not name a file" in result.stderr
+    assert not root.exists()
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not json",
+        json.dumps({"kind": MARKER_KIND, "embedding": {**ENV_RECORD, "profile": "x"}}),
+        json.dumps(
+            {"kind": MARKER_KIND, "embedding": {**ENV_RECORD, "dimensions": "2048"}}
+        ),
+        json.dumps({"kind": MARKER_KIND, "embedding": {"profile": "loopback"}}),
+    ],
+)
+def test_reopen_refuses_a_malformed_marker(tmp_path, marker):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / MARKER).write_text(marker)
+    result = run(
+        ["-m", "cognee_lab.identity", "status", "--root", str(root)],
+        operator_env(tmp_path),
+    )
+    assert result.returncode == 2
+    assert "Root marker embedding record is malformed" in result.stderr
 
 
 @pytest.mark.parametrize(
