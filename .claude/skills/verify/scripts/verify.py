@@ -21,14 +21,23 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 from datetime import datetime, timezone
+from importlib.metadata import version as package_version
 from pathlib import Path
+
+from dotenv import dotenv_values
+
+from cognee_lab.identity.environment import read_embedding
 
 REPO = Path(__file__).resolve().parents[4]
 RUNS = REPO / "outputs" / "verify"
 CLI = [sys.executable, "-m", "cognee_lab.identity"]
 EXPECTED_COGNEE = "1.6.2"
+CREATING = {"fixture", "multi-fixture", "chunked-fixture"}
+ENV_EMBEDDING_KEYS = ("EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS")
+TOKENIZER_PATCH = REPO / "patches" / "cognee-1.6.2-openai-compatible-tokenizer.patch"
 
 
 def fail(message):
@@ -81,16 +90,50 @@ def new_run(args):
     print(run.relative_to(REPO))
 
 
+def root_embedding(root):
+    """The marker's embedding record, or a string that names why it is unusable."""
+    try:
+        record = read_embedding(root)
+    except ValueError as exc:
+        return f"malformed: {exc}"
+    return record or "pre-profile root: no embedding record"
+
+
+def env_file_key_status():
+    """Which required embedding keys the env file sets non-empty. Names only, never values."""
+    named = os.environ.get("COGNEE_ENV_FILE", "").strip()
+    source = Path(named).expanduser() if named else REPO / ".env"
+    values = dotenv_values(source) if source.is_file() else {}
+    return {
+        "env_file": "COGNEE_ENV_FILE" if named else ".env",
+        "env_file_exists": source.is_file(),
+        "keys_set": {
+            key: bool((values.get(key) or "").strip()) for key in ENV_EMBEDDING_KEYS
+        },
+    }
+
+
+def tokenizer_fix_state():
+    """Reverse dry-run of the tokenizer patch; never applies or reverts it."""
+    result = subprocess.run(
+        ["patch", "-p1", "-R", "--dry-run", "-i", str(TOKENIZER_PATCH)],
+        capture_output=True,
+        text=True,
+        cwd=sysconfig.get_paths()["purelib"],
+    )
+    return "applied" if result.returncode == 0 else "not applied"
+
+
 def doctor(args):
     checks = {}
+    warnings = []
     checks["repo_root"] = (REPO / "src/cognee_lab/identity/__main__.py").exists()
     checks["python_3_12"] = sys.version_info[:2] == (3, 12)
     try:
-        import cognee
-
-        checks["cognee_version"] = cognee.__version__
+        # Metadata only: importing cognee would load the lab .env.
+        checks["cognee_version"] = package_version("cognee")
     except Exception as exc:  # report, don't crash the doctor
-        checks["cognee_version"] = f"import failed: {exc}"
+        checks["cognee_version"] = f"not installed: {exc}"
     checks["cognee_is_1_6_2"] = checks["cognee_version"] == EXPECTED_COGNEE
     checks["jq_available"] = shutil.which("jq") is not None
     checks["cli_parses"] = (
@@ -104,10 +147,28 @@ def doctor(args):
             p.name: (p / "stage6-fixture.json").exists() for p in roots
         }
         checks["roots_are_fixtures"] = all(checks["roots"].values())
+        checks["root_embeddings"] = {p.name: root_embedding(p) for p in roots}
+        checks["roots_record_embedding"] = all(
+            isinstance(record, dict) for record in checks["root_embeddings"].values()
+        )
+        if any(
+            isinstance(r, dict) and r["profile"] == "env"
+            for r in checks["root_embeddings"].values()
+        ):
+            checks["env_embedding_file"] = env_file_key_status()
+            checks["env_embedding_keys_set"] = all(
+                checks["env_embedding_file"]["keys_set"].values()
+            )
+            checks["tokenizer_fix"] = tokenizer_fix_state()
+            if checks["tokenizer_fix"] != "applied":
+                warnings.append(
+                    "tokenizer fix is not applied; env roots fall back to an approximate "
+                    "tokenizer (see patches/README.md). Loopback runs are unaffected."
+                )
         checks["live_cli_pids"] = live_cli_processes(run)
         checks["no_live_cli"] = not checks["live_cli_pids"]
     ok = all(v for k, v in checks.items() if isinstance(v, bool))
-    print(json.dumps(dict(ok=ok, **checks), indent=2))
+    print(json.dumps(dict(ok=ok, warnings=warnings, **checks), indent=2))
     raise SystemExit(0 if ok else 1)
 
 
@@ -130,6 +191,11 @@ def drive(args):
         fail("give the CLI command after --, e.g. -- chunked-fixture")
     if "--root" in cli_args:
         fail("drive adds --root itself; name the root with the ROOT argument")
+    if CREATING & set(cli_args) and not any(
+        a == "--embedding" or a.startswith("--embedding=") for a in cli_args
+    ):
+        # The CLI default is env, which calls the embedding API. Verify offline unless asked.
+        cli_args = [*cli_args, "--embedding", "loopback"]
     root = run / "roots" / args.root
     command = CLI + cli_args + ["--root", str(root)]
     n = len(evidence_steps(run)) + 1
