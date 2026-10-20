@@ -345,7 +345,10 @@ async def run(args, root):
     result = dict(
         cognee_version=cognee.__version__,
         fixture_root=str(root),
-        profile="native configured stores; local deterministic embedding service; no LLM",
+        profile="native configured stores; no LLM",
+        embedding=json.loads((root / "stage6-fixture.json").read_text()).get(
+            "embedding"
+        ),
         result=answer,
         recovery_events=await publisher.records.events(dataset_id),
     )
