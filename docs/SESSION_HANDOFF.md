@@ -4,7 +4,7 @@
 
 ## Objective and reading order
 
-Build a methodology for integrating structured knowledge into Cognee through **Describe, Publish, Maintain and Retrieve**. Identity is the first worked integration. Carry demonstrated mechanisms and tests forward to other domains, such as scientific measurements, while keeping each domain's meaning and rules explicit. Scientific justification/reasoning is outside this implementation's scope.
+Develop a method to integrate structured knowledge into Cognee. The method has four operations: **Describe, Publish, Maintain and Retrieve**. Identity is the first worked example. Use the demonstrated mechanisms and tests when examining other domains, including scientific measurements. Keep each domain's meaning and rules explicit. This implementation does not provide scientific justification or scientific reasoning.
 
 Read this document first, then:
 
@@ -18,11 +18,11 @@ The [representation decision record](../results/cognee_stage5_4_5_identity_repre
 
 ## Code baseline and delivery status
 
-Runtime code is in `src/cognee_lab/identity/`. Implemented code includes **captured occurrence additions and new-group publication**, following resolved fact-bearing group retirement. No split/combine, automatic Describe, dependent-source reconsideration or standard-entry-point extension has been generated. The addition update extends transition admission, captured semantic output, diagnostics, CLI commands and tests; the saved-source schema and dependencies are unchanged.
+Runtime code is in `src/cognee_lab/identity/`. The implementation includes **captured occurrence additions and new-group publication**, following resolved fact-bearing group retirement. It does not include split/combine, automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The addition update extends transition admission, captured semantic output, diagnostics, CLI commands and tests. The saved-source schema and dependencies are unchanged.
 
 The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The next task is the concrete group split/combination review below.
 
-Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`; subsequent code was delivered as patches. That hash is the generation base, **not a claimed current user/GitHub HEAD**. The original checkout plus that hash alone is insufficient to resume. A complete committed checkout must contain the subsequent code and docs. No remote commit/push was performed by the generating assistant.
+Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was delivered as patches. That hash identifies the generation base. It **does not identify a verified current user/GitHub HEAD**. The original checkout at that hash is not sufficient to resume work. A complete committed checkout must also contain the later code and documents. The generating assistant did not commit or push to the remote repository.
 
 Delivered patch order, for provenance or reconstructing an older checkout:
 
@@ -40,7 +40,7 @@ Delivered patch order, for provenance or reconstructing an older checkout:
 
 These are delivery filenames, not required runtime files or a promise that patch archives are committed. Do not reapply patches to a checkout already containing their changes. The occurrence-removal and resolved-group-retirement code-patch SHA-256 values are respectively `d01d68c99051c4b26cb08ce8f9ed3a240b44b71d16f5076c684004bfb4f5b0c2` and `0086ae816b52cc23803e93cfc932497920d5efe8811c6040189c56c2b28fda60`.
 
-At session start inspect `git status --short`, `git log -1 --oneline`, the files below and CLI commands. Preserve local changes. After integrating a delivered update, commit and push the relevant source/tests/schema/dependencies/docs so a fresh GitHub checkout has the complete baseline. User-local output stores and this chat's downloaded archives are not substitutes for committed source.
+At session start, inspect `git status --short`, `git log -1 --oneline`, the files below and CLI commands. Preserve local changes. After you integrate a delivered update, commit and push the relevant source, tests, schema, dependencies and documents. A fresh GitHub checkout must contain the complete baseline. User-local output stores and downloaded chat archives are not substitutes for committed source.
 
 ## Completed functionality and evidence
 
@@ -108,7 +108,9 @@ This is **step 4 within Stage 6**, not project Stage 4.
 4. **Full source lifecycle:** coordinate original removal with generated-source retirement, generated-source rebuild and authorized endpoint reconstruction; preserve remaining owners and distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal alone keeps Data/description and original facts; it is not full source Forget.
 5. **Verification/recovery coverage:** extend current revision/attempt/currentness, ownership/index/evidence and retirement checks across those operations, including incomplete/missing-plan diagnostics. Do not make a general crash-recovery framework a new prerequisite.
 
-The next task is to **review a concrete group split/combination case**, then implement the smallest captured regrouping slice. State which old groups retire, which fresh resulting IDs and decisions replace them, and what semantic output must be regenerated; do not infer fact transfer from group continuity. The existing `occurrence_retention` mode handles removals, while `occurrence_continuity` separately maps every old occurrence to a reviewed new index and admits additions. Neither admits splits/combinations or mixed removal/addition. Reuse the whole-document rebuild/common publisher and preserve independent doc02 support. No generic Describe algorithm is a prerequisite.
+The next task is to **review a concrete group split/combination case**. Then implement the smallest captured regrouping example. Identify retired old groups, replacement IDs, reviewed decisions and semantic output that needs regeneration. Do not infer fact transfer from group continuity.
+
+The `occurrence_retention` mode handles removals. The `occurrence_continuity` mode maps each old occurrence to a reviewed new index and permits additions. Neither mode permits splits/combinations or mixed removal/addition. Reuse the whole-document rebuild and common publisher. Preserve independent doc02 support. A generic Describe algorithm is not required for this example.
 
 ## Code map
 
@@ -144,7 +146,7 @@ uv run python -c "import cognee; print(cognee.__version__)"
 uv run pytest -q -m 'not integration'
 ```
 
-The inspected native version must be **1.6.2**. A different version needs renewed compatibility inspection; do not silently treat it as the tested profile. A full native suite is `uv run pytest -q -m integration`; it creates fresh stores and can take minutes. Run focused native files for the changed path, then broaden only as needed.
+The inspected native version must be **1.6.2**. If the version differs, inspect compatibility again. Do not identify another version as the tested profile. Run focused native tests for the changed path first. The full native suite is `uv run pytest -q -m integration`. It creates fresh stores and can take minutes.
 
 The latest happy path, with a **new** root, is:
 
