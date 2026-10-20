@@ -56,7 +56,7 @@ The [occurrence-addition checkpoint](docs/stage6_identity_occurrence_addition.md
 
 Will run in a single-user mode and use local storage for Cognee.
 
-The historical lab extraction/embedding profile uses external API credentials. The isolated Stage-6 fixtures use captured decisions and a loopback deterministic embedding service; they need no LLM or external embedding API credentials. Follow the handoff and fixture guides before opening or changing lab stores.
+The historical lab extraction/embedding profile uses external API credentials. The isolated Stage-6 fixtures use captured decisions and need no LLM credentials. By default, fixture creation uses the embedding settings in `.env`. The `--embedding loopback` option selects the offline deterministic embedding service, which needs no credentials. pytest uses the loopback profile. Follow the handoff and fixture guides before opening or changing lab stores.
 
 Install dependencies:
 
