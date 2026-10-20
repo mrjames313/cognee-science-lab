@@ -1,6 +1,6 @@
 # Step 4 / M3: unchanged-text identity revision replacement
 
-**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
 
 Implemented against pinned Cognee 1.6.2 on 2026-10-19. This guide covers unchanged-text correction, the first portion of accepted step 4. Later guides cover selected text edits, rechunking and group retirement; dependency maintenance and the full lifecycle remain incomplete.
 
@@ -18,7 +18,7 @@ The correction is deliberately supplied as captured test input, not inferred fro
 
 The revised assignments have a separate captured correction producer. Existing mention groups keep their original producer attribution.
 
-The expected revision is mandatory for the fixture correction. A stale caller is rejected before changing native Data or graph state. Repeating revise with expected revision 1 after success is a stale request; use reconcile to check/rebuild the saved current revision.
+The fixture correction requires an expected revision. The system rejects a stale caller before it changes native Data or graph state. Repeating revise with expected revision 1 after success is a stale request; use reconcile to check/rebuild the saved current revision.
 
 | Observation | doc01 | doc02 |
 |---|---|---|
@@ -31,7 +31,7 @@ The expected revision is mandatory for the fixture correction. A stale caller is
 
 The default HC query returns both local facts with their respective document-scoped interpretations. The correction command also queries Revised controller and returns doc01's fact alone. Healthy same-revision reconciliation preserves the corrected result.
 
-The correction command prints its summary and writes revision_result.json. The captured input is available in identity_doc01_revision2.json. Subsequent reconciliation writes multisource_result.json. Source summaries include saved_revision, verified_revision, registered_revision and registered_matches_saved. The project relational description is the authoritative saved record; the original fixture input files remain initial fixtures, and current fixture operations load saved intent from the ledger.
+The correction command prints its summary and writes revision_result.json. The captured input is available in identity_doc01_revision2.json. Subsequent reconciliation writes multisource_result.json. Source summaries include saved_revision, verified_revision, registered_revision and registered_matches_saved. The project relational description is the authoritative saved record. The original fixture input files remain initial fixtures, and current fixture operations load saved intent from the ledger.
 
 ## Replacement API and write order
 
@@ -39,7 +39,7 @@ Publisher.replace(source, texts=..., chunks=..., ctx=..., expected_revision=...,
 
 1. Verify the previous publication is current; require exactly the next revision and unchanged original text inputs, chunk mapping and mention groups. Validate the intended record, actual input fingerprints, UUID uses, native context and existing semantic output.
 2. Persist the new authoritative description as pending, with its intended revision and a durable plan containing the previous description, old/new edge identities and retired declarations. The prior verified revision remains recorded.
-3. Update the registered generated Data snapshot through Cognee's ingestion Task using an explicit existing data_id. Preserve that ID, update native managed files/content metadata and refresh the Task context. The generated snapshot is managed from saved intent; its previous external file source_uri is not retained as a reload source.
+3. Update the registered generated Data snapshot through Cognee's ingestion Task using an explicit existing data_id. Preserve that ID, update native managed files/content metadata and refresh the Task context. The generated snapshot is managed from saved intent. Its previous external file source_uri is not retained as a reload source.
 4. Publish required new Entities and intended identity links through the common publisher. Existing compatible Entity fields are referenced without ordinary-property writes.
 5. Remove obsolete source-specific contributions and native retention. Use Cognee's source-ref removal planner for the selected retired nodes/edges, preserving unrelated owners and payloads. A surviving contribution without its native owner is an error rather than permission to delete its edge.
 6. Verify intended graph/ownership/indexes, obsolete-output retirement, registered JSON/content metadata, unchanged required semantic output and actual reasoning inputs. Only then acknowledge the matching attempt as current at revision 2.
@@ -78,6 +78,6 @@ Retrieval also compares current saved intent with the registered snapshot and na
 
 Pure checks cover captured correction structure, unchanged-occurrence admission, native-owner preservation, expected-revision/pending-intent guards and exact saved-plan reuse. Native tests cover stale callers, coordinated revision/currentness, both query routes, exact local fact/evidence preservation, original borrowed-field preservation, doc02 survival, obsolete singleton/vector removal, reopen/reconcile, and explicit recovery at four write boundaries. Previous publication/withdrawal fixtures remain regression checks.
 
-This fixture establishes neither the quality of the supplied identity correction nor a guarantee that arbitrary previously extracted facts remain valid after a real identity change. The supplied semantic verifier checks the captured unchanged local fact; general semantic regeneration/selection after changed meaning remains later work; captured same-binding regeneration now exists in text-change fixtures.
+This fixture does not establish the quality of the supplied identity correction. It does not guarantee that previously extracted facts remain valid after an arbitrary identity change. The supplied semantic verifier checks the captured unchanged local fact. General semantic regeneration/selection after changed meaning remains later work; captured same-binding regeneration now exists in text-change fixtures.
 
-The unchanged-text mode described here does not admit text, group membership, occurrence ranges, chunk boundaries, new context selection or dependent-source maintenance. The later [text-edit checkpoint](stage6_identity_text_changes.md) adds a separate, explicit TextChange mode for a captured prefix insertion, whole-document native rechunking and exact occurrence remapping; arbitrary edit and dependency policies remain incomplete. Standard Cognify/Remember/Update wiring, coordinated native Data removal, hard-crash writer abandonment, public SearchType, complete corpus traversal and all-backend validation remain incomplete. There is no A/B copy, rollback, automatic retry, LLM Describe or comprehensive replay framework.
+The unchanged-text mode described here does not admit text, group membership, occurrence ranges, chunk boundaries, new context selection or dependent-source maintenance. The later [text-edit checkpoint](stage6_identity_text_changes.md) adds a separate, explicit TextChange mode for a captured prefix insertion, whole-document native rechunking and exact occurrence remapping. Arbitrary edit and dependency policies remain incomplete. Standard Cognify/Remember/Update wiring, coordinated native Data removal, hard-crash writer abandonment, public SearchType, complete corpus traversal and all-backend validation remain incomplete. There is no A/B copy, rollback, automatic retry, LLM Describe or comprehensive replay framework.

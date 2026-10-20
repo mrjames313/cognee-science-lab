@@ -1,8 +1,8 @@
 # Step 4 / M3: native multi-chunk maintenance
 
-**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+**Guide scope:** commands and limits for this captured profile. For current project status, later checkpoints, the code baseline, and verification evidence, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
 
-This checkpoint adds a captured multi-chunk fixture to the existing text-replacement path. It exercises a grouped mention across chunks, a single occurrence split across a boundary, a fact whose literal text spans two chunks, changed boundaries, repeated edits, native evidence indexes, and explicit recovery. Decisions and fact spans are captured test input; this is not a general extraction or coreference algorithm.
+This checkpoint adds a captured multi-chunk fixture to the text-replacement path. It exercises a grouped mention across chunks, a single occurrence split across a boundary, a fact whose literal text spans two chunks, changed boundaries, repeated edits, native evidence indexes, and explicit recovery. Decisions and fact spans are captured test input. This is not a general extraction or coreference algorithm.
 
 ## Run
 
@@ -20,7 +20,7 @@ The new profile uses native TextChunker with a deliberately small budget of 9 to
 Helios controller (HC) regulates plasma heating, the controller adjusts coil current, and it limits oscillations.
 ```
 
-There is a trailing newline. Doc02 has the same opening plus the existing startup sentence. Doc01 initially has six native chunks; doc02 has eight. Each source has its own local mention group, identity contribution and original-owned fact. The unresolved plasma group and independent singleton support remain present.
+The text ends with a newline. Doc02 has the same opening plus the existing startup sentence. Doc01 initially has six native chunks. Doc02 has eight. Each source has its own local mention group, identity contribution and original-owned fact. The unresolved plasma group and independent singleton support remain present.
 
 The edit prepends exactly `Δ review: `: 10 Unicode code points, 11 UTF-8 bytes. The fixture supplies a captured review of unchanged interpretation. It does not infer that arbitrary new preceding text is irrelevant.
 
@@ -35,9 +35,9 @@ The edit prepends exactly `Δ review: `: 10 Unicode code points, 11 UTF-8 bytes.
 | Group Entity ID / fact edge ID / referent | Existing | Preserved |
 | Doc02 revision and fact/evidence | Revision 1 | Unchanged |
 
-Indexes in this table are zero-based. A changed boundary can preserve total chunk count. Content-derived IDs can also recur when a chunk's text is unchanged; that does not establish that its position or index is unchanged.
+The table uses zero-based indices. A boundary change can leave the total chunk count unchanged. Content-derived IDs can also recur when a chunk's text is unchanged. That does not establish that its position or index is unchanged.
 
-`multisource_result.json` contains the initial or reconciliation summary. `text_revision_result.json` contains the edit summary and `text_changes` diagnostics. Source summaries now expose the complete `chunk_mapping`, `mention_marker_chunk_ids` and `fact_evidence_chunk_ids`. Each mapping entry reports actual marker presence, ownership of the captured fact and evidence presence, so the diagnostic distinguishes expectations from stored graph/provenance observations. A later healthy reconcile replaces its completed mutation plan; the historical edit result remains the transition record.
+`multisource_result.json` contains the initial or reconciliation summary. `text_revision_result.json` contains the edit summary and `text_changes` diagnostics. Source summaries now expose the complete `chunk_mapping`, `mention_marker_chunk_ids` and `fact_evidence_chunk_ids`. Each mapping entry reports actual marker presence, ownership of the captured fact and evidence presence, so the diagnostic distinguishes expectations from stored graph/provenance observations. A later healthy reconcile replaces its completed mutation plan. The historical edit result remains the transition record.
 
 ## Marker location and fact provenance are different sets
 
@@ -72,12 +72,12 @@ uv run python -m cognee_lab.identity status --root outputs/stage6_multichunk_fai
 uv run python -m cognee_lab.identity reconcile --root outputs/stage6_multichunk_failure --source doc01
 ```
 
-Before recovery, doc01 is failed and withheld; doc02's fact remains available with both evidence chunks. Explicit reconciliation uses the saved budget/transition, repeats the whole-document rebuild, restores doc01 at 2 / 2 / 2 and resolves the same incident. Native tests cover interruption after chunk storage and after fact/identity graph publication. Existing earlier text-replacement failure boundaries remain regressions.
+Before recovery, doc01 is failed and withheld. Doc02's fact remains available with both evidence chunks. Explicit reconciliation uses the saved budget/transition, repeats the whole-document rebuild, restores doc01 at 2 / 2 / 2 and resolves the same incident. Native tests cover interruption after chunk storage and after fact/identity graph publication. Existing earlier text-replacement failure boundaries remain regressions.
 
 ## Scope and next work
 
 This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. This prefix profile does not evaluate LLM extraction or changed interpretations. Subsequent removal/retirement profiles cover selected group-membership changes. Additions/regrouping, span-specific aliases, dependent-source reconsideration, generic source removal and standard Task-transform wiring remain beyond the implemented profile. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
 
-The original six-step build order is unchanged. Step 4 has native chunk-boundary/evidence coverage and subsequent captured removal/retirement cases; additions/regrouping, changed interpretations and dependency/source lifecycle remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
+The original six-step build order is unchanged. Step 4 has native chunk-boundary/evidence coverage and subsequent captured removal/retirement cases. Additions/regrouping, changed interpretations and dependency/source lifecycle remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
 
-The subsequent [reviewed removal checkpoint](stage6_identity_occurrence_removal.md) supplies explicit survivor indices and new exact spans for partial-group continuity and empty unresolved-group retirement. It retains this native rebuild/recovery path; the prefix profile above remains unchanged.
+The subsequent [reviewed removal checkpoint](stage6_identity_occurrence_removal.md) supplies explicit survivor indices and new exact spans for partial-group continuity and empty unresolved-group retirement. It retains this native rebuild/recovery path. The prefix profile above remains unchanged.
