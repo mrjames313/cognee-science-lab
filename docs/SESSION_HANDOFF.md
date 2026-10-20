@@ -111,7 +111,10 @@ The assistant measured these results on the user's Mac on 2026-10-20, before the
 - Each root keeps its data, system, cache, graph, vector and relational stores inside the root.
 - The CLI sets `COGNEE_ENV_FILE` to `src/cognee_lab/identity/fixture.env`, which contains only comments. Cognee's import-time load then does not replace the fixture settings. The LLM settings stay fake. No fixture command calls an LLM.
 - The creation commands (`fixture`, `multi-fixture`, `chunked-fixture`) take `--embedding env|loopback`. The default is `env`.
-  - `env` reads `EMBEDDING_*` and `HUGGINGFACE_TOKENIZER` from the repository `.env`, or from the file that `COGNEE_ENV_FILE` names. The values stay in process memory. If the file does not set `EMBEDDING_MODEL` or does not set `EMBEDDING_DIMENSIONS`, creation fails before it makes the root.
+  - `env` reads `EMBEDDING_*` and `HUGGINGFACE_TOKENIZER` from the repository `.env`, or from the file that `COGNEE_ENV_FILE` names. The values stay in process memory. Creation fails before it makes the root in these cases:
+    - The file does not set `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS`, or sets one of them to an empty value.
+    - `EMBEDDING_DIMENSIONS` is not an integer.
+    - `COGNEE_ENV_FILE` does not name a file.
   - `loopback` is the earlier offline service with deterministic 64-dimension embeddings.
 - The root marker `stage6-fixture.json` records `embedding` as `{"profile", "model", "dimensions"}`. It records no key and no endpoint. Later commands read the marker and refuse a different `--embedding` value. For an `env` root, they also refuse a `.env` whose embedding model or dimensions changed.
 - The `result.json` file from the `fixture` command copies `embedding` from the marker. It no longer states that every root used a local deterministic service.

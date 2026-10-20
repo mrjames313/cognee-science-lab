@@ -128,14 +128,16 @@ def main():
     if not creating and not (root / MARKER).exists():
         parser.error("Root is not an isolated Stage 6 fixture directory")
     environment = ExitStack()
+    made = False
     try:
         if creating:
             create_root(root, args.embedding or "env")
+            made = True
         elif error := _reopen_error(args, root):
             parser.error(error)
         environment.enter_context(fixture_environment(root))
     except ValueError as exc:
-        if creating and root.exists():
+        if made:
             (root / MARKER).unlink()
             root.rmdir()
         parser.error(str(exc))

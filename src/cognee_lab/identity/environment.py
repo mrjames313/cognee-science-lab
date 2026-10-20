@@ -94,7 +94,7 @@ def read_embedding(root: Path) -> dict | None:
     """The root's embedding record, or None for a root made before profiles."""
     try:
         marker = json.loads((root / MARKER).read_text())
-    except json.JSONDecodeError:
+    except (OSError, ValueError):
         raise ValueError(_MALFORMED) from None
     if not isinstance(marker, dict):
         raise ValueError(_MALFORMED)
