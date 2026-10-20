@@ -1,0 +1,982 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -7,6 +7,10 @@
+ There are multiple experiment stages, each building on the previous.
+ 
+ See the writeups in the `results/` directory for summaries of the current findings and conclusions.
++
++## Continuing this project
++
++**Start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).** It records the delivered code baseline, implementation and Mac-verification status, code map, original six-step sequence, remaining work and next task. [ROADMAP.md](ROADMAP.md) is the stage overview. Dated investigation/checkpoint writeups retain their historical evidence boundaries.
+ 
+ ## Stages
+ 
+@@ -23,18 +27,18 @@
+ ### Stage 3 — Retrieval methods
+ Status: complete
+ Goal: understand how Cognee retrieves knowledge from the graph/vector/chunk layers, and whether retrieval compensates for the fragmentation we observed.
+-We planned to test queries
++The query experiments and findings are recorded in `results/stage_three.md`.
+ 
+ ### Stage 4 — Custom / mixed graph model
+-Status: next
++Status: exploration complete for the Stage-6 handoff
+ Goal: investigate how to specify a graph model with a mix of strongly-typed entities / relationships (for example, physical quantites) and open-world graph such as what Cognee generates by default.  The idea is to enforce specificity and precision where it is warranted by the domain, while allowing for the flexibility and extensibility of open-world extraction.
+ 
+ ### Stage 5 — Identity, relation semantics, and schema evolution
+-Status: planned
++Status: scoped identity/operational investigation and architecture handoff complete; implementation continues in Stage 6
+ Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
+ 
+ ### Stage 6 — Custom pipeline and intermediate representations
+-Status: deterministic publication/retrieval, shared-source withdrawal, unchanged-text identity correction and captured source-text edits with multi-chunk provenance implemented; broader integration in progress
++Status: steps 1–2 and bounded portions of steps 3–4 implemented; captured publication/retrieval, shared-source withdrawal, corrections, native text/chunk rebuilding and occurrence/group retirement verified; additions, dependencies, full source lifecycle and steps 5–6 remain
+ Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
+ 
+ See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/two-source fixtures, selected identity-source withdrawal, focused tests, recovery-event visibility and remaining boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
+@@ -50,8 +54,7 @@
+ 
+ Will run in a single-user mode and use local storage for Cognee.
+ 
+-LLMs for processing inputs, and creating embeddings are API calls and require
+-authentication.
++The historical lab extraction/embedding profile uses external API credentials. The isolated Stage-6 fixtures use captured decisions and a loopback deterministic embedding service; they need no LLM or external embedding API credentials. Follow the handoff and fixture guides before opening or changing lab stores.
+ 
+ Install dependencies:
+ 
+@@ -67,7 +70,7 @@
+ 
+ 
+ 
+-### Model configuration
++### Historical lab model configuration
+ 
+ Stage 1 experiments are all local.
+ 
+@@ -75,5 +78,3 @@
+ 
+ It also uses Nvidia's (free) embedding API, which should provide better
+ performance than the local embeddings, and affects chunking as well.
+-
+-
+diff --git a/ROADMAP.md b/ROADMAP.md
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -1,11 +1,13 @@
+ # Cognee Science Lab Roadmap
+ 
+-**Last revised:** 2026-10-19
++**Last revised:** 2026-10-20
+ **Project:** `cognee-science-lab`  
+ **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
+ **Current work:** Stage 6 — steps 1–2 have native fixtures; step 3's multi-source withdrawal path is demonstrated; step 4 includes guarded unchanged-text identity corrections and a captured prefix-edit path with whole-document native rechunking, remapped positions and rebuilt fact evidence, including multi-chunk markers and fact continuations. See [the fixture guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md). The subsequent [reviewed occurrence-removal path](docs/stage6_identity_occurrence_removal.md) preserves partial groups and retires an empty unresolved group using captured continuity. The [resolved-group retirement case](docs/stage6_identity_resolved_retirement.md) also removes a retired local resolution/fact/evidence and preserves independent shared support. Additions/regrouping, context/meaning reconsideration, dependent-source maintenance and full original-document removal remain lifecycle work. Earlier investigation entries retain historical wording; the reviewed handoff governs the design.
+ 
+ This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
++
++For continuation, code generation/verification status and the exact next task, start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md). Historical revision entries below describe their own dates.
+ 
+ ## Progress at a glance
+ 
+@@ -63,7 +65,7 @@
+ 
+ Do not add authoritative identity fields to ordinary Entity properties. Store resolution kind, applicability and current contributions on identity edges, and retain structured assignments/original-input provenance independently in generated identity sources. Do not introduce singleton or variant markers, or a graph support node per assignment, in the initial design.
+ 
+-The proposal groups document-local assignments into one generated Data item per original document and uses native document-level owners to retain all required endpoints. Original-input dependency, native ownership and applicability remain distinct. See [the recorded proposal](cognee_stage5_4_5_identity_representation_proposal.md) for the preliminary ownership matrix, edge contents, evidence boundaries and remaining decisions.
++The proposal groups document-local assignments into one generated Data item per original document and uses native document-level owners to retain all required endpoints. Original-input dependency, native ownership and applicability remain distinct. See [the recorded proposal](results/cognee_stage5_4_5_identity_representation_proposal.md) for the preliminary ownership matrix, edge contents, evidence boundaries and remaining decisions.
+ 
+ ### Project state must survive native mutation
+ 
+@@ -213,7 +215,7 @@
+ 
+ ---
+ 
+-## Stage 5 — Identity, resolution, and semantic reconciliation — IN PROGRESS
++## Stage 5 — Identity, resolution, and semantic reconciliation — SCOPED EXPLORATION/HANDOFF COMPLETE
+ 
+ ### 5.1 Identity benchmark and fragmentation inventory — COMPLETE
+ 
+@@ -358,7 +360,7 @@
+ 
+ This groups references during description/publication. It does not authorize merging existing native mention nodes, collapsing semantic relations or losing their source attribution. If semantic relations are attached to grouped mention nodes, occurrence-level attribution must be retained explicitly; it cannot be inferred merely from the endpoint node. Broader post-publication graph compaction remains deferred.
+ 
+-### 5.4 — Operational semantics, architecture, and graph evolution — IN PROGRESS
++### 5.4 — Operational semantics, architecture, and graph evolution — REVIEW COMPLETE FOR STAGE 6
+ 
+ The earlier **5.4A resolution scope/timing + 5.4B graph evolution** split is superseded. Identity representation cannot be chosen independently of Cognee's construction, maintenance, retrieval, update, and deletion behavior. Scope/context questions are retained below and in Stage 6 rather than abandoned.
+ 
+@@ -451,7 +453,7 @@
+ 
+ Keep **derived maintenance separate**: use idempotent Memify/Improve Tasks for reconciliation, normalization, and suitable semantic materialization. How maintenance is invoked after each source mutation remains part of 5.4.5/Stage 6; merely adding the Cognify transform does not wire this automatically.
+ 
+-#### 5.4.5 Architecture and operational invariants — IN PROGRESS; INITIAL REPRESENTATION RECORDED
++#### 5.4.5 Architecture and operational invariants — HANDOFF REVIEW COMPLETE
+ 
+ Consolidate 5.4.1–5.4.4 into an implementable architecture. Begin with evidence of **actual Cognee mutation behavior across the whole graph**, then derive ownership rules. Do not treat desired ownership or logical graph layers as facts about existing Cognee mechanics.
+ 
+@@ -487,9 +489,9 @@
+ 
+ The completed matrix covers semantic, project semantic, support/reconciliation, source/context, native ownership, assertion evidence, graph indexes, and session/history/accounting artifacts. No production scientific schema or physical identity representation is selected by the fixture.
+ 
+-**Handoff:** design identity storage/source binding and maintenance next. Helper cleanup and replay remain required for the selected identity workflows. Index/backend-reference consistency applies to stores consumed by enabled retrieval/provenance paths; unused diagnostic stores do not force immediate repair. These are later implementation obligations, not unfinished characterization tasks.
+-
+-##### 5.4.5.2 Artifact ownership / provenance model — INITIAL CHOICES RECORDED
++**Subsequent implementation:** the reviewed model and bounded Stage-6 publication/maintenance fixtures now exist. General lifecycle coverage remains in Stage 6; it does not reopen the completed characterization. Index/backend-reference guarantees apply to stores consumed by enabled paths; unused diagnostic stores do not force immediate repair.
++
++##### 5.4.5.2 Artifact ownership / provenance model — REVIEWED; INITIAL RUNTIME MODEL IMPLEMENTED
+ 
+ The six outcome requirements remain in cognee_stage5_4_5_requirements_review.md. The initial ownership choices are:
+ 
+@@ -500,23 +502,23 @@
+ - distinguish original-input dependency, generated-source ownership, applicability and run attribution;
+ - recompute shared edge contributions when assignments are withdrawn, rather than relying on owner retention to restore properties.
+ 
+-The preliminary matrix is in cognee_stage5_4_5_identity_representation_proposal.md. Complete the original-source → generated-source dependency/lifecycle mapping and actively consumed index/backend-reference ownership before declaring .2 finished. Cached QA/session vectors remain conditional on enabling reuse.
++The reviewed matrix is in results/cognee_identity_stage6_handoff.md. Runtime fixtures implement original-chunk markers/facts/evidence, generated-source endpoint retention and shared contribution ownership. General original-to-generated dependency/removal orchestration and expanded consumed-store admission remain Stage-6 implementation work. Cached QA/session vectors remain conditional on enabling reuse.
+ 
+ **Scientific reasoning boundary:** provenance and retention ownership do not establish scientific support. Scientific justification remains Stage 8; no claim/evidence inference policy is adopted here.
+ 
+-##### 5.4.5.3 Stable physical representation — INITIAL DIRECTION SELECTED
+-
+-The selected initial direction uses ordinary Entity nodes, identity-group variant relationships without a privileged canonical member, local reference-group mention Entities, and explicit mention markers from the generated identity source's TextDocument graph node.
++##### 5.4.5.3 Stable physical representation — REVIEWED; DRAFT FORMS AND PUBLISHER IMPLEMENTED
++
++The selected initial direction uses ordinary Entity nodes, identity-group variant relationships without a privileged canonical member, local reference-group mention Entities, and explicit mention markers from the original occurrence-covering DocumentChunks. Generated identity Data owns resolution contributions and endpoint retention, not those markers.
+ 
+ Resolution edges store resolution_kind and current contributions. Separate singleton/variant markers and per-assignment graph support nodes are omitted. Structured assignments are sufficient to reproduce exact graph intent; ordinary LLM parsing of identity descriptions is not relied on for faithful reconstruction.
+ 
+ Deterministic occurrence UUIDs override Entity's default name-based identity. A custom loading Task must publish ID-based edges and intentionally attach existing endpoint refs without passing populated existing Entities through recursive persistence. calculate_chunk_graphs is a computation seam, not a complete reference-only loader/routing solution.
+ 
+-Remaining outputs: structured-source serialization and stable IDs, exact edge schemas/scope conventions, loader/routing, treatment of current prototype helpers, and compatibility with operations that delete/remap endpoints. No combined runtime validation is claimed.
+-
+-##### 5.4.5.4 Write / reconcile / read / update lifecycle — IN REVIEW
+-
+-Start with one generated source publishing a new Entity and an edge to an existing Entity. Then cover edge-only publication, unresolved-to-resolved mentions, overlapping contributions, original-source Update/Forget, generated-source rebuild, failure/retry and selected native endpoint mutation. These are design-dependent follow-ups, not a restart of the completed .1 characterization.
++Implemented outputs include draft structured-source forms/serialization, explicit UUIDs, current contribution payloads, native source-bound loading and bounded lifecycle validation. General extraction/routing, dependent-source/full source lifecycle and optional endpoint consolidation/remapping remain unimplemented/admission work; prototype Stage-5 helpers are not the current runtime representation.
++
++##### 5.4.5.4 Write / reconcile / read / update lifecycle — CONTRACT REVIEWED; PARTIAL STAGE-6 IMPLEMENTATION
++
++The initial new/existing-endpoint publication, shared contributions, source withdrawal, selected corrections, text/chunk rebuilding and group-retirement sequences are implemented. Remaining scenario coverage and original/generated source orchestration are tracked in Stage 6 and the session handoff; the .1 investigation and architecture review are complete.
+ 
+ Specify which Tasks belong inside transformed Cognify and which belong in Memify/Improve; when maintenance runs; how failed or stale derived state is detected; and what a custom Retriever accepts as usable state.
+ 
+@@ -528,9 +530,9 @@
+ | Update | Project full-rebuild path with customization forwarded, then maintenance | Original/generated-source dependencies, endpoint recreation, usable-state/failure behavior |
+ | Delete | Native Forget plus derived-source retirement/contribution repair | Surviving inputs/owners, original dependency cleanup, indirect edge/index removal |
+ 
+-##### 5.4.5.5 Operational invariants and Stage-6 handoff
+-
+-Candidate invariants to finalize from evidence:
++##### 5.4.5.5 Operational invariants and Stage-6 handoff — REVIEW COMPLETE
++
++Reviewed invariants guiding implementation and tests:
+ 
+ - source text remains authoritative;
+ - reconciliation is non-destructive; identity-group equivalence is applicable-context-dependent, without a privileged canonical member;
+@@ -567,13 +569,13 @@
+ 
+ ## Stage 6 — Custom processing architecture — IN PROGRESS
+ 
+-The first implementation checkpoint covers validated saved forms and a tiny custom-Task publication/retrieval path through configured native stores. It uses native source ownership/evidence and backend-neutral integration code. Standard Cognify/Remember/Update wiring, complete maintenance/retrieval and the wider sequence test suite remain. See [commands, evidence and limits](docs/stage6_identity_first_slice.md).
++Current code extends the initial validated forms/custom-Task publication/retrieval through shared-source withdrawal, guarded corrections, native whole-document rebuilds and reviewed occurrence/group retirement. Standard Cognify/Remember/Update wiring, complete maintenance/retrieval and broader sequence coverage remain. See [SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) for current status and the individual guides for exact fixture scope.
+ 
+ Goal: move manually demonstrated representations into actual Cognee processing tasks/pipelines and ensure they participate in lifecycle/provenance behavior.
+ 
+ ### 6.1 Explicit source/intermediate representations
+ 
+-Retain source occurrences and extraction decisions explicitly. Define and implement a shared guarded API for reading/changing saved representations, explicit retirement/full replacement and reporting affected records, with domain helpers above common storage mechanics. Implement durable generated identity sources initially grouped per original document; preserve structured assignments and original-input provenance outside materialized graph edges. Use explicit saved local reference-group UUIDs for mention Entities, and persist classification on has_identity_mention edges rather than Entity role fields.
++Source occurrences, extraction decisions and generated registered JSON sources are implemented for captured descriptions. Publisher.replace/withdraw and the relational ledger provide guarded full-source changes, retirement and currentness; extend their supported operations rather than starting another storage API. Keep domain helpers above common mechanics and original-input provenance outside materialized graph edges. Use explicit saved local reference-group UUIDs for mention Entities, and persist classification on has_identity_mention edges rather than Entity role fields.
+ 
+ For mentions, move from temporary occurrence indices to exact source coordinates where possible:
+ 
+@@ -616,7 +618,7 @@
+ 
+ Treat proposal section 15's A/B full-store staging as an optional experiment for the first iteration, not a prerequisite: construct and validate a coherent candidate generation including original source updates, saved descriptions, graph/native ownership, relational paths and active indexes; promote through a guarded active-generation selection and reader/process handoff. Begin with serialized writes to promotion-copied state. Separate prepare/execute/validate/promote from extensible failure-policy handlers; existing clone probes do not establish live-snapshot or promotion guarantees. This remains a feasibility/design item, not an implemented replacement for native lifecycle orchestration.
+ 
+-Implement proposal sections 13–14 and 20: the guarded stored-representation API and project-owned SQLite publication ledger are selected at the design level. Test retry from captured intent after graph failure, exact revision/attempt completion guards and eligibility of valid surviving sources; exact transactions/hooks remain implementation work.
++The guarded stored-representation API, backend-neutral relational publication ledger, revision/attempt checks, caught-failure events and explicit saved-intent retry are implemented for admitted fixture operations. Extend those mechanisms to the remaining source/dependency workflows and standard entry-point hooks; do not introduce SQLite-specific bookkeeping or claim a cross-store transaction.
+ 
+ Implement the lifecycle selected in 5.4.4 and finalized in 5.4.5:
+ 
+@@ -650,7 +652,7 @@
+ 
+ Design regression suites directly from 5.4.5's operation sequences and expected outputs. Each case records its fixture, initiating operation, intermediate/failure eligibility and expected saved records, graph properties/IDs/owners, applicable traversal and consumed-index results. Use captured extraction/resolution outputs for deterministic lifecycle assertions rather than requiring fresh LLM runs to agree.
+ 
+-Organize coverage into description/plan checks, real-backend publication/ownership integration, and maintenance-plus-retrieval scenarios. Fault injection and replay exercise partial writes and saved-record/graph consistency. Proposal section 11 records the initial scenario matrix. These tests are planned for implementation in Stage 6; none is added or reported passing by this documentation update.
++Organize coverage into description/plan checks, real-backend publication/ownership integration, and maintenance-plus-retrieval scenarios. Fault injection and replay exercise partial writes and saved-record/graph consistency. Proposal section 11 records the initial scenario matrix. This is the broader scenario inventory. The current captured subset is implemented; the session handoff and fixture guides record passing tests and gaps. The inventory is not a claim that every listed scenario has passed.
+ 
+ Turn the matrices/invariants into focused regression scenarios:
+ 
+@@ -763,24 +765,19 @@
+ 
+ ---
+ 
+-# Current immediate work
+-
+-Current stage: **5.4.5**. Initial ownership and representation choices for **.2–.3** and several **.4** lifecycle decisions are recorded. The current review is the native integration of identity-aware semantic facts; Maintain policy and Retrieve contracts follow.
+-
+-The chosen direction is documented in cognee_stage5_4_5_identity_representation_proposal.md. Neither .2 nor .3 is marked complete: schema, source dependency handling, loader/routing and the consumed-index matrix still need finalization. The preferred B Cognify extension remains unimplemented.
+-
+-Immediate sequence:
+-
+-1. Settle minimal captured semantic-output placement and native chunk publication with exact endpoint IDs. Work through original semantic facts surviving removal/rebuild of the generated identity source so mention classification remains valid or safely unavailable.
+-2. Review initial Maintain triggers, occurrence/group continuity, split/retarget/retirement behavior and corresponding saved-record changes, reusing the selected publication ledger and captured-intent retry.
+-3. Finalize Retrieve's eligibility/scope/currentness checks, variant expansion, eligible local-mention facts, logical deduplication and actual consumed indexes.
+-4. Consolidate the schema/ownership matrix, admitted operation sequences, .5 invariants and Stage-6 fixtures, including native routing/reload/update, shared owners, endpoint preservation and failure/retry. A/B remains optional. Capture reusable findings with their Describe/Publish/Maintain/Retrieve activities and evidence status.
+-5. Implement Stage 6; preserve the architecture check-in afterward.
+-6. Keep mention compaction, a general predicate ontology and scientific reasoning deferred to their existing stages.
+-
+-**Stage impact:** no new stages or renumbering. The proposal narrows the choices in .2–.3 and specifies Stage-6 source/loader/retriever work. Broad .1 characterization is complete; combined publication behavior and performance remain unvalidated.
+-
+-
++# Current immediate work — 2026-10-20
++
++Current stage: **Stage 6, accepted implementation step 4 / M3, partially complete**. Stage-5.4.5 architecture/handoff review is complete. Bounded native publication, shared-source withdrawal, correction, text/rechunk rebuild, partial occurrence removal and unresolved/resolved group-retirement checkpoints have been implemented and independently exercised by the user.
++
++The next task is **occurrence additions**: add references to a continuing group and introduce a new local group, with captured decisions, checked positions/IDs/markers, original-owned fact/evidence handling, independent-source preservation and explicit recovery. The existing removal-only admission must be extended deliberately.
++
++Remaining step-4 areas are additions/regrouping, changed interpretation with refreshed semantic output, dependency-aware multi-document/span/record maintenance, coordinated original/generated Data lifecycle, and verification/recovery coverage across those operations. General exact-ID semantic conversion remains broader than the captured writer. See [the session handoff](docs/SESSION_HANDOFF.md) for code locations, delivery baseline, test versus Mac-reproduction evidence and commands.
++
++Step 5 owns standard B Task-transform Cognify/Remember/full Update/removal hooks and broader retrieval/delivery/offline diagnostics. Step 6 owns seeded rules/model Describe and its separate quality/consistency evaluation. A/B staging, incremental chunk reuse, comprehensive replay, automatic orchestration and metrics tooling remain deferred; they are not new step-4 gates. The post-Stage-6 architecture check-in and later scientific stages remain unchanged.
++
++## Historical revision record
++
++Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
+ 
+ ## Revision record — 2026-10-11
+ 
+@@ -940,3 +937,6 @@
+ 
+ Proposal section 27 and extension-reference section 18.25 record the baseline and findings. The next review should settle minimal captured semantic-output placement and the independent-source mention-lifetime case, then initial Maintain triggers/continuity and Retrieve's local-fact contract. Routing and the first real-backend fixtures remain implementation/probe work. Update the existing Stage-6 sequence suites; no new stage, full semantic-fact ledger, runtime compatibility result or native-coverage measurement is added.
+ 
++### Documentation reconciliation and session handoff — 2026-10-20
++
++Reconcile older global “not implemented” and “next review” statements with the delivered Stage-6 code, while preserving dated experiment history and distinguishing fixture-specific limits from missing general functionality. The current checkpoint is Stage-6 implementation step 4 / M3, partially complete through resolved fact-bearing group retirement; occurrence additions are next. Add [SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) with the code/patch baseline, completed and remaining work, module map, resume commands and separate generation-environment/Mac verification summaries. This update changes documentation only; it adds no runtime behavior and does not rerun the runtime test suite.
+diff --git a/docs/SESSION_HANDOFF.md b/docs/SESSION_HANDOFF.md
+new file mode 100644
+--- /dev/null
++++ b/docs/SESSION_HANDOFF.md
+@@ -0,0 +1,154 @@
++# Session handoff — resume here
++
++**Updated:** 2026-10-20 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. **Next task:** occurrence additions. This document records the current continuation state; dated experiment writeups describe their own checkpoints.
++
++## Objective and reading order
++
++Build a methodology for integrating structured knowledge into Cognee through **Describe, Publish, Maintain and Retrieve**. Identity is the first worked integration. Carry demonstrated mechanisms and tests forward to other domains, such as scientific measurements, while keeping each domain's meaning and rules explicit. Scientific justification/reasoning is outside this implementation's scope.
++
++Read this document first, then:
++
++1. [ROADMAP.md](../ROADMAP.md): project stages and current scope.
++2. [Stage-6 architecture/contract](../results/cognee_identity_stage6_handoff.md): physical representation, ownership, continuity, recovery and original six-step build order. Its dated implementation subsections are checkpoint history.
++3. [R1–R6 requirements](../results/cognee_stage5_4_5_requirements_review.md): outcome constraints, not a claim of complete coverage.
++4. [Latest fixture guide](stage6_identity_resolved_retirement.md), followed by the earlier guides linked below for individual commands.
++5. [Integration playbook](../results/cognee_knowledge_integration_playbook.md): findings tagged with Describe/Publish/Maintain/Retrieve and transfer questions for other integrations.
++
++The [representation decision record](../results/cognee_stage5_4_5_identity_representation_proposal.md) and [pinned native extension reference](../results/cognee_extension_architecture_reference_v1.6.2.md) explain rationale and native behavior. Do not treat their early dated “next” or “not implemented at that checkpoint” statements as current implementation status. The roadmap and this handoff identify current work; later explicit approved scope changes supersede earlier proposals.
++
++## Code baseline and delivery status
++
++Runtime code is in `src/cognee_lab/identity/`. Implemented code stops at **resolved, fact-bearing group retirement**. No occurrence-addition, split/combine, automatic Describe, dependent-source reconsideration or standard-entry-point extension has been generated. This documentation update changes no runtime code, test, schema or dependency.
++
++Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`; subsequent code was delivered as patches. That hash is the generation base, **not a claimed current user/GitHub HEAD**. The original checkout plus that hash alone is insufficient to resume. A complete committed checkout must contain the subsequent code and docs. No remote commit/push was performed by the generating assistant.
++
++Delivered patch order, for provenance or reconstructing an older checkout:
++
++1. Main-compatible initial implementation: `stage6_main_5a17988.patch` (an earlier initial delivery was named `stage6_initial.patch`; do not apply both).
++2. `stage6_seed_selection_fix.patch`.
++3. `stage6_multisource_withdrawal.patch`.
++4. `stage6_revision_replacement.patch`.
++5. `stage6_source_text_changes.patch`.
++6. `stage6_multichunk_maintenance.patch`.
++7. `stage6_occurrence_removal.patch`.
++8. `stage6_resolved_group_retirement.patch`.
++
++These are delivery filenames, not required runtime files or a promise that patch archives are committed. Do not reapply patches to a checkout already containing their changes. The last two code-patch SHA-256 values are respectively `d01d68c99051c4b26cb08ce8f9ed3a240b44b71d16f5076c684004bfb4f5b0c2` and `0086ae816b52cc23803e93cfc932497920d5efe8811c6040189c56c2b28fda60`.
++
++At session start inspect `git status --short`, `git log -1 --oneline`, the files below and CLI commands. Preserve local changes. After integrating a delivered update, commit and push the relevant source/tests/schema/dependencies/docs so a fresh GitHub checkout has the complete baseline. User-local output stores and this chat's downloaded archives are not substitutes for committed source.
++
++## Completed functionality and evidence
++
++“Implemented” below means a bounded deterministic fixture through actual configured stores. Identity/semantic judgments are supplied as captured fixture input; their quality has not been evaluated.
++
++| Checkpoint | Implemented behavior | Guide |
++|---|---|---|
++| Initial publication and seed fix | Validated records, exact UUID creation/reference, native ownership/evidence, HC-seeded local-fact retrieval, explicit same-revision reconcile and caught-failure visibility | [First slice](stage6_identity_first_slice.md) |
++| Multi-source withdrawal | Shared contributions/owners, both withdrawal orders, unresolved mentions, singleton retention, independent original facts/evidence and explicit withdrawal retry | [First slice](stage6_identity_first_slice.md#two-source-lifecycle-fixture) |
++| Unchanged-text correction | Guarded next revision; retarget doc01 while preserving doc02; registered/saved/graph agreement; retire obsolete declarations; forward recovery | [Revision replacement](stage6_identity_revision_replacement.md) |
++| Prefix edit and native rebuild | Same original Data ID, checked Unicode offsets/hashes, whole-document native memory removal/ingestion/chunk rebuild, refreshed captured facts/evidence and unsafe-cascade/dependency refusal | [Text changes](stage6_identity_text_changes.md) |
++| Multi-chunk maintenance | Split occurrence markers, complete fact continuation evidence, repeated edits/current chunk indexes, current-budget reconstruction and caught-failure recovery | [Multi-chunk](stage6_identity_multichunk.md) |
++| Partial/empty unresolved groups | Explicit old-occurrence retention indices, stable continuing group, retirement of empty unresolved group/node/vector/markers, independent support preserved | [Occurrence removal](stage6_identity_occurrence_removal.md) |
++| Empty resolved fact-bearing group | Retire saved group/resolution/declaration, physical mention/node vector, resolution link, local fact/evidence/markers; preserve doc02's distinct fact and shared endpoint/index | [Resolved retirement](stage6_identity_resolved_retirement.md) |
++
++### Tests run in the generation environment
++
++The last code checkpoint recorded **59 programmatic tests and 7 selected native sequence tests passing (66 distinct cases)**. The native selection was three resolved-retirement sequences, three preceding occurrence-removal sequences and one multi-chunk repeated-edit/reconcile/withdraw sequence. The other 19 native cases were not rerun in that checkpoint. Earlier delivery counts overlap; do not add them or claim a fresh full-suite run.
++
++Tests used Python 3.12.14, Cognee 1.6.2, actual configured Ladybug/LanceDB/SQLite stores, deterministic loopback embeddings and no LLM. Only that native profile is demonstrated. Final code-patch application and affected-file byte equality were checked. The documentation-only update did not rerun the runtime suite.
++
++### Results verified on the user's Mac
++
++The user ran and supplied terminal output; the assistant reviewed the returned JSON. This is independent reproduction on the user's machine, not execution there by the assistant. Verified sequences include initial publication/reconcile, multi-source withdrawal/retry, unchanged-text correction/recovery, prefix-edit/recovery, and the following latest checkpoints:
++
++| User-local root(s) | Reviewed result |
++|---|---|
++| `outputs/stage6_multichunk` and `_failure` | Edit and healthy reconcile preserve complete evidence/current chunk mapping; failed doc01 withheld while doc02 survives; explicit reconcile completes revision 2 and resolves incident |
++| `outputs/stage6_occurrences` and `_failure` | g01 keeps only `it` at `[46,48)`; empty unresolved g02 is removed; healthy reconcile does not resurrect it; interrupted cleanup completes with the same event resolved |
++| `outputs/stage6_resolved_retirement` and `_failure` | g01/r01/local fact/evidence are removed; unresolved g02 survives; only doc02's unchanged fact returns; healthy reconcile preserves retirement; explicit recovery resolves the same event at revision 2 |
++
++For those final three checkpoints, doc01 reaches saved/registered/verified revision 2 and doc02 stays at 1. Borrowed Entity fields and independent shared support survive. Successful paths produce no incidents; injected failures produce one test-labeled incident closed after verified forward completion. The latest resolved-retirement recovery was reviewed on 2026-10-19, from the run ending approximately 22:45 America/Detroit.
++
++Raw terminal transcripts were supplied in chat and are not asserted to be committed. This table is the durable verification summary. The roots above are user-local existing stores: reuse them for inspection only, and use new roots for new fixture creation. Dataset IDs vary by root; never substitute IDs from another run.
++
++## Original six-step implementation sequence
++
++This is **step 4 within Stage 6**, not project Stage 4.
++
++| Step | Current status |
++|---|---|
++| 1 / M0 | Runtime forms/schema, exact chunk mapping, portable bookkeeping and capability checks implemented for the initial profile |
++| 2 / M1 | Captured Task → native publication → useful fact/evidence retrieval → reconcile demonstrated |
++| 3 / M2 | Multi-source ownership/withdrawal demonstrated; general exact-ID semantic conversion remains broader than the captured writer |
++| 4 / M3 | Partly complete: corrections, prefix/rechunk edits, partial occurrence removal, empty unresolved and resolved fact-bearing group retirement, explicit caught-failure recovery |
++| 5 / M4 | Standard Cognify/Remember/full Update B Task-transform wiring, source-removal entry-point hooks, public Retriever/SearchType, broader traversal/delivery/diagnostics not implemented |
++| 6 / M5 | Seeded rules/model Describe and separate quality/consistency evaluation not implemented |
++
++### Remaining step-4 work
++
++1. **Occurrence/group changes:** additions to continuing groups, new groups, explicit splits/combinations with fresh resulting IDs, and representation-kind changes using separate suitable Entities. Removal is now demonstrated for the captured unresolved and resolved cases.
++2. **Changed interpretation and semantic refresh:** edits changing a referent/definition/scope, with coordinated saved decisions and regenerated facts/evidence. Existing unchanged-text retargeting and captured same-binding edits do not establish this generally.
++3. **Dependencies:** identify and reconsider affected sources that consumed another document, corpus fields or saved records; support admitted span/record remapping. Current code rejects known dependent-document text edits rather than silently propagating them. New-corpus opportunity selection is not solved by positive dependencies alone.
++4. **Full source lifecycle:** coordinate original removal with generated-source retirement, generated-source rebuild and authorized endpoint reconstruction; preserve remaining owners and distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal alone keeps Data/description and original facts; it is not full source Forget.
++5. **Verification/recovery coverage:** extend current revision/attempt/currentness, ownership/index/evidence and retirement checks across those operations, including incomplete/missing-plan diagnostics. Do not make a general crash-recovery framework a new prerequisite.
++
++The next task is **occurrence additions**, first with captured decisions: extend a continuing group and introduce a distinct new group; validate exact current document spans, stable continuing IDs/fresh new IDs, markers, assignments and original-owned semantic output; preserve doc02; check explicit failure recovery. The current `occurrence_retention` admission requires a removal and does not admit additions. Extend that boundary deliberately rather than bypassing it in a fixture. Reuse the whole-document rebuild and common publisher. No generic Describe algorithm is required for this next slice.
++
++## Code map
++
++Paths below are relative to `src/cognee_lab/identity/`.
++
++| Module | Responsibility / boundary |
++|---|---|
++| `models.py`, `schema.py` | Runtime saved forms; generated draft JSON Schema |
++| `validation.py` | SHA-256/JCS fingerprints, exact slices/native chunk tiling, input and cross-source UUID-use checks |
++| `storage.py` | Namespaced relational publication/event tables; portable expected-revision/attempt and project-writer guards |
++| `registered.py` | Real Data JSON/raw-text ingestion/readback and registered snapshot checks |
++| `publish.py` | Missing-node creation, safe existing-node retention, original markers, aggregated generated-source identity contributions and verification |
++| `replace.py`, `withdraw.py` | Guarded replacement/withdrawal, durable old/new intent, selective retirement and explicit forward recovery |
++| `text_changes.py` | Prefix/removal admission, dependency/cascade guards, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
++| `retrieve.py` | Bounded fixture retrieval, saved-source eligibility, scoped identity links/local mention facts and native current evidence; not a public corpus-wide retriever |
++| `native.py` | Normalizers over graph/provenance/neighborhood interfaces |
++| `fixture.py`, `multisource.py`, `captured_chunks.py` | Captured facts, source contexts, exact producing/evidence chunk binding, single/two-source setup and diagnostics |
++| `revisions.py`, `text_fixture.py` | Captured identity correction/prefix edit, shared maintenance callbacks and transition diagnostics |
++| `occurrence_fixture.py`, `resolved_retirement.py` | Captured removal/retirement examples and physical absence/shared-survival checks |
++| `__main__.py`, `fixture_embeddings.py` | Isolated fixture CLI/profile and deterministic local embedding service |
++
++Tests live in `tests/test_identity*.py`; original forms/text in `tests/fixtures/identity/`; exported schema in `schemas/cognee_identity_source_schema_draft.json`. Module/fixture IDs and phrases in the captured adapters are not a completed generic extraction layer.
++
++## Resume and verification commands
++
++From the repository root, inspect the checkout first. Use the lockfile and confirm the inspected Cognee version before native tests:
++
++```bash
++git status --short
++git log -1 --oneline
++uv sync --group dev
++uv run python -c "import cognee; print(cognee.__version__)"
++uv run pytest -q -m 'not integration'
++```
++
++The inspected native version must be **1.6.2**. A different version needs renewed compatibility inspection; do not silently treat it as the tested profile. A full native suite is `uv run pytest -q -m integration`; it creates fresh stores and can take minutes. Run focused native files for the changed path, then broaden only as needed.
++
++The latest happy path, with a **new** root, is:
++
++```bash
++uv run python -m cognee_lab.identity chunked-fixture --root outputs/stage6_resume_check
++uv run python -m cognee_lab.identity retire-resolved-group --root outputs/stage6_resume_check --source doc01 --expected-revision 1
++uv run python -m cognee_lab.identity reconcile --root outputs/stage6_resume_check --source doc01
++```
++
++Expected: only doc02's fact, doc01 current at 2/2/2, doc02 current at 1/1/1, g01 physical output absent, g02/shared support present, no recovery incident. The guide has a separate fresh-root `replace_published` failure/recovery sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories.
++
++## Constraints to preserve
++
++- Use **singleton**, **identity group (variants)** and document-local mention groups; no privileged canonical member, authoritative `entity_role` field or permanent identity-group registry. Do not silently promote a mention into a reusable Entity.
++- Saved descriptions and the publication ledger govern intent/currentness. Graph properties or an old recipe alone do not authorize resurrection. Existing compatible Entities are referenced/retained without ordinary-field overwrite; populated nested existing DataPoints can accidentally enter the write set.
++- Original occurrence chunks own/retain markers; original producing chunks own semantic facts/evidence; generated identity Data owns identity contributions and required-endpoint retention. Attaching a fact owner alone does not protect an unretained endpoint from cascading deletion. Preserve the reused-endpoint retention fix.
++- Occurrence coordinates are exact Unicode code points in the extracted document string, `[start,end)`. Validate source fingerprint, slices and complete native chunk mapping. Never choose the first repeated substring as an implicit locator. Content-derived chunk IDs can recur while positions/indexes change.
++- Use configured Cognee interfaces and backend-neutral relational operations. Ladybug/LanceDB/SQLite are the tested fixture profile; no vendor-specific implementation is authorized. The old NVIDIA tokenizer patch is separate from this isolated no-API fixture.
++- Pending/failed sources are withheld; independent valid sources survive. Recovery is explicitly selected forward completion of saved intent, not rollback or automatic retry. Native readers ignoring the ledger can see intermediate graph state. Hard crashes can leave a writer reservation; do not casually clear it or claim general restart recovery.
++- Prefer programmatic validation/publication/traversal. Capture where rules/model judgment is required. Captured fixture decisions and deterministic embeddings establish lifecycle mechanics, not extraction/search quality or scientific support.
++- A/B staging, incremental chunk reuse, comprehensive semantic replay/archives, automatic orchestration, all-alias Triplet text and universal scope/ontology frameworks are deferred. Size/density/token-overhead tooling is future evaluation work. Do not enable diagnostic Triplet/cache/optional native stages without admitting their actual lifecycle and consumed-store behavior.
++
++After each next checkpoint update this handoff's baseline, implemented/remaining status and verification table, together with the roadmap and relevant guide/playbook findings. Preserve dates and distinguish generated-here tests, user-reported native reproduction and untested design.
+diff --git a/docs/stage6_identity_first_slice.md b/docs/stage6_identity_first_slice.md
+--- a/docs/stage6_identity_first_slice.md
++++ b/docs/stage6_identity_first_slice.md
+@@ -1,4 +1,6 @@
+ # Stage 6: identity publication, retrieval and lifecycle fixtures
++
++**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+ 
+ Implemented on 2026-10-17 against Cognee 1.6.2. This is the agreed first checkpoint (record validation and a deterministic end-to-end fixture), not the complete Stage 6 integration. The reviewed handoff remains the design authority for later milestones.
+ 
+@@ -50,7 +52,7 @@
+ 
+ The injected failure happens after deterministic semantic output exists, so identity-only reconciliation can verify that output and restore publication without another model decision. Reconciliation is explicit and gets a new attempt; repeated graph/contribution publication is idempotent. The original event remains linked to the verified recovery. Deliberate injections are labeled separately from runtime incidents.
+ 
+-`--fault-stage nodes` and `--fault-stage verification` exercise other boundaries. If required semantic output is absent after a node-stage failure, identity-only reconciliation refuses to declare success. Actual document reconsideration/rebuild will be a later milestone; there is no hidden extraction call.
++`--fault-stage nodes` and `--fault-stage verification` exercise other boundaries. If required semantic output is absent after a node-stage failure, identity-only reconciliation refuses to declare success. Selected captured text-change profiles now support explicit original-document rebuilds. General reconsideration or regeneration of uncaptured semantic output remains later work; identity-only reconcile does not hide an extraction call.
+ 
+ Detected changed reasoning inputs are withheld and recorded as recovery-required incidents. Event writes that themselves fail are surfaced, leaving publication unavailable. Abrupt-process-death inspection/reservation abandonment and further recovery outcomes remain incomplete: a hard crash can leave the project writer reserved, so do not treat this slice as general restart recovery.
+ 
+@@ -60,9 +62,9 @@
+ 
+ The native run exposed a mismatch between `get_edges`' interface annotation and its actual legacy return shape/direction on this path. The integration uses `get_edge_delete_data` for exact edge/provenance reads and `iter_bounded_neighborhood` for uniform directed EdgeData, without an adapter-specific workaround. Default neighborhood implementations on some backends can read more than the returned cap; actual backend work bounds need separate admission tests.
+ 
+-Remaining work includes arbitrary text/occurrence-changing revisions beyond the captured prefix-edit path, coordinated original/generated Data removal and full document lifecycle, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The [multi-chunk checkpoint](stage6_identity_multichunk.md) verifies split markers and complete captured fact evidence. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
++Remaining work includes additions/regrouping and changed interpretations beyond the captured prefix/removal/retirement paths, coordinated original/generated Data removal and full document lifecycle, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The [multi-chunk checkpoint](stage6_identity_multichunk.md) verifies split markers and complete captured fact evidence. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
+ 
+-The saved authoritative JSON is serialized in the project relational row, with a matching snapshot in the registered generated Data item. The [unchanged-text replacement checkpoint](stage6_identity_revision_replacement.md) coordinates advancing those representations and the graph. Pending/failed replacements are withheld until verified. The [text-edit checkpoint](stage6_identity_text_changes.md) adds a captured prefix insertion with exact occurrence remapping and a full native original-memory rebuild; broader text/meaning changes remain unsupported.
++The saved authoritative JSON is serialized in the project relational row, with a matching snapshot in the registered generated Data item. The [unchanged-text replacement checkpoint](stage6_identity_revision_replacement.md) coordinates advancing those representations and the graph. Pending/failed replacements are withheld until verified. The [text-edit checkpoint](stage6_identity_text_changes.md) adds a captured prefix insertion with exact occurrence remapping and a full native original-memory rebuild; captured partial/empty-group removal and resolved fact retirement are covered in their subsequent guides. General changed-meaning processing remains unsupported.
+ 
+ No live lab corpus was changed, no native dependency source was patched, and no backend-specific query/storage implementation was added. Comprehensive replay, whole-store A/B copies, model-driven Describe, automatic repair and size/density tooling remain deferred.
+ 
+diff --git a/docs/stage6_identity_multichunk.md b/docs/stage6_identity_multichunk.md
+--- a/docs/stage6_identity_multichunk.md
++++ b/docs/stage6_identity_multichunk.md
+@@ -1,4 +1,6 @@
+ # Step 4 / M3: native multi-chunk maintenance
++
++**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+ 
+ This checkpoint adds a captured multi-chunk fixture to the existing text-replacement path. It exercises a grouped mention across chunks, a single occurrence split across a boundary, a fact whose literal text spans two chunks, changed boundaries, repeated edits, native evidence indexes, and explicit recovery. Decisions and fact spans are captured test input; this is not a general extraction or coreference algorithm.
+ 
+@@ -74,8 +76,8 @@
+ 
+ ## Scope and next work
+ 
+-This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. It does not evaluate multi-chunk LLM extraction, semantic interpretation of arbitrary edits, changes in group membership, span-specific aliases, automatic dependent-source reconsideration, generic source removal or standard Cognify/Update task-transform wiring. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
++This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. This prefix profile does not evaluate LLM extraction or changed interpretations. Subsequent removal/retirement profiles cover selected group-membership changes. Additions/regrouping, span-specific aliases, dependent-source reconsideration, generic source removal and standard Task-transform wiring remain beyond the implemented profile. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
+ 
+-The original six-step build order is unchanged. Step 4 has stronger chunk-boundary and evidence coverage; arbitrary occurrence edits and dependency/source lifecycle work remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
++The original six-step build order is unchanged. Step 4 has native chunk-boundary/evidence coverage and subsequent captured removal/retirement cases; additions/regrouping, changed interpretations and dependency/source lifecycle remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
+ 
+ The subsequent [reviewed removal checkpoint](stage6_identity_occurrence_removal.md) supplies explicit survivor indices and new exact spans for partial-group continuity and empty unresolved-group retirement. It retains this native rebuild/recovery path; the prefix profile above remains unchanged.
+diff --git a/docs/stage6_identity_occurrence_removal.md b/docs/stage6_identity_occurrence_removal.md
+--- a/docs/stage6_identity_occurrence_removal.md
++++ b/docs/stage6_identity_occurrence_removal.md
+@@ -1,4 +1,6 @@
+ # Step 4 / M3: reviewed occurrence removal
++
++**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+ 
+ This checkpoint extends the native whole-document rebuild to explicit occurrence removal. It uses captured identity/semantic review, exact positions, the existing publication ledger and native Cognee 1.6.2 interfaces. It remains a bounded part of step 4.
+ 
+@@ -69,6 +71,6 @@
+ 
+ `TextChange(previous_text, text, chunk_budget, occurrence_retention=...)` selects the reviewed-removal admission path. Every old group must be present in the map. Lists must contain unique, ordered, in-range integer indices (booleans are refused). Continuing groups keep their Entity/document identity and occurrence texts, with exact valid new spans. Empty lists explicitly retire the group and its resolution/declaration. Continuing assignments and other construction recipes remain unchanged. The default with no retention map preserves the existing prefix-only guard.
+ 
+-The fixture accepts only its documented fresh doc01 input. It does not locate arbitrary repeated phrases, decide which ambiguous occurrence continues, add new occurrences, split/combine groups, retarget surviving groups, retire a resolved group with its own facts, or implement general semantic extraction. The common replacement API requires caller-provided semantic rebuilding and verification. Span/record dependencies, dependent-source propagation and coordinated full original/generated Data removal remain later work. No backend-specific implementation, new dependency, new schema field or native Cognee source change is included.
++The remove-occurrences command accepts only its documented fresh doc01 input. It does not locate arbitrary repeated phrases, decide ambiguous continuity, add occurrences, split/combine groups or retarget surviving groups. The separate retire-resolved-group command covers a resolved group with its captured local fact; general semantic extraction remains unimplemented. The common replacement API requires caller-provided semantic rebuilding and verification. Span/record dependencies, dependent-source propagation and coordinated full original/generated Data removal remain later work. No backend-specific implementation, new dependency, new schema field or native Cognee source change is included.
+ 
+ The subsequent [resolved-group retirement checkpoint](stage6_identity_resolved_retirement.md) adds the captured case of removing a resolved group and its original-owned local fact/evidence, preserving a different fact from doc02. It reuses this explicit retention format and coordinator.
+diff --git a/docs/stage6_identity_resolved_retirement.md b/docs/stage6_identity_resolved_retirement.md
+--- a/docs/stage6_identity_resolved_retirement.md
++++ b/docs/stage6_identity_resolved_retirement.md
+@@ -1,4 +1,6 @@
+ # Step 4 / M3: retire a resolved, fact-bearing group
++
++**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+ 
+ This checkpoint removes every occurrence of doc01's primary resolved group. The existing whole-document rebuild and generated-retention cleanup perform the deletion; no new lifecycle coordinator or source schema is introduced. Identity and semantic decisions are captured fixture input, not model inference.
+ 
+diff --git a/docs/stage6_identity_revision_replacement.md b/docs/stage6_identity_revision_replacement.md
+--- a/docs/stage6_identity_revision_replacement.md
++++ b/docs/stage6_identity_revision_replacement.md
+@@ -1,6 +1,8 @@
+ # Step 4 / M3: unchanged-text identity revision replacement
+ 
+-Implemented against pinned Cognee 1.6.2 on 2026-10-19. This is the first portion of accepted step 4, following the publication and multi-source withdrawal fixtures. It is not completion of document edits, rechunking, dependency maintenance or the full lifecycle.
++**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
++
++Implemented against pinned Cognee 1.6.2 on 2026-10-19. This guide covers unchanged-text correction, the first portion of accepted step 4. Later guides cover selected text edits, rechunking and group retirement; dependency maintenance and the full lifecycle remain incomplete.
+ 
+ ## Run the captured correction
+ 
+@@ -76,6 +78,6 @@
+ 
+ Pure checks cover captured correction structure, unchanged-occurrence admission, native-owner preservation, expected-revision/pending-intent guards and exact saved-plan reuse. Native tests cover stale callers, coordinated revision/currentness, both query routes, exact local fact/evidence preservation, original borrowed-field preservation, doc02 survival, obsolete singleton/vector removal, reopen/reconcile, and explicit recovery at four write boundaries. Previous publication/withdrawal fixtures remain regression checks.
+ 
+-This fixture establishes neither the quality of the supplied identity correction nor a guarantee that arbitrary previously extracted facts remain valid after a real identity change. The supplied semantic verifier checks the captured unchanged local fact; semantic regeneration and its selection policy remain later work.
++This fixture establishes neither the quality of the supplied identity correction nor a guarantee that arbitrary previously extracted facts remain valid after a real identity change. The supplied semantic verifier checks the captured unchanged local fact; general semantic regeneration/selection after changed meaning remains later work; captured same-binding regeneration now exists in text-change fixtures.
+ 
+ The unchanged-text mode described here does not admit text, group membership, occurrence ranges, chunk boundaries, new context selection or dependent-source maintenance. The later [text-edit checkpoint](stage6_identity_text_changes.md) adds a separate, explicit TextChange mode for a captured prefix insertion, whole-document native rechunking and exact occurrence remapping; arbitrary edit and dependency policies remain incomplete. Standard Cognify/Remember/Update wiring, coordinated native Data removal, hard-crash writer abandonment, public SearchType, complete corpus traversal and all-backend validation remain incomplete. There is no A/B copy, rollback, automatic retry, LLM Describe or comprehensive replay framework.
+diff --git a/docs/stage6_identity_text_changes.md b/docs/stage6_identity_text_changes.md
+--- a/docs/stage6_identity_text_changes.md
++++ b/docs/stage6_identity_text_changes.md
+@@ -1,4 +1,6 @@
+ # Step 4 / M3: source-text edits with a whole-document rebuild
++
++**Guide scope:** commands and limits for this captured profile. For current project status, subsequent checkpoints, code baseline and verification evidence, start with [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+ 
+ This checkpoint extends guarded identity revision replacement to a captured prefix insertion in doc01. It uses Cognee 1.6.2 through configured interfaces, with no LLM calls or backend-specific storage code. It is a bounded maintenance demonstration, not completion of step 4 or standard Update wiring.
+ 
+@@ -42,7 +44,7 @@
+ 
+ `TextChange(previous_text, text, chunk_budget=512)` describes the exact original-text transition. Pass it to `Publisher.replace` with the intended next source, prepared native chunks, real generated-source context, expected saved revision, and explicit `semantic_writer` / `verify_semantics` callbacks. These callbacks receive no automatic identity or scientific reasoning. The fixture supplies captured fact generation and verifies the independently supported doc02 fact as well as the rebuilt doc01 fact.
+ 
+-The initial admission is deliberately narrow: one original plain-text Data item; a nonempty prefix insertion; stable group IDs, occurrence texts, group membership, assignments and construction recipes; exact shifted ranges; native TextChunker output and exact tiling. Arbitrary edits, changed interpretation/grouping, span-scoped variant remapping, span/record dependencies and additional consumed text documents require later work and are refused here. A dependent saved identity source referencing the edited original is refused before mutation; automatic reconsideration of that source is not implemented.
++The default prefix-mode admission is deliberately narrow: one original plain-text Data item; a nonempty prefix insertion; stable group IDs, occurrence texts, group membership, assignments and construction recipes; exact shifted ranges; native TextChunker output and exact tiling. An explicit occurrence-retention manifest now admits the documented removal/retirement modes through the same API. Additions/regrouping, changed interpretation, span-scoped variant remapping, span/record dependencies and additional consumed documents remain outside these modes. A dependent saved identity source referencing the edited original is refused before mutation; automatic reconsideration of that source is not implemented.
+ 
+ Maintain uses a full rebuild of this original document, even if an incremental update could preserve some chunks. The original default fixture still fits in one native chunk. The later [multi-chunk checkpoint](stage6_identity_multichunk.md) adds a native small-budget profile, split occurrence markers and two-chunk captured fact evidence. General multi-chunk semantic extraction and interpretation remain unevaluated.
+ 
+@@ -91,6 +93,6 @@
+ 
+ Tests cover Unicode/document positions, stale offsets despite a current hash, changed interpretation admission, split occurrence coverage, dependent-source refusal, unsafe endpoint cascades, the real native edit/reopen/reconcile/withdraw sequence, doc02 preservation, and caught failures at all four boundaries above. Previous publication, withdrawal and unchanged-text revision tests remain regressions. The initial backend profile is still the only native profile exercised; code uses configured interfaces.
+ 
+-Remaining step-4 work includes arbitrary edits and deleted/replaced occurrences, context/meaning reconsideration, general multi-chunk fact extraction beyond captured spans, incremental chunk reuse, span-scoped aliases, dependent-source propagation and coordinated full original/generated Data removal. Decision-model/LLM Describe quality remains a separate later evaluation. Saved previous/new text increases recovery-plan size; the existing planned size/metrics work should measure that overhead before introducing compression, shared blobs or a larger replay framework.
++Remaining step-4 work includes occurrence additions/regrouping, changed interpretations with refreshed semantic output, supported span/record and dependent-source maintenance, and coordinated original/generated Data removal/rebuild cases. Captured occurrence removal and resolved fact retirement are implemented in subsequent guides. General semantic conversion remains broader than the captured writer; incremental chunk reuse is deferred, not a step-4 completion gate. Decision-model/LLM Describe quality remains a separate later evaluation. Saved previous/new text increases recovery-plan size; the existing planned size/metrics work should measure that overhead before introducing compression, shared blobs or a larger replay framework.
+ 
+ Subsequent checkpoint: [reviewed occurrence removal](stage6_identity_occurrence_removal.md) now admits explicitly selected survivors and retires empty unresolved groups. This does not extend the prefix fixture into an automatic arbitrary-edit Describe algorithm.
+diff --git a/results/cognee_extension_architecture_reference_v1.6.2.md b/results/cognee_extension_architecture_reference_v1.6.2.md
+--- a/results/cognee_extension_architecture_reference_v1.6.2.md
++++ b/results/cognee_extension_architecture_reference_v1.6.2.md
+@@ -4,6 +4,8 @@
+ **Pinned Cognee version:** 1.6.2  
+ **Original review date:** 2026-10-10  
+ **Identity-design update:** 2026-10-13  
++**Current implementation pointer (2026-10-20):** [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the delivered baseline, tests/Mac reproduction and next task. This reference retains pinned source findings and dated design evolution; historical evidence limits do not negate later bounded runtime fixtures.
++
+ **Purpose:** Reusable reference for identity management and future Cognee integrations. This note focuses on extension boundaries, lifecycle behavior, and version-resilient design rather than one specific identity representation.
+ 
+ ## 1. Design objective
+@@ -20,7 +22,7 @@
+ 6. `GraphDBInterface` / vector-engine abstractions.
+ 7. Selected subclass points on built-in retrievers when necessary.
+ 8. Internal utilities/private methods only as a last resort.
+-9. Backend-specific Ladybug/LanceDB details only when unavoidable.
++9. Keep backend-specific implementation inside native adapters; project integrations use configured interfaces and refuse unsupported capabilities. Source inspection of an adapter does not authorize a vendor-specific project fallback.
+ 
+ A Python function being importable is not the same as being a stable extension API.
+ 
+@@ -409,9 +411,9 @@
+ 
+ The preferred B Task-list transform remains proposed and unimplemented. This direction neither implements it nor establishes which routing/loader wiring is sufficient.
+ 
+-## 14. Remaining questions for controlled tests — current design
+-
+-The earlier source-context, native deletion, incremental property and watermark questions now have scoped results in the characterization report. The combined new identity form is untested. Focus further checks on:
++## 14. Original controlled-test inventory and current coverage
++
++The earlier source-context, native deletion, incremental property and watermark questions now have scoped results in the characterization report. The new identity form was not runtime-validated by this dated source review. Later Stage-6 fixtures demonstrate bounded cases from items 1, 2 and 5 below, plus selected marker, retirement and rebuild cases from items 3 and 4. This is the original test inventory, not a list of wholly unstarted work; the [session handoff](../docs/SESSION_HANDOFF.md) separates implemented cases from the remaining coverage. Broader lifecycle, native-entry-point and retrieval integration remain partial or unimplemented, and item 7 applies only when those profiles are admitted.
+ 
+ 1. Publishing a new explicit-ID Entity and an ID-based edge to an existing Entity without rewriting the existing fields, while intentionally retaining both endpoints.
+ 2. Edge-only publication and contribution collection serialization/aggregation under multiple source owners.
+@@ -583,7 +585,7 @@
+ | attach_node_source_refs | Intentional retention of matched existing nodes without field replacement | Applicability or original-input provenance |
+ | Custom Retriever | Project-specific identity-group/mention traversal and output policy | Equivalent behavior in native retrieval/triplet indexing |
+ 
+-Keep computation separate from publication: callbacks can calculate intent, but the loading Task must control new-node writes, existing-node ref attachment, full edge contribution payloads and checks. Native full-rebuild Update does not accept arbitrary callback kwargs as a durable route. The initial chunkless identity-source path uses custom Tasks directly; calculate_chunk_graphs remains an optional seam for chunk-based extensions. Determine the loader/routing sequence under the B extension during .4; the small core patch, derived-source orchestration and this combined publication workflow remain unimplemented.
++Keep computation separate from publication: callbacks can calculate intent, but the loading Task must control new-node writes, existing-node ref attachment, full edge contribution payloads and checks. Native full-rebuild Update does not accept arbitrary callback kwargs as a durable route. The initial chunkless identity-source path uses custom Tasks directly; calculate_chunk_graphs remains an optional seam for chunk-based extensions. The reviewed direct custom-Task loader/source binding now has native fixtures. The B core patch and standard-entry-point/derived-source orchestration remain unimplemented; they are later implementation work, not another .4 design review.
+ 
+ No guarantees are added for every backend, optional maintenance stage, remote path or access-control configuration.
+ 
+@@ -612,16 +614,16 @@
+ 
+ | Concrete lesson / cross-cutting finding | Reusable integration finding | Activities | Evidence / design status |
+ |---|---|---|---|
+-| Distinct same-text local bindings need explicit IDs | Define object identity explicitly; a display name need not be a deduplication key. Several validated references in one local binding may share an ID. | Describe, Publish, Maintain, Retrieve | Explicit-ID precedence and prototype occurrence construction are source-inspected; the new combined workflow remains untested. |
+-| Referencing, retaining and rewriting an endpoint are separate actions | A publication plan must distinguish existing-node references, intentional retention ownership and property writes. | Describe, Publish, Maintain | Recursive rewrite/co-ownership is measured in fixtures; reference-only custom edges and deliberate ref attachment are source-inspected. |
+-| Describe must distinguish what to create from what to reference, including intended edges | Save explicit graph intent; keep domain interpretation in Describe while Publish executes declared persistence/aggregation rules and selected programmatic steps. | Describe, Publish, Maintain | Architecture refinement, not an implemented DTO, universal graph language or runtime result. |
+-| Shared native ownership does not merge application metadata | Define aggregation or replacement semantics for shared structures, then keep applicability consistent with surviving assignments. | Describe, Publish, Maintain, Retrieve | Native shared retention is measured; ordinary edge replacement is source-inspected. Contribution aggregation is proposed, not implemented. |
+-| Generated identity sources depend on original inputs | Retain explicit original-to-derived dependencies and define retirement/regeneration after input changes. | Describe, Publish, Maintain | Separate source-owner mechanics are characterized; the proposed derived-source orchestration is unimplemented. |
+-| Mention references and variant equivalence require different traversal | Define relationship interpretation and context eligibility, and implement retrieval that honors them. | Describe, Publish, Retrieve | Earlier identity-aware retrieval is demonstrated; contribution-aware group/mention traversal remains proposed. |
+-| Occurrence identity and classification can persist while its resolution changes | Preserve an occurrence-specific Entity ID and mention marker independently of accepted resolution; replace or withdraw resolution relationships explicitly. | Describe, Publish, Maintain, Retrieve | Accepted initial representation behavior; combined lifecycle and reader eligibility remain untested. |
+-| Lifecycle modifications primarily belong to Maintain | Maintain owns change detection, affected-set selection and replacement/retirement/reconstruction; it may reuse Publish's controlled persistence primitives. | Publish, Maintain | Responsibility clarification; no separate mutation engine or implementation is selected. |
++| Distinct same-text local bindings need explicit IDs | Define object identity explicitly; a display name need not be a deduplication key. Several validated references in one local binding may share an ID. | Describe, Publish, Maintain, Retrieve | Explicit-ID precedence and prototype occurrence construction are source-inspected; the later bounded custom-Task workflow is native-tested; broader extraction/conversion is not established. |
++| Referencing, retaining and rewriting an endpoint are separate actions | A publication plan must distinguish existing-node references, intentional retention ownership and property writes. | Describe, Publish, Maintain | Recursive rewrite/co-ownership is measured in fixtures; safe existing-node reference/retention without ordinary-field overwrite is now native-tested in the Stage-6 fixtures. |
++| Describe must distinguish what to create from what to reference, including intended edges | Save explicit graph intent; keep domain interpretation in Describe while Publish executes declared persistence/aggregation rules and selected programmatic steps. | Describe, Publish, Maintain | Draft IdentitySource records and controlled publication of explicit intent are implemented; no universal graph language is claimed. |
++| Shared native ownership does not merge application metadata | Define aggregation or replacement semantics for shared structures, then keep applicability consistent with surviving assignments. | Describe, Publish, Maintain, Retrieve | Native shared retention is measured; ordinary edge replacement is source-inspected. Source-specific contribution aggregation/replacement/withdrawal is implemented and native-tested in Stage 6. |
++| Generated identity sources depend on original inputs | Retain explicit original-to-derived dependencies and define retirement/regeneration after input changes. | Describe, Publish, Maintain | Bounded original-text rebuild/generated-snapshot coordination is implemented; dependent-source propagation and full Data-removal orchestration remain incomplete. |
++| Mention references and variant equivalence require different traversal | Define relationship interpretation and context eligibility, and implement retrieval that honors them. | Describe, Publish, Retrieve | Contribution-aware document-context group/mention fixture traversal is implemented; broader corpus traversal/delivery remains incomplete. |
++| Occurrence identity and classification can persist while its resolution changes | Preserve an occurrence-specific Entity ID and mention marker independently of accepted resolution; replace or withdraw resolution relationships explicitly. | Describe, Publish, Maintain, Retrieve | Captured retarget/removal/reconcile/recovery and ledger-based reader eligibility are native-tested; general changed-meaning reconsideration remains incomplete. |
++| Lifecycle modifications primarily belong to Maintain | Maintain owns change detection, affected-set selection and replacement/retirement/reconstruction; it may reuse Publish's controlled persistence primitives. | Publish, Maintain | Fixture Maintain uses common Publisher.replace/withdraw and TextChange; broader affected-source selection is not implemented. |
+ | Maintain must decide what propagates into saved records | Separate validated source changes and accepted interpretation changes from native property drift, remapping and materialization failures; update durable descriptions only under the declared policy. | Describe, Maintain | Responsibility/design clarification; no automatic graph-to-source synchronization is implemented. |
+-| Multi-document interpretations require operational use of input provenance | Use dependencies to select affected assignments and preserve independent sources; document grouping alone does not establish independence. | Describe, Maintain, Retrieve | Functional/test refinement; external-context dependency handling remains unimplemented. |
++| Multi-document interpretations require operational use of input provenance | Use dependencies to select affected assignments and preserve independent sources; document grouping alone does not establish independence. | Describe, Maintain, Retrieve | Input validation and known dependent-edit refusal are implemented; external-context propagation/reconsideration remains incomplete. |
+ | Describe relates document identities to eligible corpus identities | Candidate discovery and contextual interpretation produce exact reuse/create/link intent; occurrence-ID preservation is separate from interpretation reuse. New corpus arrivals can make earlier unresolved records worth reconsidering under Maintain. | Describe, Maintain, Retrieve | Intended scope and test refinement; candidate algorithms, reconsideration triggers and stability policy remain unimplemented. |
+ | Make representation meaning and rules explicit | Define concepts, relationship meanings, valid combinations and context. Investigate which parts constitute a domain ontology and which are schemas or operational rules. | Describe, Publish, Maintain, Retrieve | Cross-cutting design finding and investigation topic; no ontology formalism is selected. |
+ | Preserve durable descriptions independently of graph materialization | Save sufficient structured input, endpoint references and provenance to rebuild the intended graph and maintain source dependencies. | Describe, Publish, Maintain, Retrieve | Selected initial architecture; storage layout and combined rebuild/explanation behavior remain unvalidated. |
+@@ -637,7 +639,7 @@
+ 
+ The recurring activities can transfer to measurements: describe values/units/context, publish measurement records linked to existing instruments/facilities, maintain revisions/calibrations and retrieve under conditions. Their domain rules are not copied from identity equivalence. A second worked example should determine which mechanisms generalize; no generic plugin/package runtime or universal ontology framework is being implemented now.
+ 
+-This documentation update adds no runtime result, stage or renumbering. Operation walkthroughs toward 5.4.5.4 remain the immediate work.
++This dated design update itself added no runtime result, stage or renumbering. Subsequent .4/.5 review is complete and bounded Stage-6 runtime evidence is recorded in the session handoff; operation walkthroughs are no longer the immediate task.
+ 
+ ### 18.4 Explicit descriptions and bounded publication — refinement, 2026-10-13
+ 
+@@ -669,7 +671,7 @@
+ 
+ Captured occurrence information and derived interpretation have different update sources: original text/coordinates come from verified original input; accepted target/applicability/derivation information comes from identity processing. Interpretation changes preserve occurrence identity, while source-occurrence changes require validation/regeneration.
+ 
+-Saved-record modification can succeed while graph publication fails. Preserve the intended state for retry and keep affected retrieval unavailable until the current description and required graph materialization agree. The exact status/revision/transaction implementation remains to be selected under the lifecycle contract.
++Saved-record modification can succeed while graph publication fails. Preserve the intended state for retry and keep affected retrieval unavailable until the current description and required graph materialization agree. The current runtime implements portable status/revision/attempt guards, minimal plans and explicit caught-failure coordination for admitted paths; it does not provide a cross-store transaction.
+ 
+ The detailed occurrence policy is in proposal section 2.3. The reusable finding is tagged Describe and Maintain; resulting graph writes use Publish's shared routines. This policy does not require an archive, indiscriminate graph-to-source copying or a universal reaction to every Cognee mutation.
+ 
+@@ -677,7 +679,7 @@
+ 
+ Each reviewed sequence and expected output is also input to a planned test suite. Capture initial fixture, initiating operation, saved-record result, graph IDs/properties/native refs, retrieval eligibility/applicability, active derived-store checks, failure points and replay result. Proposal section 11 contains the scenario matrix; roadmap 6.6 carries implementation.
+ 
+-Use deterministic captured extraction/identity decisions for lifecycle tests, actual isolated backend/source contexts for persistence integration, and end-to-end maintenance/retrieval plus failure-injection cases. Separate interpretation-quality benchmarks from orchestration assertions. These are planned tests; none has been implemented or run for the new representation.
++Use deterministic captured extraction/identity decisions for lifecycle tests, actual isolated backend/source contexts for persistence integration, and end-to-end maintenance/retrieval plus failure-injection cases. Separate interpretation-quality benchmarks from orchestration assertions. This is the broader test design; a captured native/programmatic subset is now implemented and passing. Current coverage is recorded in SESSION_HANDOFF.md, without claiming all planned cases or model-quality evaluation.
+ 
+ The accepted shared-source withdrawal adds concrete checks to existing findings: native owner survival does not remove obsolete contribution properties; surviving assignment Y need not change when X is retired; source-bound repair must not reattach the retired source; and a retained physical edge with no accepted contributions must not be treated as a current identity relationship.
+ 
+@@ -703,13 +705,13 @@
+ 
+ ### 18.10 Shared stored-representation mutation interface — agreed direction
+ 
+-Add a shared interface for reading and applying guarded changes to saved descriptions/records, explicit source-level replacement/retirement and change reporting. Domain helpers enforce meaning; generic storage persists intent. Distinguish interpretation withdrawal, occurrence retirement, representation revision and original-input revision. Keep graph publication explicit and coordinated by Maintain. The adapter/API implementation is still open; illustrative method names are not native Cognee APIs.
++Add a shared interface for reading and applying guarded changes to saved descriptions/records, explicit source-level replacement/retirement and change reporting. Domain helpers enforce meaning; generic storage persists intent. Distinguish interpretation withdrawal, occurrence retirement, representation revision and original-input revision. Keep graph publication explicit and coordinated by Maintain. The project runtime now supplies registered/relational storage and guarded Publisher publish/replace/withdraw operations for admitted paths. A generic fine-grained record-edit API remains broader work; illustrative names here are not native Cognee APIs.
+ 
+ ### 18.11 Saved-state/publication failure coordination — proposed next review
+ 
+ Proposal sections 13–14 record the accepted storage-interface direction and a proposed per-affected-source completion protocol. Commit intended description, reconcile graph/active indexes, verify and acknowledge the exact current revision. Acknowledge neither failed nor superseded publication as current. Reuse saved decisions during graph retry; regenerating Describe can introduce a new interpretation and is a separate action.
+ 
+-On shared structures, preserve eligible surviving contributors while excluding pending/retired ones, subject to required object/index validity. Recording saved state and graph state are separate failure boundaries; no automatic cross-store transaction or historical-property rollback is promised. This protocol remains under review and unimplemented.
++On shared structures, preserve eligible surviving contributors while excluding pending/retired ones, subject to required object/index validity. Recording saved state and graph state are separate failure boundaries; no automatic cross-store transaction or historical-property rollback is promised. The reviewed protocol is implemented for supported fixture operations through the portable ledger and controlled publisher. General source/dependency orchestration and standard hooks remain; no cross-store transaction is claimed.
+ 
+ ### 18.12 A/B generation staging and extensible recovery — proposed, 2026-10-13
+ 
+@@ -757,7 +759,7 @@
+ 
+ Retarget an entire group by changing its resolution; retarget some occurrences by splitting the group first. Withdrawal does not automatically retire captured references or classification. Variant relationship records share assignment/provenance machinery with two exact reusable endpoints and explicit applicability, without a mention-group reference.
+ 
+-General lesson: source object identity, captured inputs and derived interpretation can have different lifecycles. A shared mutation API must preserve those distinctions while coordinating materialization. Proposal section 18 contains the agreed identity forms; these are structured records, not graph support nodes, and exact serialization remains open.
++General lesson: source object identity, captured inputs and derived interpretation can have different lifecycles. A shared mutation API must preserve those distinctions while coordinating materialization. Proposal section 18 contains the agreed identity forms; these are structured records, not graph support nodes, and draft serialization is now implemented in the Stage-6 runtime models/exported schema.
+ 
+ ### 18.17 Durable construction fallback for borrowed corpus endpoints — revised proposal, 2026-10-14
+ 
+@@ -921,5 +923,4 @@
+ | ID-only edges can miss optional Triplet embeddings when endpoints are absent from the current node batch | Publish, Maintain, Retrieve | Verify configured derived indexes independently of graph success. |
+ | One physical source/name/target edge can have several owners but one ordinary property bag | Describe, Publish, Maintain, Retrieve | Begin with native ordinary-fact behavior; add a focused extension only for a demonstrated loss. Identity contribution collections do not automatically generalize to every fact. |
+ 
+-Proposal section 27 records the native baseline, source-inspected seams and planned real-backend sequences. Exact captured-output placement, reference-only adapter and cross-source mention classification lifetime remain open. No new runtime result is claimed and the native-versus-custom extraction coverage experiment remains deferred.
+-
++Proposal section 27 records the native baseline, source-inspected seams and planned real-backend sequences. Later captured fixtures implement original-owned semantic output/evidence, safe exact-ID references and mention retention across generated-source withdrawal. General semantic conversion/dependency lifecycle remain incomplete. This dated source review itself added no runtime result; the native-versus-custom extraction coverage experiment remains deferred.
+diff --git a/results/cognee_identity_stage6_handoff.md b/results/cognee_identity_stage6_handoff.md
+--- a/results/cognee_identity_stage6_handoff.md
++++ b/results/cognee_identity_stage6_handoff.md
+@@ -2,7 +2,7 @@
+ 
+ **Consolidated:** 2026-10-15 (America/Detroit).  
+ **Baseline:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`; Ladybug/LanceDB/SQLite, shared physical storage.  
+-**Status:** handoff review completed 2026-10-17. The first deterministic implementation slice now has native fixture evidence (section 12); full lifecycle, standard entry-point integration and broader retrieval remain in progress.
++**Current status (2026-10-20):** architecture review complete; bounded Stage-6 steps 1–4 have code and native evidence through resolved fact-bearing group retirement. Step 4 is partial; standard entry-point integration and broader retrieval remain. Start a new session with [the current session handoff](../docs/SESSION_HANDOFF.md), which records the exact delivery/verification boundary and next task. Section 12 is dated checkpoint history, not a cumulative list of unfinished work.
+ 
+ ## 1. Authority, scope and first build
+ 
+@@ -12,9 +12,9 @@
+ |---|---|
+ | Environment | Local Python; Ladybug/LanceDB/SQLite is the initial integration-test configuration, not an implementation dependency |
+ | Source processing | Local Python, ordinary text STANDARD route, project Tasks |
+-| Native entry points | Cognify/standard Remember and project-model full-rebuild Update through the proposed B Task-transform seam |
+-| Lifecycle | Overlapping ingest, selected document maintenance, original/generated source removal and dataset cleanup |
+-| Retrieval | Registered project Retriever/SearchType, native public request envelope |
++| Native entry points | Target for step 5: Cognify/standard Remember and project-model full-rebuild Update through B Task-transform; current fixtures use custom Tasks and composed native operations |
++| Lifecycle | Target: overlapping ingest, selected maintenance, original/generated source removal and dataset cleanup; current code demonstrates publication/withdrawal, corrections and bounded original-text rebuild/retirement |
++| Retrieval | Target for step 5: registered project Retriever/SearchType; current code is the bounded identity-aware fixture retriever |
+ | Maintenance selection | Original documents mapped to generated identity sources; no caller-facing per-assignment/fragment selection |
+ | Optional native stages/backends/transport | Admit only after checking their actual mutations and consumed stores; remote callables and native incremental Update are not initial project paths |
+ 
+@@ -89,7 +89,7 @@
+ 
+ ## 3. Saved forms: implementation draft
+ 
+-[cognee_identity_source_schema_draft.json](cognee_identity_source_schema_draft.json) and [cognee_identity_source_example.json](cognee_identity_source_example.json) make the selected concepts concrete. Field names, the draft version tag, input-kind enumeration and configuration spelling are draft implementation choices, not additional approved semantic requirements or an existing Cognee model.
++[cognee_identity_source_schema_draft.json](../schemas/cognee_identity_source_schema_draft.json) and [cognee_identity_source_example.json](../tests/fixtures/identity/cognee_identity_source_example.json) make the selected concepts concrete. Field names, the draft version tag, input-kind enumeration and configuration spelling are draft implementation choices, not additional approved semantic requirements or an existing Cognee model.
+ 
+ | Draft field | Purpose |
+ |---|---|
+@@ -141,7 +141,7 @@
+ 
+ Distinguish missing output from missing reasoning input. A new output, or a gap explicitly covered by a validated captured rebuild/publication plan, can be created with the exact UUID and recipe when the required inputs/intent remain valid. If an existing corpus Entity used as a reasoning input later disappears outside that expected plan, a recipe plus its old fingerprint does not establish continued validity; the digest does not contain the consumed values. Initially leave saved-intent reconciliation unavailable and select the document for reconsideration. Independent reconstruction beyond captured plans needs an explicit future dependency/capture policy. Graph absence alone establishes neither deliberate retirement nor permission to restore. An explicit retirement/replacement plan prevents stale restoration without banning a separately current source's valid independent support.
+ 
+-The current schema supplies much of the input/recipe data, but recipe validation, UUID-use compilation, dependency checks, operation capture, coordinated writer protection and final verification are project implementation work. Native node lookup and source-reference attachment are primitives, not implementations of these domain checks. Unsupported independent mutations are not made safe by a check-before-write alone.
++The current runtime implements recipe validation, UUID-use compilation, supported input checks, minimal operation capture, portable writer/revision guards and final verification for admitted fixture paths. Broader dependency propagation and operation coverage remain implementation work. Native node lookup/source-reference attachment are primitives, not domain checks; unsupported independent mutations are not made safe by a check-before-write alone.
+ 
+ ### Producer bookkeeping — agreed 2026-10-17
+ 
+@@ -355,7 +355,7 @@
+ 
+ ## 11. Build order and unresolved engineering work
+ 
+-Build order accepted 2026-10-17; the first reviewable deliverable covers M0–M1. Implement relevant sequence tests alongside each step rather than making the entire inventory an upfront gate.
++Build order accepted 2026-10-17. The initial deliverable covered M0–M1; current code extends through the partial M3 boundary below. Implement relevant sequence tests alongside each step rather than making the entire inventory an upfront gate. Current delivered baseline and independently reviewed Mac results are in [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md).
+ 
+ | Milestone / accepted step | Concrete output and current boundary |
+ |---|---|
+@@ -389,7 +389,7 @@
+ 
+ ### First implementation checkpoint — 2026-10-17
+ 
+-Repository code now lives in src/cognee_lab/identity, with a generated schema in schemas, exact source/example fixtures in tests/fixtures/identity and commands/limits documented in docs/stage6_identity_first_slice.md. The initial source is registered as a real Cognee Data item; publication uses real source contexts and configured interfaces. Bookkeeping stores the serialized JSON/currentness/minimal plan in backend-neutral relational project tables; the first registered generated source contains its matching JSON snapshot. Revision replacement is refused until a coordinated source-update path is implemented.
++Repository code was introduced in src/cognee_lab/identity, with a generated schema in schemas, exact source/example fixtures in tests/fixtures/identity and commands/limits documented in docs/stage6_identity_first_slice.md. The initial source is registered as a real Cognee Data item; publication uses real source contexts and configured interfaces. Bookkeeping stores the serialized JSON/currentness/minimal plan in backend-neutral relational project tables; the registered generated source contains its matching JSON snapshot. At this first checkpoint revision replacement was refused; subsequent checkpoints below implement guarded replacement and selected text/group changes.
+ 
+ The first fixture preserves a borrowed Entity's differing ordinary fields/sentinel, creates the exact variant/M UUIDs, publishes chunk-owned mention markers and a mention-anchored limits->oscillations fact, and returns original native evidence plus the accepted scoped identity annotation. Retrieval demonstrably seeds HC, follows its document-applicable variant link and then the accepted local mention. A fresh process can reopen the stores and explicit same-revision reconciliation is idempotent.
+ 
+@@ -427,7 +427,7 @@
+ 
+ The edit path refuses other saved sources depending on the edited original; it does not implement their reconsideration. Caught interruptions after original-memory removal, original ingestion, native chunk persistence and graph publication use the exact saved transition for an explicit full-rebuild retry. Pending/failed doc01 interpretation is withheld while doc02 remains usable. No LLM judgment occurs during replay; no rollback, atomic native visibility or hard-crash lock recovery is claimed.
+ 
+-This advances a bounded portion of step 4, not the complete milestone. The native fixture remains one chunk; pure mapping tests include an occurrence split across two chunks. Arbitrary edits, changed meanings/group membership, multi-chunk semantic extraction, span/record dependency remapping, dependent-source propagation, full source removal and standard pipeline wiring remain. The original six-step build order is unchanged. Commands, diagnostics and exact scope: ../docs/stage6_identity_text_changes.md.
++At this prefix-edit checkpoint, the native fixture used one chunk and pure tests split an occurrence across chunks. The subsequent multi-chunk and removal checkpoints supersede its chunk-count/group-removal limits. General extraction, changed meanings, additions/regrouping, span/record and dependent-source maintenance, full source removal and standard pipeline wiring remain. The original six-step build order is unchanged. Commands and exact prefix profile: ../docs/stage6_identity_text_changes.md.
+ 
+ ### Step 4 / M3: native multi-chunk checkpoint — 2026-10-19
+ 
+@@ -443,7 +443,7 @@
+ 
+ The common whole-document rebuild regenerates the captured surviving local fact and current evidence, rewrites current markers, removes the empty group's saved record/resolution/Entity declaration and retires its now unowned Entity/vector. Existing foreign owners and independent doc02 interpretations must survive. The saved failure plan contains previous/new text, native chunk budget, previous description and explicit retention; recovery reuses those exact inputs without rerunning identity judgment. Diagnostics distinguish net text-length change from a global position shift, and expose retired group/node/index/marker state.
+ 
+-This is not a generic edit or grouping implementation. Occurrence additions, group splits/combinations, changed continuing interpretations and deletion of a resolved group with facts remain unimplemented fixture cases. Broader semantic extraction, dependent-source propagation and original-source removal remain step-4 work. There is no new source-schema field, provider implementation, native Cognee modification or recovery framework. Commands and exact limits: ../docs/stage6_identity_occurrence_removal.md.
++At this removal checkpoint, additions, splits/combinations, changed continuing interpretations and resolved-group fact retirement were outside its fixture. The following resolved-retirement checkpoint implements the last of those cases. Additions/regrouping, broader semantic refresh, dependent-source propagation and original-source removal remain step-4 work. There is no new source-schema field, provider implementation, native Cognee modification or recovery framework. Commands and exact partial-removal profile: ../docs/stage6_identity_occurrence_removal.md.
+ 
+ ### Step 4 / M3: resolved-group retirement checkpoint — 2026-10-19
+ 
+diff --git a/results/cognee_knowledge_integration_playbook.md b/results/cognee_knowledge_integration_playbook.md
+--- a/results/cognee_knowledge_integration_playbook.md
++++ b/results/cognee_knowledge_integration_playbook.md
+@@ -6,7 +6,7 @@
+ 
+ **Consolidated:** 2026-10-15 (America/Detroit).  
+ **Baseline examined:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`; the lab uses Ladybug/LanceDB/SQLite.  
+-**Status:** reusable design process and implementation checklist, derived from the identity investigation. The new identity workflow is not yet implemented end to end. Measurement examples below are illustrative, not a selected scientific schema.
++**Current status (2026-10-20):** reusable process/checklist plus bounded native identity implementation evidence through resolved-group retirement. Captured Describe → Publish/Maintain → Retrieve sequences work in the initial profile; automatic Describe, full source/dependency lifecycle, standard entry points and general retrieval remain incomplete. Measurement examples are illustrative, not a selected scientific schema. Read [the session handoff](../docs/SESSION_HANDOFF.md) for current code and verification status; dated sections below retain checkpoint evidence.
+ 
+ ## 1. What carries over to the next integration
+ 
+@@ -48,17 +48,17 @@
+ 
+ | ID | General lesson/process | Activities | Current basis | What the next integration must verify |
+ |---|---|---|---|---|
+-| G01 | Explicit IDs and continuity rules are separate from display names and current offsets | D, P, M, R | Explicit-ID precedence is source-inspected; grouped continuity is selected design | Define identity for repeated equal-valued measurements and source revisions |
+-| G02 | Reference, retention and ordinary property persistence are different actions | D, P, M | Recursive overwrite/co-ownership observed; native ref attachment inspected | Link existing instrument/facility nodes without rewriting them |
++| G01 | Explicit IDs and continuity rules are separate from display names and current offsets | D, P, M, R | Explicit-ID creation/reference and captured shift/removal continuity are native-tested; general additions/regrouping remain | Define identity for repeated equal-valued measurements and source revisions |
++| G02 | Reference, retention and ordinary property persistence are different actions | D, P, M | Recursive overwrite/co-ownership characterized; safe existing-node retention without ordinary-field overwrite native-tested | Link existing instrument/facility nodes without rewriting them |
+ | G03 | A saved description specifies exact graph intent; Publish executes declared rules | D, P, M | Captured next-revision identity corrections use the same publisher, with no new inference during replacement/recovery | Define edges/endpoints/aggregation explicitly instead of asking Publish to infer meaning |
+ | G04 | Native source ownership retains objects but does not aggregate application properties | D, P, M, R | Two-source fixture/tests exercise payload aggregation, both withdrawal orders, native owner survival and last-owner deletion | Decide whether native shared-edge semantics suffice for values/qualifiers |
+ | G05 | Original evidence, generated-source ownership and producer attribution are distinct | D, P, M, R | Combined fixture checks original fact/marker/evidence survival after generated-source withdrawal; marked endpoints require explicit original retention | State original measurement evidence and endpoint retention separately from generated structure ownership |
+ | G06 | A generated registered Data item does not automatically follow its original input's lifecycle | D, P, M | Explicit generated identity-output withdrawal implemented; coordinated original/generated Data deletion still unimplemented | Map original inputs to generated measurement sources and retire/refresh them explicitly |
+-| G07 | Actual supplied context and selection changes define operational dependencies | D, M, R | Selected dependency/locator policy | Capture calibration, unit definitions and corpus context actually supplied; handle newly inserted context |
++| G07 | Actual supplied context and selection changes define operational dependencies | D, M, R | Checked input fingerprints, spans and current chunk maps implemented; dependent-source edits are refused pending propagation | Capture calibration, unit definitions and corpus context actually supplied; handle newly inserted context |
+ | G08 | Saved meaning and graph materialization have separate failure points | P, M, R | Native revision tests interrupt saved-record, registered-Data, additive graph and retirement phases; ledger eligibility withholds incomplete sources | Reuse publication guards; diagnostic recovery events must not become a parallel currentness registry |
+ | G09 | Reconcile valid saved intent; explicitly reconsider when regeneration is required | D, P, M | Explicit replacement recovery finishes the exact saved next revision and retirement plan; comprehensive captured replay remains deferred | Distinguish forward completion of captured intent from regenerating uncaptured interpretation; measure recovery needs before adding automation |
+-| G10 | Rebuild recipes are minimal creation seeds, not historical property snapshots | D, P, M | Exact-ID creation/ref semantics inspected; combined replay untested | Ensure required borrowed endpoints can be retained/recreated without stale resurrection |
+-| G11 | Retrieval consumes domain rules; native graph search does not acquire them automatically | D, P, R | Earlier identity retrieval demonstrated; new traversal unimplemented | Define measurement-specific conditions, units and update eligibility |
++| G10 | Rebuild recipes are minimal creation seeds, not historical property snapshots | D, P, M | Exact-ID creation/reference and captured retry native-tested; unexpected missing reasoning inputs do not authorize recipe resurrection | Ensure required borrowed endpoints can be retained/recreated without stale resurrection |
++| G11 | Retrieval consumes domain rules; native graph search does not acquire them automatically | D, P, R | Contribution-aware document-context fixture retrieval implemented; public corpus-wide traversal/delivery remains incomplete | Define measurement-specific conditions, units and update eligibility |
+ | G12 | One interpretation annotation should drive object, context and answer rendering | D, M, R | Selected identity delivery policy | Reuse the mechanism where helpful; choose measurement-specific meanings rather than copying identity states blindly |
+ | G13 | Deduplicate repeated artifacts; preserve distinct statements/evidence unless equivalence is explicitly defined | P, M, R | Native ID/evidence helpers inspected; grouped presentation selected | Do not collapse distinct experimental runs merely because their values match |
+ | G14 | Only actually consumed derived stores need integration guarantees | P, M, R | Stale index/evidence behavior characterized; R5 | Check explicit and generic vector collection discovery, source evidence and enabled caches |
+@@ -98,7 +98,7 @@
+ 
+ ### Recovery evidence before recovery automation (P, M, R)
+ 
+-Start with explicit recovery, a minimal durable change plan and publication guards; add complete output capture or stepwise replay only when justified. Record recovery-required incidents with source/attempt/revision, discovery time, failed stage/reason, runtime profile, selected recovery method and verified outcome. Preserve a compact event history after temporary artifacts are cleaned. Link repeated observations/recovery attempts rather than counting every restart as a new incident; distinguish injected test cases from runtime failures. The event history is diagnostic, while the ledger remains the publication-eligibility authority. Surface event IDs in failures and provide a small listing/export. Use frequency, repeated causes, method success and detection-to-restoration time to prioritize later recovery work. Abrupt crashes are recorded when pending state is next inspected; no background service is a prerequisite.
++Start with explicit recovery, a minimal durable change plan and publication guards; add complete output capture or stepwise replay only when justified. Record recovery-required incidents with source/attempt/revision, discovery time, failed stage/reason, runtime profile, selected recovery method and verified outcome. Preserve a compact event history after temporary artifacts are cleaned. Link repeated observations/recovery attempts rather than counting every restart as a new incident; distinguish injected test cases from runtime failures. The event history is diagnostic, while the ledger remains the publication-eligibility authority. Surface event IDs in failures and provide a small listing/export. Use frequency, repeated causes, method success and detection-to-restoration time to prioritize later recovery work. The broader target is to record abrupt-crash incidents when pending state is inspected; this is not completed general restart recovery. Current caught failures are recorded immediately, while an abandoned writer reservation can still block progress. No background service is a prerequisite.
+ 
+ ### Future size and overhead evaluation (D, P, M, R)
+ 
+diff --git a/results/cognee_stage5_4_5_1_initial_findings.md b/results/cognee_stage5_4_5_1_initial_findings.md
+--- a/results/cognee_stage5_4_5_1_initial_findings.md
++++ b/results/cognee_stage5_4_5_1_initial_findings.md
+@@ -4,7 +4,7 @@
+ **Design/source clarification added:** 2026-10-13  
+ **Lab checkout:** `4c0cca741a40277229fd2e0a781ac0d4e399a8d3`  
+ **Inspected Cognee:** tag `v1.6.2`, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`  
+-**Status:** COMPLETE for the agreed characterization scope. Source inspection and the scoped runtime batches cover persistence, overlapping ingestion, default Improve/Memify, custom Tasks/source context, incremental and full-rebuild Update, source/dataset Forget, a minimal scientific fixture, and Recall/Search bookkeeping. The operation × artifact synthesis is complete. Initial 5.4.5.2–.3 ownership/representation choices are now recorded separately; the next activity is operation walkthroughs toward .4. The whole of 5.4.5 remains in progress. The design update adds no runtime result.
++**Status:** COMPLETE for the agreed characterization scope. Source inspection and the scoped runtime batches cover persistence, overlapping ingestion, default Improve/Memify, custom Tasks/source context, incremental and full-rebuild Update, source/dataset Forget, a minimal scientific fixture, and Recall/Search bookkeeping. The operation × artifact synthesis is complete. The subsequent Stage-5.4.5 architecture/handoff review is complete; current implementation is Stage 6, partial step 4. This file retains the pinned investigation results and their original evidence boundaries. Later runtime fixtures do not retroactively repair or rerun those experiments. See [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md).
+ 
+ ## Design handoff update — 2026-10-13
+ 
+@@ -679,7 +679,7 @@
+ - full-rebuild Update needs explicit maintenance replay;
+ - dataset-wide behavior also depends on provenance mode, ownership scope, and storage isolation.
+ 
+-Public Forget and both Update profiles now confirm these mechanisms for the lab's present unstamped/shared structures. The measured Update runs additionally distinguish true chunk preservation from recreation, confirm the custom-model rebuild gate, and expose incremental evidence maintenance gaps. Maintenance replay and index repair remain unimplemented and untested.
++Public Forget and both Update profiles now confirm these mechanisms for the lab's present unstamped/shared structures. The measured Update runs additionally distinguish true chunk preservation from recreation, confirm the custom-model rebuild gate, and expose incremental evidence maintenance gaps. Maintenance replay and index repair were not implemented/tested in these legacy-helper probes. Later Stage-6 captured source/identity rebuild and cleanup fixtures are recorded separately; they do not establish repair of this historical helper graph.
+ 
+ ## 8. Consolidated operation × artifact matrix
+ 
+@@ -739,7 +739,7 @@
+ - Read controls use CHUNKS and pinned RAG_COMPLETION, a fresh explicit session, automatic feedback off, last-access tracking off, and one explicit synthetic feedback update.
+ - Session-enabled/opt-in Improve stages, global-context rebuilding, automatic feedback analysis, last-access tracking enabled, single-document contamination-chain invalidation, every retrieval lane, other backends, and access-control-enabled isolation remain source-inspected or untested as labeled.
+ - Scientific classes are minimal fixtures. Production Claim/Measurement/Evidence modeling, ontology reasoning, immutable history, general contradiction handling, and project identity reconciliation are later work.
+-- Indexed-text direct invalidation, cleanup/replay/index/evidence repairs, and the preferred Cognify B extension remain unimplemented. The diagnostic default-model incremental profile does not replace the lab's project-model construction.
++- At this characterization checkpoint, no indexed-text direct invalidation or cleanup/replay/index/evidence repair was implemented. Later Stage-6 bounded rebuild/retirement results are separate; general repairs and the preferred Cognify B extension remain incomplete. The diagnostic default-model incremental profile does not replace the lab's project-model construction.
+ - Captures are sequential and targeted, not transactional full-store inventories. Graph-associated ID reads deliberately use pre-deletion scopes to avoid hiding deleted-node/edge leftovers; fixture/session probes track all IDs they observed.
+ 
+ ### Evidence inventory
+diff --git a/results/cognee_stage5_4_5_identity_representation_proposal.md b/results/cognee_stage5_4_5_identity_representation_proposal.md
+--- a/results/cognee_stage5_4_5_identity_representation_proposal.md
++++ b/results/cognee_stage5_4_5_identity_representation_proposal.md
+@@ -3,7 +3,7 @@
+ **Recorded:** 2026-10-13 (America/Detroit)  
+ **Project:** cognee-science-lab  
+ **Baseline:** Cognee 1.6.2, Ladybug/LanceDB/SQLite, shared physical storage.  
+-**Status:** Selected initial design direction from the discussion. This is a proposal to implement and validate, not an implemented schema or a runtime compatibility guarantee. Exact serialization, Task sequencing, failure handling and operation contracts remain to be settled.
++**Status reconciled 2026-10-20:** decision record leading to the reviewed Stage-6 contract. Draft forms/serialization, source-bound publisher, contribution aggregation, guarded replacement/withdrawal and explicit caught-failure recovery are implemented for bounded native fixtures. Earlier dated proposals below retain rationale; they are not a current unfinished-work list. See [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) and the [Stage-6 contract](cognee_identity_stage6_handoff.md) for current status and supersessions.
+ 
+ This record supersedes the current design's earlier privileged canonical/variant model and the proposal for one graph support node per assignment. Earlier Stage-5 demonstrations remain historical evidence. The six requirements in [the requirements review](cognee_stage5_4_5_requirements_review.md) remain outcome constraints; the choices here are one proposed way to satisfy them.
+ 
+@@ -29,7 +29,7 @@
+ 
+ Initially, use one generated identity Data item for the document-local assignments derived from one original document: I01 for DOC01, I02 for DOC02. Each assignment has its own stable identifier within that grouping. Changing one assignment can therefore require republishing its generated source's set. Cross-document assignments are not assigned a grouping policy yet.
+ 
+-The source must be registered through Cognee's Data lifecycle. Merely creating a text-bearing graph node does not make it a Data item eligible for native Cognify/Update/Forget orchestration. Use one authoritative JSON document registered as the generated Data item. It contains the structured records, source references, revision and enough construction data for replay. Exact record schemas remain under review. It must survive graph rebuild rather than exist only on generated graph nodes.
++The source must be registered through Cognee's Data lifecycle. Merely creating a text-bearing graph node does not make it a Data item eligible for native Cognify/Update/Forget orchestration. Use one authoritative JSON document registered as the generated Data item. It contains the structured records, source references, revision and enough construction data for replay. The draft runtime schemas are implemented in identity/models.py and the exported JSON Schema; future extensions remain subject to validation. It must survive graph rebuild rather than exist only on generated graph nodes.
+ 
+ At minimum, saved assignments retain the information needed for exact publication and maintenance:
+ 
+@@ -230,7 +230,7 @@
+ 
+ ## 11. Sequence-driven regression-suite plan — 2026-10-13
+ 
+-**Status:** planned validation design, not implemented tests. The user requested test suites around the operation sequences and expected outputs, in addition to using those sequences to specify functionality.
++**Status:** broader validation inventory, partially implemented. Native and programmatic sequence tests now cover the admitted fixtures; this list is not a claim that every case has passed. The user requested tests alongside the operation sequences. Current coverage and evidence provenance are recorded in SESSION_HANDOFF.md.
+ 
+ Use each walkthrough as a scenario specification: initial original/generated sources and captured assignments; exact operation; expected saved-record changes; graph IDs/properties/native refs; retrieval applicability; actively consumed index results; partial-failure behavior; and replay outcome. Preserve original Entity properties where the sequence promises reference-only publication.
+ 
+@@ -317,13 +317,13 @@
+ 
+ A representation revision identifies edits to the generated description; source revision/fingerprint identifies its original input. They are different. The API persists supplied intent, rather than deciding whether a graph change warrants an interpretation change. Identity helpers such as set_resolution/withdraw_resolution enforce domain rules and use the shared storage interface.
+ 
+-An accepted saved change creates an explicit publication requirement. Maintain coordinates graph effects and completion; generic storage calls must not hide uncontrolled domain inference or graph mutation. Actual serialization, adapter, command forms, guard mechanics and publication coordination remain to be designed and implemented.
++An accepted saved change creates an explicit publication requirement. Maintain coordinates graph effects and completion; generic storage calls must not hide uncontrolled domain inference or graph mutation. Draft JSON forms, registered/relational adapters, fixture commands, revision/attempt guards and publication coordination are implemented for admitted paths. General record APIs, dependent-source maintenance and standard entry-point hooks remain broader work.
+ 
+ Add tests for conflicting revisions, unrelated-record preservation, explicit full replacement/retirement, distinction between occurrence retirement and resolution withdrawal, replay, and saved-record success followed by graph failure.
+ 
+ ## 14. Failure/retry completion protocol — selected initial baseline
+ 
+-This section is the selected pending-state/retry baseline, not an implemented lifecycle. Section 20 records the agreed project-owned SQLite publication ledger. Section 15 adds the optional A/B candidate-generation alternative: these retry/verification responses still apply inside the candidate, while the active prior generation can remain coherent. Keep coordination scoped to supported operations.
++This section defines the pending-state/retry baseline, now implemented for admitted Stage-6 fixtures. Section 20 records the publication ledger; the runtime uses backend-neutral relational operations through the configured Cognee session, with SQLite only in the tested profile. Section 15 adds the optional A/B candidate-generation alternative: these retry/verification responses still apply inside the candidate, while the active prior generation can remain coherent. Keep coordination scoped to supported operations.
+ 
+ 1. Before changing inputs or applying maintenance, mark affected identity material unavailable/currentness pending. Preserve unaffected sources whose required objects and consumed representations remain valid.
+ 2. Describe and commit the intended current representation through the shared API. Retain its revision and the relevant old/new publication identifiers.
+@@ -331,7 +331,7 @@
+ 4. Verify intended nodes/edges/refs, retirement of obsolete contributions, and enabled derived representations.
+ 5. Record publication completion for that exact saved revision and restore current retrieval eligibility only if it is still the current intended description with valid inputs.
+ 
+-If a newer description arrives, an older job must not mark that source current. Guard completion against the latest revision and current attempt; coordinate project writers. The project-owned SQLite ledger and initial source-level eligibility are selected in section 20; exact transactions, verification checks and lifecycle hooks still require implementation.
++If a newer description arrives, an older job must not mark that source current. Guard completion against the latest revision and current attempt; coordinate project writers. The portable relational ledger, exact revision/attempt acknowledgement and verification checks are implemented for supported fixture operations; general dependency/source lifecycle and standard hooks remain. There is no cross-store transaction.
+ 
+ | Failure point | Recovery expectation |
+ |---|---|
+@@ -396,9 +396,9 @@
+ 
+ ## 16. Structured identity source without generated chunks — accepted simplification, 2026-10-14
+ 
+-The generated identity source is initially one authoritative JSON document registered as a Cognee Data item. Data.id identifies this generated source; dataset context remains part of operations. Stable record IDs address individual records within it. The JSON retains original-input references, its representation revision, records and corpus-backed construction information for required Entity endpoints, including existing ones. Record contents are selected at the design level; exact serialization remains open. Coordinator state storage is selected in section 20.
+-
+-Publish consumes the structured description directly through custom Tasks. Generated-source publication creates its TextDocument and required resolution relationships/endpoint retention under its real generated-source context. The document node uses the generated Data ID but does not anchor has_identity_mention. Original-source publication creates chunk-to-mention markers under the original chunks' native ownership, coordinated with the saved identity description. Native mechanisms were source-inspected; this combined workflow is not yet live-tested.
++The generated identity source is initially one authoritative JSON document registered as a Cognee Data item. Data.id identifies this generated source; dataset context remains part of operations. Stable record IDs address individual records within it. The JSON retains original-input references, its representation revision, records and corpus-backed construction information for required Entity endpoints, including existing ones. Record contents and draft serialization are implemented in the runtime models and exported schema. Coordinator state storage is selected in section 20.
++
++Publish consumes the structured description directly through custom Tasks. Generated-source publication creates its TextDocument and required resolution relationships/endpoint retention under its real generated-source context. The document node uses the generated Data ID but does not anchor has_identity_mention. Original-source publication creates chunk-to-mention markers under the original chunks' native ownership, coordinated with the saved identity description. This combined custom-Task publication/ownership workflow now has bounded native fixture evidence. Standard Cognify/Remember/Update routing remains unimplemented; see the session handoff.
+ 
+ No required consumer currently needs generated identity prose. Explanations can be rendered from saved records on demand; optional substantive explanations may be retained as record data. Deterministic rendered prose need not be duplicated in the saved representation. Text embeddings or LLM-facing descriptions may be added later if a specific retrieval consumer needs them.
+ 
+@@ -449,11 +449,11 @@
+ 
+ Measure saved-record/node/edge counts and retrieval work on representative corpus text; no measured savings or thresholds are claimed. Include repeated references sharing a target, same-surface references with different targets in one paragraph, boundary-crossing references, overlapping chunk views, unresolved bindings, range shifts after edits, partial-group retargeting/splits and source Update/Forget/replay. Test that the ranges—not the whole context—control applicability, and that relation attribution is not lost.
+ 
+-Construction data remains a minimal recipe for required corpus-backed Entity endpoints, including matched existing Entities: explicit Entity UUID, ordinary Entity model, name, required description and only deliberately selected optional fields. It is used for initial creation or validated missing-node reconstruction; existing nodes bypass construction. Do not blindly rewrite existing Entity properties, store populated existing endpoints inside that recipe, or recreate a retired/invalid endpoint merely because a stale record referenced it. Marker/resolution/provenance data remain outside ordinary Entity fields. The exact record schemas and reconstruction authorization policy remain under review.
++Construction data remains a minimal recipe for required corpus-backed Entity endpoints, including matched existing Entities: explicit Entity UUID, ordinary Entity model, name, required description and only deliberately selected optional fields. It is used for initial creation or validated missing-node reconstruction; existing nodes bypass construction. Do not blindly rewrite existing Entity properties, store populated existing endpoints inside that recipe, or recreate a retired/invalid endpoint merely because a stale record referenced it. Marker/resolution/provenance data remain outside ordinary Entity fields. Draft record schemas and bounded creation/rebuild authorization are implemented; unexpected loss of a consumed reasoning input is not general permission to reconstruct it.
+ 
+ ## 18. Saved resolution and variant relationship records — agreed direction, 2026-10-14
+ 
+-Keep the interpretation record separate from the local reference-group record and its captured occurrences. These are saved structured records, not additional graph support nodes. Exact JSON field names and serialization remain open.
++Keep the interpretation record separate from the local reference-group record and its captured occurrences. These are saved structured records, not additional graph support nodes. Draft JSON field names and serialization now exist in the runtime models/exported schema; this section records their semantic responsibilities.
+ 
+ | Mention resolution information | Purpose |
+ |---|---|
+@@ -506,7 +506,7 @@
+ 
+ ## 20. Publication ledger — agreed initial design, 2026-10-14
+ 
+-Use a small project-owned SQLite ledger, separate from the authoritative JSON description and from Cognee's native pipeline status. This implements the pending-state/retry baseline; A/B copies are not required for the first iteration. It is an architecture choice, not existing native Cognee behavior or an implemented table.
++Use the implemented project-owned relational ledger and registered JSON snapshot, distinct from Cognee's native pipeline status. Backend-neutral tables/operations use Cognee's configured session; SQLite is the tested profile, not a separate provider-specific implementation. Pending-state/retry does not require A/B copies.
+ 
+ | Field | Meaning |
+ |---|---|
+@@ -539,7 +539,7 @@
+ 
+ Add failure injection before/after invalidation, saved JSON, graph/index writes and acknowledgement; same-revision repair; older-attempt rejection; newer-revision rejection; shared-edge surviving-source eligibility; and restart recovery from durable pending state. If A/B staging is introduced later, its ledger/currentness must correspond to the selected coherent store generation.
+ 
+-Storage and publication-state review is complete at the initial design level. Exact record serialization remains implementation work. Next review: concrete Describe inputs/candidate selection and repeatability, native lifecycle integration, then the Retrieve contract and Stage-6 handoff.
++Storage/publication and subsequent Describe/lifecycle/Retrieve contract review are complete for the initial design. Draft serialization and bounded runtime coordination are implemented. Current work is partial Stage-6 step 4; candidate algorithms/quality, general dependency lifecycle and broader retrieval remain separately tracked.
+ 
+ ## 21. Describe grounding and future decision-model support — review findings and proposed boundary, 2026-10-14
+ 
+@@ -1095,7 +1095,7 @@
+ 
+ Plan deterministic fixtures for accepted/singleton, unresolved/ambiguous query/local references, inconsistent/pending/failed bindings, independently valid other-source evidence, empty evidence, accepted binding with limited identity expansion and an unfinished required identity check. Verify one annotation source drives all delivery modes without contradictory labels, plus separate model-consumer comprehension checks and original provenance. These are planned tests, not runtime results.
+ 
+-Section 41 selects the minimal document-level Maintain/reconsideration boundary. Remaining work is consolidated Stage-6 schema/operation/index/retry-capture/fixture handoff. Retrieve's initial policy review is complete at the design level; implementation and combined validation remain open. Retrieval evidence suggesting missing resolves_to relationships remains a noted Describe/Maintain follow-up, without automatic acceptance or publication.
++Section 41 selects the minimal document-level Maintain/reconsideration boundary. The consolidated Stage-6 handoff, draft forms and bounded publication/maintenance/retrieval fixtures now exist. Retrieve's initial policy review is complete; broader corpus traversal/delivery, source/dependency lifecycle and general extraction remain implementation work. Retrieval evidence suggesting missing resolves_to relationships remains a noted Describe/Maintain follow-up, without automatic acceptance or publication.
+ 
+ ## 39. Bounded identity expansion and offline identity-graph diagnostics — agreed 2026-10-15
+ 
+diff --git a/results/cognee_stage5_4_5_requirements_review.md b/results/cognee_stage5_4_5_requirements_review.md
+--- a/results/cognee_stage5_4_5_requirements_review.md
++++ b/results/cognee_stage5_4_5_requirements_review.md
+@@ -1,15 +1,15 @@
+ # Stage 5.4.5 — Requirements after scope audit
+ 
+-**Revised:** 2026-10-13 (America/Detroit)  
++**Status reconciled:** 2026-10-20 (America/Detroit); outcome requirements unchanged from the reviewed scope.
+ **Project:** cognee-science-lab  
+ **Baseline:** Cognee 1.6.2, Ladybug/LanceDB/SQLite, access control disabled, shared physical graph.  
+-**Status:** Six outcome requirements retained after scope audit; terminology and reference/ownership wording aligned with the initial identity representation proposal recorded on 2026-10-13. The proposal is a design direction, not an implemented schema or additional runtime validation.
++**Status:** Six outcome requirements retained. Architecture review is complete and draft runtime forms plus bounded Stage-6 publication/maintenance/retrieval fixtures exist. These do not establish complete R1–R6 coverage. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records current implementation and verification status; this document defines outcomes.
+ 
+ ## What this document requires
+ 
+ The target is the lab's identity-processing extension: ingest source text, retain observations, resolve names and mentions, retrieve semantic relationships through the resulting identities, and keep those records usable after source changes.
+ 
+-The initial implementation target is standard text Cognify/Remember, overlapping ingest, project maintenance, project-model full-rebuild Update, source/dataset Forget, and the custom identity-aware retrieval path. These are target workflows, not a claim that the project integration already exists. Native incremental Update is a characterized diagnostic path; enabling it for the project requires demonstrating the same outcomes as the supported update workflow.
++The initial implementation target is standard text Cognify/Remember, overlapping ingest, project maintenance, project-model full-rebuild Update, source/dataset Forget, and the custom identity-aware retrieval path. These are target workflows, not a claim that every native entry point is integrated; bounded custom-Task fixtures already exist. Native incremental Update is a characterized diagnostic path; enabling it for the project requires demonstrating the same outcomes as the supported update workflow.
+ 
+ The requirements apply to those workflows in the pinned lab configuration. They do not promise compatibility with all Cognee operations, optional stages, migrations, backends, or access-control configurations. Adding another workflow requires checking the records and outputs it can affect, not specifying every possible mutation in the SDK.
+ 
+@@ -137,7 +137,7 @@
+ 
+ **Keep as findings:** native writer inventories; the recognized watermark pipeline names; Memify empty-list fallback; cross-dataset native retrieval/indexing; graph-native versus ledger provenance; optional consolidation/migrations; read/history/accounting effects. They guide implementation and targeted tests but do not become independent obligations to modify Cognee.
+ 
+-**Keep as architecture choices:** generated identity sources grouped per original document, native document-level retention for required endpoints, explicit mention marker edges, contribution-bearing resolution edges and occurrence UUIDs. These are recorded in the companion proposal rather than promoted to new universal requirements. Exact storage/routing, Task placement, rebuild sequencing and the active retrieval/index list remain open. These choices must produce R1–R6's outcomes.
++**Keep as architecture choices:** generated identity sources grouped per original document, native document-level retention for required endpoints, explicit mention marker edges, contribution-bearing resolution edges and occurrence UUIDs. These are recorded in the companion proposal rather than promoted to new universal requirements. Draft JSON/relational storage, custom-Task placement, explicit rebuild sequencing and a bounded consumed-store profile are implemented. Standard routing, expanded lifecycle and broader retrieval/store admission remain work. These choices must produce R1–R6's outcomes.
+ 
+ **Do not add now:** all-alias expansion of Triplet text; a new support-layer framework; universal dataset isolation; a history/version-control system; general rollback; production accounting/audit policy; scientific Claim/Measurement/Evidence reasoning. Native provenance and retention ownership do not establish scientific support. Scientific modeling/evaluation remains Stage 8.
+ 
+@@ -147,15 +147,15 @@
+ 
+ | Decision | Current direction / remaining concrete output |
+ |---|---|
+-| Authoritative identity storage | Generated identity sources preserve structured assignments. Final serialization, stable source/assignment IDs and writer entry points remain open. No per-assignment graph support node is required. |
++| Authoritative identity storage | Registered JSON plus relational descriptions, explicit source/record UUIDs and guarded publish/replace/withdraw entry points are implemented. The schema is a draft; automatic Describe/initial-key generation is later work. No per-assignment support node is required. |
+ | Source and contributor binding | One generated source per original document's local assignments; native document-level owners retain both endpoints. Complete the ownership/index matrix and original-source → generated-source dependency handling. |
+-| Mention representation | Distinct occurrence UUIDs and generated-chunk has_identity_mention edges preserve resolved/unresolved classification. Finalize locator conventions and keep markers/resolutions consistent. |
+-| Shared identity links | Store current assignment contributions and scope on the edge. Finalize aggregation/write sequencing and withdrawal behavior; native owner cleanup does not merge custom properties. |
++| Mention representation | Explicit group UUIDs and original occurrence-chunk has_identity_mention edges preserve classification. Document-relative Unicode [start,end) ranges/native chunk mapping are implemented; additions/regrouping remain. |
++| Shared identity links | Source-specific contribution aggregation, scope payloads, guarded replacement and withdrawal are implemented. Native owner cleanup does not merge custom properties; preserve application aggregation. |
+ | Maintenance sequence | Walk through publication, overlapping ingest, original/generated-source Update/Forget, rebuild gaps and failure/retry. Define loader/routing and how the resolver excludes incomplete maintenance. |
+ | Enabled retrieval paths | Adapt custom traversal for identity groups, directed scoped mentions and contribution eligibility; identify consumed collections and evidence lookups. Native readers do not enforce this model automatically. |
+ | Session behavior | Decide QA reuse and feedback application; define invalidation/clear behavior if enabled. |
+ 
+-The initial ownership choices and physical direction advance 5.4.5.2 and .3 together. Their final deliverables remain incomplete. Operation walkthroughs in .4 and invariants/Stage-6 handoff in .5 are next; no stage is added or renumbered.
++The Stage-5.4.5 architecture/handoff review is complete. Runtime generalization and remaining operation coverage are Stage-6 work, currently partial step 4. No stage is added or renumbered.
+ 
+ ## Evidence and validation status
+ 

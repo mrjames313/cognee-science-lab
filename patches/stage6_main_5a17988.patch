@@ -1,0 +1,2817 @@
+diff --git a/README.md b/README.md
+index e204a59..e85071e 100644
+--- a/README.md
++++ b/README.md
+@@ -34,9 +34,11 @@ Status: planned
+ Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
+ 
+ ### Stage 6 — Custom pipeline and intermediate representations
+-Status: planned, major checkpoint
++Status: first deterministic identity publication/retrieval slice implemented; broader integration in progress
+ Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
+ 
++See [the Stage 6 first-slice guide](docs/stage6_identity_first_slice.md) for isolated fixture commands, focused tests, recovery-event visibility and the remaining implementation boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
++
+ 
+ ## Setup and running the code
+ 
+diff --git a/ROADMAP.md b/ROADMAP.md
+index 1e32c6c..30cdc7a 100644
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -1,9 +1,9 @@
+ # Cognee Science Lab Roadmap
+ 
+-**Last revised:** 2026-10-14  
++**Last revised:** 2026-10-17
+ **Project:** `cognee-science-lab`  
+ **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
+-**Current work:** Stage 5.4.5.4 — initial saved identity forms, reconstruction coverage, publication ledger and seeded Describe direction selected. Identity-aware semantic facts will use native relationships/provenance as the baseline. Next: captured semantic-output placement and independent source lifetimes, initial Maintain policy, then Retrieve contracts. Stage 5.4.5.1 characterization remains complete. Exact serialization/routing, combined runtime validation, final invariants and Stage-6 implementation remain pending.
++**Current work:** Stage 6 — first deterministic identity publication/retrieval slice implemented. See [the first-slice guide](docs/stage6_identity_first_slice.md) for verified behavior, tests, recovery visibility and remaining boundaries. Earlier investigation entries below retain their historical wording; the reviewed handoff governs the selected design.
+ 
+ This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
+ 
+@@ -19,8 +19,8 @@ This revision reconciles the previously saved roadmap with the later project dis
+ | 5.4.2 | Complete enough to proceed | Operational map and preferred extension seams |
+ | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
+ | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
+-| 5.4.5 | In progress | .1 complete; .2–.3 initial ownership/representation proposal recorded; operation walkthroughs, lifecycle and handoff next |
+-| 6 | Planned | Implement the chosen processing/retrieval architecture, then reassess |
++| 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
++| 6 | In progress | First native deterministic fixture demonstrated; next independent multi-source support/withdrawal, then broader lifecycle and standard wiring |
+ | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
+ 
+ 
+@@ -565,7 +565,9 @@ The current source/identity chain is: original document/chunk inputs produce sav
+ 
+ 
+ 
+-## Stage 6 — Custom processing architecture — PLANNED
++## Stage 6 — Custom processing architecture — IN PROGRESS
++
++The first implementation checkpoint covers validated saved forms and a tiny custom-Task publication/retrieval path through configured native stores. It uses native source ownership/evidence and backend-neutral integration code. Standard Cognify/Remember/Update wiring, complete maintenance/retrieval and the wider sequence test suite remain. See [commands, evidence and limits](docs/stage6_identity_first_slice.md).
+ 
+ Goal: move manually demonstrated representations into actual Cognee processing tasks/pipelines and ensure they participate in lifecycle/provenance behavior.
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 7893f11..a52e83e 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -7,6 +7,8 @@ requires-python = ">=3.12"
+ dependencies = [
+     "cognee>=1.6,<1.7",
+     "pydantic>=2.13.5",
++    "rfc8785==0.1.2",
++    "sqlalchemy>=2,<3",
+ ]
+ 
+ [build-system]
+@@ -19,3 +21,18 @@ module-root = "src"
+ 
+ [tool.uv.extra-build-dependencies]
+ cognee-science-lab = ["setuptools"]
++
++[dependency-groups]
++dev = [
++    "jsonschema>=4,<5",
++    "pytest>=8,<10",
++    "pytest-asyncio>=0.24,<2",
++]
++
++[tool.pytest.ini_options]
++testpaths = ["tests"]
++markers = ["integration: fresh native Cognee graph/vector/relational fixture (no LLM)"]
++asyncio_mode = "auto"
++
++[tool.black]
++target-version = ["py312"]
+diff --git a/results/cognee_identity_stage6_handoff.md b/results/cognee_identity_stage6_handoff.md
+index 25a7d1a..3d57373 100644
+--- a/results/cognee_identity_stage6_handoff.md
++++ b/results/cognee_identity_stage6_handoff.md
+@@ -2,7 +2,7 @@
+ 
+ **Consolidated:** 2026-10-15 (America/Detroit).  
+ **Baseline:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`; Ladybug/LanceDB/SQLite, shared physical storage.  
+-**Status:** consolidated approved behavior plus explicitly labeled draft serialization/implementation choices. No new end-to-end native integration result is claimed.
++**Status:** handoff review completed 2026-10-17. The first deterministic implementation slice now has native fixture evidence (section 12); full lifecycle, standard entry-point integration and broader retrieval remain in progress.
+ 
+ ## 1. Authority, scope and first build
+ 
+@@ -299,7 +299,7 @@ Verify by returned IDs/content and source refs, not collection existence, row co
+ 
+ ## 10. Sequence-driven test suite
+ 
+-These are planned implementation tests. The JSON example was structurally checked; none of these native integration cases has been run for the new representation.
++This is the broader planned implementation suite. Section 12 records the first implemented subset and native evidence; a passing tiny fixture does not establish all cases below.
+ 
+ | ID | Sequence and expected observation | Requirements | Reusable lesson |
+ |---|---|---|---|
+@@ -355,14 +355,16 @@ Assertions cover saved revisions/records, exact graph IDs and untouched properti
+ 
+ ## 11. Build order and unresolved engineering work
+ 
+-| Milestone | Concrete output |
++Build order accepted 2026-10-17; the first reviewable deliverable covers M0–M1. Implement relevant sequence tests alongside each step rather than making the entire inventory an upfront gate.
++
++| Milestone / accepted step | Concrete output and current boundary |
+ |---|---|
+-| M0 | Validate schema/example/profile; implement guarded saved records, ledger, minimal change plan and recovery-event storage/listing |
+-| M1 | One deterministic fixture through custom Tasks -> publish -> useful retrieval -> explicit identity reconciliation; exercise a failure/event and explicit recovery. Inspect actual ownership/evidence early |
+-| M2 | Exact-ID semantic conversion/native chunk bookkeeping plus representative name/variant/mention facts; expand overlap and multi-source tests |
+-| M3 | B Task-transform integration and supported original/generated lifecycle hooks; full-rebuild Update and source/dataset removal |
+-| M4 | Complete bounded traversal, grouped delivery and shared-code identity diagnostics; run mutation/failure/index suites |
+-| M5 | Seeded model/rule Describe examples through the same pipeline; improve accuracy after whole-path examples work |
++| M0 / 1 | Validated runtime records/schema, exact native chunk mapping and portable bookkeeping/publication capability checks. First implementation exists; only the initial backend profile is tested |
++| M1 / 2 | Tiny captured-decision custom Task pipeline -> real publication -> useful mention-anchored fact retrieval/original evidence -> explicit identity reconciliation. First native fixture demonstrated; this is not registered public SearchType or standard Cognify wiring |
++| M2 / 3 | Multi-source overlap/support and withdrawal, plus broader exact-ID semantic conversion. Test both removal orders, shared contributions, singleton retention and unresolved mentions |
++| M3 / 4 | Selected document changes, dependent-input maintenance, rechunking, retargeting and explicit failure recovery. Basic ledger/events and caught-failure reconciliation exist; broad lifecycle and abrupt-crash recovery remain |
++| M4 / 5 | Complete B Task-transform wiring for standard Cognify/Remember/full Update/removal, consumed-store admission and broader context-sensitive traversal/delivery/offline diagnostics |
++| M5 / 6 | Seeded rules/model Describe examples through the same pipeline, including abbreviations, shortenings and contextual references; separate consistency/model-quality evaluation |
+ | Checkpoint | Review R1–R6 evidence and G01–G18 transfer status before Stages 7–8 |
+ 
+ Resolve these engineering details during the smallest fixtures, without opening another broad policy review: exact Data registration/discriminator routing; safe existing-endpoint conversion; serialized writer/expected-revision and file/ledger ordering; attempt cleanup; concrete admitted collection names/configuration; shared edge-property serialization through the graph interface (first tested on Ladybug); source-bound marker publication and chunk-offset mappings. If a fixture contradicts a selected invariant, record the mismatch and make the smallest explicit adaptation rather than silently weaken it.
+@@ -383,4 +385,16 @@ Show corpus totals, per-source median/p95/maximum and growth relative to source-
+ 
+ [cognee_knowledge_integration_playbook.md](cognee_knowledge_integration_playbook.md) maps the concrete choices to reusable lessons with Describe/Publish/Maintain/Retrieve applicability and measurement transfer questions. During Stage 6, attach actual source/test results to that register. Extract only demonstrated common mechanics; leave identity grouping/equivalence/range rules in its adapter.
+ 
+-Validation performed for this consolidation: generated a draft JSON Schema from Pydantic models; validated the example through those models and JSON round-trip; checked source SHA-256/exact occurrence slices; rejected six malformed examples (missing accepted target, unresolved with accepted target, absent endpoint recipe, missing group, overlapping spans and competing current group records). Cross-record/source checks are not all expressible in JSON Schema. A separate JSON-Schema-engine validation and native Cognee execution were not run. No repository implementation was changed.
++At the initial 2026-10-15 consolidation, validation performed was: generated a draft JSON Schema from Pydantic models; validated the example through those models and JSON round-trip; checked source SHA-256/exact occurrence slices; rejected six malformed examples (missing accepted target, unresolved with accepted target, absent endpoint recipe, missing group, overlapping spans and competing current group records). Cross-record/source checks are not all expressible in JSON Schema. At that point a separate JSON-Schema-engine validation and native Cognee execution had not been run and no repository implementation had been changed. The following checkpoint supersedes that implementation status.
++
++### First implementation checkpoint — 2026-10-17
++
++Repository code now lives in src/cognee_lab/identity, with a generated schema in schemas, exact source/example fixtures in tests/fixtures/identity and commands/limits documented in docs/stage6_identity_first_slice.md. The initial source is registered as a real Cognee Data item; publication uses real source contexts and configured interfaces. Bookkeeping stores the serialized JSON/currentness/minimal plan in backend-neutral relational project tables; the first registered generated source contains its matching JSON snapshot. Revision replacement is refused until a coordinated source-update path is implemented.
++
++The first fixture preserves a borrowed Entity's differing ordinary fields/sentinel, creates the exact variant/M UUIDs, publishes chunk-owned mention markers and a mention-anchored limits->oscillations fact, and returns original native evidence plus the accepted scoped identity annotation. Retrieval demonstrably seeds HC, follows its document-applicable variant link and then the accepted local mention. A fresh process can reopen the stores and explicit same-revision reconciliation is idempotent.
++
++Validation evidence: 22 pytest cases passed, including real configured Ladybug/LanceDB/SQLite subprocess fixtures with local deterministic embeddings, injected-failure withholding/reconciliation, changed consumed-field invalidation with a recovery event, portable ledger/revision guards, failed-recovery incident deduplication, strict forms, exact repeated Unicode positions, RFC 8785 hashing and JSON-Schema-engine validation. No paid model/API extraction or lab-corpus mutation was used. No native dependency source was modified. These are fixture results, not complete T01–T20/P01–P16 coverage or demonstrated compatibility with other backends.
++
++A native interface mismatch was observed: legacy get_edges returns a shape/direction that differs from its interface annotation on this path. The project uses get_edge_delete_data for exact edge/provenance properties and iter_bounded_neighborhood for uniform EdgeData, without backend-specific queries. Record this as a reusable seam lesson; actual work bounds still depend on the configured adapter's implementation.
++
++Remaining first-slice limits are explicit: no revision replacement/withdrawal lifecycle, standard entry-point transform or public SearchType yet; document-context retrieval is fixture-scoped and declines span-applicable variant expansion; complete multi-source traversal, unresolved/ambiguous passage delivery and offline diagnostics remain. Caught failures and dependency invalidation produce incidents, but a hard crash can still leave the writer reserved: pending-attempt inspection/explicit abandonment is later recovery work. Comprehensive semantic capture/replay, autonomous repair, A/B staging and metrics tooling remain deferred.
+diff --git a/results/cognee_knowledge_integration_playbook.md b/results/cognee_knowledge_integration_playbook.md
+index abb1d85..f6cfec5 100644
+--- a/results/cognee_knowledge_integration_playbook.md
++++ b/results/cognee_knowledge_integration_playbook.md
+@@ -127,3 +127,9 @@ Start from the artifact checklist and known pinned native seams instead of repea
+ At the post-Stage-6 checkpoint, attach actual identity code/tests to G01–G18 and mark each as demonstrated, partial, rejected or still untested. The first measurement fixture then tests those reusable candidates rather than assuming them. This is the evidence for a reusable package; a documentation analogy alone is insufficient.
+ 
+ No measurement schema, scientific reasoning model, generic runtime framework or additional project stage is selected by this consolidation.
++
++## First implementation evidence — 2026-10-17
++
++The first identity fixture uses configured native graph/vector/relational interfaces, captured decisions and local deterministic embeddings. Its focused/native tests exercise publication, original-source evidence, explicit reconciliation and recovery visibility. This is partial evidence for the reusable lessons rather than completion of all lifecycle/retrieval requirements. See ../docs/stage6_identity_first_slice.md for commands and limits.
++
++A concrete interface lesson: verify actual read shapes/direction as well as method availability. The legacy get_edges result differed from its interface annotation on the tested path. The integration uses get_edge_delete_data and iter_bounded_neighborhood through the common interfaces, without backend-specific queries.
+diff --git a/schemas/cognee_identity_source_schema_draft.json b/schemas/cognee_identity_source_schema_draft.json
+index 79359e0..e5304d3 100644
+--- a/schemas/cognee_identity_source_schema_draft.json
++++ b/schemas/cognee_identity_source_schema_draft.json
+@@ -189,7 +189,8 @@
+         "content_sha256": {
+           "pattern": "^[0-9a-f]{64}$",
+           "title": "Content Sha256",
+-          "type": "string"
++          "type": "string",
++          "description": "SHA-256 lowercase hex of RFC 8785 JCS UTF-8 of selected supplied field/value object; missing fields fail."
+         }
+       },
+       "required": [
+@@ -442,7 +443,8 @@
+         "content_sha256": {
+           "pattern": "^[0-9a-f]{64}$",
+           "title": "Content Sha256",
+-          "type": "string"
++          "type": "string",
++          "description": "SHA-256 lowercase hex of JCS UTF-8 complete supplied record, excluding enclosing source/revision."
+         }
+       },
+       "required": [
+@@ -477,7 +479,8 @@
+         "text_sha256": {
+           "pattern": "^[0-9a-f]{64}$",
+           "title": "Text Sha256",
+-          "type": "string"
++          "type": "string",
++          "description": "SHA-256 lowercase hex of exact extracted document string encoded as UTF-8, without normalization."
+         }
+       },
+       "required": [
+@@ -545,7 +548,8 @@
+         "text_sha256": {
+           "pattern": "^[0-9a-f]{64}$",
+           "title": "Text Sha256",
+-          "type": "string"
++          "type": "string",
++          "description": "SHA-256 lowercase hex of UTF-8 document_text[start:end], excluding offsets and parent digest."
+         }
+       },
+       "required": [
+@@ -768,7 +772,8 @@
+         "minLength": 1
+       },
+       "title": "Inputs",
+-      "type": "object"
++      "type": "object",
++      "description": "Shared inputs/locators. Per-record input_refs declare actual reasoning dependencies."
+     },
+     "producers": {
+       "additionalProperties": {
+@@ -788,7 +793,8 @@
+         "format": "uuid"
+       },
+       "title": "Entity Constructions",
+-      "type": "object"
++      "type": "object",
++      "description": "Each entry declares an Entity this source intends to retain, including supported singletons and existing endpoints, and supplies minimal creation values. All required endpoints need entries. Existing nodes bypass property writes; a recipe does not authorize reconstructing a missing reasoning input or retired intent."
+     },
+     "mention_groups": {
+       "additionalProperties": {
+@@ -836,7 +842,8 @@
+         "minLength": 1
+       },
+       "title": "Variant Assignments",
+-      "type": "object"
++      "type": "object",
++      "description": "Relationships independently established by this source, not a cached identity-graph walk."
+     }
+   },
+   "required": [
+@@ -856,5 +863,5 @@
+   "title": "Cognee identity source — implementation draft 0.1",
+   "type": "object",
+   "$schema": "https://json-schema.org/draft/2020-12/schema",
+-  "description": "Draft serialization of approved identity concepts. Cross-reference, range, source-validity and graph-currentness checks require publisher validation; JSON Schema alone is insufficient."
++  "description": "Schema generated from runtime models. Cross-reference, exact text/range, dependency, UUID-use and publication checks also run in Python."
+ }
+diff --git a/uv.lock b/uv.lock
+index d45f768..643f72d 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -1,5 +1,5 @@
+ version = 1
+-revision = 3
++revision = 5
+ requires-python = ">=3.12"
+ resolution-markers = [
+     "(python_full_version >= '3.14' and platform_python_implementation != 'PyPy' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version and sys_platform == 'darwin') or (python_full_version >= '3.14' and platform_python_implementation != 'PyPy' and sys_platform != 'darwin' and sys_platform != 'emscripten')",
+@@ -7,8 +7,8 @@ resolution-markers = [
+     "(python_full_version >= '3.14' and platform_python_implementation != 'PyPy' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or (python_full_version >= '3.14' and platform_python_implementation != 'PyPy' and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')",
+     "(python_full_version >= '3.14' and platform_python_implementation == 'PyPy' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or (python_full_version >= '3.14' and platform_python_implementation == 'PyPy' and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')",
+     "(python_full_version == '3.13.*' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version == '3.13.*' and sys_platform != 'darwin')",
+-    "(python_full_version < '3.13' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version < '3.13' and sys_platform != 'darwin')",
+     "(python_full_version == '3.13.*' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or (python_full_version == '3.13.*' and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')",
++    "(python_full_version < '3.13' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version < '3.13' and sys_platform != 'darwin')",
+     "(python_full_version < '3.13' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or (python_full_version < '3.13' and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')",
+ ]
+ 
+@@ -723,12 +723,30 @@ source = { editable = "." }
+ dependencies = [
+     { name = "cognee" },
+     { name = "pydantic" },
++    { name = "rfc8785" },
++    { name = "sqlalchemy" },
++]
++
++[package.dev-dependencies]
++dev = [
++    { name = "jsonschema" },
++    { name = "pytest" },
++    { name = "pytest-asyncio" },
+ ]
+ 
+ [package.metadata]
+ requires-dist = [
+     { name = "cognee", specifier = ">=1.6,<1.7" },
+     { name = "pydantic", specifier = ">=2.13.5" },
++    { name = "rfc8785", specifier = "==0.1.2" },
++    { name = "sqlalchemy", specifier = ">=2,<3" },
++]
++
++[package.metadata.requires-dev]
++dev = [
++    { name = "jsonschema", specifier = ">=4,<5" },
++    { name = "pytest", specifier = ">=8,<10" },
++    { name = "pytest-asyncio", specifier = ">=0.24,<2" },
+ ]
+ 
+ [[package]]
+@@ -1487,6 +1505,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/8a/eb/427ed2b20a38a4ee29f24dbe4ae2dafab198674fe9a85e3d6adf9e5f5f41/inflect-7.5.0-py3-none-any.whl", hash = "sha256:2aea70e5e70c35d8350b8097396ec155ffd68def678c7ff97f51aa69c1d92344", size = 35197, upload-time = "2024-12-28T17:11:15.931Z" },
+ ]
+ 
++[[package]]
++name = "iniconfig"
++version = "2.3.1"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/01/e1/2069291243c926a2ff1cd706c7f3eeb9b62144bf60f77c9fb9ff2fb26bd3/iniconfig-2.3.1.tar.gz", hash = "sha256:67f4b9c50da0dedf52af349e7749a80a9057a5031199791b906c3bb3ae878960", size = 21209, upload-time = "2026-10-06T22:48:38.076Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl", hash = "sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7", size = 7552, upload-time = "2026-10-06T22:48:36.959Z" },
++]
++
+ [[package]]
+ name = "instructor"
+ version = "1.15.1"
+@@ -2362,8 +2389,8 @@ version = "1.23.2"
+ source = { registry = "https://pypi.org/simple" }
+ resolution-markers = [
+     "(python_full_version == '3.13.*' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version == '3.13.*' and sys_platform != 'darwin')",
+-    "(python_full_version < '3.13' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version < '3.13' and sys_platform != 'darwin')",
+     "(python_full_version == '3.13.*' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or (python_full_version == '3.13.*' and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')",
++    "(python_full_version < '3.13' and 'Darwin Kernel Version 22.' not in platform_version and 'Darwin Kernel Version 23.' not in platform_version) or (python_full_version < '3.13' and sys_platform != 'darwin')",
+     "(python_full_version < '3.13' and 'Darwin Kernel Version 22.' in platform_version and sys_platform == 'darwin') or (python_full_version < '3.13' and 'Darwin Kernel Version 23.' in platform_version and sys_platform == 'darwin')",
+ ]
+ dependencies = [
+@@ -3126,6 +3153,35 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/f7/5e/35c856e186b74678c24927847ad9895a51f1bc02a0c6126477a6c6040064/pyreadline3-3.5.6-py3-none-any.whl", hash = "sha256:8449b734232e42a5dcd74048e39b60db2839a4c38cf3ae2bf7707d58b5389c0d", size = 85243, upload-time = "2026-05-14T17:55:03.262Z" },
+ ]
+ 
++[[package]]
++name = "pytest"
++version = "9.1.1"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "colorama", marker = "sys_platform == 'win32'" },
++    { name = "iniconfig" },
++    { name = "packaging" },
++    { name = "pluggy" },
++    { name = "pygments" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/e4/47/b9efed96c114afcfa3c9d3fe98a76a1d14c74a9e266d397cf6eb64be5e01/pytest-9.1.1.tar.gz", hash = "sha256:1088fbde8f2b49d95a549a195707afa7a76a3ce9bcadc26b6d71f0ffda5fe313", size = 1636369, upload-time = "2026-06-19T10:58:32.857Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl", hash = "sha256:37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c", size = 386536, upload-time = "2026-06-19T10:58:31.347Z" },
++]
++
++[[package]]
++name = "pytest-asyncio"
++version = "1.4.0"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "pytest" },
++    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/43/7c/d36d04db312ecf4298932ef77e6e4a9e8ad017906e24e34f0b0c361a2473/pytest_asyncio-1.4.0.tar.gz", hash = "sha256:c6c0d2259945122819f171a32ecea2c349ead889ee28176caaf492143424be42", size = 58514, upload-time = "2026-05-26T09:56:04.083Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/03/e2/08a497ef684b88559c9cc5f4ad53a37e7b99e727094a86d6ea32536d5d3c/pytest_asyncio-1.4.0-py3-none-any.whl", hash = "sha256:933ca923a23075a87fb7070c0ec272a6848489824d887c85c812670932835aa1", size = 16930, upload-time = "2026-05-26T09:56:02.576Z" },
++]
++
+ [[package]]
+ name = "python-dateutil"
+ version = "2.9.0.post0"
+@@ -3434,6 +3490,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/bb/f9/15b44d5e4401b0013bbcefe3c09d7bfddcce28cc3d41b1d3077bcedf5b1f/requirements_parser-0.13.1-py3-none-any.whl", hash = "sha256:6e385663eb32589d16e5b22bb6e5251a57908e73803ffff438b53cd6ea2056e0", size = 14926, upload-time = "2026-06-18T07:52:24.171Z" },
+ ]
+ 
++[[package]]
++name = "rfc8785"
++version = "0.1.2"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/f8/2f/071527b61df98ec4c812cc98cd078ebf07bd7f05606e29c609a60b850143/rfc8785-0.1.2.tar.gz", hash = "sha256:4668c70e02f4cf96327d60375d2f1f21958830ff777e0e414424a794323521a1", size = 8662, upload-time = "2024-03-19T22:41:00.637Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/1c/e2/d4e206ded1fd0eed27e63cbe3832affba72070ca758f009c70f133c5485e/rfc8785-0.1.2-py3-none-any.whl", hash = "sha256:c4e92e9ecc828bef2aa7dba1de8ac983511f7532a0df11c770d39099a25cf201", size = 9172, upload-time = "2024-03-19T22:40:59.497Z" },
++]
++
+ [[package]]
+ name = "rich"
+ version = "14.3.4"
+diff --git a/docs/stage6_identity_first_slice.md b/docs/stage6_identity_first_slice.md
+new file mode 100644
+index 0000000..e9a0a73
+--- /dev/null
++++ b/docs/stage6_identity_first_slice.md
+@@ -0,0 +1,67 @@
++# Stage 6: first identity publication/retrieval slice
++
++Implemented on 2026-10-17 against Cognee 1.6.2. This is the agreed first checkpoint (record validation and a deterministic end-to-end fixture), not the complete Stage 6 integration. The reviewed handoff remains the design authority for later milestones.
++
++## Run it
++
++From the repository root:
++
++```bash
++uv sync --group dev
++uv run python -m cognee_lab.identity fixture --root outputs/stage6_first
++uv run python -m cognee_lab.identity retrieve --root outputs/stage6_first --query 'What does HC limit?'
++uv run python -m cognee_lab.identity reconcile --root outputs/stage6_first
++uv run python -m cognee_lab.identity status --root outputs/stage6_first
++uv run pytest -q
++```
++
++Use a new root for `fixture`; an existing directory is rejected. The other commands require the fixture marker. These commands configure a fresh, isolated test profile before importing Cognee; they do not reset or use the lab's configured corpus. The first tested configuration is Ladybug/LanceDB/SQLite. Providers and paths here are fixture configuration, not direct backend access in the integration.
++
++The fixture uses a loopback OpenAI-compatible service with deterministic token-hash embeddings. Graph, vector and relational storage are real; no extraction/answer LLM or external embedding API is called. Hugging Face offline mode prevents a tokenizer download; this tiny fixture does not evaluate chunk token-budget precision or embedding quality. Environments whose injected HTTP proxy requires optional SOCKS support may need `uv pip install 'httpx[socks]' pysocks` for Cognee startup; this is an environment dependency, not an integration backend dependency.
++
++Expected result: the query seeds the HC Entity, traverses the document-applicable variant relationship to the reusable controller, then finds the accepted local mention and its `limits -> oscillations` fact. Output includes the original document/chunk evidence, exact occurrence positions and accepted identity annotation. The source passage is not replaced with generated identity prose.
++
++## What the code does
++
++- `models.py` validates the saved forms, references, required construction entries, sorted occurrences and local role consistency. `validation.py` checks exact document/span digests, RFC 8785 structured input signatures, native chunk mapping, actual supplied dependencies and cross-source UUID use.
++- `publish.py` uses configured Cognee engines and native persistence/reference APIs. It writes only missing Entities, retains compatible existing Entities without overwriting ordinary fields, creates original-chunk-owned markers, and aggregates source-specific contribution payloads on graph-only identity edges.
++- `fixture.py` routes captured semantic output through native chunk ownership, index helpers and evidence buffering/lookup, under the original source context. It avoids populated nested existing Entities. A native custom Task invokes the publisher; completing the standard Cognify Task-transform hook remains later work.
++- `storage.py` stores serialized descriptions, minimal intent, publication status and recovery events through Cognee's configured relational session facility with backend-neutral SQLAlchemy operations. It creates only namespaced project tables. A portable conditional update reserves one project writer across the shared stores; it does not coordinate arbitrary native writers.
++- `retrieve.py` is a small document-context fixture retriever. It consumes Entity-name candidates, current validated saved assignments, actual physical contribution payloads, bounded native fact neighborhoods and native original-source evidence. Helper links are excluded from subject-matter facts. It rechecks publication tokens before delivery.
++
++The example/schema/source fixture live in `tests/fixtures/identity/` and `schemas/`. The runtime schema is generated from the models:
++
++```bash
++uv run python -m cognee_lab.identity.schema
++```
++
++The schema test verifies generation stays synchronized and validates the example with a JSON Schema engine. Cross-record/runtime validity still needs the Python checks.
++
++## Failure visibility and recovery
++
++```bash
++uv run python -m cognee_lab.identity fixture --root outputs/stage6_failure --fault-stage identity_edges
++# Expected nonzero exit and a recovery_event_id.
++uv run python -m cognee_lab.identity retrieve --root outputs/stage6_failure
++# No facts from the unfinished source.
++uv run python -m cognee_lab.identity status --root outputs/stage6_failure
++uv run python -m cognee_lab.identity reconcile --root outputs/stage6_failure
++```
++
++The injected failure happens after deterministic semantic output exists, so identity-only reconciliation can verify that output and restore publication without another model decision. Reconciliation is explicit and gets a new attempt; repeated graph/contribution publication is idempotent. The original event remains linked to the verified recovery. Deliberate injections are labeled separately from runtime incidents.
++
++`--fault-stage nodes` and `--fault-stage verification` exercise other boundaries. If required semantic output is absent after a node-stage failure, identity-only reconciliation refuses to declare success. Actual document reconsideration/rebuild will be a later milestone; there is no hidden extraction call.
++
++Detected changed reasoning inputs are withheld and recorded as recovery-required incidents. Event writes that themselves fail are surfaced, leaving publication unavailable. Abrupt-process-death inspection/reservation abandonment and further recovery outcomes remain incomplete: a hard crash can leave the project writer reserved, so do not treat this slice as general restart recovery.
++
++## Verified behavior and limits
++
++Focused tests cover invalid records, UUID-use conflict, repeated Unicode chunks, JCS signatures, missing/changed corpus inputs, saved revision/attempt guards, event deduplication, native publication/ownership/index/evidence verification, reopening the actual stores, idempotent reconciliation, injected failure withholding/recovery and dependency-change detection. Test code also rejects concrete backend imports and raw query calls in the application package. These checks do not establish compatibility with untested backends.
++
++The native run exposed a mismatch between `get_edges`' interface annotation and its actual legacy return shape/direction on this path. The integration uses `get_edge_delete_data` for exact edge/provenance reads and `iter_bounded_neighborhood` for uniform directed EdgeData, without an adapter-specific workaround. Default neighborhood implementations on some backends can read more than the returned cap; actual backend work bounds need separate admission tests.
++
++Remaining work includes multi-document lifecycle/withdrawal, revision replacement, full original/generated source removal, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
++
++The saved authoritative JSON is serialized in the project relational row; the initial registered generated Data item contains the matching JSON snapshot. This slice rejects description revision replacement rather than allowing those representations to diverge. A later maintenance milestone must implement the coordinated saved-source update path.
++
++No live lab corpus was changed, no native dependency source was patched, and no backend-specific query/storage implementation was added. Comprehensive replay, whole-store A/B copies, model-driven Describe, automatic repair and size/density tooling remain deferred.
+diff --git a/src/cognee_lab/identity/__init__.py b/src/cognee_lab/identity/__init__.py
+new file mode 100644
+index 0000000..e73fc51
+--- /dev/null
++++ b/src/cognee_lab/identity/__init__.py
+@@ -0,0 +1 @@
++"""Stage 6 identity integration: validated descriptions and interface-based publication."""
+diff --git a/src/cognee_lab/identity/__main__.py b/src/cognee_lab/identity/__main__.py
+new file mode 100644
+index 0000000..c7aba5e
+--- /dev/null
++++ b/src/cognee_lab/identity/__main__.py
+@@ -0,0 +1,84 @@
++"""Isolated initial fixture commands. Never reset or open the user's lab store."""
++
++import argparse
++import asyncio
++import json
++import os
++from pathlib import Path
++
++from .fixture_embeddings import FixtureEmbeddings
++
++
++def configure(root: Path, endpoint: str):
++    # Test-profile configuration only; persistence uses configured Cognee APIs.
++    env = dict(
++        SYSTEM_ROOT_DIRECTORY=str(root / "system"),
++        DATA_ROOT_DIRECTORY=str(root / "data"),
++        DB_PATH=str(root / "relational"),
++        DB_PROVIDER="sqlite",
++        GRAPH_DATABASE_PROVIDER="ladybug",
++        GRAPH_FILE_PATH=str(root / "graph"),
++        VECTOR_DB_PROVIDER="lancedb",
++        VECTOR_DB_URL=str(root / "vector"),
++        ENABLE_BACKEND_ACCESS_CONTROL="false",
++        GRAPH_DATABASE_SUBPROCESS_ENABLED="false",
++        VECTOR_DB_SUBPROCESS_ENABLED="false",
++        EMBEDDING_PROVIDER="openai_compatible",
++        EMBEDDING_MODEL="text-embedding-3-small",
++        EMBEDDING_DIMENSIONS="64",
++        EMBEDDING_ENDPOINT=endpoint,
++        EMBEDDING_API_KEY="fixture",
++        LLM_PROVIDER="openai",
++        LLM_MODEL="gpt-4o-mini",
++        LLM_API_KEY="fixture",
++        CACHING="false",
++        TELEMETRY_DISABLED="true",
++        EDGE_EVIDENCE_ENABLED="true",
++        HF_HUB_OFFLINE="1",
++        TRANSFORMERS_OFFLINE="1",
++        LOG_LEVEL="ERROR",
++        KUZU_BUFFER_POOL_SIZE=str(128 << 20),
++        KUZU_MAX_DB_SIZE=str(1 << 30),
++        KUZU_NUM_THREADS="2",
++    )
++    for key, value in env.items():
++        os.environ[key] = value
++    os.environ["NO_PROXY"] = ",".join(
++        filter(None, [os.environ.get("NO_PROXY"), "127.0.0.1", "localhost"])
++    )
++    (root / "relational").mkdir(parents=True, exist_ok=True)
++
++
++def main():
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument(
++        "command", choices=["fixture", "retrieve", "status", "reconcile"]
++    )
++    parser.add_argument("--root", type=Path, required=True)
++    parser.add_argument("--query", default="What does HC limit?")
++    parser.add_argument(
++        "--fault-stage", choices=["nodes", "identity_edges", "verification"]
++    )
++    args = parser.parse_args()
++    root = args.root.resolve()
++    if args.command == "fixture":
++        root.mkdir(parents=True, exist_ok=False)
++        (root / "stage6-fixture.json").write_text(
++            json.dumps({"kind": "stage6-isolated-fixture"})
++        )
++    elif not (root / "stage6-fixture.json").exists():
++        parser.error("Root is not an isolated Stage 6 fixture directory")
++    with FixtureEmbeddings() as endpoint:
++        configure(root, endpoint)
++        from .fixture import run
++
++        try:
++            result = asyncio.run(run(args, root))
++        except Exception as exc:
++            print(json.dumps({"error": type(exc).__name__, "message": str(exc)}))
++            raise SystemExit(1) from exc
++        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/src/cognee_lab/identity/fixture.py b/src/cognee_lab/identity/fixture.py
+new file mode 100644
+index 0000000..b0d68e4
+--- /dev/null
++++ b/src/cognee_lab/identity/fixture.py
+@@ -0,0 +1,267 @@
++"""Real Cognee storage, captured decisions, synthetic original documents only."""
++
++import json
++from pathlib import Path
++from uuid import NAMESPACE_URL, UUID, uuid5
++
++from .models import IdentitySource
++from .publish import Publisher
++from .retrieve import retrieve
++from .validation import IntentError, map_chunks
++
++FIXTURES = Path(__file__).resolve().parents[3] / "tests/fixtures/identity"
++SEED_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:seed-document")
++OSCILLATIONS_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:oscillations")
++
++
++async def context_for(data_id):
++    from cognee.infrastructure.databases.relational import get_relational_engine
++    from cognee.modules.data.models import Data, Dataset
++    from cognee.modules.pipelines.models import PipelineContext
++    from cognee.modules.users.methods import get_default_user
++
++    user = await get_default_user()
++    async with get_relational_engine().get_async_session() as session:
++        data = await session.get(Data, UUID(str(data_id)))
++        if data is None:
++            raise IntentError("source_missing", "Fixture Data item missing")
++        dataset = await session.get(Dataset, data.dataset_id)
++    return PipelineContext(
++        user=user,
++        data_item=data,
++        dataset=dataset,
++        pipeline_name="stage6_captured_fixture",
++    )
++
++
++async def load_chunks(source, ctx):
++    from cognee.modules.chunking.TextChunker import TextChunker
++    from cognee.modules.data.processing.document_types import TextDocument
++
++    doc = TextDocument(
++        id=ctx.data_item.id,
++        name=ctx.data_item.name,
++        raw_data_location=ctx.data_item.raw_data_location,
++        external_metadata=None,
++    )
++    return [
++        chunk async for chunk in doc.read(chunker_cls=TextChunker, max_chunk_size=512)
++    ]
++
++
++async def write_semantics(publisher, source, chunks, ctx):
++    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
++    from cognee.modules.engine.models import Entity
++    from cognee.modules.graph.utils import ensure_default_edge_properties
++    from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
++    from cognee.modules.provenance.edge_evidence.persistence import (
++        flush_context_provenance,
++    )
++    from cognee.tasks.storage.index_data_points import index_data_points
++    from cognee.tasks.storage.index_graph_edges import index_graph_edges
++
++    chunk = chunks[0]
++    group = source.mention_groups["g01"]
++    ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunk.id)
++    target = await publisher.graph.get_node(str(OSCILLATIONS_ID))
++    if target is None:
++        node = Entity(
++            id=OSCILLATIONS_ID, name="oscillations", description="Plasma oscillations."
++        )
++        await publisher.graph.add_nodes([node], source_ref_key=ref)
++        await index_data_points([node], vector_engine=publisher.vector)
++    elif target.get("type") != "Entity":
++        raise IntentError("incompatible_type", "Fact endpoint is not an Entity")
++    await publisher.graph.attach_node_source_refs([str(group.entity_id)], [ref])
++    edge = (
++        str(group.entity_id),
++        str(OSCILLATIONS_ID),
++        "limits",
++        {"edge_text": "it limits oscillations"},
++    )
++    edges = ensure_default_edge_properties([edge])
++    await publisher.graph.add_edges(edges, source_ref_key=ref)
++    await index_graph_edges(edges, vector_engine=publisher.vector)
++    contained = ensure_default_edge_properties(
++        [
++            (str(chunk.id), str(group.entity_id), "contains", {}),
++            (str(chunk.id), str(OSCILLATIONS_ID), "contains", {}),
++        ]
++    )
++    await publisher.graph.add_edges(contained, source_ref_key=ref)
++    # Use native per-chunk production/evidence buffering, including exact IDs.
++    chunk._produced_edge_identities = [(edge[0], edge[1], edge[2])]
++    chunk._provenance_edges = edges
++    await capture_graph_provenance([chunk], [*edges, *contained], ctx)
++    await flush_context_provenance(ctx)
++
++
++async def verify_semantics(publisher, source, chunks, ctx):
++    from cognee.infrastructure.databases.provenance import (
++        EdgeIdentity,
++        make_chunk_source_ref_key,
++    )
++    from cognee.modules.engine.utils import generate_edge_object_id
++    from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
++
++    mid = str(source.mention_groups["g01"].entity_id)
++    identity = EdgeIdentity(mid, str(OSCILLATIONS_ID), "limits")
++    metadata = (await publisher.graph.get_edge_delete_data([identity])).get(identity)
++    ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunks[0].id)
++    if metadata is None or ref not in metadata.source_ref_keys:
++        raise IntentError(
++            "semantic_missing",
++            "Original-chunk fact ownership missing; explicitly rebuild",
++        )
++    eid = UUID(generate_edge_object_id(mid, str(OSCILLATIONS_ID), "limits"))
++    evidence = await get_edge_evidence_records([eid], source.dataset_id)
++    if not any(
++        e.data_id == ctx.data_item.id and e.chunk_id == chunks[0].id for e in evidence
++    ):
++        raise IntentError(
++            "evidence_missing", "Native original evidence missing; explicitly rebuild"
++        )
++    if not await publisher.vector.retrieve("DocumentChunk_text", [str(chunks[0].id)]):
++        raise IntentError("verify_index", "Original chunk vector missing")
++
++
++async def prepare(root):
++    import cognee
++    from cognee.modules.engine.models import Entity
++    from cognee.tasks.ingestion.data_item import DataItem
++    from cognee.tasks.storage import add_data_points
++
++    template = json.loads(
++        (FIXTURES / "cognee_identity_source_example.json").read_text()
++    )
++    original_id = UUID(template["inputs"]["doc01"]["data_id"])
++    generated_id = UUID(template["identity_data_id"])
++    (root / "source.txt").write_bytes((FIXTURES / "source.txt").read_bytes())
++    (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
++    await cognee.add(
++        [
++            DataItem(data=str(root / "seed.txt"), data_id=SEED_DATA_ID),
++            DataItem(data=str(root / "source.txt"), data_id=original_id),
++        ],
++        dataset_name="stage6_isolated_fixture",
++        skip_connection_test=True,
++    )
++    original_ctx = await context_for(original_id)
++    dataset = original_ctx.dataset.id
++    template["dataset_id"] = str(dataset)
++    for item in template["inputs"].values():
++        if "dataset_id" in item:
++            item["dataset_id"] = str(dataset)
++    a = UUID(template["mention_resolutions"]["r01"]["target_entity_id"])
++    recipe = template["entity_constructions"][str(a)]
++    await add_data_points(
++        [Entity(id=a, name=recipe["name"], description=recipe["description"])],
++        ctx=await context_for(SEED_DATA_ID),
++    )
++    publisher = await Publisher.configured()
++    await publisher.graph.update_node(str(a), {"fixture_sentinel": "preserve me"})
++    # Deliberately different creation values must not overwrite a borrowed node.
++    recipe["description"] = "Creation seed only; never overwrite an existing Entity."
++    chunks = await load_chunks(None, original_ctx)
++    if len(chunks) != 1:
++        raise IntentError("fixture_shape", "Tiny fixture expected one native chunk")
++    text = (root / "source.txt").read_text()
++    mapping = map_chunks(text, chunks)
++    start, end = mapping[str(chunks[0].id)]
++    template["inputs"]["chunk01"].update(
++        chunk_id=str(chunks[0].id), start=start, end=end
++    )
++    await add_data_points(chunks, ctx=original_ctx)
++    source = IdentitySource.model_validate_json(json.dumps(template))
++    (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
++    await cognee.add(
++        DataItem(data=str(root / "identity.json"), data_id=generated_id),
++        dataset_name="stage6_isolated_fixture",
++        skip_connection_test=True,
++    )
++    info = dict(
++        dataset_id=str(dataset),
++        original_data_id=str(original_id),
++        identity_data_id=str(generated_id),
++        expected_fact_target=str(OSCILLATIONS_ID),
++    )
++    (root / "fixture-info.json").write_text(json.dumps(info, indent=2))
++    return source, chunks, original_ctx, publisher
++
++
++async def run(args, root):
++    import cognee
++
++    if cognee.__version__ != "1.6.2":
++        raise IntentError(
++            "unsupported_version", "First fixture requires inspected Cognee 1.6.2"
++        )
++    if args.command == "fixture":
++        source, chunks, original_ctx, publisher = await prepare(root)
++    else:
++        source = IdentitySource.model_validate_json(
++            (root / "identity.json").read_text()
++        )
++        original_ctx = await context_for(
++            source.inputs[source.original_input_ref].data_id
++        )
++        chunks = await load_chunks(source, original_ctx)
++        publisher = await Publisher.configured()
++    dataset_id = source.dataset_id
++    if args.command == "status":
++        return dict(
++            publications=await publisher.records.rows(dataset_id),
++            recovery_events=await publisher.records.events(dataset_id),
++        )
++    if args.command == "retrieve":
++        return await retrieve(publisher, dataset_id, args.query)
++
++    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
++    from cognee.modules.pipelines.tasks.task import Task
++
++    ctx = await context_for(source.identity_data_id)
++
++    async def publish_fixture(items, ctx=None):
++        for item in items:
++            await publisher.publish(
++                item,
++                texts={"doc01": (root / "source.txt").read_text()},
++                chunks={str(c.id): c for c in chunks},
++                ctx=ctx,
++                expected_revision=0 if args.command == "fixture" else source.revision,
++                origin="test/fault_injection" if args.fault_stage else "test",
++                fault_stage=args.fault_stage,
++                semantic_writer=(
++                    (lambda: write_semantics(publisher, item, chunks, original_ctx))
++                    if args.command == "fixture"
++                    else None
++                ),
++                verify_semantics=lambda: verify_semantics(
++                    publisher, item, chunks, original_ctx
++                ),
++            )
++        return items
++
++    async for _ in run_tasks_base(
++        [Task(publish_fixture, needs_llm=False)], [source], ctx.user, ctx
++    ):
++        pass
++    answer = await retrieve(publisher, dataset_id, args.query)
++    if not any(
++        f["relationship"] == "limits"
++        and f["target_id"] == str(OSCILLATIONS_ID)
++        and f.get("identity", {}).get("state") == "accepted"
++        for f in answer["facts"]
++    ):
++        raise IntentError(
++            "fixture_retrieval", "Expected mention-anchored fact was not retrieved"
++        )
++    result = dict(
++        cognee_version=cognee.__version__,
++        fixture_root=str(root),
++        profile="native configured stores; local deterministic embedding service; no LLM",
++        result=answer,
++        recovery_events=await publisher.records.events(dataset_id),
++    )
++    (root / "result.json").write_text(json.dumps(result, indent=2))
++    return result
+diff --git a/src/cognee_lab/identity/fixture_embeddings.py b/src/cognee_lab/identity/fixture_embeddings.py
+new file mode 100644
+index 0000000..deb1349
+--- /dev/null
++++ b/src/cognee_lab/identity/fixture_embeddings.py
+@@ -0,0 +1,67 @@
++"""Local deterministic embedding SERVICE for fixtures, not a storage adapter.
++
++The real configured vector interface calls this OpenAI-compatible endpoint.
++This exercises storage/index retrieval, not embedding-model quality.
++"""
++
++import hashlib
++import json
++import math
++import re
++import threading
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++
++
++def embed(text, dimensions=64):
++    vector = [0.0] * dimensions
++    for token in re.findall(r"\w+", str(text).casefold()):
++        index = (
++            int.from_bytes(hashlib.sha256(token.encode()).digest()[:4], "big")
++            % dimensions
++        )
++        vector[index] += 1.0
++    norm = math.sqrt(sum(v * v for v in vector)) or 1.0
++    return [v / norm for v in vector]
++
++
++class FixtureEmbeddings:
++    def __enter__(self):
++        class Handler(BaseHTTPRequestHandler):
++            def log_message(self, *_):
++                pass
++
++            def do_POST(self):
++                if self.path != "/v1/embeddings":
++                    self.send_error(404)
++                    return
++                request = json.loads(
++                    self.rfile.read(int(self.headers["Content-Length"]))
++                )
++                inputs = request["input"]
++                if isinstance(inputs, str):
++                    inputs = [inputs]
++                result = dict(
++                    object="list",
++                    model=request.get("model", "fixture"),
++                    data=[
++                        dict(object="embedding", index=i, embedding=embed(t))
++                        for i, t in enumerate(inputs)
++                    ],
++                    usage=dict(prompt_tokens=0, total_tokens=0),
++                )
++                payload = json.dumps(result).encode()
++                self.send_response(200)
++                self.send_header("Content-Type", "application/json")
++                self.send_header("Content-Length", str(len(payload)))
++                self.end_headers()
++                self.wfile.write(payload)
++
++        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
++        self.thread.start()
++        return f"http://127.0.0.1:{self.server.server_port}/v1"
++
++    def __exit__(self, *_):
++        self.server.shutdown()
++        self.server.server_close()
++        self.thread.join()
+diff --git a/src/cognee_lab/identity/models.py b/src/cognee_lab/identity/models.py
+new file mode 100644
+index 0000000..553066b
+--- /dev/null
++++ b/src/cognee_lab/identity/models.py
+@@ -0,0 +1,253 @@
++from __future__ import annotations
++
++from typing import Annotated, Any, Literal, Union
++from uuid import UUID
++
++from pydantic import BaseModel, ConfigDict, Field, model_validator
++
++Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
++Key = Annotated[str, Field(min_length=1)]
++
++
++class Strict(BaseModel):
++    model_config = ConfigDict(extra="forbid", strict=True)
++
++
++class Range(Strict):
++    start: int = Field(ge=0)
++    end: int = Field(gt=0)
++
++    @model_validator(mode="after")
++    def ordered(self):
++        if self.end <= self.start:
++            raise ValueError("range must be nonempty [start,end)")
++        return self
++
++
++class Occurrence(Range):
++    text: str = Field(min_length=1)
++
++
++class SourceTextInput(Strict):
++    kind: Literal["source_text"]
++    dataset_id: UUID
++    data_id: UUID
++    text_sha256: Digest
++
++
++class ChunkInput(Range):
++    kind: Literal["chunk"]
++    document_ref: Key
++    chunk_id: UUID
++
++
++class TextSpanInput(Range):
++    kind: Literal["text_span"]
++    document_ref: Key
++    text_sha256: Digest
++
++
++class CorpusObjectInput(Strict):
++    kind: Literal["corpus_object"]
++    dataset_id: UUID
++    entity_id: UUID
++    selected_fields: list[Key] = Field(min_length=1)
++    content_sha256: Digest
++
++
++class SavedRecordInput(Strict):
++    kind: Literal["saved_record"]
++    dataset_id: UUID
++    identity_data_id: UUID
++    record_id: Key
++    representation_revision: int = Field(ge=1)
++    content_sha256: Digest
++
++
++Input = Annotated[
++    Union[
++        SourceTextInput, ChunkInput, TextSpanInput, CorpusObjectInput, SavedRecordInput
++    ],
++    Field(discriminator="kind"),
++]
++
++
++class Producer(Strict):
++    method: Literal["rules", "llm", "decision_model", "captured_fixture"]
++    implementation: Key
++    version: Key
++    configuration: dict[str, Any]
++    run_id: str | None = None
++
++
++class Recipe(Strict):
++    name: str
++    description: str
++
++
++class Group(Strict):
++    entity_id: UUID
++    document_ref: Key
++    occurrences: list[Occurrence] = Field(min_length=1)
++    chunk_refs: list[Key] = Field(min_length=1)
++    input_refs: list[Key] = Field(min_length=1)
++    producer_ref: Key
++
++    @model_validator(mode="after")
++    def nonoverlapping(self):
++        if any(b.start < a.end for a, b in zip(self.occurrences, self.occurrences[1:])):
++            raise ValueError("occurrences must be sorted and nonoverlapping")
++        return self
++
++
++class DecisionBase(Strict):
++    group_ref: Key
++    input_refs: list[Key] = Field(min_length=1)
++    producer_ref: Key
++    explanation: str | None = None
++
++
++class Accepted(DecisionBase):
++    status: Literal["accepted"]
++    target_entity_id: UUID
++
++
++class Unresolved(DecisionBase):
++    status: Literal["unresolved"]
++    candidate_entity_ids: list[UUID] | None = None
++
++
++class Ambiguous(DecisionBase):
++    status: Literal["ambiguous"]
++    candidate_entity_ids: list[UUID] | None = None
++
++
++MentionResolution = Annotated[
++    Union[Accepted, Unresolved, Ambiguous], Field(discriminator="status")
++]
++
++
++class CorpusScope(Strict):
++    kind: Literal["corpus"]
++
++
++class DocumentScope(Strict):
++    kind: Literal["document"]
++    document_ref: Key
++
++
++class TextScope(Strict):
++    kind: Literal["text_spans"]
++    document_ref: Key
++    ranges: list[Range] = Field(min_length=1)
++
++
++Scope = Annotated[
++    Union[CorpusScope, DocumentScope, TextScope], Field(discriminator="kind")
++]
++
++
++class Variant(Strict):
++    status: Literal["accepted"]
++    source_entity_id: UUID
++    target_entity_id: UUID
++    applicability: Scope
++    input_refs: list[Key] = Field(min_length=1)
++    producer_ref: Key
++    explanation: str | None = None
++
++
++class IdentitySource(Strict):
++    kind: Literal["cognee_identity_source"]
++    schema_version: Literal["0.1-draft"]
++    dataset_id: UUID
++    identity_data_id: UUID
++    revision: int = Field(ge=1)
++    original_input_ref: Key
++    inputs: dict[Key, Input]
++    producers: dict[Key, Producer]
++    entity_constructions: dict[UUID, Recipe]
++    mention_groups: dict[Key, Group]
++    mention_resolutions: dict[Key, MentionResolution]
++    variant_assignments: dict[Key, Variant]
++
++    @model_validator(mode="after")
++    def references(self):
++        if not isinstance(self.inputs.get(self.original_input_ref), SourceTextInput):
++            raise ValueError("original_input_ref must identify source_text")
++        for item in self.inputs.values():
++            if isinstance(item, (ChunkInput, TextSpanInput)) and not isinstance(
++                self.inputs.get(item.document_ref), SourceTextInput
++            ):
++                raise ValueError("text/chunk document_ref must identify source_text")
++        mention_ids = set()
++        for group in self.mention_groups.values():
++            if group.entity_id in mention_ids:
++                raise ValueError("mention groups need distinct Entity UUIDs")
++            mention_ids.add(group.entity_id)
++            if group.document_ref != self.original_input_ref:
++                raise ValueError("initial local groups belong to the original document")
++            if group.entity_id not in self.entity_constructions:
++                raise ValueError("missing mention construction recipe")
++            chunks = [self.inputs.get(k) for k in group.chunk_refs]
++            if any(
++                not isinstance(c, ChunkInput) or c.document_ref != group.document_ref
++                for c in chunks
++            ):
++                raise ValueError("group chunk_refs must identify original chunks")
++            for occurrence in group.occurrences:
++                intervals = sorted(
++                    (max(c.start, occurrence.start), min(c.end, occurrence.end))
++                    for c in chunks
++                    if c.start < occurrence.end and c.end > occurrence.start
++                )
++                cursor = occurrence.start
++                for a, b in intervals:
++                    if a > cursor:
++                        break
++                    cursor = max(cursor, b)
++                if cursor < occurrence.end:
++                    raise ValueError("chunk mappings must cover each occurrence")
++        assigned = set()
++        if set(self.mention_resolutions) & set(self.variant_assignments):
++            raise ValueError("assignment IDs must be unique within source")
++        for decision in self.mention_resolutions.values():
++            if (
++                decision.group_ref not in self.mention_groups
++                or decision.group_ref in assigned
++            ):
++                raise ValueError(
++                    "unknown group or competing current resolution records"
++                )
++            assigned.add(decision.group_ref)
++            if isinstance(decision, Accepted):
++                if (
++                    decision.target_entity_id in mention_ids
++                    or decision.target_entity_id not in self.entity_constructions
++                ):
++                    raise ValueError(
++                        "accepted mention target needs reusable endpoint recipe"
++                    )
++        for variant in self.variant_assignments.values():
++            endpoints = (variant.source_entity_id, variant.target_entity_id)
++            if endpoints[0] == endpoints[1] or any(
++                e in mention_ids or e not in self.entity_constructions
++                for e in endpoints
++            ):
++                raise ValueError("variant endpoints need distinct reusable recipes")
++            if isinstance(
++                variant.applicability, (DocumentScope, TextScope)
++            ) and not isinstance(
++                self.inputs.get(variant.applicability.document_ref), SourceTextInput
++            ):
++                raise ValueError("variant scope must identify source text")
++        for record in (
++            list(self.mention_groups.values())
++            + list(self.mention_resolutions.values())
++            + list(self.variant_assignments.values())
++        ):
++            if record.producer_ref not in self.producers or any(
++                k not in self.inputs for k in record.input_refs
++            ):
++                raise ValueError("unknown producer/input reference")
++        return self
+diff --git a/src/cognee_lab/identity/native.py b/src/cognee_lab/identity/native.py
+new file mode 100644
+index 0000000..d7b7695
+--- /dev/null
++++ b/src/cognee_lab/identity/native.py
+@@ -0,0 +1,19 @@
++"""Small normalizers over documented Cognee interfaces, never adapter clients."""
++
++
++async def edge_metadata(graph, source_id, target_id, relationship):
++    from cognee.infrastructure.databases.provenance import EdgeIdentity
++
++    identity = EdgeIdentity(str(source_id), str(target_id), relationship)
++    return (await graph.get_edge_delete_data([identity])).get(identity)
++
++
++async def fact_neighborhood(graph, subject, max_nodes):
++    """Uniform EdgeData with real direction/properties, unlike legacy get_edges."""
++    nodes, edges = [], []
++    async for chunk_nodes, chunk_edges in graph.iter_bounded_neighborhood(
++        [subject], depth=1, max_nodes=max_nodes
++    ):
++        nodes.extend(chunk_nodes)
++        edges.extend(chunk_edges)
++    return edges, len(nodes) >= max_nodes
+diff --git a/src/cognee_lab/identity/publish.py b/src/cognee_lab/identity/publish.py
+new file mode 100644
+index 0000000..58c06b7
+--- /dev/null
++++ b/src/cognee_lab/identity/publish.py
+@@ -0,0 +1,409 @@
++"""Initial publisher: new source or same-revision reconciliation, through Cognee APIs."""
++
++import json
++from dataclasses import dataclass
++
++from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
++from .native import edge_metadata
++from .storage import RecordStore, encode
++from .validation import IntentError, validate_inputs, validate_uses
++
++
++def contribution(source, assignment_id, kind, applicability):
++    return dict(
++        dataset_id=str(source.dataset_id),
++        identity_data_id=str(source.identity_data_id),
++        revision=source.revision,
++        assignment_id=assignment_id,
++        kind=kind,
++        applicability=applicability,
++    )
++
++
++def identity_edges(source):
++    edges = []
++    for key, decision in source.mention_resolutions.items():
++        if isinstance(decision, Accepted):
++            group = source.mention_groups[decision.group_ref]
++            doc = source.inputs[group.document_ref]
++            scope = dict(
++                kind="text_spans",
++                data_id=str(doc.data_id),
++                text_sha256=doc.text_sha256,
++                ranges=[dict(start=o.start, end=o.end) for o in group.occurrences],
++            )
++            edges.append(
++                (
++                    str(group.entity_id),
++                    str(decision.target_entity_id),
++                    "resolves_to",
++                    contribution(source, key, "mention", scope),
++                )
++            )
++    for key, variant in source.variant_assignments.items():
++        scope = variant.applicability.model_dump(mode="json")
++        if scope["kind"] != "corpus":
++            doc = source.inputs[scope.pop("document_ref")]
++            scope.update(data_id=str(doc.data_id), text_sha256=doc.text_sha256)
++        edges.append(
++            (
++                str(variant.source_entity_id),
++                str(variant.target_entity_id),
++                "resolves_to",
++                contribution(source, key, "variant", scope),
++            )
++        )
++    return edges
++
++
++def contributions(properties):
++    try:
++        result = json.loads(properties.get("identity_contributions", "[]"))
++    except (TypeError, ValueError) as exc:
++        raise IntentError(
++            "invalid_contributions", "Malformed identity edge payload"
++        ) from exc
++    if not isinstance(result, list) or any(not isinstance(x, dict) for x in result):
++        raise IntentError(
++            "invalid_contributions", "Identity contributions must be a list of objects"
++        )
++    return result
++
++
++@dataclass
++class PublishResult:
++    attempt_id: str
++    created: list[str]
++    referenced: list[str]
++
++
++class Publisher:
++    def __init__(self, graph, vector, records: RecordStore, runtime_profile=None):
++        self.graph, self.vector, self.records = graph, vector, records
++        self.runtime_profile = runtime_profile or {}
++
++    @classmethod
++    async def configured(cls):
++        from cognee.infrastructure.databases.graph import get_graph_engine
++        from cognee.infrastructure.databases.vector import get_vector_engine_async
++        from cognee.infrastructure.databases.graph.config import get_graph_config
++        from cognee.infrastructure.databases.vector.config import get_vectordb_config
++        from cognee.infrastructure.databases.relational.config import (
++            get_relational_config,
++        )
++        from cognee import __version__
++
++        records = RecordStore()
++        await records.initialize()
++        return cls(
++            await get_graph_engine(),
++            await get_vector_engine_async(),
++            records,
++            runtime_profile=dict(
++                cognee_version=__version__,
++                graph_provider=get_graph_config().graph_database_provider,
++                vector_provider=get_vectordb_config().vector_db_provider,
++                relational_provider=get_relational_config().db_provider,
++            ),
++        )
++
++    async def preflight(self, source, texts, chunks, ctx):
++        from cognee.infrastructure.databases.graph.graph_db_interface import (
++            GraphDBInterface,
++        )
++        from cognee.modules.data.methods.get_data import get_data
++        from cognee.infrastructure.files.utils.open_data_file import open_data_file
++
++        required = [
++            "attach_node_source_refs",
++            "attach_edge_source_refs",
++            "get_node_delete_data",
++            "get_edge_delete_data",
++        ]
++        for method in required:
++            implementation = getattr(type(self.graph), method, None)
++            if implementation is getattr(GraphDBInterface, method, None):
++                raise IntentError("unsupported_capability", f"Graph lacks {method}")
++        if (
++            ctx.user is None
++            or str(ctx.dataset.id) != str(source.dataset_id)
++            or str(ctx.data_item.id) != str(source.identity_data_id)
++        ):
++            raise IntentError(
++                "source_context", "Expected real generated-source PipelineContext"
++            )
++        for item in source.inputs.values():
++            if isinstance(item, SourceTextInput):
++                if item.dataset_id != source.dataset_id:
++                    raise IntentError(
++                        "dataset_scope",
++                        "Cross-dataset text inputs are not admitted yet",
++                    )
++                record = await get_data(ctx.user.id, item.data_id, source.dataset_id)
++                if record is None:
++                    raise IntentError(
++                        "source_missing", "Original Data item is not registered"
++                    )
++                key = next(k for k, value in source.inputs.items() if value is item)
++                if key in texts:
++                    async with open_data_file(
++                        record.raw_data_location, mode="r", encoding="utf-8"
++                    ) as f:
++                        if f.read() != texts[key]:
++                            raise IntentError(
++                                "source_changed",
++                                "Supplied text differs from registered original",
++                            )
++        generated = await get_data(
++            ctx.user.id, source.identity_data_id, source.dataset_id
++        )
++        if generated is None:
++            raise IntentError(
++                "source_missing", "Generated identity Data item is not registered"
++            )
++        async with open_data_file(
++            generated.raw_data_location, mode="r", encoding="utf-8"
++        ) as f:
++            try:
++                registered = IdentitySource.model_validate_json(f.read())
++            except ValueError as exc:
++                raise IntentError(
++                    "generated_source_kind",
++                    "Registered Data is not an identity description",
++                ) from exc
++        if registered != source:
++            raise IntentError(
++                "generated_source_changed",
++                "Registered identity description differs from selected intent",
++            )
++        for chunk_id, chunk in chunks.items():
++            stored = await self.graph.get_node(chunk_id)
++            if stored is None or stored.get("text") != chunk.text:
++                raise IntentError(
++                    "chunk_mapping", "Original chunk is absent or differs in the graph"
++                )
++        await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
++        rows = await self.records.rows()
++        descriptions = [
++            IdentitySource.model_validate_json(r["description"])
++            for r in rows
++            if (r["dataset"], r["source"])
++            != (str(source.dataset_id), str(source.identity_data_id))
++        ]
++        validate_uses([*descriptions, source])
++        previous = next(
++            (
++                r
++                for r in rows
++                if (r["dataset"], r["source"])
++                == (str(source.dataset_id), str(source.identity_data_id))
++            ),
++            None,
++        )
++        if previous and previous["revision"] != source.revision:
++            raise IntentError(
++                "not_admitted", "Revision replacement/withdrawal is a later milestone"
++            )
++        for entity_id in source.entity_constructions:
++            node = await self.graph.get_node(str(entity_id))
++            if node is not None and node.get("type") != "Entity":
++                raise IntentError("incompatible_type", f"{entity_id} is not an Entity")
++
++    async def publish(
++        self,
++        source: IdentitySource,
++        *,
++        texts,
++        chunks,
++        ctx,
++        expected_revision=0,
++        origin="runtime",
++        fault_stage=None,
++        semantic_writer=None,
++        verify_semantics=None,
++    ):
++        from cognee.infrastructure.databases.provenance import (
++            EdgeIdentity,
++            make_chunk_source_ref_key,
++            make_source_ref_key,
++        )
++        from cognee.modules.engine.models import Entity
++        from cognee.modules.graph.utils import ensure_default_edge_properties
++        from cognee.tasks.storage import add_data_points
++
++        await self.preflight(source, texts, chunks, ctx)
++        wanted = identity_edges(source)
++        markers = [
++            (str(source.inputs[key].chunk_id), str(group.entity_id), key)
++            for group in source.mention_groups.values()
++            for key in group.chunk_refs
++        ]
++        plan = dict(
++            operation="identity_publish",
++            revision=source.revision,
++            entities=[str(i) for i in source.entity_constructions],
++            identity_edges=[list(e[:3]) for e in wanted],
++            markers=[list(m[:2]) for m in markers],
++            withdraw=[],
++            runtime_profile=self.runtime_profile,
++        )
++        attempt = await self.records.begin(
++            source,
++            expected_revision=expected_revision,
++            plan=plan,
++            origin=origin,
++            method="reconcile" if expected_revision else "publish",
++        )
++        stage, created, referenced = "validation", [], []
++        try:
++            # Repeat after taking the project writer reservation.
++            await self.preflight(source, texts, chunks, ctx)
++            owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
++            old_properties = {}
++            stage = "nodes"
++            new_nodes = []
++            for entity_id, recipe in source.entity_constructions.items():
++                node = await self.graph.get_node(str(entity_id))
++                if node is None:
++                    new_nodes.append(
++                        Entity(
++                            id=entity_id,
++                            name=recipe.name,
++                            description=recipe.description,
++                        )
++                    )
++                    created.append(str(entity_id))
++                else:
++                    old_properties[str(entity_id)] = node
++                    referenced.append(str(entity_id))
++            if new_nodes:
++                await add_data_points(new_nodes, ctx=ctx)
++            if referenced:
++                await self.graph.attach_node_source_refs(referenced, [owner])
++            if fault_stage == stage:
++                raise IntentError(
++                    "injected_failure", "Injected failure after node persistence"
++                )
++
++            if semantic_writer is not None:
++                stage = "semantic_write"
++                await semantic_writer()
++
++            stage = "markers"
++            for chunk_id, mention_id, key in markers:
++                chunk_input = source.inputs[key]
++                doc = source.inputs[chunk_input.document_ref]
++                ref = make_chunk_source_ref_key(
++                    source.dataset_id, doc.data_id, chunk_input.chunk_id
++                )
++                await self.graph.add_edges(
++                    ensure_default_edge_properties(
++                        [(chunk_id, mention_id, "has_identity_mention", {})]
++                    ),
++                    source_ref_key=ref,
++                )
++            stage = "identity_edges"
++            for source_id, target_id, relation, own in wanted:
++                existing = await edge_metadata(
++                    self.graph, source_id, target_id, relation
++                )
++                props = dict(existing.edge_properties) if existing else {}
++                if existing and props.get("resolution_kind") != own["kind"]:
++                    raise IntentError(
++                        "edge_collision", "Existing resolves_to has incompatible kind"
++                    )
++                previous = contributions(props)
++                key = (own["dataset_id"], own["identity_data_id"], own["assignment_id"])
++                kept = [
++                    c
++                    for c in previous
++                    if (
++                        c.get("dataset_id"),
++                        c.get("identity_data_id"),
++                        c.get("assignment_id"),
++                    )
++                    != key
++                ]
++                props.update(
++                    resolution_kind=own["kind"],
++                    identity_contributions=encode([*kept, own]),
++                )
++                # Helper links are graph-only, excluded from semantic index discovery.
++                await self.graph.add_edges(
++                    ensure_default_edge_properties(
++                        [(source_id, target_id, relation, props)]
++                    ),
++                    source_ref_key=owner,
++                )
++            if fault_stage == stage:
++                raise IntentError(
++                    "injected_failure", "Injected failure after identity edges"
++                )
++
++            stage = "verification"
++            for entity_id in source.entity_constructions:
++                sid = str(entity_id)
++                node = await self.graph.get_node(sid)
++                if node is None or node.get("type") != "Entity":
++                    raise IntentError("verify_node", "Expected Entity missing")
++                if sid in old_properties and node != old_properties[sid]:
++                    raise IntentError(
++                        "unexpected_overwrite", "Referencing changed ordinary fields"
++                    )
++                metadata = (await self.graph.get_node_delete_data([sid]))[sid]
++                if owner not in metadata.source_ref_keys:
++                    raise IntentError("verify_owner", "Entity owner missing")
++                if not await self.vector.retrieve("Entity_name", [sid]):
++                    raise IntentError("verify_index", "Entity name vector missing")
++            for source_id, target_id, relation, own in wanted:
++                edge = await edge_metadata(self.graph, source_id, target_id, relation)
++                if edge is None or own not in contributions(edge.edge_properties):
++                    raise IntentError("verify_edge", "Identity contribution missing")
++                ref = EdgeIdentity(source_id, target_id, relation)
++                if (
++                    owner
++                    not in (await self.graph.get_edge_delete_data([ref]))[
++                        ref
++                    ].source_ref_keys
++                ):
++                    raise IntentError("verify_owner", "Identity edge owner missing")
++            for chunk_id, mention_id, key in markers:
++                if not await self.graph.has_edge(
++                    chunk_id, mention_id, "has_identity_mention"
++                ):
++                    raise IntentError("verify_marker", "Mention marker missing")
++                item = source.inputs[key]
++                doc = source.inputs[item.document_ref]
++                marker = await edge_metadata(
++                    self.graph, chunk_id, mention_id, "has_identity_mention"
++                )
++                ref = make_chunk_source_ref_key(
++                    source.dataset_id, doc.data_id, item.chunk_id
++                )
++                if marker is None or ref not in marker.source_ref_keys:
++                    raise IntentError(
++                        "verify_owner", "Original-chunk marker owner missing"
++                    )
++            await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
++            if verify_semantics is not None:
++                await verify_semantics()
++            if fault_stage == stage:
++                raise IntentError(
++                    "injected_failure", "Injected failure before acknowledgement"
++                )
++            await self.records.complete(source, attempt)
++            return PublishResult(attempt, created, referenced)
++        except Exception as exc:
++            try:
++                event = await self.records.fail(
++                    source, attempt, stage, exc, origin=origin
++                )
++            except Exception as diagnostic_error:
++                raise IntentError(
++                    "recovery_record_failed",
++                    f"Publication unavailable: attempt={attempt}, stage={stage}, error={exc}; "
++                    f"recovery-event write also failed: {diagnostic_error}",
++                ) from diagnostic_error
++            raise IntentError(
++                "recovery_required", f"{exc}; recovery_event_id={event}"
++            ) from exc
+diff --git a/src/cognee_lab/identity/retrieve.py b/src/cognee_lab/identity/retrieve.py
+new file mode 100644
+index 0000000..715b7fc
+--- /dev/null
++++ b/src/cognee_lab/identity/retrieve.py
+@@ -0,0 +1,276 @@
++"""Small fixture retriever; native requests/registration follow in the next milestone."""
++
++import re
++from types import SimpleNamespace
++from uuid import UUID
++
++from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
++from .native import edge_metadata, fact_neighborhood
++from .publish import contributions, identity_edges
++from .validation import IntentError, validate_inputs
++
++
++async def valid_sources(publisher, dataset_id, rows):
++    from cognee.infrastructure.databases.relational import get_relational_engine
++    from cognee.modules.data.models import Data
++    from cognee.infrastructure.files.utils.open_data_file import open_data_file
++
++    valid, unavailable = [], []
++    for row in rows:
++        if row["state"] != "current" or row["revision"] != row["verified_revision"]:
++            continue
++        source = IdentitySource.model_validate_json(row["description"])
++        try:
++            texts, chunks = {}, {}
++            async with get_relational_engine().get_async_session() as session:
++                for key, item in source.inputs.items():
++                    if isinstance(item, SourceTextInput):
++                        data = await session.get(Data, item.data_id)
++                        if data is None or data.dataset_id != item.dataset_id:
++                            raise IntentError(
++                                "source_missing", "Original Data item missing"
++                            )
++                        async with open_data_file(
++                            data.raw_data_location, mode="r", encoding="utf-8"
++                        ) as f:
++                            texts[key] = f.read()
++            for item in source.inputs.values():
++                if isinstance(item, ChunkInput):
++                    node = await publisher.graph.get_node(str(item.chunk_id))
++                    parent = source.inputs[item.document_ref]
++                    if (
++                        node is None
++                        or node.get("type") != "DocumentChunk"
++                        or not await edge_metadata(
++                            publisher.graph, item.chunk_id, parent.data_id, "is_part_of"
++                        )
++                    ):
++                        raise IntentError(
++                            "chunk_mapping", "Original chunk or document link missing"
++                        )
++                    chunks[str(item.chunk_id)] = SimpleNamespace(
++                        id=item.chunk_id,
++                        chunk_index=node["chunk_index"],
++                        text=node["text"],
++                        is_part_of=SimpleNamespace(id=parent.data_id),
++                    )
++            await validate_inputs(
++                source, texts=texts, chunks=chunks, graph=publisher.graph
++            )
++            valid.append((source, row))
++        except IntentError as exc:
++            event = await publisher.records.fail(
++                source, row["attempt"], "retrieval_validation", exc
++            )
++            unavailable.append(
++                dict(
++                    identity_data_id=row["source"],
++                    reason=exc.code,
++                    recovery_event_id=event,
++                )
++            )
++    return valid, unavailable
++
++
++def words(text):
++    return {w.rstrip("s") for w in re.findall(r"\w+", text.casefold()) if len(w) > 1}
++
++
++async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
++    """Rank actual facts, with document-context variant expansion and local mentions.
++
++    This intentionally bounded first slice scans saved source descriptions. Full
++    graph traversal, arbitrary external facts and public SearchType are later work.
++    """
++    from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
++    from cognee.modules.engine.utils import generate_edge_object_id
++
++    rows = await publisher.records.rows(dataset_id)
++    current, unavailable = await valid_sources(publisher, dataset_id, rows)
++    mention_ids = {
++        str(g.entity_id) for s, _ in current for g in s.mention_groups.values()
++    }
++    if not await publisher.vector.has_collection("Entity_name"):
++        return dict(facts=[], identity_expansion_limited=False, identity_work=0)
++    candidates = await publisher.vector.search(
++        "Entity_name",
++        query_text=query,
++        query_vector=None,
++        limit=10,
++        include_payload=True,
++    )
++    # Local mention labels are not reusable query aliases. Prefer explicit name
++    # matches; vector candidates remain available for natural-language queries.
++    reusable = [c for c in candidates if str(c.id) not in mention_ids]
++    exact = [
++        c
++        for c in reusable
++        if words(c.payload.get("name", "")) and words(c.payload["name"]) <= words(query)
++    ]
++    seeds = {str(c.id) for c in (exact or reusable[:1])}
++    facts, seen, work, limited, fact_limited = [], set(), 0, False, False
++    for source, row in current:
++        if work >= work_limit:
++            limited = True
++            break
++        doc = source.inputs[source.original_input_ref]
++        document_id = str(doc.data_id)
++        eligible = set(seeds)
++        expected_contributions = {
++            c["assignment_id"]: c for *_, c in identity_edges(source)
++        }
++
++        # Read current physical links and validate each declared contribution.
++        async def accepted_link(a, b, assignment):
++            nonlocal work, limited
++            if work >= work_limit:
++                limited = True
++                return False
++            work += 1
++            edge = await edge_metadata(publisher.graph, a, b, "resolves_to")
++            if edge is None:
++                return False
++            expected = expected_contributions[assignment]
++            if edge.edge_properties.get("resolution_kind") != expected["kind"]:
++                return False
++            for c in contributions(edge.edge_properties):
++                if work >= work_limit:
++                    limited = True
++                    return False
++                work += 1
++                if c == expected:
++                    return True
++            return False
++
++        changed = True
++        while changed and not limited:
++            changed = False
++            for key, variant in source.variant_assignments.items():
++                if work >= work_limit:
++                    limited = True
++                    break
++                work += 1
++                scope = variant.applicability
++                # A span-specific alias needs a span-specific candidate context;
++                # this first document-context route declines it rather than widen it.
++                if scope.kind == "text_spans":
++                    continue
++                if (
++                    scope.kind == "document"
++                    and str(source.inputs[scope.document_ref].data_id) != document_id
++                ):
++                    continue
++                a, b = str(variant.source_entity_id), str(variant.target_entity_id)
++                if (a in eligible or b in eligible) and not {a, b} <= eligible:
++                    if await accepted_link(a, b, key):
++                        eligible.update((a, b))
++                        changed = True
++        mentions = {}
++        for key, decision in source.mention_resolutions.items():
++            if work >= work_limit:
++                limited = True
++                break
++            work += 1
++            if (
++                isinstance(decision, Accepted)
++                and str(decision.target_entity_id) in eligible
++            ):
++                group = source.mention_groups[decision.group_ref]
++                mid = str(group.entity_id)
++                if await accepted_link(mid, str(decision.target_entity_id), key):
++                    mentions[mid] = (group, decision, key)
++        for subject in eligible | set(mentions):
++            neighborhood, cutoff = await fact_neighborhood(
++                publisher.graph, subject, 200
++            )
++            fact_limited |= cutoff
++            for a, b, relation, props in neighborhood:
++                if str(a) != subject or relation in {
++                    "resolves_to",
++                    "has_identity_mention",
++                    "contains",
++                    "is_a",
++                    "is_part_of",
++                    "belongs_to_set",
++                }:
++                    continue
++                edge_id = UUID(generate_edge_object_id(str(a), str(b), relation))
++                evidence = await get_edge_evidence_records(
++                    [edge_id], UUID(str(dataset_id))
++                )
++                own_evidence = [e for e in evidence if str(e.data_id) == document_id]
++                checked = []
++                for e in own_evidence:
++                    chunk = await publisher.graph.get_node(str(e.chunk_id))
++                    if chunk is None:
++                        continue
++                    # This is evidence from the active original source. Current
++                    # whole-document version is checked below through native Data.
++                    checked.append(
++                        dict(
++                            data_id=document_id,
++                            chunk_id=str(e.chunk_id),
++                            chunk_index=e.chunk_index,
++                            text=chunk.get("text", ""),
++                        )
++                    )
++                if not checked or str(edge_id) in seen:
++                    continue
++                target = await publisher.graph.get_node(str(b))
++                text = (
++                    props.get("edge_text")
++                    or f'{relation} {(target or {}).get("name", "")}'
++                )
++                score = len(words(query) & words(text))
++                entry = dict(
++                    edge_id=str(edge_id),
++                    source_id=str(a),
++                    target_id=str(b),
++                    relationship=relation,
++                    text=text,
++                    evidence=checked,
++                    score=score,
++                )
++                if subject in mentions:
++                    group, decision, key = mentions[subject]
++                    # Native evidence is per chunk; ensure it actually covers this
++                    # group, not a context-only passage.
++                    allowed_chunks = {
++                        str(source.inputs[k].chunk_id) for k in group.chunk_refs
++                    }
++                    entry["evidence"] = [
++                        e for e in checked if e["chunk_id"] in allowed_chunks
++                    ]
++                    if not entry["evidence"]:
++                        continue
++                    entry["identity"] = dict(
++                        state="accepted",
++                        target_entity_id=str(decision.target_entity_id),
++                        occurrences=[o.model_dump() for o in group.occurrences],
++                        identity_data_id=str(source.identity_data_id),
++                        assignment_id=key,
++                    )
++                facts.append(entry)
++                seen.add(str(edge_id))
++    # Recheck ledger to avoid delivering a source superseded during this read.
++    after = {
++        r["source"]: (r["state"], r["revision"], r["attempt"])
++        for r in await publisher.records.rows(dataset_id)
++    }
++    if any(
++        after.get(r["source"]) != ("current", r["revision"], r["attempt"])
++        for _, r in current
++    ):
++        raise IntentError(
++            "retrieval_changed", "Publication changed during retrieval; retry query"
++        )
++    facts.sort(key=lambda x: (-x["score"], x["edge_id"]))
++    return dict(
++        facts=facts[:limit],
++        identity_expansion_limited=limited,
++        identity_work=work,
++        fact_candidates_limited=fact_limited,
++        seed_entity_ids=sorted(seeds),
++        unavailable_sources=unavailable,
++        identity_guide="Accepted links identify the scoped referent; ownership and provenance do not establish scientific support.",
++    )
+diff --git a/src/cognee_lab/identity/schema.py b/src/cognee_lab/identity/schema.py
+new file mode 100644
+index 0000000..cbaa130
+--- /dev/null
++++ b/src/cognee_lab/identity/schema.py
+@@ -0,0 +1,48 @@
++"""Export the implementation schema; cross-record/runtime checks remain Python checks."""
++
++import json
++from pathlib import Path
++
++from .models import IdentitySource
++
++
++def schema():
++    result = IdentitySource.model_json_schema()
++    result["$schema"] = "https://json-schema.org/draft/2020-12/schema"
++    result["title"] = "Cognee identity source — implementation draft 0.1"
++    result["description"] = (
++        "Schema generated from runtime models. Cross-reference, exact text/range, "
++        "dependency, UUID-use and publication checks also run in Python."
++    )
++    result["properties"]["entity_constructions"]["description"] = (
++        "Each entry declares an Entity this source intends to retain, including supported "
++        "singletons and existing endpoints, and supplies minimal creation values. All required "
++        "endpoints need entries. Existing nodes bypass property writes; a recipe does not "
++        "authorize reconstructing a missing reasoning input or retired intent."
++    )
++    result["properties"]["variant_assignments"][
++        "description"
++    ] = "Relationships independently established by this source, not a cached identity-graph walk."
++    result["properties"]["inputs"][
++        "description"
++    ] = "Shared inputs/locators. Per-record input_refs declare actual reasoning dependencies."
++    definitions = result["$defs"]
++    definitions["SourceTextInput"]["properties"]["text_sha256"][
++        "description"
++    ] = "SHA-256 lowercase hex of exact extracted document string encoded as UTF-8, without normalization."
++    definitions["TextSpanInput"]["properties"]["text_sha256"][
++        "description"
++    ] = "SHA-256 lowercase hex of UTF-8 document_text[start:end], excluding offsets and parent digest."
++    definitions["CorpusObjectInput"]["properties"]["content_sha256"][
++        "description"
++    ] = "SHA-256 lowercase hex of RFC 8785 JCS UTF-8 of selected supplied field/value object; missing fields fail."
++    definitions["SavedRecordInput"]["properties"]["content_sha256"][
++        "description"
++    ] = "SHA-256 lowercase hex of JCS UTF-8 complete supplied record, excluding enclosing source/revision."
++    return result
++
++
++if __name__ == "__main__":
++    target = Path("schemas/cognee_identity_source_schema_draft.json")
++    target.parent.mkdir(parents=True, exist_ok=True)
++    target.write_text(json.dumps(schema(), indent=2, ensure_ascii=False) + "\n")
+diff --git a/src/cognee_lab/identity/storage.py b/src/cognee_lab/identity/storage.py
+new file mode 100644
+index 0000000..2cf7162
+--- /dev/null
++++ b/src/cognee_lab/identity/storage.py
+@@ -0,0 +1,314 @@
++"""Portable project bookkeeping through Cognee's configured relational sessions."""
++
++import json
++from datetime import datetime, timezone
++from uuid import NAMESPACE_URL, uuid4, uuid5
++
++from sqlalchemy import Integer, String, Text, select, update
++from sqlalchemy.exc import IntegrityError
++from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
++
++from .models import IdentitySource
++from .validation import IntentError
++
++
++class Base(DeclarativeBase):
++    pass
++
++
++class Publication(Base):
++    __tablename__ = "lab_identity_publications"
++    dataset: Mapped[str] = mapped_column(String(36), primary_key=True)
++    source: Mapped[str] = mapped_column(String(36), primary_key=True)
++    revision: Mapped[int] = mapped_column(Integer)
++    verified_revision: Mapped[int] = mapped_column(Integer, default=0)
++    state: Mapped[str] = mapped_column(String(16))
++    attempt: Mapped[str] = mapped_column(String(36))
++    description: Mapped[str] = mapped_column(Text)
++    plan: Mapped[str] = mapped_column(Text)
++
++
++class Writer(Base):
++    __tablename__ = "lab_identity_writers"
++    dataset: Mapped[str] = mapped_column(String(36), primary_key=True)
++    owner: Mapped[str | None] = mapped_column(String(36), nullable=True)
++
++
++class RecoveryEvent(Base):
++    __tablename__ = "lab_identity_recovery_events"
++    id: Mapped[str] = mapped_column(String(36), primary_key=True)
++    dataset: Mapped[str] = mapped_column(String(36))
++    source: Mapped[str] = mapped_column(String(36))
++    attempt: Mapped[str] = mapped_column(String(36))
++    details: Mapped[str] = mapped_column(Text)
++
++
++def now() -> str:
++    return datetime.now(timezone.utc).isoformat()
++
++
++def encode(value) -> str:
++    return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
++
++
++class RecordStore:
++    def __init__(self, session_factory=None):
++        if session_factory is None:
++            from cognee.infrastructure.databases.relational import get_relational_engine
++
++            session_factory = get_relational_engine().get_async_session
++        self.session_factory = session_factory
++
++    async def initialize(self):
++        async with self.session_factory() as session:
++            connection = await session.connection()
++            await connection.run_sync(Base.metadata.create_all)
++            await session.commit()
++
++    async def rows(self, dataset=None):
++        async with self.session_factory() as session:
++            statement = select(Publication)
++            if dataset is not None:
++                statement = statement.where(Publication.dataset == str(dataset))
++            rows = (await session.execute(statement)).scalars().all()
++            return [
++                dict(
++                    dataset=r.dataset,
++                    source=r.source,
++                    revision=r.revision,
++                    verified_revision=r.verified_revision,
++                    state=r.state,
++                    attempt=r.attempt,
++                    description=r.description,
++                    plan=json.loads(r.plan),
++                )
++                for r in rows
++            ]
++
++    async def events(self, dataset):
++        async with self.session_factory() as session:
++            rows = (
++                (
++                    await session.execute(
++                        select(RecoveryEvent).where(
++                            RecoveryEvent.dataset == str(dataset)
++                        )
++                    )
++                )
++                .scalars()
++                .all()
++            )
++            return [json.loads(r.details) for r in rows]
++
++    async def begin(
++        self,
++        source: IdentitySource,
++        *,
++        expected_revision: int,
++        plan: dict,
++        method="publish",
++        origin="runtime",
++    ) -> str:
++        dataset, sid = str(source.dataset_id), str(source.identity_data_id)
++        # Serialize project writers across datasets in shared physical storage.
++        # Native writers outside this coordinator are not covered by this lock.
++        lock_scope = "shared-identity-publication"
++        async with self.session_factory() as session:
++            if await session.get(Writer, lock_scope) is None:
++                session.add(Writer(dataset=lock_scope, owner=None))
++                try:
++                    await session.commit()
++                except IntegrityError:
++                    await session.rollback()
++        attempt = str(uuid4())
++        async with self.session_factory() as session:
++            locked = await session.execute(
++                update(Writer)
++                .where(Writer.dataset == lock_scope, Writer.owner.is_(None))
++                .values(owner=attempt)
++            )
++            if locked.rowcount != 1:
++                raise IntentError(
++                    "writer_busy", "Dataset has an active/abandoned project writer"
++                )
++            row = await session.get(Publication, (dataset, sid))
++            actual_revision = row.revision if row else 0
++            if actual_revision != expected_revision:
++                raise IntentError("stale_revision", "Saved revision changed")
++            if row and row.state == "pending":
++                raise IntentError(
++                    "pending_attempt",
++                    "Inspect abandoned pending publication explicitly",
++                )
++            payload = source.model_dump_json()
++            if row and source.revision == actual_revision:
++                if json.loads(payload) != json.loads(row.description):
++                    raise IntentError(
++                        "revision_reuse", "Changed description requires a new revision"
++                    )
++            elif source.revision != actual_revision + 1:
++                raise IntentError(
++                    "revision_sequence",
++                    "New description must advance exactly one revision",
++                )
++            if row is None:
++                row = Publication(dataset=dataset, source=sid, verified_revision=0)
++                session.add(row)
++            row.revision, row.state, row.attempt = source.revision, "pending", attempt
++            row.description, row.plan = payload, encode(plan)
++            # Recovery attempts are diagnostic links, not new incidents.
++            events = (
++                (
++                    await session.execute(
++                        select(RecoveryEvent).where(
++                            RecoveryEvent.dataset == dataset,
++                            RecoveryEvent.source == sid,
++                        )
++                    )
++                )
++                .scalars()
++                .all()
++            )
++            for event in events:
++                info = json.loads(event.details)
++                if info.get("resolved_at") is None:
++                    info.setdefault("recovery_attempts", []).append(
++                        {"attempt_id": attempt, "method": method, "started_at": now()}
++                    )
++                    event.details = encode(info)
++            plan.update(origin=origin, method=method)
++            row.plan = encode(plan)
++            await session.commit()
++        return attempt
++
++    async def fail(self, source, attempt, stage, error, *, origin=None) -> str:
++        dataset, sid = str(source.dataset_id), str(source.identity_data_id)
++        event_id = str(uuid5(NAMESPACE_URL, f"lab-recovery:{dataset}:{sid}:{attempt}"))
++        async with self.session_factory() as session:
++            row = await session.get(Publication, (dataset, sid))
++            if row is None or row.attempt != attempt:
++                raise IntentError("stale_attempt", "Failure belongs to another attempt")
++            row.state = "failed"
++            event = await session.get(RecoveryEvent, event_id)
++            if event is None:
++                prior = (
++                    (
++                        await session.execute(
++                            select(RecoveryEvent).where(
++                                RecoveryEvent.dataset == dataset,
++                                RecoveryEvent.source == sid,
++                            )
++                        )
++                    )
++                    .scalars()
++                    .all()
++                )
++                for candidate in prior:
++                    details = json.loads(candidate.details)
++                    if details.get("resolved_at") is None and any(
++                        a["attempt_id"] == attempt
++                        for a in details.get("recovery_attempts", [])
++                    ):
++                        event, event_id = candidate, candidate.id
++                        break
++            info = (
++                json.loads(event.details)
++                if event
++                else {
++                    "recovery_event_id": event_id,
++                    "dataset_id": dataset,
++                    "identity_data_id": sid,
++                    "original_data_id": str(
++                        source.inputs[source.original_input_ref].data_id
++                    ),
++                    "attempt_id": attempt,
++                    "intended_revision": source.revision,
++                    "last_verified_revision": row.verified_revision,
++                    "first_detected_at": now(),
++                    "origin": origin or json.loads(row.plan).get("origin", "runtime"),
++                    "runtime_profile": json.loads(row.plan).get("runtime_profile", {}),
++                    "operation": json.loads(row.plan).get("method", "publish"),
++                    "integration_version": "stage6-m0-m1",
++                    "resolved_at": None,
++                }
++            )
++            failure = dict(
++                stage=stage,
++                reason_code=getattr(error, "code", type(error).__name__),
++                message=str(error)[:800],
++            )
++            info["last_observed_at"] = now()
++            if info["attempt_id"] == attempt:
++                info.update(failure)
++            else:
++                for recovery in info.get("recovery_attempts", []):
++                    if recovery["attempt_id"] == attempt:
++                        recovery.update(failure, outcome="failed", finished_at=now())
++            if event is None:
++                session.add(
++                    RecoveryEvent(
++                        id=event_id,
++                        dataset=dataset,
++                        source=sid,
++                        attempt=attempt,
++                        details=encode(info),
++                    )
++                )
++            else:
++                event.details = encode(info)
++            await session.execute(
++                update(Writer)
++                .where(
++                    Writer.dataset == "shared-identity-publication",
++                    Writer.owner == attempt,
++                )
++                .values(owner=None)
++            )
++            await session.commit()
++        return event_id
++
++    async def complete(self, source, attempt):
++        dataset, sid = str(source.dataset_id), str(source.identity_data_id)
++        async with self.session_factory() as session:
++            result = await session.execute(
++                update(Publication)
++                .where(
++                    Publication.dataset == dataset,
++                    Publication.source == sid,
++                    Publication.revision == source.revision,
++                    Publication.attempt == attempt,
++                    Publication.state == "pending",
++                )
++                .values(state="current", verified_revision=source.revision)
++            )
++            if result.rowcount != 1:
++                raise IntentError(
++                    "stale_attempt", "Cannot acknowledge stale/nonpending attempt"
++                )
++            await session.execute(
++                update(Writer)
++                .where(
++                    Writer.dataset == "shared-identity-publication",
++                    Writer.owner == attempt,
++                )
++                .values(owner=None)
++            )
++            for event in (
++                await session.execute(
++                    select(RecoveryEvent).where(
++                        RecoveryEvent.dataset == dataset, RecoveryEvent.source == sid
++                    )
++                )
++            ).scalars():
++                info = json.loads(event.details)
++                if info.get("resolved_at") is None:
++                    info.update(
++                        resolved_at=now(),
++                        resolving_attempt=attempt,
++                        resolving_revision=source.revision,
++                        outcome="restored",
++                    )
++                    if info.get("recovery_attempts"):
++                        info["recovery_attempts"][-1]["outcome"] = "verified"
++                    event.details = encode(info)
++            await session.commit()
+diff --git a/src/cognee_lab/identity/validation.py b/src/cognee_lab/identity/validation.py
+new file mode 100644
+index 0000000..fc808ab
+--- /dev/null
++++ b/src/cognee_lab/identity/validation.py
+@@ -0,0 +1,196 @@
++"""Exact input checks. No identity judgments or approximate substring matching."""
++
++from hashlib import sha256
++from typing import Any
++
++import rfc8785
++
++from .models import (
++    ChunkInput,
++    CorpusObjectInput,
++    IdentitySource,
++    SavedRecordInput,
++    SourceTextInput,
++    TextScope,
++    TextSpanInput,
++)
++
++
++class IntentError(ValueError):
++    """Intent cannot currently be published; code is suitable for diagnostics."""
++
++    def __init__(self, code: str, message: str):
++        self.code = code
++        super().__init__(message)
++
++
++def text_digest(text: str) -> str:
++    return sha256(text.encode("utf-8")).hexdigest()
++
++
++def object_digest(value: Any) -> str:
++    return sha256(rfc8785.dumps(value)).hexdigest()
++
++
++def map_chunks(document_text: str, chunks: list) -> dict[str, tuple[int, int]]:
++    """Use Cognee's exact tiling check, not a separate mapping algorithm."""
++    from cognee.modules.chunking.incremental_chunking import chunk_offsets
++
++    ordered = sorted(chunks, key=lambda c: c.chunk_index)
++    if len({c.chunk_index for c in ordered}) != len(ordered):
++        raise IntentError("chunk_mapping", "Duplicate chunk indexes")
++    if len({str(c.id) for c in ordered}) != len(ordered):
++        raise IntentError("chunk_mapping", "Duplicate chunk UUIDs")
++    try:
++        offsets = chunk_offsets(document_text, [c.text for c in ordered])
++    except ValueError as exc:
++        raise IntentError("chunk_mapping", str(exc)) from exc
++    except Exception as exc:
++        from cognee.modules.chunking.incremental_chunking import IncrementalPlanError
++
++        if isinstance(exc, IncrementalPlanError):
++            raise IntentError("chunk_mapping", str(exc)) from exc
++        raise
++    return {str(c.id): span for c, span in zip(ordered, offsets, strict=True)}
++
++
++async def validate_inputs(
++    source: IdentitySource,
++    *,
++    texts: dict[str, str],
++    chunks: dict[str, Any],
++    graph,
++    saved_record_reader=None,
++) -> None:
++    """Validate the current source and the union of actually consumed dependencies."""
++    used = {source.original_input_ref}
++    for record in [
++        *source.mention_groups.values(),
++        *source.mention_resolutions.values(),
++        *source.variant_assignments.values(),
++    ]:
++        used.update(record.input_refs)
++    for group in source.mention_groups.values():
++        used.add(group.document_ref)
++        used.update(group.chunk_refs)
++    for variant in source.variant_assignments.values():
++        if hasattr(variant.applicability, "document_ref"):
++            used.add(variant.applicability.document_ref)
++    for key in list(used):
++        item = source.inputs[key]
++        if isinstance(item, (ChunkInput, TextSpanInput)):
++            used.add(item.document_ref)
++
++    mappings = {}
++    for key in used:
++        item = source.inputs[key]
++        if isinstance(item, SourceTextInput):
++            if key not in texts or text_digest(texts[key]) != item.text_sha256:
++                raise IntentError("source_changed", f"Text missing/changed: {key}")
++            matching = [
++                c for c in chunks.values() if str(c.is_part_of.id) == str(item.data_id)
++            ]
++            if matching:
++                mappings[key] = map_chunks(texts[key], matching)
++
++    for key in used:
++        item = source.inputs[key]
++        if isinstance(item, SourceTextInput):
++            text = texts.get(key)
++            if text is None or text_digest(text) != item.text_sha256:
++                raise IntentError("source_changed", f"Text missing/changed: {key}")
++        elif isinstance(item, TextSpanInput):
++            text = texts[item.document_ref]
++            if (
++                item.end > len(text)
++                or text_digest(text[item.start : item.end]) != item.text_sha256
++            ):
++                raise IntentError("input_changed", f"Span missing/changed: {key}")
++        elif isinstance(item, CorpusObjectInput):
++            node = await graph.get_node(str(item.entity_id))
++            if node is None:
++                raise IntentError(
++                    "missing_reasoning_input", f"Corpus input missing: {key}"
++                )
++            if any(field not in node for field in item.selected_fields):
++                raise IntentError("input_changed", f"Corpus fields missing: {key}")
++            if (
++                object_digest({field: node[field] for field in item.selected_fields})
++                != item.content_sha256
++            ):
++                raise IntentError("input_changed", f"Corpus fields changed: {key}")
++        elif isinstance(item, SavedRecordInput):
++            if saved_record_reader is None:
++                raise IntentError(
++                    "unsupported_input", "A saved-record reader is required"
++                )
++            value, revision = await saved_record_reader(item)
++            if (
++                revision != item.representation_revision
++                or object_digest(value) != item.content_sha256
++            ):
++                raise IntentError("input_changed", f"Saved record changed: {key}")
++        elif isinstance(item, ChunkInput):
++            chunk = chunks.get(str(item.chunk_id))
++            parent = source.inputs[item.document_ref]
++            text = texts[item.document_ref]
++            if (
++                chunk is None
++                or str(chunk.is_part_of.id) != str(parent.data_id)
++                or item.end > len(text)
++                or chunk.text != text[item.start : item.end]
++            ):
++                raise IntentError(
++                    "chunk_mapping", f"Chunk missing or mapping changed: {key}"
++                )
++            if mappings.get(item.document_ref, {}).get(str(item.chunk_id)) != (
++                item.start,
++                item.end,
++            ):
++                raise IntentError(
++                    "chunk_mapping",
++                    f"Chunk range differs from ordered native mapping: {key}",
++                )
++
++    for group in source.mention_groups.values():
++        text = texts[group.document_ref]
++        for occurrence in group.occurrences:
++            if (
++                occurrence.end > len(text)
++                or text[occurrence.start : occurrence.end] != occurrence.text
++            ):
++                raise IntentError(
++                    "occurrence_changed", "Occurrence does not match document slice"
++                )
++        for key in group.chunk_refs:
++            chunk = source.inputs[key]
++            if not any(
++                o.start < chunk.end and chunk.start < o.end for o in group.occurrences
++            ):
++                raise IntentError(
++                    "context_marker", "Context-only chunk cannot own a mention marker"
++                )
++    for variant in source.variant_assignments.values():
++        scope = variant.applicability
++        if isinstance(scope, TextScope):
++            if any(r.end > len(texts[scope.document_ref]) for r in scope.ranges):
++                raise IntentError("scope_range", "Variant range outside document")
++
++
++def validate_uses(sources: list[IdentitySource]) -> None:
++    """Build a transient UUID-use view; singleton declarations count as reusable."""
++    mentions, reusable = {}, set()
++    for source in sources:
++        local_mentions = {g.entity_id for g in source.mention_groups.values()}
++        reusable.update(set(source.entity_constructions) - local_mentions)
++        for key, group in source.mention_groups.items():
++            identity = (source.identity_data_id, key)
++            if group.entity_id in mentions and mentions[group.entity_id] != identity:
++                raise IntentError(
++                    "incompatible_group", "Mention UUID belongs to another group"
++                )
++            mentions[group.entity_id] = identity
++    if set(mentions) & reusable:
++        raise IntentError(
++            "incompatible_use", "UUID used as both mention and reusable Entity"
++        )
+diff --git a/tests/conftest.py b/tests/conftest.py
+new file mode 100644
+index 0000000..e98af1a
+--- /dev/null
++++ b/tests/conftest.py
+@@ -0,0 +1,32 @@
++import os
++import tempfile
++from pathlib import Path
++
++import pytest
++
++
++def pytest_configure(config):
++    # Configure before any lazy Cognee import. No lab store or API is touched.
++    root = Path(tempfile.mkdtemp(prefix="cognee-stage6-unit-"))
++    for name, value in {
++        "SYSTEM_ROOT_DIRECTORY": str(root / "system"),
++        "DATA_ROOT_DIRECTORY": str(root / "data"),
++        "ENABLE_BACKEND_ACCESS_CONTROL": "false",
++        "TELEMETRY_DISABLED": "true",
++        "CACHING": "false",
++        "LOG_LEVEL": "ERROR",
++    }.items():
++        os.environ[name] = value
++    (root / "system/databases").mkdir(parents=True)
++
++
++@pytest.fixture
++def source_payload():
++    import json
++
++    return json.loads(
++        (
++            Path(__file__).parent
++            / "fixtures/identity/cognee_identity_source_example.json"
++        ).read_text()
++    )
+diff --git a/tests/test_identity_native.py b/tests/test_identity_native.py
+new file mode 100644
+index 0000000..ce6cae8
+--- /dev/null
++++ b/tests/test_identity_native.py
+@@ -0,0 +1,114 @@
++"""Real configured stores in fresh subprocesses; no user's .env/store is used."""
++
++import json
++import subprocess
++import sys
++from pathlib import Path
++
++import pytest
++
++REPO = Path(__file__).resolve().parents[1]
++
++
++def command(root, operation, *args, expect=0):
++    result = subprocess.run(
++        [
++            sys.executable,
++            "-m",
++            "cognee_lab.identity",
++            operation,
++            "--root",
++            str(root),
++            *args,
++        ],
++        cwd=REPO,
++        capture_output=True,
++        text=True,
++        timeout=150,
++    )
++    assert result.returncode == expect, result.stdout[-7000:] + result.stderr[-2000:]
++    return result
++
++
++@pytest.mark.integration
++def test_native_publish_query_and_idempotent_reconcile(tmp_path):
++    root = tmp_path / "native"
++    command(root, "fixture")
++    first = json.loads((root / "result.json").read_text())
++    fact = next(f for f in first["result"]["facts"] if f["relationship"] == "limits")
++    assert fact["source_id"] == "233cb019-3986-5864-88bc-91f334a64372"
++    assert (
++        fact["identity"]["target_entity_id"] == "8b4bff50-907b-56b6-bc80-3b0a7018714a"
++    )
++    assert fact["evidence"][0]["data_id"] == "50d5313b-0fee-5945-b1d5-5c1d37a6f880"
++    assert "it limits oscillations" in fact["evidence"][0]["text"]
++    assert first["result"]["seed_entity_ids"] == [
++        "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
++    ]
++    command(root, "retrieve")  # Reopen real stores in a second process.
++    command(root, "reconcile")
++    second = json.loads((root / "result.json").read_text())
++    assert second["result"]["facts"] == first["result"]["facts"]
++    assert second["recovery_events"] == []
++    # A native property mutation invalidates a field actually consumed by
++    # Describe; the saved recipe must not silently restore it during retrieval.
++    script = """
++import asyncio,json,sys
++from pathlib import Path
++from uuid import UUID
++from cognee_lab.identity.fixture_embeddings import FixtureEmbeddings
++from cognee_lab.identity.__main__ import configure
++root=Path(sys.argv[1])
++with FixtureEmbeddings() as endpoint:
++ configure(root,endpoint)
++ from cognee_lab.identity.publish import Publisher
++ from cognee_lab.identity.retrieve import retrieve
++ async def check():
++  p=await Publisher.configured()
++  await p.graph.update_node('8b4bff50-907b-56b6-bc80-3b0a7018714a',{'description':'changed input'})
++  dataset=UUID(json.loads((root/'fixture-info.json').read_text())['dataset_id'])
++  answer=await retrieve(p,dataset,'What does HC limit?')
++  assert answer['facts']==[]
++  assert answer['unavailable_sources'][0]['reason']=='input_changed'
++  events=await p.records.events(dataset)
++  assert len(events)==1 and events[0]['origin']=='test'
++ asyncio.run(check())
++"""
++    mutated = subprocess.run(
++        [sys.executable, "-c", script, str(root)],
++        cwd=REPO,
++        capture_output=True,
++        text=True,
++        timeout=150,
++    )
++    assert mutated.returncode == 0, mutated.stdout[-4000:] + mutated.stderr[-2000:]
++
++
++@pytest.mark.integration
++def test_native_failure_is_unavailable_and_explicitly_recovered(tmp_path):
++    root = tmp_path / "failure"
++    failed = command(root, "fixture", "--fault-stage", "identity_edges", expect=1)
++    assert "recovery_event_id=" in failed.stdout
++    query = command(root, "retrieve")
++    assert '"facts": []' in query.stdout
++    command(root, "reconcile")
++    result = json.loads((root / "result.json").read_text())
++    assert result["result"]["facts"]
++    assert len(result["recovery_events"]) == 1
++    assert result["recovery_events"][0]["resolved_at"]
++    assert result["recovery_events"][0]["origin"] == "test/fault_injection"
++
++
++def test_application_code_has_no_concrete_backend_access():
++    import ast
++
++    for path in (REPO / "src/cognee_lab/identity").glob("*.py"):
++        tree = ast.parse(path.read_text())
++        for node in ast.walk(tree):
++            if isinstance(node, ast.ImportFrom):
++                assert not any(
++                    x in (node.module or "").split(".")
++                    for x in ["lancedb", "ladybug", "kuzu", "sqlite3", "dialects"]
++                )
++            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
++                assert node.func.attr not in {"query", "execute_sql", "connect"}, path
+diff --git a/tests/test_identity_records.py b/tests/test_identity_records.py
+new file mode 100644
+index 0000000..3f6e115
+--- /dev/null
++++ b/tests/test_identity_records.py
+@@ -0,0 +1,142 @@
++import json
++from pathlib import Path
++from types import SimpleNamespace
++from uuid import uuid4
++
++import pytest
++from pydantic import ValidationError
++
++from cognee_lab.identity.models import IdentitySource
++from cognee_lab.identity.validation import (
++    IntentError,
++    map_chunks,
++    object_digest,
++    text_digest,
++    validate_inputs,
++    validate_uses,
++)
++
++
++def parse(value):
++    return IdentitySource.model_validate_json(json.dumps(value))
++
++
++def test_example_and_exact_text(source_payload):
++    source = parse(source_payload)
++    text = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
++    assert text_digest(text) == source.inputs["doc01"].text_sha256
++    for occurrence in source.mention_groups["g01"].occurrences:
++        assert text[occurrence.start : occurrence.end] == occurrence.text
++    assert text_digest(text.rstrip()) != text_digest(text)
++
++
++@pytest.mark.parametrize(
++    "mutation",
++    [
++        lambda p: p["mention_resolutions"]["r01"].pop("target_entity_id"),
++        lambda p: p["mention_resolutions"]["r01"].update(status="unresolved"),
++        lambda p: p["entity_constructions"].pop(
++            p["mention_groups"]["g01"]["entity_id"]
++        ),
++        lambda p: p["mention_resolutions"]["r01"].update(group_ref="absent"),
++        lambda p: p["mention_resolutions"].update(
++            r02=dict(p["mention_resolutions"]["r01"])
++        ),
++        lambda p: p["mention_groups"]["g01"]["occurrences"][1].update(start=50),
++        lambda p: p["mention_groups"]["g01"]["occurrences"][0].update(start=True),
++        lambda p: p["variant_assignments"]["v01"].update(
++            target_entity_id=p["mention_groups"]["g01"]["entity_id"]
++        ),
++        lambda p: p["mention_groups"]["g01"].update(producer_ref="absent"),
++        lambda p: p["mention_resolutions"]["r01"].update(input_refs=["absent"]),
++    ],
++)
++def test_rejects_invalid_forms(source_payload, mutation):
++    mutation(source_payload)
++    with pytest.raises(ValidationError):
++        parse(source_payload)
++
++
++def test_unresolved_keeps_group_without_target(source_payload):
++    r = source_payload["mention_resolutions"]["r01"]
++    r.pop("target_entity_id")
++    r["status"] = "unresolved"
++    source = parse(source_payload)
++    from cognee_lab.identity.publish import identity_edges
++
++    assert len(identity_edges(source)) == 1  # Variant remains; mention has no edge.
++
++
++def test_cross_source_uuid_use(source_payload):
++    a = parse(source_payload)
++    source_payload["identity_data_id"] = str(uuid4())
++    source_payload["mention_groups"] = {}
++    source_payload["mention_resolutions"] = {}
++    b = parse(source_payload)  # The same M is now declared a reusable singleton.
++    with pytest.raises(IntentError, match="both mention and reusable"):
++        validate_uses([a, b])
++
++
++def test_repeated_unicode_chunks_map_in_order():
++    chunks = [
++        SimpleNamespace(id="a", chunk_index=0, text="α😀\n"),
++        SimpleNamespace(id="b", chunk_index=1, text="α😀\n"),
++    ]
++    assert map_chunks("α😀\nα😀\n", chunks) == {"a": (0, 3), "b": (3, 6)}
++    with pytest.raises(IntentError):
++        map_chunks("α😀 α😀\n", chunks)
++
++
++def test_jcs_and_exact_projection():
++    assert object_digest({"b": 2, "a": 1}) == object_digest({"a": 1, "b": 2})
++    assert object_digest([1, 2]) != object_digest([2, 1])
++    assert object_digest({"x": None}) != object_digest({})
++    with pytest.raises(ValueError):
++        object_digest({"x": float("nan")})
++
++
++def test_generated_schema_matches_and_example_validates(source_payload):
++    from cognee_lab.identity.schema import schema
++    from jsonschema import Draft202012Validator, FormatChecker
++
++    checked = json.loads(
++        (
++            Path(__file__).parents[1]
++            / "schemas/cognee_identity_source_schema_draft.json"
++        ).read_text()
++    )
++    assert checked == schema()
++    Draft202012Validator(checked, format_checker=FormatChecker()).validate(
++        source_payload
++    )
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "state,code", [("missing", "missing_reasoning_input"), ("changed", "input_changed")]
++)
++async def test_recipe_does_not_replace_missing_or_changed_reasoning_input(
++    source_payload, state, code
++):
++    source = parse(source_payload)
++    text = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
++    chunk = SimpleNamespace(
++        id=source.inputs["chunk01"].chunk_id,
++        chunk_index=0,
++        text=text,
++        is_part_of=SimpleNamespace(id=source.inputs["doc01"].data_id),
++    )
++
++    class Graph:
++        async def get_node(self, _):
++            return (
++                None
++                if state == "missing"
++                else {"name": "Changed", "description": "Changed"}
++            )
++
++    with pytest.raises(IntentError) as err:
++        await validate_inputs(
++            source, texts={"doc01": text}, chunks={str(chunk.id): chunk}, graph=Graph()
++        )
++    assert err.value.code == code
+diff --git a/tests/test_identity_storage.py b/tests/test_identity_storage.py
+new file mode 100644
+index 0000000..052bc61
+--- /dev/null
++++ b/tests/test_identity_storage.py
+@@ -0,0 +1,56 @@
++import json
++from uuid import uuid4
++
++import pytest
++
++from cognee_lab.identity.models import IdentitySource
++from cognee_lab.identity.storage import RecordStore
++from cognee_lab.identity.validation import IntentError
++
++
++@pytest.mark.asyncio
++async def test_guard_failure_event_and_explicit_reconciliation(source_payload):
++    source_payload["dataset_id"] = str(uuid4())
++    for value in source_payload["inputs"].values():
++        if "dataset_id" in value:
++            value["dataset_id"] = source_payload["dataset_id"]
++    source = IdentitySource.model_validate_json(json.dumps(source_payload))
++    store = RecordStore()
++    await store.initialize()
++    first = await store.begin(source, expected_revision=0, plan={}, origin="test")
++    assert (await store.rows(source.dataset_id))[0]["state"] == "pending"
++    with pytest.raises(IntentError, match="writer"):
++        await store.begin(source, expected_revision=1, plan={})
++    event = await store.fail(
++        source, first, "nodes", IntentError("injected", "test failure"), origin="test"
++    )
++    await store.fail(
++        source, first, "nodes", IntentError("injected", "observed again"), origin="test"
++    )
++    assert len(await store.events(source.dataset_id)) == 1
++    with pytest.raises(IntentError, match="revision changed"):
++        await store.begin(source, expected_revision=0, plan={})
++    second = await store.begin(
++        source, expected_revision=1, plan={}, method="reconcile", origin="test"
++    )
++    same_event = await store.fail(
++        source,
++        second,
++        "verification",
++        IntentError("injected", "recovery failed"),
++        origin="test",
++    )
++    assert same_event == event
++    assert len(await store.events(source.dataset_id)) == 1
++    second = await store.begin(
++        source, expected_revision=1, plan={}, method="reconcile", origin="test"
++    )
++    with pytest.raises(IntentError, match="stale"):
++        await store.complete(source, first)
++    await store.complete(source, second)
++    row = (await store.rows(source.dataset_id))[0]
++    assert row["state"] == "current" and row["verified_revision"] == 1
++    records = await store.events(source.dataset_id)
++    assert records[0]["recovery_event_id"] == event
++    assert records[0]["resolved_at"] is not None
++    assert records[0]["recovery_attempts"][-1]["attempt_id"] == second

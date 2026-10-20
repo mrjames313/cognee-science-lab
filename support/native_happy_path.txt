@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /tmp/cognee-stage6-native-env/bin/python
+cachedir: .pytest_cache
+rootdir: /workspace/scratch/cfdfb9b99ad1/stage6_current_main
+configfile: pyproject.toml
+plugins: platformdirs-4.12.2, typeguard-4.6.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 3 items / 2 deselected / 1 selected
+
+tests/test_identity_additions_native.py::test_native_add_occurrences_reopen_reconcile_prefix_and_withdraw PASSED [100%]
+
+================= 1 passed, 2 deselected in 567.58s (0:09:27) ==================

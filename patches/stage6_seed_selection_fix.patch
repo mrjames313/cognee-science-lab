@@ -1,0 +1,104 @@
+--- a/src/cognee_lab/identity/retrieve.py
++++ b/src/cognee_lab/identity/retrieve.py
+@@ -76,6 +76,30 @@
+     return {w.rstrip("s") for w in re.findall(r"\w+", text.casefold()) if len(w) > 1}
+ 
+ 
++async def select_seed_entities(graph, candidates, mention_ids, query):
++    """Prefer explicit reusable names, using current graph fields, not payload shape.
++
++    Native vector indexes need not expose an Entity's ``name`` in their payload.
++    Resolve their IDs through the graph interface and keep vector order only as
++    the fallback for queries without an explicit candidate name.
++    """
++    reusable, exact, seen = [], [], set()
++    query_words = words(query)
++    for candidate in candidates:
++        entity_id = str(candidate.id)
++        if entity_id in mention_ids or entity_id in seen:
++            continue
++        seen.add(entity_id)
++        node = await graph.get_node(entity_id)
++        if node is None or node.get("type") != "Entity":
++            continue
++        reusable.append(entity_id)
++        name_words = words(node.get("name") or "")
++        if name_words and name_words <= query_words:
++            exact.append(entity_id)
++    return set(exact or reusable[:1])
++
++
+ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
+     """Rank actual facts, with document-context variant expansion and local mentions.
+ 
+@@ -97,17 +121,11 @@
+         query_text=query,
+         query_vector=None,
+         limit=10,
+-        include_payload=True,
++        include_payload=False,
+     )
+     # Local mention labels are not reusable query aliases. Prefer explicit name
+     # matches; vector candidates remain available for natural-language queries.
+-    reusable = [c for c in candidates if str(c.id) not in mention_ids]
+-    exact = [
+-        c
+-        for c in reusable
+-        if words(c.payload.get("name", "")) and words(c.payload["name"]) <= words(query)
+-    ]
+-    seeds = {str(c.id) for c in (exact or reusable[:1])}
++    seeds = await select_seed_entities(publisher.graph, candidates, mention_ids, query)
+     facts, seen, work, limited, fact_limited = [], set(), 0, False, False
+     for source, row in current:
+         if work >= work_limit:
+--- /dev/null
++++ b/tests/test_identity_retrieval.py
+@@ -0,0 +1,48 @@
++"""Query seed selection must not depend on vector payload layout or lucky rank."""
++
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++import pytest
++
++from cognee_lab.identity.retrieve import select_seed_entities
++
++
++@pytest.mark.parametrize("payload", [None, {"text": "HC"}, {"name": "wrong"}])
++async def test_explicit_name_beats_higher_ranked_fact_target(payload):
++    nodes = {
++        "oscillations": {"type": "Entity", "name": "oscillations"},
++        "hc": {"type": "Entity", "name": "HC"},
++        "mention": {"type": "Entity", "name": "HC"},
++    }
++    graph = SimpleNamespace(get_node=AsyncMock(side_effect=nodes.get))
++    candidates = [
++        SimpleNamespace(id=key, payload=payload)
++        for key in ["oscillations", "mention", "hc", "hc"]
++    ]
++    assert await select_seed_entities(
++        graph, candidates, {"mention"}, "What does HC limit?"
++    ) == {"hc"}
++    assert [call.args[0] for call in graph.get_node.await_args_list] == [
++        "oscillations",
++        "hc",
++    ]
++
++
++async def test_fallback_skips_stale_and_non_entity_vector_entries():
++    nodes = {
++        "chunk": {"type": "DocumentChunk", "name": "HC"},
++        "a": {"type": "Entity", "name": "Helios controller"},
++        "b": {"type": "Entity", "name": "Other device"},
++    }
++    graph = SimpleNamespace(get_node=AsyncMock(side_effect=nodes.get))
++    candidates = [SimpleNamespace(id=key) for key in ["missing", "chunk", "a", "b"]]
++    assert await select_seed_entities(graph, candidates, set(), "regulation?") == {"a"}
++
++
++async def test_no_eligible_candidate_returns_no_seed():
++    graph = SimpleNamespace(get_node=AsyncMock(return_value=None))
++    assert (
++        await select_seed_entities(graph, [SimpleNamespace(id="missing")], set(), "HC")
++        == set()
++    )

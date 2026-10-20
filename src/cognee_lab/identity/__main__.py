@@ -37,6 +37,7 @@ def configure(root: Path, endpoint: str):
         EDGE_EVIDENCE_ENABLED="true",
         HF_HUB_OFFLINE="1",
         TRANSFORMERS_OFFLINE="1",
+        LITELLM_LOCAL_MODEL_COST_MAP="True",
         LOG_LEVEL="ERROR",
         KUZU_BUFFER_POOL_SIZE=str(128 << 20),
         KUZU_MAX_DB_SIZE=str(1 << 30),
@@ -62,6 +63,7 @@ def main():
             "edit-text",
             "remove-occurrences",
             "retire-resolved-group",
+            "add-occurrences",
             "withdraw",
             "retrieve",
             "status",
@@ -104,12 +106,23 @@ def main():
     root = args.root.resolve()
     if (
         args.command
-        in {"revise", "edit-text", "remove-occurrences", "retire-resolved-group"}
+        in {
+            "revise",
+            "edit-text",
+            "remove-occurrences",
+            "retire-resolved-group",
+            "add-occurrences",
+        }
         and args.expected_revision is None
     ):
         parser.error(f"{args.command} requires --expected-revision")
     if args.fault_stage:
-        if args.command in {"edit-text", "remove-occurrences", "retire-resolved-group"}:
+        if args.command in {
+            "edit-text",
+            "remove-occurrences",
+            "retire-resolved-group",
+            "add-occurrences",
+        }:
             if not args.fault_stage.startswith(("text_", "replace_")):
                 parser.error("Fault stage does not match the selected operation")
         elif args.fault_stage.startswith("text_"):
@@ -122,7 +135,12 @@ def main():
         if (prefix and not args.fault_stage.startswith(prefix)) or (
             not prefix
             and args.command
-            not in {"edit-text", "remove-occurrences", "retire-resolved-group"}
+            not in {
+                "edit-text",
+                "remove-occurrences",
+                "retire-resolved-group",
+                "add-occurrences",
+            }
             and args.fault_stage.startswith(("withdraw_", "replace_"))
         ):
             parser.error("Fault stage does not match the selected operation")
@@ -137,7 +155,11 @@ def main():
         parser.error("Root is not an isolated Stage 6 fixture directory")
     with FixtureEmbeddings() as endpoint:
         configure(root, endpoint)
-        if args.command in {"remove-occurrences", "retire-resolved-group"}:
+        if args.command in {
+            "remove-occurrences",
+            "retire-resolved-group",
+            "add-occurrences",
+        }:
             from .occurrence_fixture import run
         elif args.command == "edit-text":
             from .text_fixture import run

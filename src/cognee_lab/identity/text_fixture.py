@@ -166,6 +166,7 @@ async def transition_summary(publisher, row):
         position_shift=(
             (len(change.text) - len(change.previous_text))
             if change.occurrence_retention is None
+            and change.occurrence_continuity is None
             else None
         ),
         text_length_delta=len(change.text) - len(change.previous_text),
@@ -190,6 +191,7 @@ async def transition_summary(publisher, row):
         mention_ids_preserved=all(
             g.entity_id == old.mention_groups[k].entity_id
             for k, g in source.mention_groups.items()
+            if k in old.mention_groups
         ),
         chunk_budget=change.chunk_budget,
         previous_chunk_mapping=[
@@ -205,20 +207,48 @@ async def transition_summary(publisher, row):
         content_ids_present_in_both=sorted(old_ids & new_ids),
         groups={
             k: dict(
-                previous_occurrences=[
-                    o.model_dump() for o in old.mention_groups[k].occurrences
-                ],
+                previous_occurrences=(
+                    [o.model_dump() for o in old.mention_groups[k].occurrences]
+                    if k in old.mention_groups
+                    else []
+                ),
+                entity_id=str(g.entity_id),
                 occurrences=[o.model_dump() for o in g.occurrences],
                 chunk_refs=g.chunk_refs,
-                previous_marker_chunk_ids=[
-                    str(old.inputs[k].chunk_id)
-                    for k in old.mention_groups[k].chunk_refs
-                ],
+                previous_marker_chunk_ids=(
+                    [
+                        str(old.inputs[k].chunk_id)
+                        for k in old.mention_groups[k].chunk_refs
+                    ]
+                    if k in old.mention_groups
+                    else []
+                ),
                 marker_chunk_ids=[str(source.inputs[k].chunk_id) for k in g.chunk_refs],
             )
             for k, g in source.mention_groups.items()
         },
         occurrence_retention=change.occurrence_retention,
+        occurrence_continuity=change.occurrence_continuity,
+        added_groups={
+            k: dict(
+                entity_id=str(g.entity_id),
+                entity_present=await publisher.graph.get_node(str(g.entity_id))
+                is not None,
+                entity_indexed=bool(
+                    await publisher.vector.retrieve("Entity_name", [str(g.entity_id)])
+                ),
+                marker_chunk_ids=[
+                    str(i.chunk_id)
+                    for i in source.inputs.values()
+                    if isinstance(i, ChunkInput)
+                    and await publisher.graph.has_edge(
+                        str(i.chunk_id), str(g.entity_id), "has_identity_mention"
+                    )
+                ],
+            )
+            for k, g in source.mention_groups.items()
+            if k not in old.mention_groups
+        },
         retired_groups={
             k: dict(
                 entity_id=str(g.entity_id),
@@ -241,9 +271,13 @@ async def transition_summary(publisher, row):
             if k not in source.mention_groups
         },
         decision_method=(
-            "Captured survivor review; programmatic exact span validation and whole-document rebuild"
-            if change.occurrence_retention is not None
-            else "Captured review of unchanged interpretation; programmatic exact offset remap"
+            "Captured addition review; explicit old-to-new occurrence mapping and whole-document rebuild"
+            if change.occurrence_continuity is not None
+            else (
+                "Captured survivor review; programmatic exact span validation and whole-document rebuild"
+                if change.occurrence_retention is not None
+                else "Captured review of unchanged interpretation; programmatic exact offset remap"
+            )
         ),
     )
 

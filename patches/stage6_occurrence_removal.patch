@@ -1,0 +1,811 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -41,6 +41,8 @@
+ 
+ Step 4 includes [guarded identity corrections](docs/stage6_identity_revision_replacement.md) and [captured source-text edits](docs/stage6_identity_text_changes.md). The text-edit slice remaps document positions, rebuilds native chunks/facts/evidence, preserves independent sources and explicitly recovers caught failures. The [multi-chunk checkpoint](docs/stage6_identity_multichunk.md) adds split occurrences, complete fact-continuation evidence, changing boundaries and repeated edits. Arbitrary edits, dependency propagation and standard Update wiring remain incomplete.
+ 
++The [reviewed occurrence-removal checkpoint](docs/stage6_identity_occurrence_removal.md) adds partial-group continuity and empty unresolved-group retirement through the same rebuild/recovery boundary. Its explicit retention map is captured review input, not automatic text matching or interpretation.
++
+ 
+ ## Setup and running the code
+ 
+diff --git a/ROADMAP.md b/ROADMAP.md
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -3,7 +3,7 @@
+ **Last revised:** 2026-10-19
+ **Project:** `cognee-science-lab`  
+ **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
+-**Current work:** Stage 6 — steps 1–2 have native fixtures; step 3's multi-source withdrawal path is demonstrated; step 4 includes guarded unchanged-text identity corrections and a captured prefix-edit path with whole-document native rechunking, remapped positions and rebuilt fact evidence, including multi-chunk markers and fact continuations. See [the fixture guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md). Arbitrary edits, context/meaning reconsideration, dependent-source maintenance and full original-document removal remain lifecycle work. Earlier investigation entries retain historical wording; the reviewed handoff governs the design.
++**Current work:** Stage 6 — steps 1–2 have native fixtures; step 3's multi-source withdrawal path is demonstrated; step 4 includes guarded unchanged-text identity corrections and a captured prefix-edit path with whole-document native rechunking, remapped positions and rebuilt fact evidence, including multi-chunk markers and fact continuations. See [the fixture guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md). The subsequent [reviewed occurrence-removal path](docs/stage6_identity_occurrence_removal.md) preserves partial groups and retires an empty unresolved group using captured continuity. Additions/regrouping, context/meaning reconsideration, dependent-source maintenance and full original-document removal remain lifecycle work. Earlier investigation entries retain historical wording; the reviewed handoff governs the design.
+ 
+ This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
+ 
+@@ -20,7 +20,7 @@
+ | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
+ | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
+ | 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
+-| 6 | In progress | Guarded identity correction and captured prefix-edit/rebuild coordinate saved intent, registered originals/identity Data, graph and evidence; multi-chunk marker/evidence maintenance now demonstrated; next arbitrary edits, general extraction, dependency propagation and original-source lifecycle, then standard wiring |
++| 6 | In progress | Guarded identity correction, multi-chunk prefix edits and reviewed occurrence removal coordinate saved intent, registered Data, graph and evidence; partial groups continue and empty unresolved groups retire; next additions/regrouping, changed meanings/general extraction, dependency propagation and original-source lifecycle, then standard wiring |
+ | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
+ 
+ 
+diff --git a/docs/stage6_identity_multichunk.md b/docs/stage6_identity_multichunk.md
+--- a/docs/stage6_identity_multichunk.md
++++ b/docs/stage6_identity_multichunk.md
+@@ -77,3 +77,5 @@
+ This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. It does not evaluate multi-chunk LLM extraction, semantic interpretation of arbitrary edits, changes in group membership, span-specific aliases, automatic dependent-source reconsideration, generic source removal or standard Cognify/Update task-transform wiring. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
+ 
+ The original six-step build order is unchanged. Step 4 has stronger chunk-boundary and evidence coverage; arbitrary occurrence edits and dependency/source lifecycle work remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
++
++The subsequent [reviewed removal checkpoint](stage6_identity_occurrence_removal.md) supplies explicit survivor indices and new exact spans for partial-group continuity and empty unresolved-group retirement. It retains this native rebuild/recovery path; the prefix profile above remains unchanged.
+diff --git a/docs/stage6_identity_occurrence_removal.md b/docs/stage6_identity_occurrence_removal.md
+new file mode 100644
+--- /dev/null
++++ b/docs/stage6_identity_occurrence_removal.md
+@@ -0,0 +1,72 @@
++# Step 4 / M3: reviewed occurrence removal
++
++This checkpoint extends the native whole-document rebuild to explicit occurrence removal. It uses captured identity/semantic review, exact positions, the existing publication ledger and native Cognee 1.6.2 interfaces. It remains a bounded part of step 4.
++
++## Concrete example
++
++Start from doc01 of a fresh `chunked-fixture`:
++
++```text
++Helios controller (HC) regulates plasma heating, the controller adjusts coil current, and it limits oscillations.
++```
++
++The captured replacement text is:
++
++```text
++Helios controller (HC) regulates heating, and it limits oscillations.
++```
++
++Both strings include a trailing newline. The source supplies a captured review that the remaining `it` still refers to the same controller and supports the same local `limits` fact. Code does not infer that interpretation from the deletion.
++
++The explicit retention map is `{"g01": [1], "g02": []}`. Values are ordered zero-based indices into the **previous saved revision's occurrence list**. The map is scoped to this transition and stored in its durable change plan; these indices are not permanent occurrence IDs or a new source-schema field.
++
++- g01 retains its second occurrence, `it`, at the supplied new document range `[46, 48)`. Its group UUID, Entity UUID, resolution-record ID, target and ordinary fact ID continue. Its first occurrence, `the controller`, is removed from the saved group and retrieval annotation.
++- g02 loses its only occurrence, `plasma`. Its saved group, unresolved resolution record and Entity construction declaration are removed. Native original-memory removal retires its old markers; removal of its generated-source retention deletes its now unowned Entity and vector. Other owners would retain an Entity; losing this source alone does not authorize deleting foreign support.
++- Every replacement chunk is constructed by the native chunker with the recorded budget. The local fact is regenerated from the captured remaining span with current native ownership/evidence. This is a whole-document rebuild, not preservation of old fact materialization merely because its ID continues.
++- doc02's description, local fact, chunks/evidence and shared-edge contribution remain independent. The existing reusable controller's ordinary fields are not rewritten.
++
++## Run and inspect
++
++Apply this checkpoint after the multi-chunk maintenance patch. Choose a new root:
++
++```bash
++uv run python -m cognee_lab.identity chunked-fixture \
++  --root outputs/stage6_occurrences
++
++uv run python -m cognee_lab.identity remove-occurrences \
++  --root outputs/stage6_occurrences --source doc01 --expected-revision 1
++```
++
++Expected: two retrieved facts; doc01 current at saved/registered/verified revision 2, doc02 unchanged at revision 1; doc01's fact annotation contains only `it`; its unresolved Entity and marker flags are false. In `text_changes`, `retired_groups.g02` reports no Entity, index entry or marker; retired chunks/vectors are absent; evidence uses current chunks. `position_shift` is null because a deletion is not described by one global offset shift. `text_length_delta` reports the net character-count change without assigning that change to every occurrence.
++
++The command writes `occurrence_revision_result.json`, the intended identity JSON and new original text into the isolated output root. Baseline fixture files are not authoritative after a revision; readers use the saved current description and registered original. Healthy reconciliation must not resurrect g02:
++
++```bash
++uv run python -m cognee_lab.identity reconcile \
++  --root outputs/stage6_occurrences --source doc01
++```
++
++## Explicit recovery
++
++Use another fresh root:
++
++```bash
++uv run python -m cognee_lab.identity chunked-fixture \
++  --root outputs/stage6_occurrences_failure
++uv run python -m cognee_lab.identity remove-occurrences \
++  --root outputs/stage6_occurrences_failure --expected-revision 1 \
++  --fault-stage replace_published
++# Expected intentional failure before final retirement/verification.
++uv run python -m cognee_lab.identity retrieve \
++  --root outputs/stage6_occurrences_failure
++uv run python -m cognee_lab.identity reconcile \
++  --root outputs/stage6_occurrences_failure --source doc01
++```
++
++The failed attempt withholds doc01; doc02's complete fact remains available. Reconcile uses the exact saved intended revision, retention map, previous/new text and chunk budget, repeats the whole-document rebuild and completes retirement. It does not rerun identity judgment or reconstruct continuity from stale spans. The same diagnostic incident is resolved only after revision 2 verification. Native tests also cover failure at `text_chunks`, before the fact and identity materialization are rebuilt.
++
++## API and remaining limits
++
++`TextChange(previous_text, text, chunk_budget, occurrence_retention=...)` selects the reviewed-removal admission path. Every old group must be present in the map. Lists must contain unique, ordered, in-range integer indices (booleans are refused). Continuing groups keep their Entity/document identity and occurrence texts, with exact valid new spans. Empty lists explicitly retire the group and its resolution/declaration. Continuing assignments and other construction recipes remain unchanged. The default with no retention map preserves the existing prefix-only guard.
++
++The fixture accepts only its documented fresh doc01 input. It does not locate arbitrary repeated phrases, decide which ambiguous occurrence continues, add new occurrences, split/combine groups, retarget surviving groups, retire a resolved group with its own facts, or implement general semantic extraction. The common replacement API requires caller-provided semantic rebuilding and verification. Span/record dependencies, dependent-source propagation and coordinated full original/generated Data removal remain later work. No backend-specific implementation, new dependency, new schema field or native Cognee source change is included.
+diff --git a/docs/stage6_identity_text_changes.md b/docs/stage6_identity_text_changes.md
+--- a/docs/stage6_identity_text_changes.md
++++ b/docs/stage6_identity_text_changes.md
+@@ -92,3 +92,5 @@
+ Tests cover Unicode/document positions, stale offsets despite a current hash, changed interpretation admission, split occurrence coverage, dependent-source refusal, unsafe endpoint cascades, the real native edit/reopen/reconcile/withdraw sequence, doc02 preservation, and caught failures at all four boundaries above. Previous publication, withdrawal and unchanged-text revision tests remain regressions. The initial backend profile is still the only native profile exercised; code uses configured interfaces.
+ 
+ Remaining step-4 work includes arbitrary edits and deleted/replaced occurrences, context/meaning reconsideration, general multi-chunk fact extraction beyond captured spans, incremental chunk reuse, span-scoped aliases, dependent-source propagation and coordinated full original/generated Data removal. Decision-model/LLM Describe quality remains a separate later evaluation. Saved previous/new text increases recovery-plan size; the existing planned size/metrics work should measure that overhead before introducing compression, shared blobs or a larger replay framework.
++
++Subsequent checkpoint: [reviewed occurrence removal](stage6_identity_occurrence_removal.md) now admits explicitly selected survivors and retires empty unresolved groups. This does not extend the prefix fixture into an automatic arbitrary-edit Describe algorithm.
+diff --git a/results/cognee_identity_stage6_handoff.md b/results/cognee_identity_stage6_handoff.md
+--- a/results/cognee_identity_stage6_handoff.md
++++ b/results/cognee_identity_stage6_handoff.md
+@@ -362,7 +362,7 @@
+ | M0 / 1 | Validated runtime records/schema, exact native chunk mapping and portable bookkeeping/publication capability checks. First implementation exists; only the initial backend profile is tested |
+ | M1 / 2 | Tiny captured-decision custom Task pipeline -> real publication -> useful mention-anchored fact retrieval/original evidence -> explicit identity reconciliation. First native fixture demonstrated; this is not registered public SearchType or standard Cognify wiring |
+ | M2 / 3 | Multi-source overlap/support and withdrawal, plus broader exact-ID semantic conversion. Test both removal orders, shared contributions, singleton retention and unresolved mentions |
+-| M3 / 4 | Unchanged-text identity correction plus a captured prefix edit with native whole-document rechunking, shifted occurrences, evidence replacement and caught-failure reconciliation implemented. Captured multi-chunk fact ownership/evidence and split-occurrence maintenance also demonstrated. Arbitrary edits/group changes, general extraction, dependency propagation and abrupt-crash recovery remain |
++| M3 / 4 | Unchanged-text identity correction, captured multi-chunk prefix edits and reviewed occurrence removal use native whole-document rebuilding and explicit recovery. Partial groups continue; empty unresolved groups retire with obsolete retention/index/markers. Additions, splits/combinations, changed meanings/general extraction, dependent-source propagation and abrupt-crash recovery remain |
+ | M4 / 5 | Complete B Task-transform wiring for standard Cognify/Remember/full Update/removal, consumed-store admission and broader context-sensitive traversal/delivery/offline diagnostics |
+ | M5 / 6 | Seeded rules/model Describe examples through the same pipeline, including abbreviations, shortenings and contextual references; separate consistency/model-quality evaluation |
+ | Checkpoint | Review R1–R6 evidence and G01–G18 transfer status before Stages 7–8 |
+@@ -436,3 +436,11 @@
+ Retrieval requires some checked fact evidence to cover an occurrence and retains its checked continuation evidence. It does not discard the tail of a fact because that chunk lacks a mention marker, or assign every marker/context chunk as provenance. Healthy reconcile reads the actual native chunk budget; the durable text transition supplies it during failed-edit recovery. Repeated prefix edits verify that content IDs may recur while indexes change. Full-document rebuilding remains the implementation; content-ID continuity is not incremental execution reuse.
+ 
+ Native sequence coverage includes publication, text edits, reopen/reconcile, another edit to revision 3, current original-memory survival after identity withdrawal, and explicit recovery after chunk storage or additive graph publication. Doc02's independent fact/evidence/contribution stays unchanged. The six-step build order and step-4 boundary remain: arbitrary occurrence/group changes, general extraction/Describe quality, dependency propagation and coordinated full source removal still require work. Commands and exact limits: ../docs/stage6_identity_multichunk.md.
++
++### Step 4 / M3: reviewed occurrence-removal checkpoint — 2026-10-19
++
++The `remove-occurrences` captured example supplies an explicit transition manifest: g01 retains old occurrence index 1 (`it`), while g02 retains none. The intended description supplies exact new document-relative spans; code validates every previous/new slice, stable continuing UUIDs, complete ordered survivor indices and unchanged surviving assignment semantics. It does not infer continuity or semantic irrelevance from the deletion. The default text-change admission remains prefix-only unless this manifest is supplied.
++
++The common whole-document rebuild regenerates the captured surviving local fact and current evidence, rewrites current markers, removes the empty group's saved record/resolution/Entity declaration and retires its now unowned Entity/vector. Existing foreign owners and independent doc02 interpretations must survive. The saved failure plan contains previous/new text, native chunk budget, previous description and explicit retention; recovery reuses those exact inputs without rerunning identity judgment. Diagnostics distinguish net text-length change from a global position shift, and expose retired group/node/index/marker state.
++
++This is not a generic edit or grouping implementation. Occurrence additions, group splits/combinations, changed continuing interpretations and deletion of a resolved group with facts remain unimplemented fixture cases. Broader semantic extraction, dependent-source propagation and original-source removal remain step-4 work. There is no new source-schema field, provider implementation, native Cognee modification or recovery framework. Commands and exact limits: ../docs/stage6_identity_occurrence_removal.md.
+diff --git a/results/cognee_knowledge_integration_playbook.md b/results/cognee_knowledge_integration_playbook.md
+--- a/results/cognee_knowledge_integration_playbook.md
++++ b/results/cognee_knowledge_integration_playbook.md
+@@ -183,3 +183,14 @@
+ | Retrieval must preserve complete admitted provenance fragments | P, M, R | The earlier marker-only evidence restriction would truncate a split fact. Delivery now retains checked native-owned continuation evidence once an occurrence-overlapping supporting chunk is present | Ensure a retrieved measurement includes its unit/qualifier fragment; source-location classification should not silently cut off the evidence needed to interpret it |
+ 
+ These findings are demonstrated with captured fact spans and reviewed identity decisions. They do not establish scientific support or solve automatic span selection, semantic reconsideration or generic multi-chunk extraction. Reuse the responsibility split and sequence tests first; keep domain-specific extraction and meaning rules in the integration adapter.
++
++## Reviewed occurrence removal — 2026-10-19
++
++| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
++|---|---|---|---|
++| Continuing identity and continuing source positions are separate decisions | D, M, R | A captured survivor manifest maps prior occurrence indices to new exact spans; g01 keeps its UUID/binding while losing one reference. Exact slice checks do not decide whether its meaning continues | A measurement or observation can keep its logical ID while row/text positions change, but retaining that ID requires an explicit domain continuity decision |
++| A partial record update needs explicit empty-record retirement | D, P, M | g02's empty survivor list removes the saved group/resolution/declaration; native source removal plus generated-retention cleanup removes its unowned node/vector/markers. Tests require absence, not only new output presence | Removing the last supporting observation must retire that source's declarations and materialization, while preserving objects retained by other sources |
++| A text-length delta is not a position remapping policy | D, M, R | Reviewed removal supplies every continuing span; diagnostics expose `position_shift: null` and a separate net `text_length_delta` | Deleting a row/section shifts later positions differently from earlier ones; avoid applying a global offset inferred only from total size |
++| Recovery must preserve continuity input, not just intended output | P, M | The minimal text-change plan retains the exact occurrence-retention map alongside old/new text, prior description and chunk budget; explicit retry completes the same revision | Save the domain-specific transition information needed for retirement and recreation before destroying source materialization; do not reconstruct it from missing graph state |
++
++The example uses captured decisions and one surviving captured fact. It does not establish a general matching algorithm, interpret arbitrary edits or provide scientific justification. A future measurement adapter can reuse the guarded replace/rebuild/recovery boundary and these sequence assertions while supplying its own continuity and retirement semantics.
+diff --git a/src/cognee_lab/identity/__main__.py b/src/cognee_lab/identity/__main__.py
+--- a/src/cognee_lab/identity/__main__.py
++++ b/src/cognee_lab/identity/__main__.py
+@@ -60,6 +60,7 @@
+             "chunked-fixture",
+             "revise",
+             "edit-text",
++            "remove-occurrences",
+             "withdraw",
+             "retrieve",
+             "status",
+@@ -100,14 +101,17 @@
+     )
+     args = parser.parse_args()
+     root = args.root.resolve()
+-    if args.command in {"revise", "edit-text"} and args.expected_revision is None:
++    if (
++        args.command in {"revise", "edit-text", "remove-occurrences"}
++        and args.expected_revision is None
++    ):
+         parser.error(f"{args.command} requires --expected-revision")
+     if args.fault_stage:
+-        if args.command == "edit-text":
++        if args.command in {"edit-text", "remove-occurrences"}:
+             if not args.fault_stage.startswith(("text_", "replace_")):
+                 parser.error("Fault stage does not match the selected operation")
+         elif args.fault_stage.startswith("text_"):
+-            parser.error("Text failure boundaries require edit-text")
++            parser.error("Text failure boundaries require a text-changing command")
+         prefix = (
+             "withdraw_"
+             if args.command == "withdraw"
+@@ -115,7 +119,7 @@
+         )
+         if (prefix and not args.fault_stage.startswith(prefix)) or (
+             not prefix
+-            and args.command != "edit-text"
++            and args.command not in {"edit-text", "remove-occurrences"}
+             and args.fault_stage.startswith(("withdraw_", "replace_"))
+         ):
+             parser.error("Fault stage does not match the selected operation")
+@@ -130,7 +134,9 @@
+         parser.error("Root is not an isolated Stage 6 fixture directory")
+     with FixtureEmbeddings() as endpoint:
+         configure(root, endpoint)
+-        if args.command == "edit-text":
++        if args.command == "remove-occurrences":
++            from .occurrence_fixture import run
++        elif args.command == "edit-text":
+             from .text_fixture import run
+         elif args.command == "revise":
+             from .revisions import run
+diff --git a/src/cognee_lab/identity/multisource.py b/src/cognee_lab/identity/multisource.py
+--- a/src/cognee_lab/identity/multisource.py
++++ b/src/cognee_lab/identity/multisource.py
+@@ -236,7 +236,12 @@
+ 
+         registered = await read_registered(source)
+         mid = source.mention_groups["g01"].entity_id
+-        unresolved = source.mention_groups["g02"].entity_id
++        unresolved_group = source.mention_groups.get("g02")
++        unresolved = (
++            unresolved_group.entity_id
++            if unresolved_group
++            else fixture_id(label + ":unresolved")
++        )
+         group = source.mention_groups["g01"]
+         mapped = [i for i in source.inputs.values() if isinstance(i, ChunkInput)]
+         chunks = []
+@@ -318,14 +323,15 @@
+                 if e.data_id == doc.data_id
+             }
+             == {(c.id, c.chunk_index) for c in selected},
+-            unresolved_marker_present=all(
++            unresolved_marker_present=unresolved_group is not None
++            and all(
+                 [
+                     await publisher.graph.has_edge(
+                         str(source.inputs[k].chunk_id),
+                         str(unresolved),
+                         "has_identity_mention",
+                     )
+-                    for k in source.mention_groups["g02"].chunk_refs
++                    for k in unresolved_group.chunk_refs
+                 ]
+             ),
+             unresolved_entity_present=await publisher.graph.get_node(str(unresolved))
+diff --git a/src/cognee_lab/identity/occurrence_fixture.py b/src/cognee_lab/identity/occurrence_fixture.py
+new file mode 100644
+--- /dev/null
++++ b/src/cognee_lab/identity/occurrence_fixture.py
+@@ -0,0 +1,105 @@
++"""Captured occurrence removal; explicit review, not a Describe matcher."""
++
++import json
++
++from .captured_chunks import bind_chunks
++from .models import IdentitySource
++from .validation import IntentError, text_digest
++
++BEFORE = (
++    "Helios controller (HC) regulates plasma heating, the controller adjusts "
++    "coil current, and it limits oscillations.\n"
++)
++AFTER = "Helios controller (HC) regulates heating, and it limits oscillations.\n"
++RETENTION = {"g01": [1], "g02": []}
++
++
++def describe_removal(old, before, chunks):
++    if before != BEFORE or set(old.mention_groups) != set(RETENTION):
++        raise IntentError(
++            "fixture_scope",
++            "Use doc01 of a fresh chunked-fixture for captured occurrence removal",
++        )
++    payload = old.model_dump(mode="json")
++    payload["revision"] += 1
++    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(AFTER)
++    payload["producers"]["occurrence_review"] = dict(
++        method="captured_fixture",
++        implementation="stage6-captured-occurrence-removal",
++        version="0.1",
++        configuration={"policy": "explicit-survivors-unchanged-binding-v1"},
++        run_id=None,
++    )
++    # Positions and continuity are captured example input, never nearest-text matching.
++    start = len("Helios controller (HC) regulates heating, and ")
++    payload["mention_groups"]["g01"]["occurrences"] = [
++        dict(start=start, end=start + 2, text="it")
++    ]
++    retired = payload["mention_groups"].pop("g02")["entity_id"]
++    payload["entity_constructions"].pop(retired)
++    payload["mention_resolutions"] = {
++        k: v
++        for k, v in payload["mention_resolutions"].items()
++        if v["group_ref"] != "g02"
++    }
++    for item in [
++        *payload["mention_groups"].values(),
++        *payload["mention_resolutions"].values(),
++        *payload["variant_assignments"].values(),
++    ]:
++        item["producer_ref"] = "occurrence_review"
++    bind_chunks(payload, AFTER, chunks)
++    return IdentitySource.model_validate_json(json.dumps(payload))
++
++
++async def run(args, root):
++    from .captured_chunks import recorded_budget
++    from .fixture import context_for
++    from .multisource import current_sources, snapshot
++    from .publish import Publisher
++    from .text_changes import TextChange, chunk_text, original_context, read_original
++    from .text_fixture import maintain_one
++
++    if args.source != "doc01" or not (root / "chunked-fixture-info.json").exists():
++        raise IntentError(
++            "fixture_scope", "Occurrence removal requires doc01 of a chunked-fixture"
++        )
++    publisher = await Publisher.configured()
++    args._fixture_publisher = publisher
++    old = (await current_sources(root, publisher))["doc01"]
++    row = next(
++        r
++        for r in await publisher.records.rows(old.dataset_id)
++        if r["source"] == str(old.identity_data_id)
++    )
++    if row["revision"] != args.expected_revision:
++        raise IntentError("stale_revision", "Saved revision changed")
++    if row["state"] != "current":
++        raise IntentError(
++            "recovery_choice", "Reconcile the exact saved replacement explicitly"
++        )
++    ctx = await context_for(old.identity_data_id)
++    before = await read_original(old, ctx)
++    change = TextChange(
++        before, AFTER, await recorded_budget(old, publisher.graph), RETENTION
++    )
++    chunks = await chunk_text(
++        AFTER, await original_context(old, ctx), change.chunk_budget
++    )
++    intended = describe_removal(old, before, chunks)
++    (root / f"identity_doc01_occurrence_revision{intended.revision}.json").write_text(
++        intended.model_dump_json(indent=2) + "\n"
++    )
++    (root / f"source_doc01_revision{intended.revision}.txt").write_text(AFTER)
++    await maintain_one(
++        publisher,
++        intended,
++        change,
++        expected_revision=args.expected_revision,
++        fault_stage=args.fault_stage,
++    )
++    result = await snapshot(
++        publisher, await current_sources(root, publisher), args.query
++    )
++    (root / "occurrence_revision_result.json").write_text(json.dumps(result, indent=2))
++    return result
+diff --git a/src/cognee_lab/identity/text_changes.py b/src/cognee_lab/identity/text_changes.py
+--- a/src/cognee_lab/identity/text_changes.py
++++ b/src/cognee_lab/identity/text_changes.py
+@@ -121,14 +121,16 @@
+     ]
+ 
+ 
+-def admit_remap(old, source, before, after):
++def admit_remap(old, source, before, after, occurrence_retention=None):
+     """The caller supplies reviewed decisions; this check does not infer identity.
+ 
+-    First slice: a prefix insertion, stable groups and occurrence texts, all
+-    offsets shifted by the exact Unicode prefix length. Arbitrary edits and
+-    grouping changes require a later Describe/reconsideration implementation.
++    Default: a prefix insertion with exact uniform offsets. The optional
++    retention manifest admits explicit reviewed occurrence removal instead;
++    it is not a text matcher or a semantic reconsideration algorithm.
+     """
+-    if not before or not after.endswith(before) or after == before:
++    if occurrence_retention is None and (
++        not before or not after.endswith(before) or after == before
++    ):
+         raise IntentError(
+             "not_admitted", "Text slice requires a nonempty prefix insertion"
+         )
+@@ -163,6 +165,10 @@
+     if text_digest(before) != a.text_sha256 or text_digest(after) != b.text_sha256:
+         raise IntentError(
+             "source_changed", "Saved text transition fingerprints disagree"
++        )
++    if occurrence_retention is not None:
++        return admit_occurrence_removal(
++            old, source, before, after, occurrence_retention
+         )
+     if set(old.mention_groups) != set(source.mention_groups):
+         raise IntentError("not_admitted", "This slice preserves group membership")
+@@ -215,11 +221,108 @@
+     return delta
+ 
+ 
++def admit_occurrence_removal(old, source, before, after, retention):
++    """Validate explicit reviewed continuity; never infer matches from text.
++
++    Every old group maps to ordered zero-based occurrence indices to retain.
++    Empty lists explicitly retire groups. New positions are supplied in the
++    intended source and checked against the new document, independently of
++    identity judgment. This slice preserves the surviving assignment semantics.
++    """
++    if not before or not after or before == after:
++        raise IntentError("not_admitted", "Occurrence removal requires changed text")
++    if not isinstance(retention, dict) or set(retention) != set(old.mention_groups):
++        raise IntentError("occurrence_changed", "Declare retention for every old group")
++    kept = set()
++    retired_entities = set()
++    for key, previous in old.mention_groups.items():
++        indices = retention[key]
++        if (
++            not isinstance(indices, list)
++            or any(
++                type(i) is not int or not 0 <= i < len(previous.occurrences)
++                for i in indices
++            )
++            or indices != sorted(set(indices))
++        ):
++            raise IntentError(
++                "occurrence_changed",
++                "Retained indices must be unique, ordered old occurrence indices",
++            )
++        # Check the previous slices too: fingerprints alone do not validate spans.
++        for o in previous.occurrences:
++            if before[o.start : o.end] != o.text:
++                raise IntentError(
++                    "occurrence_changed", "Previous occurrence does not match text"
++                )
++        if not indices:
++            retired_entities.add(previous.entity_id)
++            continue
++        kept.add(key)
++        current = source.mention_groups.get(key)
++        if (
++            current is None
++            or current.entity_id != previous.entity_id
++            or current.document_ref != previous.document_ref
++            or [o.text for o in current.occurrences]
++            != [previous.occurrences[i].text for i in indices]
++            or any(after[o.start : o.end] != o.text for o in current.occurrences)
++        ):
++            raise IntentError(
++                "occurrence_changed",
++                "Supply exact reviewed surviving occurrences with stable group UUIDs",
++            )
++    if set(source.mention_groups) != kept:
++        raise IntentError(
++            "occurrence_changed", "Only explicitly continuing groups may remain"
++        )
++    if not any(
++        len(retention[k]) < len(g.occurrences) for k, g in old.mention_groups.items()
++    ):
++        raise IntentError(
++            "not_admitted", "This reviewed slice removes at least one occurrence"
++        )
++
++    def decisions(values):
++        return {
++            k: {
++                field: v
++                for field, v in item.model_dump(mode="json").items()
++                if field not in {"producer_ref", "input_refs", "explanation"}
++            }
++            for k, item in values.items()
++        }
++
++    expected_resolutions = {
++        k: r for k, r in old.mention_resolutions.items() if r.group_ref in kept
++    }
++    if (
++        decisions(source.mention_resolutions) != decisions(expected_resolutions)
++        or decisions(source.variant_assignments) != decisions(old.variant_assignments)
++        or source.entity_constructions
++        != {
++            k: v
++            for k, v in old.entity_constructions.items()
++            if k not in retired_entities
++        }
++        or any(
++            v.applicability.kind == "text_spans"
++            for v in source.variant_assignments.values()
++        )
++    ):
++        raise IntentError(
++            "not_admitted",
++            "Preserve continuing decisions and recipes; retire only empty-group declarations",
++        )
++    return None  # An arbitrary reviewed removal has no single global offset shift.
++
++
+ @dataclass(frozen=True)
+ class TextChange:
+     previous_text: str
+     text: str
+     chunk_budget: int = 512
++    occurrence_retention: dict[str, list[int]] | None = None
+ 
+     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
+         from cognee.infrastructure.databases.provenance.markers import (
+@@ -227,7 +330,9 @@
+         )
+         from cognee.infrastructure.databases.unified import get_unified_engine
+ 
+-        admit_remap(old, source, self.previous_text, self.text)
++        admit_remap(
++            old, source, self.previous_text, self.text, self.occurrence_retention
++        )
+         if not 1 <= self.chunk_budget <= 4096:
+             raise IntentError("not_admitted", "Invalid captured chunk budget")
+         if texts != {source.original_input_ref: self.text}:
+diff --git a/src/cognee_lab/identity/text_fixture.py b/src/cognee_lab/identity/text_fixture.py
+--- a/src/cognee_lab/identity/text_fixture.py
++++ b/src/cognee_lab/identity/text_fixture.py
+@@ -153,7 +153,12 @@
+         identity_data_id=str(source.identity_data_id),
+         original_data_id=str(source.inputs[key].data_id),
+         position_unit="Unicode code points; document-relative [start, end)",
+-        position_shift=len(change.text) - len(change.previous_text),
++        position_shift=(
++            (len(change.text) - len(change.previous_text))
++            if change.occurrence_retention is None
++            else None
++        ),
++        text_length_delta=len(change.text) - len(change.previous_text),
+         previous_text_sha256=old.inputs[key].text_sha256,
+         text_sha256=source.inputs[key].text_sha256,
+         previous_chunk_ids=sorted(old_ids),
+@@ -200,7 +205,33 @@
+             )
+             for k, g in source.mention_groups.items()
+         },
+-        decision_method="Captured review of unchanged interpretation; programmatic exact offset remap",
++        occurrence_retention=change.occurrence_retention,
++        retired_groups={
++            k: dict(
++                entity_id=str(g.entity_id),
++                previous_occurrences=[o.model_dump() for o in g.occurrences],
++                entity_present=await publisher.graph.get_node(str(g.entity_id))
++                is not None,
++                entity_indexed=bool(
++                    await publisher.vector.retrieve("Entity_name", [str(g.entity_id)])
++                ),
++                marker_present=any(
++                    [
++                        await publisher.graph.has_edge(
++                            c, str(g.entity_id), "has_identity_mention"
++                        )
++                        for c in old_ids | new_ids
++                    ]
++                ),
++            )
++            for k, g in old.mention_groups.items()
++            if k not in source.mention_groups
++        },
++        decision_method=(
++            "Captured survivor review; programmatic exact span validation and whole-document rebuild"
++            if change.occurrence_retention is not None
++            else "Captured review of unchanged interpretation; programmatic exact offset remap"
++        ),
+     )
+ 
+ 
+diff --git a/tests/test_identity_occurrences.py b/tests/test_identity_occurrences.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_identity_occurrences.py
+@@ -0,0 +1,101 @@
++import json
++from types import SimpleNamespace
++from uuid import uuid4
++
++import pytest
++
++from cognee_lab.identity.models import IdentitySource
++from cognee_lab.identity.multisource import add_lifecycle_records
++from cognee_lab.identity.occurrence_fixture import (
++    AFTER,
++    BEFORE,
++    RETENTION,
++    describe_removal,
++)
++from cognee_lab.identity.text_changes import admit_remap
++from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
++
++
++def example(payload):
++    payload["inputs"]["doc01"]["text_sha256"] = text_digest(BEFORE)
++    payload["inputs"]["chunk01"]["end"] = len(BEFORE)
++    payload["mention_groups"]["g01"]["occurrences"] = [
++        dict(start=49, end=63, text="the controller"),
++        dict(start=90, end=92, text="it"),
++    ]
++    add_lifecycle_records(payload, "doc01", BEFORE)
++    old = IdentitySource.model_validate_json(json.dumps(payload))
++    chunk = SimpleNamespace(
++        id=uuid4(),
++        chunk_index=0,
++        text=AFTER,
++        is_part_of=SimpleNamespace(id=old.inputs["doc01"].data_id),
++    )
++    return old, chunk, describe_removal(old, BEFORE, [chunk])
++
++
++async def test_reviewed_partial_and_empty_group_removal(source_payload):
++    old, chunk, intended = example(source_payload)
++    assert admit_remap(old, intended, BEFORE, AFTER, RETENTION) is None
++    assert list(intended.mention_groups) == ["g01"]
++    assert (
++        intended.mention_groups["g01"].entity_id == old.mention_groups["g01"].entity_id
++    )
++    assert intended.mention_groups["g01"].occurrences[0].text == "it"
++    assert "r02" not in intended.mention_resolutions
++    assert old.mention_groups["g02"].entity_id not in intended.entity_constructions
++    # Isolate the exact new text/chunk checks from external graph dependencies.
++    payload = intended.model_dump(mode="json")
++    for assignment in [
++        *payload["mention_resolutions"].values(),
++        *payload["variant_assignments"].values(),
++    ]:
++        assignment["input_refs"] = ["doc01"]
++    checked = IdentitySource.model_validate_json(json.dumps(payload))
++    await validate_inputs(
++        checked, texts={"doc01": AFTER}, chunks={str(chunk.id): chunk}, graph=None
++    )
++    # Broad reviewed removal is opt-in; the old prefix-only API remains guarded.
++    with pytest.raises(IntentError, match="prefix insertion"):
++        admit_remap(old, intended, BEFORE, AFTER)
++
++
++@pytest.mark.parametrize(
++    "mapping",
++    [
++        {"g01": [1]},
++        {"g01": [1, 1], "g02": []},
++        {"g01": [True], "g02": []},
++        {"g01": [2], "g02": []},
++        {"g01": [0], "g02": []},
++        {"g01": [1], "g02": [], "unknown": []},
++    ],
++)
++def test_explicit_continuity_refuses_incomplete_or_invalid_indices(
++    source_payload, mapping
++):
++    old, _, intended = example(source_payload)
++    with pytest.raises(IntentError):
++        admit_remap(old, intended, BEFORE, AFTER, mapping)
++
++
++def test_removal_does_not_silently_retarget_a_continuing_group(source_payload):
++    old, _, intended = example(source_payload)
++    payload = intended.model_dump(mode="json")
++    payload["mention_resolutions"]["r01"]["target_entity_id"] = payload[
++        "variant_assignments"
++    ]["v01"]["source_entity_id"]
++    changed = IdentitySource.model_validate_json(json.dumps(payload))
++    with pytest.raises(IntentError, match="continuing decisions"):
++        admit_remap(old, changed, BEFORE, AFTER, RETENTION)
++
++
++def test_new_positions_must_match_text_even_with_a_current_fingerprint(source_payload):
++    old, _, intended = example(source_payload)
++    payload = intended.model_dump(mode="json")
++    occurrence = payload["mention_groups"]["g01"]["occurrences"][0]
++    occurrence["start"] -= 1
++    occurrence["end"] -= 1
++    changed = IdentitySource.model_validate_json(json.dumps(payload))
++    with pytest.raises(IntentError, match="exact reviewed"):
++        admit_remap(old, changed, BEFORE, AFTER, RETENTION)
+diff --git a/tests/test_identity_occurrences_native.py b/tests/test_identity_occurrences_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_identity_occurrences_native.py
+@@ -0,0 +1,125 @@
++"""Occurrence continuity and empty-group retirement through native stores."""
++
++import json
++
++import pytest
++
++from test_identity_native import command
++
++
++def check_removal(before, after):
++    a, b = after["sources"]["doc01"], after["sources"]["doc02"]
++    assert (
++        a["saved_revision"] == a["verified_revision"] == a["registered_revision"] == 2
++    )
++    assert a["registered_matches_saved"] and a["state"] == "current"
++    assert b == before["sources"]["doc02"]
++    assert after["borrowed_entity"] == before["borrowed_entity"]
++    assert len(after["result"]["facts"]) == 2
++    oldfacts = {f["source_id"]: f for f in before["result"]["facts"]}
++    for f in after["result"]["facts"]:
++        old = oldfacts[f["source_id"]]
++        if f["source_id"] == a["mention_entity_id"]:
++            assert f["edge_id"] == old["edge_id"]
++            assert f["identity"]["occurrences"] == [dict(start=46, end=48, text="it")]
++            assert "it limits oscillations" in "".join(e["text"] for e in f["evidence"])
++        else:
++            assert f == old
++    assert not a["unresolved_entity_present"] and not a["unresolved_marker_present"]
++    assert (
++        a["original_marker_present"]
++        and a["original_fact_owned_by_chunk"]
++        and a["original_evidence_present"]
++    )
++    assert len(after["shared_variant"]["owners"]) == 2
++    assert (
++        next(
++            c
++            for c in before["shared_variant"]["contributions"]
++            if c["identity_data_id"] == b["identity_data_id"]
++        )
++        in after["shared_variant"]["contributions"]
++    )
++    if "text_changes" in after:
++        (change,) = after["text_changes"]
++        assert change["position_shift"] is None
++        assert change["occurrence_retention"] == {"g01": [1], "g02": []}
++        assert (
++            change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
++        )
++        assert (
++            change["mention_ids_preserved"] and change["evidence_uses_current_chunks"]
++        )
++        retired = change["retired_groups"]["g02"]
++        assert (
++            not retired["entity_present"]
++            and not retired["entity_indexed"]
++            and not retired["marker_present"]
++        )
++
++
++@pytest.mark.integration
++def test_native_remove_partial_and_empty_group_reopen_reconcile_withdraw(tmp_path):
++    root = tmp_path / "occurrences"
++    command(root, "chunked-fixture")
++    before = json.loads((root / "multisource_result.json").read_text())
++    command(root, "remove-occurrences", "--expected-revision", "1")
++    after = json.loads((root / "occurrence_revision_result.json").read_text())
++    check_removal(before, after)
++    assert after["recovery_events"] == []
++    assert (
++        json.loads(command(root, "retrieve").stdout)["facts"]
++        == after["result"]["facts"]
++    )
++    command(root, "reconcile", "--source", "doc01")
++    reconciled = json.loads((root / "multisource_result.json").read_text())
++    check_removal(before, reconciled)
++    # A healthy reconcile must not resurrect the retired group from baseline files.
++    assert reconciled["sources"] == after["sources"]
++    command(root, "withdraw", "--source", "doc01")
++    withdrawn = json.loads((root / "multisource_result.json").read_text())
++    assert len(withdrawn["result"]["facts"]) == 1
++    assert not withdrawn["sources"]["doc01"]["unresolved_entity_present"]
++    assert withdrawn["sources"]["doc02"] == before["sources"]["doc02"]
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("stage", ["text_chunks", "replace_published"])
++def test_native_occurrence_removal_recovers_exact_continuity_and_retirement(
++    tmp_path, stage
++):
++    root = tmp_path / "removal_failure"
++    command(root, "chunked-fixture")
++    before = json.loads((root / "multisource_result.json").read_text())
++    command(
++        root,
++        "remove-occurrences",
++        "--expected-revision",
++        "1",
++        "--fault-stage",
++        stage,
++        expect=1,
++    )
++    query = json.loads(command(root, "retrieve").stdout)
++    assert len(query["facts"]) == 1
++    assert query["facts"][0] == next(
++        f
++        for f in before["result"]["facts"]
++        if f["source_id"] == before["sources"]["doc02"]["mention_entity_id"]
++    )
++    assert query["unavailable_sources"][0]["reason"] == "publication_failed"
++    failed = next(
++        r
++        for r in json.loads(command(root, "status").stdout)["publications"]
++        if r["state"] == "failed"
++    )
++    assert failed["plan"]["text_change"]["occurrence_retention"] == {
++        "g01": [1],
++        "g02": [],
++    }
++    command(root, "reconcile", "--source", "doc01")
++    after = json.loads((root / "multisource_result.json").read_text())
++    check_removal(before, after)
++    (event,) = after["recovery_events"]
++    assert event["outcome"] == "restored" and event["resolving_revision"] == 2
++    assert event["resolved_at"] and len(event["recovery_attempts"]) == 1

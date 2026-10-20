@@ -6,7 +6,7 @@ The initial Ladybug/LanceDB/SQLite combination is a tested configuration, not a 
 
 **Consolidated:** 2026-10-15 (America/Detroit).  
 **Baseline examined:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`; the lab uses Ladybug/LanceDB/SQLite.  
-**Current status (2026-10-20):** reusable process/checklist plus bounded native identity implementation evidence through resolved-group retirement. Captured Describe → Publish/Maintain → Retrieve sequences work in the initial profile; automatic Describe, full source/dependency lifecycle, standard entry points and general retrieval remain incomplete. Measurement examples are illustrative, not a selected scientific schema. Read [the session handoff](../docs/SESSION_HANDOFF.md) for current code and verification status; dated sections below retain checkpoint evidence.
+**Current status (2026-10-20):** reusable process/checklist plus bounded native identity implementation evidence through captured occurrence additions. Captured Describe → Publish/Maintain → Retrieve sequences work in the initial profile; automatic Describe, full source/dependency lifecycle, standard entry points and general retrieval remain incomplete. Measurement examples are illustrative, not a selected scientific schema. Read [the session handoff](../docs/SESSION_HANDOFF.md) for current code and verification status; dated sections below retain checkpoint evidence.
 
 ## 1. What carries over to the next integration
 
@@ -48,7 +48,7 @@ The current worked handoff is [cognee_identity_stage6_handoff.md](cognee_identit
 
 | ID | General lesson/process | Activities | Current basis | What the next integration must verify |
 |---|---|---|---|---|
-| G01 | Explicit IDs and continuity rules are separate from display names and current offsets | D, P, M, R | Explicit-ID creation/reference and captured shift/removal continuity are native-tested; general additions/regrouping remain | Define identity for repeated equal-valued measurements and source revisions |
+| G01 | Explicit IDs and continuity rules are separate from display names and current offsets | D, P, M, R | Explicit-ID creation/reference and captured shift/removal/addition continuity is native-tested (see the current handoff for the addition launcher qualification); general regrouping remains | Define identity for repeated equal-valued measurements and source revisions |
 | G02 | Reference, retention and ordinary property persistence are different actions | D, P, M | Recursive overwrite/co-ownership characterized; safe existing-node retention without ordinary-field overwrite native-tested | Link existing instrument/facility nodes without rewriting them |
 | G03 | A saved description specifies exact graph intent; Publish executes declared rules | D, P, M | Captured next-revision identity corrections use the same publisher, with no new inference during replacement/recovery | Define edges/endpoints/aggregation explicitly instead of asking Publish to infer meaning |
 | G04 | Native source ownership retains objects but does not aggregate application properties | D, P, M, R | Two-source fixture/tests exercise payload aggregation, both withdrawal orders, native owner survival and last-owner deletion | Decide whether native shared-edge semantics suffice for values/qualifiers |
@@ -205,3 +205,14 @@ The example uses captured decisions and one surviving captured fact. It does not
 | Empty semantic output still needs an admitted meaning and checked inputs | D, P, M | The captured replacement no longer contains its known fact span; chunk-map validation and surviving-source verification still run when no primary fact is generated | An explicitly empty replacement can be valid after removal, while skipped processing or invalid input must remain a failure rather than masquerade as successful empty extraction |
 
 The same guarded full-document rebuild and explicit forward-recovery mechanism handles this case. These are captured lifecycle results, not scientific support, extraction accuracy, populated-Triplet deletion evidence or universal same-triple foreign-owner compatibility. Reuse the ownership/index-key checklist and presence/absence sequence assertions before adding a new integration.
+
+## Reviewed occurrence additions — 2026-10-20
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| Continuity input identifies retained records; new records are explicit declarations | D, P, M | A separate old-to-new occurrence index map preserves continuing groups while the intended description declares additions; validation refuses implicit retirement or retargeting | Preserve existing observation identities explicitly when inserting rows/readings; do not infer continuity from equal values or nearby offsets |
+| Equal display text does not imply shared local identity | D, P, M, R | A continuing group's added reference and a new paragraph-local group both say `the controller`, with distinct group UUIDs and exact source spans | Repeated equal-valued measurements or labels can describe distinct observations; separate display/value equality from record identity |
+| New domain objects need their own semantic output and provenance checks | D, P, M, R | The captured new group declares an accepted binding and a separate local fact produced from the edited original text; the existing semantic writer and publisher handle materialization | A newly declared measurement structure does not by itself generate its value/unit/qualifier relationships; specify and verify the conversion output and native producing-source ownership |
+| Recovery must reuse the identity of newly introduced records | P, M | The saved next description and continuity map retain the fresh group UUID across interrupted materialization and explicit forward completion | Persist newly allocated observation IDs before writes; retry should complete the same record rather than allocate another equal-valued observation |
+
+This is a bounded captured addition case through the common guarded full-document rebuild path. Its lifecycle verification belongs with sequence tests, while paragraph grouping, reference selection and identity judgment remain adapter decisions. It adds no general integration framework or scientific-support claim. See [the addition guide](../docs/stage6_identity_occurrence_addition.md) and [current handoff](../docs/SESSION_HANDOFF.md) for execution evidence and remaining scope.

@@ -15,6 +15,7 @@ def pytest_configure(config):
         "TELEMETRY_DISABLED": "true",
         "CACHING": "false",
         "LOG_LEVEL": "ERROR",
+        "LITELLM_LOCAL_MODEL_COST_MAP": "True",
     }.items():
         os.environ[name] = value
     (root / "system/databases").mkdir(parents=True)

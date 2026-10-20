@@ -121,15 +121,22 @@ async def chunk_text(text, ctx, budget=512):
     ]
 
 
-def admit_remap(old, source, before, after, occurrence_retention=None):
+def admit_remap(
+    old, source, before, after, occurrence_retention=None, occurrence_continuity=None
+):
     """The caller supplies reviewed decisions; this check does not infer identity.
 
     Default: a prefix insertion with exact uniform offsets. The optional
     retention manifest admits explicit reviewed occurrence removal instead;
-    it is not a text matcher or a semantic reconsideration algorithm.
+    continuity admits additions with explicit old-to-new occurrence indices.
+    These modes do not match text or reconsider identity semantics.
     """
-    if occurrence_retention is None and (
-        not before or not after.endswith(before) or after == before
+    if occurrence_retention is not None and occurrence_continuity is not None:
+        raise IntentError("not_admitted", "Select one occurrence transition mode")
+    if (
+        occurrence_retention is None
+        and occurrence_continuity is None
+        and (not before or not after.endswith(before) or after == before)
     ):
         raise IntentError(
             "not_admitted", "Text slice requires a nonempty prefix insertion"
@@ -165,6 +172,10 @@ def admit_remap(old, source, before, after, occurrence_retention=None):
     if text_digest(before) != a.text_sha256 or text_digest(after) != b.text_sha256:
         raise IntentError(
             "source_changed", "Saved text transition fingerprints disagree"
+        )
+    if occurrence_continuity is not None:
+        return admit_occurrence_addition(
+            old, source, before, after, occurrence_continuity
         )
     if occurrence_retention is not None:
         return admit_occurrence_removal(
@@ -317,12 +328,115 @@ def admit_occurrence_removal(old, source, before, after, retention):
     return None  # An arbitrary reviewed removal has no single global offset shift.
 
 
+def admit_occurrence_addition(old, source, before, after, continuity):
+    """Map every old occurrence to its reviewed index in the new group.
+
+    Unmapped new indices are additions. No removals, regrouping, retargeting,
+    recipe changes or new reusable identities are admitted by this mode.
+    Positions and identity judgments are supplied, never inferred from text.
+    """
+    if not before or not after or before == after:
+        raise IntentError("not_admitted", "Occurrence addition requires changed text")
+    if not isinstance(continuity, dict) or set(continuity) != set(old.mention_groups):
+        raise IntentError(
+            "occurrence_changed", "Declare continuity for every old group"
+        )
+    if not set(old.mention_groups) <= set(source.mention_groups):
+        raise IntentError("occurrence_changed", "Addition cannot retire old groups")
+    added = False
+    for key, previous in old.mention_groups.items():
+        current = source.mention_groups[key]
+        indices = continuity[key]
+        if (
+            not isinstance(indices, list)
+            or len(indices) != len(previous.occurrences)
+            or any(
+                type(i) is not int or not 0 <= i < len(current.occurrences)
+                for i in indices
+            )
+            or indices != sorted(set(indices))
+            or current.entity_id != previous.entity_id
+            or current.document_ref != previous.document_ref
+        ):
+            raise IntentError(
+                "occurrence_changed",
+                "Preserve all old occurrences and group UUIDs with ordered new indices",
+            )
+        for occurrence, index in zip(previous.occurrences, indices, strict=True):
+            if (
+                before[occurrence.start : occurrence.end] != occurrence.text
+                or current.occurrences[index].text != occurrence.text
+            ):
+                raise IntentError(
+                    "occurrence_changed",
+                    "Continuing occurrence text differs from reviewed mapping",
+                )
+        added |= len(current.occurrences) > len(previous.occurrences)
+    new_groups = set(source.mention_groups) - set(old.mention_groups)
+    for key in new_groups:
+        if source.mention_groups[key].entity_id in old.entity_constructions:
+            raise IntentError(
+                "incompatible_group", "A new group requires a fresh Entity UUID"
+            )
+    for group in source.mention_groups.values():
+        if any(after[o.start : o.end] != o.text for o in group.occurrences):
+            raise IntentError(
+                "occurrence_changed",
+                "New occurrence does not match its exact document slice",
+            )
+
+    def decisions(values):
+        return {
+            k: {
+                f: v
+                for f, v in item.model_dump(mode="json").items()
+                if f not in {"producer_ref", "input_refs", "explanation"}
+            }
+            for k, item in values.items()
+        }
+
+    continuing = {
+        k: r
+        for k, r in source.mention_resolutions.items()
+        if r.group_ref not in new_groups
+    }
+    new_resolutions = {
+        k: r for k, r in source.mention_resolutions.items() if r.group_ref in new_groups
+    }
+    expected_recipes = dict(old.entity_constructions)
+    for key in new_groups:
+        eid = source.mention_groups[key].entity_id
+        expected_recipes[eid] = source.entity_constructions[eid]
+    if (
+        decisions(continuing) != decisions(old.mention_resolutions)
+        or decisions(source.variant_assignments) != decisions(old.variant_assignments)
+        or set(new_resolutions)
+        & (set(old.mention_resolutions) | set(old.variant_assignments))
+        or {r.group_ref for r in new_resolutions.values()} != new_groups
+        or source.entity_constructions != expected_recipes
+        or any(
+            v.applicability.kind == "text_spans"
+            for v in source.variant_assignments.values()
+        )
+    ):
+        raise IntentError(
+            "not_admitted",
+            "Preserve existing decisions and recipes; declare each new group's resolution",
+        )
+    if not added and not new_groups:
+        raise IntentError(
+            "not_admitted", "This reviewed slice adds at least one occurrence"
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class TextChange:
     previous_text: str
     text: str
     chunk_budget: int = 512
     occurrence_retention: dict[str, list[int]] | None = None
+    occurrence_continuity: dict[str, list[int]] | None = None
 
     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
         from cognee.infrastructure.databases.provenance.markers import (
@@ -331,8 +445,25 @@ class TextChange:
         from cognee.infrastructure.databases.unified import get_unified_engine
 
         admit_remap(
-            old, source, self.previous_text, self.text, self.occurrence_retention
+            old,
+            source,
+            self.previous_text,
+            self.text,
+            self.occurrence_retention,
+            self.occurrence_continuity,
         )
+        if self.occurrence_continuity is not None and not retry:
+            for key in set(source.mention_groups) - set(old.mention_groups):
+                if (
+                    await publisher.graph.get_node(
+                        str(source.mention_groups[key].entity_id)
+                    )
+                    is not None
+                ):
+                    raise IntentError(
+                        "incompatible_group",
+                        "New mention Entity UUID already exists in the graph",
+                    )
         if not 1 <= self.chunk_budget <= 4096:
             raise IntentError("not_admitted", "Invalid captured chunk budget")
         if texts != {source.original_input_ref: self.text}:

@@ -64,16 +64,19 @@ async def write_semantics(publisher, source, chunks, ctx):
         flush_context_provenance,
     )
 
-    from .captured_chunks import fact_chunks
+    from .captured_chunks import captured_facts, fact_chunks
 
-    selected = fact_chunks(source, chunks)
-    group = source.mention_groups.get("g01")
-    for chunk in selected:
-        await write_fact_chunk(publisher, source, chunk, group, ctx)
+    for key, text in captured_facts(source):
+        selected = fact_chunks(source, chunks, group_key=key, fact_text=text)
+        group = source.mention_groups.get(key)
+        for chunk in selected:
+            await write_fact_chunk(publisher, source, chunk, group, ctx, fact_text=text)
     await flush_context_provenance(ctx)
 
 
-async def write_fact_chunk(publisher, source, chunk, group, ctx):
+async def write_fact_chunk(
+    publisher, source, chunk, group, ctx, *, fact_text="it limits oscillations"
+):
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.modules.engine.models import Entity
     from cognee.modules.graph.utils import ensure_default_edge_properties
@@ -101,7 +104,7 @@ async def write_fact_chunk(publisher, source, chunk, group, ctx):
         str(group.entity_id),
         str(OSCILLATIONS_ID),
         "limits",
-        {"edge_text": "it limits oscillations"},
+        {"edge_text": fact_text},
     )
     edges = ensure_default_edge_properties([edge])
     await publisher.graph.add_edges(edges, source_ref_key=ref)
@@ -120,6 +123,13 @@ async def write_fact_chunk(publisher, source, chunk, group, ctx):
 
 
 async def verify_semantics(publisher, source, chunks, ctx):
+    from .captured_chunks import captured_facts
+
+    for key, text in captured_facts(source):
+        await verify_fact(publisher, source, chunks, ctx, group_key=key, fact_text=text)
+
+
+async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
     from cognee.infrastructure.databases.provenance import (
         EdgeIdentity,
         make_chunk_source_ref_key,
@@ -130,12 +140,16 @@ async def verify_semantics(publisher, source, chunks, ctx):
 
     from .captured_chunks import fixture_mention_id
 
-    mid = str(fixture_mention_id(source))
+    mid = str(
+        fixture_mention_id(source)
+        if group_key == "g01"
+        else source.mention_groups[group_key].entity_id
+    )
     identity = EdgeIdentity(mid, str(OSCILLATIONS_ID), "limits")
     metadata = (await publisher.graph.get_edge_delete_data([identity])).get(identity)
     from .captured_chunks import fact_chunks
 
-    expected = fact_chunks(source, chunks)
+    expected = fact_chunks(source, chunks, group_key=group_key, fact_text=fact_text)
     refs = {
         make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, c.id)
         for c in expected

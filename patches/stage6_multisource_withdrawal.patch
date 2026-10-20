@@ -1,0 +1,1266 @@
+--- a/src/cognee_lab/identity/__main__.py
++++ b/src/cognee_lab/identity/__main__.py
+@@ -3,6 +3,7 @@
+ import argparse
+ import asyncio
+ import json
++import inspect
+ import os
+ from pathlib import Path
+ 
+@@ -52,16 +53,44 @@
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument(
+-        "command", choices=["fixture", "retrieve", "status", "reconcile"]
++        "command",
++        choices=[
++            "fixture",
++            "multi-fixture",
++            "withdraw",
++            "retrieve",
++            "status",
++            "reconcile",
++        ],
+     )
+     parser.add_argument("--root", type=Path, required=True)
+     parser.add_argument("--query", default="What does HC limit?")
+     parser.add_argument(
+-        "--fault-stage", choices=["nodes", "identity_edges", "verification"]
++        "--source",
++        choices=["doc01", "doc02"],
++        default="doc01",
++        help="Selected original document in the isolated fixture",
++    )
++    parser.add_argument(
++        "--fault-stage",
++        choices=[
++            "nodes",
++            "identity_edges",
++            "verification",
++            "withdraw_contributions",
++            "withdraw_owners",
++            "withdraw_verification",
++        ],
+     )
+     args = parser.parse_args()
+     root = args.root.resolve()
+-    if args.command == "fixture":
++    if args.fault_stage and args.fault_stage.startswith("withdraw_") != (
++        args.command == "withdraw"
++    ):
++        parser.error("Fault stage does not match the selected operation")
++    if args.command in {"fixture", "multi-fixture"}:
++        if root.exists():
++            parser.error("Fixture root already exists; choose a new directory")
+         root.mkdir(parents=True, exist_ok=False)
+         (root / "stage6-fixture.json").write_text(
+             json.dumps({"kind": "stage6-isolated-fixture"})
+@@ -70,10 +99,30 @@
+         parser.error("Root is not an isolated Stage 6 fixture directory")
+     with FixtureEmbeddings() as endpoint:
+         configure(root, endpoint)
+-        from .fixture import run
++        if args.command in {"multi-fixture", "withdraw"} or (
++            args.command == "reconcile" and (root / "multi-fixture-info.json").exists()
++        ):
++            from .multisource import run
++        else:
++            from .fixture import run
++
++        async def execute():
++            try:
++                return await run(args, root)
++            finally:
++                publisher = getattr(args, "_fixture_publisher", None)
++                if publisher is not None:
++                    # This CLI owns the isolated stores. Close before interpreter
++                    # teardown; never rely on object-finalizer order for durability.
++                    for engine in (publisher.vector, publisher.graph):
++                        close = getattr(engine, "close", None)
++                        if close is not None:
++                            closing = close()
++                            if inspect.isawaitable(closing):
++                                await closing
+ 
+         try:
+-            result = asyncio.run(run(args, root))
++            result = asyncio.run(execute())
+         except Exception as exc:
+             print(json.dumps({"error": type(exc).__name__, "message": str(exc)}))
+             raise SystemExit(1) from exc
+--- a/src/cognee_lab/identity/fixture.py
++++ b/src/cognee_lab/identity/fixture.py
+@@ -125,7 +125,7 @@
+         raise IntentError("verify_index", "Original chunk vector missing")
+ 
+ 
+-async def prepare(root):
++async def prepare(root, *, multi=False):
+     import cognee
+     from cognee.modules.engine.models import Entity
+     from cognee.tasks.ingestion.data_item import DataItem
+@@ -171,6 +171,10 @@
+     template["inputs"]["chunk01"].update(
+         chunk_id=str(chunks[0].id), start=start, end=end
+     )
++    if multi:
++        from .multisource import add_lifecycle_records
++
++        add_lifecycle_records(template, "doc01", text)
+     await add_data_points(chunks, ctx=original_ctx)
+     source = IdentitySource.model_validate_json(json.dumps(template))
+     (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
+@@ -208,6 +212,7 @@
+         chunks = await load_chunks(source, original_ctx)
+         publisher = await Publisher.configured()
+     dataset_id = source.dataset_id
++    args._fixture_publisher = publisher
+     if args.command == "status":
+         return dict(
+             publications=await publisher.records.rows(dataset_id),
+--- /dev/null
++++ b/src/cognee_lab/identity/multisource.py
+@@ -0,0 +1,312 @@
++"""Two captured original documents sharing identity output in native stores."""
++
++import json
++from uuid import NAMESPACE_URL, UUID, uuid5
++
++from .models import IdentitySource
++from .native import edge_metadata
++from .publish import Publisher, contributions
++from .retrieve import retrieve
++from .validation import IntentError, map_chunks, text_digest
++
++
++def fixture_id(label):
++    return str(uuid5(NAMESPACE_URL, "cognee-lab:stage6:multi:" + label))
++
++
++def add_lifecycle_records(payload, label, text):
++    payload["entity_constructions"][fixture_id("shared_singleton")] = dict(
++        name="Shared calibrator",
++        description="Independent singleton support from each document.",
++    )
++    payload["entity_constructions"][fixture_id(label + ":singleton")] = dict(
++        name=label + " instrument",
++        description="Singleton supported by this identity source only.",
++    )
++    mid = fixture_id(label + ":unresolved")
++    payload["entity_constructions"][mid] = dict(
++        name="local reference", description="Unresolved group with no semantic facts."
++    )
++    start = text.index("plasma")
++    payload["mention_groups"]["g02"] = dict(
++        entity_id=mid,
++        document_ref="doc01",
++        occurrences=[dict(start=start, end=start + 6, text="plasma")],
++        chunk_refs=["chunk01"],
++        input_refs=["doc01"],
++        producer_ref="fixture",
++    )
++    payload["mention_resolutions"]["r02"] = dict(
++        group_ref="g02",
++        status="unresolved",
++        input_refs=["doc01"],
++        producer_ref="fixture",
++        explanation=None,
++    )
++
++
++async def prepare(root):
++    import cognee
++    from cognee.tasks.ingestion.data_item import DataItem
++    from cognee.tasks.storage import add_data_points
++    from .fixture import prepare as prepare_first, context_for, load_chunks
++
++    if cognee.__version__ != "1.6.2":
++        raise IntentError(
++            "unsupported_version", "First fixture requires inspected Cognee 1.6.2"
++        )
++
++    first, chunks1, ctx1, publisher = await prepare_first(root, multi=True)
++    payload = first.model_dump(mode="json")
++    payload["identity_data_id"] = fixture_id("doc02:identity")
++    payload["inputs"]["doc01"]["data_id"] = fixture_id("doc02:original")
++    text = (root / "source.txt").read_text().rstrip(
++        "\n"
++    ) + " During startup, HC remains active.\n"
++    (root / "source02.txt").write_text(text)
++    await cognee.add(
++        DataItem(
++            data=str(root / "source02.txt"), data_id=UUID(fixture_id("doc02:original"))
++        ),
++        dataset_name="stage6_isolated_fixture",
++        skip_connection_test=True,
++    )
++    ctx2 = await context_for(fixture_id("doc02:original"))
++    chunks2 = await load_chunks(None, ctx2)
++    await add_data_points(chunks2, ctx=ctx2)
++    if len(chunks2) != 1:
++        raise IntentError(
++            "fixture_shape", "Two-source example expects one chunk per document"
++        )
++    start, end = map_chunks(text, chunks2)[str(chunks2[0].id)]
++    payload["inputs"]["doc01"]["text_sha256"] = text_digest(text)
++    payload["inputs"]["chunk01"].update(
++        chunk_id=str(chunks2[0].id), start=start, end=end
++    )
++    old_mid = str(first.mention_groups["g01"].entity_id)
++    new_mid = fixture_id("doc02:mention")
++    payload["entity_constructions"][new_mid] = payload["entity_constructions"].pop(
++        old_mid
++    )
++    payload["mention_groups"]["g01"]["entity_id"] = new_mid
++    for key in [fixture_id("doc01:singleton"), fixture_id("doc01:unresolved")]:
++        payload["entity_constructions"].pop(key)
++    add_lifecycle_records(payload, "doc02", text)
++    second = IdentitySource.model_validate_json(json.dumps(payload))
++    (root / "identity02.json").write_text(second.model_dump_json(indent=2) + "\n")
++    await cognee.add(
++        DataItem(data=str(root / "identity02.json"), data_id=second.identity_data_id),
++        dataset_name="stage6_isolated_fixture",
++        skip_connection_test=True,
++    )
++    info = dict(
++        dataset_id=str(first.dataset_id),
++        sources={"doc01": "identity.json", "doc02": "identity02.json"},
++    )
++    (root / "multi-fixture-info.json").write_text(json.dumps(info, indent=2))
++    return publisher, {
++        "doc01": (first, chunks1, ctx1),
++        "doc02": (second, chunks2, ctx2),
++    }
++
++
++def read_sources(root):
++    manifest = json.loads((root / "multi-fixture-info.json").read_text())
++    return {
++        label: IdentitySource.model_validate_json((root / path).read_text())
++        for label, path in manifest["sources"].items()
++    }
++
++
++async def publish_one(
++    publisher,
++    source,
++    chunks,
++    original_ctx,
++    root,
++    label,
++    *,
++    reconcile=False,
++    fault_stage=None,
++):
++    from .fixture import context_for, write_semantics, verify_semantics
++    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
++    from cognee.modules.pipelines.tasks.task import Task
++
++    ctx = await context_for(source.identity_data_id)
++
++    async def task(items, ctx=None):
++        for item in items:
++            await publisher.publish(
++                item,
++                texts={
++                    "doc01": (
++                        root / ("source.txt" if label == "doc01" else "source02.txt")
++                    ).read_text()
++                },
++                chunks={str(c.id): c for c in chunks},
++                ctx=ctx,
++                expected_revision=source.revision if reconcile else 0,
++                origin="test/fault_injection" if fault_stage else "test",
++                fault_stage=fault_stage,
++                semantic_writer=(
++                    None
++                    if reconcile
++                    else lambda: write_semantics(publisher, item, chunks, original_ctx)
++                ),
++                verify_semantics=lambda: verify_semantics(
++                    publisher, item, chunks, original_ctx
++                ),
++            )
++        return items
++
++    async for _ in run_tasks_base(
++        [Task(task, needs_llm=False)], [source], ctx.user, ctx
++    ):
++        pass
++
++
++async def snapshot(publisher, sources, query="What does HC limit?"):
++    from .fixture import OSCILLATIONS_ID
++    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
++    from cognee.modules.engine.utils import generate_edge_object_id
++    from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
++
++    first = sources["doc01"]
++    variant = first.variant_assignments["v01"]
++    shared = await edge_metadata(
++        publisher.graph,
++        variant.source_entity_id,
++        variant.target_entity_id,
++        "resolves_to",
++    )
++    rows = {r["source"]: r for r in await publisher.records.rows(first.dataset_id)}
++    result = dict(
++        result=await retrieve(publisher, first.dataset_id, query),
++        sources={},
++        shared_variant=dict(
++            present=shared is not None,
++            contributions=contributions(shared.edge_properties) if shared else [],
++            owners=shared.source_ref_keys if shared else [],
++            properties=shared.edge_properties if shared else {},
++        ),
++        shared_singleton_present=await publisher.graph.get_node(
++            fixture_id("shared_singleton")
++        )
++        is not None,
++        shared_singleton_indexed=bool(
++            await publisher.vector.retrieve(
++                "Entity_name", [fixture_id("shared_singleton")]
++            )
++        ),
++        borrowed_entity=await publisher.graph.get_node(str(variant.target_entity_id)),
++        recovery_events=await publisher.records.events(first.dataset_id),
++    )
++    for label, source in sources.items():
++        mid = source.mention_groups["g01"].entity_id
++        unresolved = source.mention_groups["g02"].entity_id
++        chunk = source.inputs["chunk01"].chunk_id
++        doc = source.inputs[source.original_input_ref]
++        fact = await edge_metadata(publisher.graph, mid, OSCILLATIONS_ID, "limits")
++        ref = make_chunk_source_ref_key(source.dataset_id, doc.data_id, chunk)
++        evidence = await get_edge_evidence_records(
++            [UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))],
++            source.dataset_id,
++        )
++        result["sources"][label] = dict(
++            identity_data_id=str(source.identity_data_id),
++            state=rows[str(source.identity_data_id)]["state"],
++            mention_entity_id=str(mid),
++            original_marker_present=await publisher.graph.has_edge(
++                str(chunk), str(mid), "has_identity_mention"
++            ),
++            original_fact_present=await publisher.graph.has_edge(
++                str(mid), str(OSCILLATIONS_ID), "limits"
++            ),
++            original_fact_owned_by_chunk=fact is not None
++            and ref in fact.source_ref_keys,
++            original_evidence_present=any(
++                e.data_id == doc.data_id and e.chunk_id == chunk for e in evidence
++            ),
++            unresolved_marker_present=await publisher.graph.has_edge(
++                str(chunk), str(unresolved), "has_identity_mention"
++            ),
++            unresolved_entity_present=await publisher.graph.get_node(str(unresolved))
++            is not None,
++            private_singleton_present=await publisher.graph.get_node(
++                fixture_id(label + ":singleton")
++            )
++            is not None,
++            private_singleton_indexed=bool(
++                await publisher.vector.retrieve(
++                    "Entity_name", [fixture_id(label + ":singleton")]
++                )
++            ),
++        )
++    return result
++
++
++async def run(args, root):
++    from .fixture import context_for, load_chunks
++
++    if args.command == "multi-fixture":
++        publisher, prepared = await prepare(root)
++        args._fixture_publisher = publisher
++        sources = {label: value[0] for label, value in prepared.items()}
++        for label, (source, chunks, ctx) in prepared.items():
++            await publish_one(
++                publisher,
++                source,
++                chunks,
++                ctx,
++                root,
++                label,
++                fault_stage=args.fault_stage if label == args.source else None,
++            )
++    else:
++        publisher = await Publisher.configured()
++        args._fixture_publisher = publisher
++        sources = (
++            read_sources(root)
++            if (root / "multi-fixture-info.json").exists()
++            else {
++                "doc01": IdentitySource.model_validate_json(
++                    (root / "identity.json").read_text()
++                )
++            }
++        )
++        if args.source not in sources:
++            raise IntentError(
++                "source_missing", "Selected document is not in this fixture"
++            )
++        selected = sources[args.source]
++        if args.command == "withdraw":
++            await publisher.withdraw(
++                selected,
++                expected_revision=selected.revision,
++                origin="test/fault_injection" if args.fault_stage else "test",
++                fault_stage=args.fault_stage,
++            )
++        elif args.command == "reconcile":
++            ctx = await context_for(
++                selected.inputs[selected.original_input_ref].data_id
++            )
++            await publish_one(
++                publisher,
++                selected,
++                await load_chunks(selected, ctx),
++                ctx,
++                root,
++                args.source,
++                reconcile=True,
++            )
++    if len(sources) == 1:
++        result = dict(
++            result=await retrieve(publisher, selected.dataset_id, args.query),
++            publications=await publisher.records.rows(selected.dataset_id),
++            recovery_events=await publisher.records.events(selected.dataset_id),
++        )
++    else:
++        result = await snapshot(publisher, sources, args.query)
++    (root / "multisource_result.json").write_text(json.dumps(result, indent=2))
++    return result
+--- a/src/cognee_lab/identity/native.py
++++ b/src/cognee_lab/identity/native.py
+@@ -1,4 +1,19 @@
+ """Small normalizers over documented Cognee interfaces, never adapter clients."""
++
++
++def require_graph_methods(graph, methods):
++    """Honor transparent engine handles when rejecting interface-only stubs."""
++    from cognee.infrastructure.databases.graph.graph_db_interface import (
++        GraphDBInterface,
++    )
++    from .validation import IntentError
++
++    for method in methods:
++        implementation = getattr(graph.__class__, method, None)
++        if implementation is None or implementation is getattr(
++            GraphDBInterface, method, None
++        ):
++            raise IntentError("unsupported_capability", f"Graph lacks {method}")
+ 
+ 
+ async def edge_metadata(graph, source_id, target_id, relationship):
+--- a/src/cognee_lab/identity/publish.py
++++ b/src/cognee_lab/identity/publish.py
+@@ -4,7 +4,7 @@
+ from dataclasses import dataclass
+ 
+ from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
+-from .native import edge_metadata
++from .native import edge_metadata, require_graph_methods
+ from .storage import RecordStore, encode
+ from .validation import IntentError, validate_inputs, validate_uses
+ 
+@@ -81,6 +81,19 @@
+     def __init__(self, graph, vector, records: RecordStore, runtime_profile=None):
+         self.graph, self.vector, self.records = graph, vector, records
+         self.runtime_profile = runtime_profile or {}
++
++    async def withdraw(
++        self, source, *, expected_revision, origin="runtime", fault_stage=None
++    ):
++        from .withdraw import withdraw
++
++        return await withdraw(
++            self,
++            source,
++            expected_revision=expected_revision,
++            origin=origin,
++            fault_stage=fault_stage,
++        )
+ 
+     @classmethod
+     async def configured(cls):
+@@ -108,9 +121,6 @@
+         )
+ 
+     async def preflight(self, source, texts, chunks, ctx):
+-        from cognee.infrastructure.databases.graph.graph_db_interface import (
+-            GraphDBInterface,
+-        )
+         from cognee.modules.data.methods.get_data import get_data
+         from cognee.infrastructure.files.utils.open_data_file import open_data_file
+ 
+@@ -120,10 +130,7 @@
+             "get_node_delete_data",
+             "get_edge_delete_data",
+         ]
+-        for method in required:
+-            implementation = getattr(type(self.graph), method, None)
+-            if implementation is getattr(GraphDBInterface, method, None):
+-                raise IntentError("unsupported_capability", f"Graph lacks {method}")
++        require_graph_methods(self.graph, required)
+         if (
+             ctx.user is None
+             or str(ctx.dataset.id) != str(source.dataset_id)
+@@ -296,6 +303,10 @@
+                 ref = make_chunk_source_ref_key(
+                     source.dataset_id, doc.data_id, chunk_input.chunk_id
+                 )
++                # A marker must retain its mention endpoint even without a fact.
++                # Native source removal may otherwise delete M and cascade the
++                # original-owned marker when generated identity support ends.
++                await self.graph.attach_node_source_refs([mention_id], [ref])
+                 await self.graph.add_edges(
+                     ensure_default_edge_properties(
+                         [(chunk_id, mention_id, "has_identity_mention", {})]
+--- a/src/cognee_lab/identity/retrieve.py
++++ b/src/cognee_lab/identity/retrieve.py
+@@ -16,8 +16,28 @@
+     from cognee.infrastructure.files.utils.open_data_file import open_data_file
+ 
+     valid, unavailable = [], []
++    events = await publisher.records.events(dataset_id)
+     for row in rows:
+         if row["state"] != "current" or row["revision"] != row["verified_revision"]:
++            if row["state"] != "withdrawn":
++                incident = next(
++                    (
++                        e
++                        for e in reversed(events)
++                        if e["identity_data_id"] == row["source"]
++                        and e.get("resolved_at") is None
++                    ),
++                    None,
++                )
++                unavailable.append(
++                    dict(
++                        identity_data_id=row["source"],
++                        reason="publication_" + row["state"],
++                        recovery_event_id=(
++                            incident["recovery_event_id"] if incident else None
++                        ),
++                    )
++                )
+             continue
+         source = IdentitySource.model_validate_json(row["description"])
+         try:
+@@ -111,11 +131,25 @@
+ 
+     rows = await publisher.records.rows(dataset_id)
+     current, unavailable = await valid_sources(publisher, dataset_id, rows)
++    # Original-owned markers can outlive generated-source withdrawal/failure.
++    # Their local labels must never become reusable vector query aliases.
+     mention_ids = {
+-        str(g.entity_id) for s, _ in current for g in s.mention_groups.values()
++        str(g.entity_id)
++        for row in rows
++        for g in IdentitySource.model_validate_json(
++            row["description"]
++        ).mention_groups.values()
+     }
+     if not await publisher.vector.has_collection("Entity_name"):
+-        return dict(facts=[], identity_expansion_limited=False, identity_work=0)
++        return dict(
++            facts=[],
++            identity_expansion_limited=False,
++            identity_work=0,
++            fact_candidates_limited=False,
++            seed_entity_ids=[],
++            unavailable_sources=unavailable,
++            identity_guide="Accepted links identify the scoped referent; ownership and provenance do not establish scientific support.",
++        )
+     candidates = await publisher.vector.search(
+         "Entity_name",
+         query_text=query,
+--- a/src/cognee_lab/identity/storage.py
++++ b/src/cognee_lab/identity/storage.py
+@@ -139,6 +139,20 @@
+                 raise IntentError(
+                     "pending_attempt",
+                     "Inspect abandoned pending publication explicitly",
++                )
++            if row and row.state == "withdrawn" and method != "withdraw":
++                raise IntentError(
++                    "withdrawn_source",
++                    "Withdrawn source requires explicit new publication intent",
++                )
++            if (
++                row
++                and row.state == "failed"
++                and json.loads(row.plan).get("operation") == "identity_withdraw"
++                and method != "withdraw"
++            ):
++                raise IntentError(
++                    "recovery_choice", "Retry the failed withdrawal explicitly"
+                 )
+             payload = source.model_dump_json()
+             if row and source.revision == actual_revision:
+@@ -228,7 +242,7 @@
+                     "origin": origin or json.loads(row.plan).get("origin", "runtime"),
+                     "runtime_profile": json.loads(row.plan).get("runtime_profile", {}),
+                     "operation": json.loads(row.plan).get("method", "publish"),
+-                    "integration_version": "stage6-m0-m1",
++                    "integration_version": "stage6-m2-withdrawal",
+                     "resolved_at": None,
+                 }
+             )
+@@ -267,8 +281,13 @@
+             await session.commit()
+         return event_id
+ 
+-    async def complete(self, source, attempt):
++    async def complete(self, source, attempt, *, state="current"):
++        if state not in {"current", "withdrawn"}:
++            raise ValueError("Unsupported completion state")
+         dataset, sid = str(source.dataset_id), str(source.identity_data_id)
++        values = {"state": state}
++        if state == "current":
++            values["verified_revision"] = source.revision
+         async with self.session_factory() as session:
+             result = await session.execute(
+                 update(Publication)
+@@ -279,7 +298,7 @@
+                     Publication.attempt == attempt,
+                     Publication.state == "pending",
+                 )
+-                .values(state="current", verified_revision=source.revision)
++                .values(**values)
+             )
+             if result.rowcount != 1:
+                 raise IntentError(
+@@ -306,7 +325,7 @@
+                         resolved_at=now(),
+                         resolving_attempt=attempt,
+                         resolving_revision=source.revision,
+-                        outcome="restored",
++                        outcome="withdrawn" if state == "withdrawn" else "restored",
+                     )
+                     if info.get("recovery_attempts"):
+                         info["recovery_attempts"][-1]["outcome"] = "verified"
+--- /dev/null
++++ b/src/cognee_lab/identity/withdraw.py
+@@ -0,0 +1,234 @@
++"""Selected generated-source retirement using native provenance deletion."""
++
++from .models import IdentitySource
++from .native import edge_metadata, require_graph_methods
++from .validation import IntentError
++
++
++async def withdraw(
++    publisher, source, *, expected_revision, origin="runtime", fault_stage=None
++):
++    from cognee.infrastructure.databases.provenance import make_source_ref_key
++    from cognee.infrastructure.databases.unified.capabilities import EngineCapability
++    from cognee.infrastructure.databases.unified.unified_store_engine import (
++        UnifiedStoreEngine,
++    )
++    from .publish import contributions, identity_edges
++    from .storage import encode
++
++    graph, vector, records = publisher.graph, publisher.vector, publisher.records
++    require_graph_methods(
++        graph,
++        [
++            "find_nodes_by_source_ref",
++            "find_edges_by_source_ref",
++            "get_node_delete_data",
++            "get_edge_delete_data",
++            "remove_node_source_refs",
++            "remove_edge_source_refs",
++            "delete_edge_triples",
++            "delete_nodes",
++            "add_edges",
++        ],
++    )
++    row = next(
++        (
++            r
++            for r in await records.rows(source.dataset_id)
++            if r["source"] == str(source.identity_data_id)
++        ),
++        None,
++    )
++    if row is None:
++        raise IntentError("source_missing", "No saved publication to withdraw")
++    if IdentitySource.model_validate_json(row["description"]) != source:
++        raise IntentError("revision_reuse", "Withdraw the exact saved description")
++    owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
++    # Keep the original retirement keys across interrupted retries, even after
++    # native deletion has detached references or removed graph objects.
++    if (
++        row["state"] != "withdrawn"
++        and row["plan"].get("operation") == "identity_withdraw"
++    ):
++        plan = dict(row["plan"])
++    else:
++        nodes = await graph.get_node_delete_data(
++            await graph.find_nodes_by_source_ref(owner)
++        )
++        owned_edges = await graph.find_edges_by_source_ref(owner)
++        edges = await graph.get_edge_delete_data(owned_edges)
++        plan = dict(
++            operation="identity_withdraw",
++            revision=source.revision,
++            runtime_profile=publisher.runtime_profile,
++            entities={
++                key: dict(
++                    refs=value.source_ref_keys,
++                    type=value.node_type,
++                    indexed_fields=value.indexed_fields,
++                )
++                for key, value in nodes.items()
++            },
++            edges=[
++                dict(
++                    source=e.source_id,
++                    target=e.target_id,
++                    relation=e.relationship_name,
++                    refs=data.source_ref_keys,
++                    properties=data.edge_properties,
++                )
++                for e, data in edges.items()
++            ],
++            identity_edges=[list(e[:3]) for e in identity_edges(source)],
++        )
++    attempt = await records.begin(
++        source,
++        expected_revision=expected_revision,
++        plan=plan,
++        method="withdraw",
++        origin=origin,
++    )
++    stage = "withdraw_contributions"
++    try:
++        triples = {tuple(e) for e in plan["identity_edges"]}
++        triples.update(
++            (e["source"], e["target"], e["relation"])
++            for e in plan["edges"]
++            if "identity_contributions" in e["properties"]
++        )
++        for a, b, relation in sorted(triples):
++            edge = await edge_metadata(graph, a, b, relation)
++            if edge is None:
++                continue
++            previous = contributions(edge.edge_properties)
++            kept = [
++                c
++                for c in previous
++                if (c.get("dataset_id"), c.get("identity_data_id"))
++                != (str(source.dataset_id), str(source.identity_data_id))
++            ]
++            for c in kept:
++                ref = make_source_ref_key(c["dataset_id"], c["identity_data_id"])
++                if ref not in edge.source_ref_keys:
++                    raise IntentError(
++                        "foreign_owner_missing",
++                        "Surviving identity contribution has no native owner",
++                    )
++            if kept != previous:
++                props = dict(edge.edge_properties, identity_contributions=encode(kept))
++                # Existing edge only: retain native owners and all other fields.
++                await graph.add_edges([(a, b, relation, props)])
++        if fault_stage == stage:
++            raise IntentError(
++                "injected_failure", "Injected failure after contribution withdrawal"
++            )
++        stage = "withdraw_owners"
++        unified = UnifiedStoreEngine(
++            graph, vector, EngineCapability.GRAPH | EngineCapability.VECTOR
++        )
++        deleted = await unified.delete_by_source_ref(owner)
++        if fault_stage == stage:
++            raise IntentError(
++                "injected_failure", "Injected failure after native owner removal"
++            )
++        stage = "withdraw_verification"
++        # Another selected source may have been retired between failed retries.
++        # Its historical refs/contributions are no longer survival obligations.
++        retired = {
++            (r["dataset"], r["source"])
++            for r in await records.rows()
++            if r["plan"].get("operation") == "identity_withdraw"
++            and r["state"] in {"withdrawn", "failed"}
++        }
++        from cognee.infrastructure.databases.provenance import parse_source_ref_key
++
++        def required_ref(ref):
++            parsed = parse_source_ref_key(ref)
++            return (str(parsed.dataset_id), str(parsed.data_id)) not in retired
++
++        if await graph.find_nodes_by_source_ref(
++            owner
++        ) or await graph.find_edges_by_source_ref(owner):
++            raise IntentError(
++                "verify_owner", "Retired generated source still owns graph objects"
++            )
++        for a, b, relation in triples:
++            edge = await edge_metadata(graph, a, b, relation)
++            if edge and any(
++                (c.get("dataset_id"), c.get("identity_data_id"))
++                == (str(source.dataset_id), str(source.identity_data_id))
++                for c in contributions(edge.edge_properties)
++            ):
++                raise IntentError(
++                    "verify_withdrawal", "Retired identity contribution remains"
++                )
++        for key, old in plan["entities"].items():
++            current = (await graph.get_node_delete_data([key])).get(key)
++            remaining = {
++                ref for ref in old["refs"] if ref != owner and required_ref(ref)
++            }
++            if remaining and (
++                current is None or not remaining <= set(current.source_ref_keys)
++            ):
++                raise IntentError(
++                    "verify_survivor", "Independent Entity ownership was lost"
++                )
++            if current is not None and not current.source_ref_keys:
++                raise IntentError("verify_withdrawal", "Unowned Entity was not removed")
++            for field in old["indexed_fields"]:
++                collection = f'{old["type"]}_{field}'
++                indexed = await vector.has_collection(collection) and bool(
++                    await vector.retrieve(collection, [key])
++                )
++                if indexed != (current is not None):
++                    raise IntentError(
++                        "verify_index",
++                        "Withdrawn/surviving Entity vector disagrees with graph",
++                    )
++        for old in plan["edges"]:
++            edge = await edge_metadata(
++                graph, old["source"], old["target"], old["relation"]
++            )
++            remaining = {
++                ref for ref in old["refs"] if ref != owner and required_ref(ref)
++            }
++            if remaining and (
++                edge is None or not remaining <= set(edge.source_ref_keys)
++            ):
++                raise IntentError(
++                    "verify_survivor", "Independent edge ownership was lost"
++                )
++            for c in contributions(old["properties"]):
++                if (c.get("dataset_id"), c.get("identity_data_id")) not in retired and (
++                    c.get("dataset_id"),
++                    c.get("identity_data_id"),
++                ) != (
++                    str(source.dataset_id),
++                    str(source.identity_data_id),
++                ):
++                    if edge is None or c not in contributions(edge.edge_properties):
++                        raise IntentError(
++                            "verify_survivor", "Independent contribution was lost"
++                        )
++        if fault_stage == stage:
++            raise IntentError(
++                "injected_failure", "Injected failure before withdrawal acknowledgement"
++            )
++        await records.complete(source, attempt, state="withdrawn")
++        return dict(
++            attempt_id=attempt,
++            state="withdrawn",
++            deleted_node_ids=deleted.deleted_node_ids,
++        )
++    except Exception as exc:
++        try:
++            event = await records.fail(source, attempt, stage, exc, origin=origin)
++        except Exception as diagnostic_error:
++            raise IntentError(
++                "recovery_record_failed",
++                f"Withdrawal unavailable: attempt={attempt}, stage={stage}, error={exc}; "
++                f"recovery-event write also failed: {diagnostic_error}",
++            ) from diagnostic_error
++        raise IntentError(
++            "recovery_required", f"{exc}; recovery_event_id={event}"
++        ) from exc
+--- a/tests/test_identity_native.py
++++ b/tests/test_identity_native.py
+@@ -91,12 +91,114 @@
+     assert "recovery_event_id=" in failed.stdout
+     query = command(root, "retrieve")
+     assert '"facts": []' in query.stdout
++    withheld = json.loads(query.stdout)
++    assert withheld["unavailable_sources"][0]["reason"] == "publication_failed"
++    assert withheld["unavailable_sources"][0]["recovery_event_id"]
+     command(root, "reconcile")
+     result = json.loads((root / "result.json").read_text())
+     assert result["result"]["facts"]
+     assert len(result["recovery_events"]) == 1
+     assert result["recovery_events"][0]["resolved_at"]
+     assert result["recovery_events"][0]["origin"] == "test/fault_injection"
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("first", ["doc01", "doc02"])
++def test_native_two_source_withdrawal_in_both_orders(tmp_path, first):
++    root = tmp_path / "shared"
++    command(root, "multi-fixture")
++    initial = json.loads((root / "multisource_result.json").read_text())
++    assert len(initial["result"]["facts"]) == 2
++    assert len(initial["shared_variant"]["contributions"]) == 2
++    assert len(initial["shared_variant"]["owners"]) == 2
++    assert initial["shared_singleton_present"]
++    for value in initial["sources"].values():
++        assert value["unresolved_entity_present"] and value["unresolved_marker_present"]
++    other = "doc02" if first == "doc01" else "doc01"
++    # Reopen stores for each selected operation, including repeated withdrawal.
++    command(root, "withdraw", "--source", first)
++    one = json.loads((root / "multisource_result.json").read_text())
++    assert one["sources"][first]["state"] == "withdrawn"
++    assert one["sources"][other]["state"] == "current"
++    assert not one["sources"][first]["private_singleton_present"]
++    assert one["sources"][other]["private_singleton_present"]
++    assert one["shared_singleton_present"]
++    assert one["shared_singleton_indexed"]
++    assert one["borrowed_entity"] == initial["borrowed_entity"]
++    assert one["borrowed_entity"]["fixture_sentinel"] == "preserve me"
++    assert not one["sources"][first]["private_singleton_indexed"]
++    assert len(one["shared_variant"]["owners"]) == 1
++    assert [c["identity_data_id"] for c in one["shared_variant"]["contributions"]] == [
++        one["sources"][other]["identity_data_id"]
++    ]
++    expected = [
++        c
++        for c in initial["shared_variant"]["contributions"]
++        if c["identity_data_id"] == one["sources"][other]["identity_data_id"]
++    ]
++    assert one["shared_variant"]["contributions"] == expected
++    assert {
++        k: v
++        for k, v in one["shared_variant"]["properties"].items()
++        if k != "identity_contributions"
++    } == {
++        k: v
++        for k, v in initial["shared_variant"]["properties"].items()
++        if k != "identity_contributions"
++    }
++    assert [f["source_id"] for f in one["result"]["facts"]] == [
++        one["sources"][other]["mention_entity_id"]
++    ]
++    command(root, "withdraw", "--source", first)
++    command(root, "withdraw", "--source", other)
++    # A later retirement ends that source's historical survival obligations.
++    command(root, "withdraw", "--source", first)
++    both = json.loads((root / "multisource_result.json").read_text())
++    assert not both["shared_variant"]["present"]
++    assert not both["shared_singleton_present"]
++    assert not both["shared_singleton_indexed"]
++    assert both["borrowed_entity"] == initial["borrowed_entity"]
++    assert both["result"]["facts"] == []
++    assert both["result"]["unavailable_sources"] == []
++    assert both["recovery_events"] == []
++    for value in both["sources"].values():
++        assert value["state"] == "withdrawn"
++        assert value["original_marker_present"] and value["original_fact_present"]
++        assert (
++            value["original_fact_owned_by_chunk"] and value["original_evidence_present"]
++        )
++        assert value["unresolved_entity_present"] and value["unresolved_marker_present"]
++        assert not value["private_singleton_present"]
++        assert not value["private_singleton_indexed"]
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("stage", ["withdraw_contributions", "withdraw_owners"])
++def test_native_withdrawal_failure_preserves_other_source_and_retries(tmp_path, stage):
++    root = tmp_path / "retirement_failure"
++    command(root, "multi-fixture")
++    command(root, "withdraw", "--source", "doc01", "--fault-stage", stage, expect=1)
++    query = json.loads(command(root, "retrieve").stdout)
++    assert len(query["facts"]) == 1
++    assert (
++        query["facts"][0]["identity"]["identity_data_id"]
++        == "ca84d73d-ee72-5dd2-8e33-4117bb6cac36"
++    )
++    assert query["unavailable_sources"][0]["reason"] == "publication_failed"
++    rejected = command(root, "reconcile", "--source", "doc01", expect=1)
++    assert "Retry the failed withdrawal explicitly" in rejected.stdout
++    # Retire the other source before retry: the original durable plan must
++    # tolerate that legitimate independent change.
++    command(root, "withdraw", "--source", "doc02")
++    command(root, "withdraw", "--source", "doc01")
++    recovered = json.loads((root / "multisource_result.json").read_text())
++    assert recovered["result"]["facts"] == []
++    assert not recovered["shared_variant"]["present"]
++    assert not recovered["shared_singleton_present"]
++    assert len(recovered["recovery_events"]) == 1
++    incident = recovered["recovery_events"][0]
++    assert incident["outcome"] == "withdrawn" and incident["resolved_at"]
++    assert incident["recovery_attempts"][-1]["method"] == "withdraw"
+ 
+ 
+ def test_application_code_has_no_concrete_backend_access():
+--- a/tests/test_identity_storage.py
++++ b/tests/test_identity_storage.py
+@@ -54,3 +54,52 @@
+     assert records[0]["recovery_event_id"] == event
+     assert records[0]["resolved_at"] is not None
+     assert records[0]["recovery_attempts"][-1]["attempt_id"] == second
++
++
++@pytest.mark.asyncio
++async def test_withdrawal_guard_and_completion(source_payload):
++    source_payload["dataset_id"] = str(uuid4())
++    for item in source_payload["inputs"].values():
++        if "dataset_id" in item:
++            item["dataset_id"] = source_payload["dataset_id"]
++    source = IdentitySource.model_validate_json(json.dumps(source_payload))
++    store = RecordStore()
++    await store.initialize()
++    attempt = await store.begin(source, expected_revision=0, plan={})
++    await store.complete(source, attempt)
++    plan = {"operation": "identity_withdraw"}
++    attempt = await store.begin(
++        source, expected_revision=1, plan=plan, method="withdraw"
++    )
++    await store.fail(
++        source, attempt, "withdraw_owners", IntentError("injected", "stopped")
++    )
++    with pytest.raises(IntentError, match="Retry the failed withdrawal"):
++        await store.begin(source, expected_revision=1, plan={}, method="reconcile")
++    attempt = await store.begin(
++        source, expected_revision=1, plan=plan, method="withdraw"
++    )
++    await store.complete(source, attempt, state="withdrawn")
++    row = (await store.rows(source.dataset_id))[0]
++    assert row["state"] == "withdrawn" and row["verified_revision"] == 1
++    assert (await store.events(source.dataset_id))[0]["outcome"] == "withdrawn"
++    with pytest.raises(IntentError, match="Withdrawn source"):
++        await store.begin(source, expected_revision=1, plan={}, method="reconcile")
++    with pytest.raises(IntentError, match="Saved revision changed"):
++        await store.begin(source, expected_revision=0, plan=plan, method="withdraw")
++
++    # Retiring a publication that never completed must not claim that its
++    # intended revision was ever successfully published.
++    partial = source.model_copy(update={"identity_data_id": uuid4()})
++    attempt = await store.begin(partial, expected_revision=0, plan={})
++    await store.fail(partial, attempt, "nodes", IntentError("injected", "partial"))
++    attempt = await store.begin(
++        partial, expected_revision=1, plan=plan, method="withdraw"
++    )
++    await store.complete(partial, attempt, state="withdrawn")
++    row = next(
++        r
++        for r in await store.rows(partial.dataset_id)
++        if r["source"] == str(partial.identity_data_id)
++    )
++    assert row["state"] == "withdrawn" and row["verified_revision"] == 0
+--- a/tests/test_identity_retrieval.py
++++ b/tests/test_identity_retrieval.py
+@@ -46,3 +46,33 @@
+         await select_seed_entities(graph, [SimpleNamespace(id="missing")], set(), "HC")
+         == set()
+     )
++
++
++def test_capability_check_sees_through_transparent_engine_handle():
++    from cognee.infrastructure.databases.graph.graph_db_interface import (
++        GraphDBInterface,
++    )
++    from cognee_lab.identity.native import require_graph_methods
++    from cognee_lab.identity.validation import IntentError
++
++    class Unsupported(GraphDBInterface):
++        pass
++
++    class Handle:
++        @property
++        def __class__(self):
++            return Unsupported
++
++    with pytest.raises(IntentError, match="remove_node_source_refs"):
++        require_graph_methods(Handle(), ["remove_node_source_refs"])
++
++    class Supported(Unsupported):
++        async def remove_node_source_refs(self, *args):
++            pass
++
++    class SupportedHandle:
++        @property
++        def __class__(self):
++            return Supported
++
++    require_graph_methods(SupportedHandle(), ["remove_node_source_refs"])
+--- a/README.md
++++ b/README.md
+@@ -34,10 +34,10 @@
+ Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
+ 
+ ### Stage 6 — Custom pipeline and intermediate representations
+-Status: first deterministic identity publication/retrieval slice implemented; broader integration in progress
++Status: deterministic publication/retrieval and shared-source withdrawal implemented; broader integration in progress
+ Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
+ 
+-See [the Stage 6 first-slice guide](docs/stage6_identity_first_slice.md) for isolated fixture commands, focused tests, recovery-event visibility and the remaining implementation boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
++See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/two-source fixtures, selected identity-source withdrawal, focused tests, recovery-event visibility and remaining boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
+ 
+ 
+ ## Setup and running the code
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -3,7 +3,7 @@
+ **Last revised:** 2026-10-17
+ **Project:** `cognee-science-lab`  
+ **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
+-**Current work:** Stage 6 — first deterministic identity publication/retrieval slice implemented. See [the first-slice guide](docs/stage6_identity_first_slice.md) for verified behavior, tests, recovery visibility and remaining boundaries. Earlier investigation entries below retain their historical wording; the reviewed handoff governs the selected design.
++**Current work:** Stage 6 — deterministic publication/retrieval plus multi-source identity withdrawal implemented. See [the fixture guide](docs/stage6_identity_first_slice.md) for tests, recovery visibility and remaining boundaries. Revision replacement and full original-document removal remain next lifecycle work. Earlier investigation entries below retain their historical wording; the reviewed handoff governs the selected design.
+ 
+ This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
+ 
+@@ -20,7 +20,7 @@
+ | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
+ | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
+ | 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
+-| 6 | In progress | First native deterministic fixture demonstrated; next independent multi-source support/withdrawal, then broader lifecycle and standard wiring |
++| 6 | In progress | Native fixtures cover shared contributions, singleton retention, selected identity-source withdrawal and retries; next revision replacement/original-source lifecycle, then standard wiring |
+ | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
+ 
+ 
+--- a/docs/stage6_identity_first_slice.md
++++ b/docs/stage6_identity_first_slice.md
+@@ -1,4 +1,4 @@
+-# Stage 6: first identity publication/retrieval slice
++# Stage 6: identity publication, retrieval and shared-source withdrawal
+ 
+ Implemented on 2026-10-17 against Cognee 1.6.2. This is the agreed first checkpoint (record validation and a deterministic end-to-end fixture), not the complete Stage 6 integration. The reviewed handoff remains the design authority for later milestones.
+ 
+@@ -24,7 +24,7 @@
+ ## What the code does
+ 
+ - `models.py` validates the saved forms, references, required construction entries, sorted occurrences and local role consistency. `validation.py` checks exact document/span digests, RFC 8785 structured input signatures, native chunk mapping, actual supplied dependencies and cross-source UUID use.
+-- `publish.py` uses configured Cognee engines and native persistence/reference APIs. It writes only missing Entities, retains compatible existing Entities without overwriting ordinary fields, creates original-chunk-owned markers, and aggregates source-specific contribution payloads on graph-only identity edges.
++- `publish.py` uses configured Cognee engines and native persistence/reference APIs. It writes only missing Entities, retains compatible existing Entities without overwriting ordinary fields, creates original-chunk-owned markers, and aggregates source-specific contribution payloads on graph-only identity edges. Each occurrence chunk explicitly retains its marked mention endpoint, including unresolved mentions without facts.
+ - `fixture.py` routes captured semantic output through native chunk ownership, index helpers and evidence buffering/lookup, under the original source context. It avoids populated nested existing Entities. A native custom Task invokes the publisher; completing the standard Cognify Task-transform hook remains later work.
+ - `storage.py` stores serialized descriptions, minimal intent, publication status and recovery events through Cognee's configured relational session facility with backend-neutral SQLAlchemy operations. It creates only namespaced project tables. A portable conditional update reserves one project writer across the shared stores; it does not coordinate arbitrary native writers.
+ - `retrieve.py` is a small document-context fixture retriever. It consumes Entity-name candidates, current validated saved assignments, actual physical contribution payloads, bounded native fact neighborhoods and native original-source evidence. Helper links are excluded from subject-matter facts. It rechecks publication tokens before delivery.
+@@ -60,8 +60,53 @@
+ 
+ The native run exposed a mismatch between `get_edges`' interface annotation and its actual legacy return shape/direction on this path. The integration uses `get_edge_delete_data` for exact edge/provenance reads and `iter_bounded_neighborhood` for uniform directed EdgeData, without an adapter-specific workaround. Default neighborhood implementations on some backends can read more than the returned cap; actual backend work bounds need separate admission tests.
+ 
+-Remaining work includes multi-document lifecycle/withdrawal, revision replacement, full original/generated source removal, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
++Remaining work includes revision replacement, coordinated original/generated Data removal and full document lifecycle, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
+ 
+ The saved authoritative JSON is serialized in the project relational row; the initial registered generated Data item contains the matching JSON snapshot. This slice rejects description revision replacement rather than allowing those representations to diverge. A later maintenance milestone must implement the coordinated saved-source update path.
+ 
+ No live lab corpus was changed, no native dependency source was patched, and no backend-specific query/storage implementation was added. Comprehensive replay, whole-store A/B copies, model-driven Describe, automatic repair and size/density tooling remain deferred.
++
++## Two-source lifecycle fixture
++
++Apply this checkpoint after the initial Stage 6 patch and seed-selection fix.
++
++```bash
++uv run python -m cognee_lab.identity multi-fixture --root outputs/stage6_shared
++uv run python -m cognee_lab.identity withdraw --root outputs/stage6_shared --source doc01
++uv run python -m cognee_lab.identity withdraw --root outputs/stage6_shared --source doc02
++```
++
++The new fixture creates two original documents and two registered identity descriptions in one dataset. Both descriptions independently support the same physical HC-to-controller variant edge and a shared singleton. Each description also declares a private singleton and distinct accepted and unresolved mention groups. Captured ordinary facts remain attached to their local mention and original producing chunk; both documents independently produce a limits-to-oscillations fact. No LLM is used.
++
++The command writes `multisource_result.json` and prints the result plus a compact graph/ownership summary. Expect:
++
++| Point | Shared variant contributions/owners | Shared singleton | Query facts |
++|---|---|---|---|
++| Both published | 2 / 2 | Present and indexed | Two local mention facts, with their own evidence |
++| Withdraw doc01 | 1 / 1, belonging to doc02 | Present and indexed | Only doc02's interpreted fact |
++| Withdraw doc02 | No remaining physical variant edge | Absent from graph and name index | None |
++
++After each withdrawal, original-chunk markers, mention nodes, ordinary facts, original ownership and native edge evidence remain. A private singleton is removed, including its name vector, when its one identity owner withdraws. The borrowed controller's ordinary fields and independent native ownership survive. Unresolved mention endpoints survive through original occurrence-chunk ownership even though they have no facts.
++
++This operation withdraws the selected generated source's graph contributions and Entity retention. It keeps the registered Data items and saved description for inspection/history. It does not delete or update original text, retract ordinary facts, implement original-document Forget, or replace a saved-description revision. The fixture retriever excludes withdrawn descriptions, so retained original facts cease receiving that description's identity interpretation.
++
++Use a fresh root to try the reverse removal order. Repeating withdrawal is supported, including after the other source was withdrawn. `reconcile --source doc02` can check the still-current second document before retirement; reconciliation cannot silently reactivate a withdrawn source.
++
++### Withdrawal implementation and failures
++
++`Publisher.withdraw(source, expected_revision=..., ...)` uses the existing portable writer/revision guards. It saves retirement keys, previous owner refs and contribution properties in a minimal plan before destructive writes. It marks the source pending, removes only that source's contribution payloads, then uses Cognee's `UnifiedStoreEngine.delete_by_source_ref` with the configured graph/vector engines. Native provenance deletion detaches shared ownership and removes unowned graph/vector output. Verification checks retired ownership/contributions and surviving native owners/indexes before acknowledging `withdrawn`. Historical survivor expectations are adjusted for other sources explicitly retired between retries.
++
++The ledger adds an explicit `withdrawn` completion state; the revision and description are retained. Withdrawal preserves the last successfully published revision, including zero for a publication that never completed. This is an operation state, not a second role or eligibility registry. Interrupted withdrawal becomes failed/unavailable with a recovery event. Explicitly retry `withdraw`; publication reconciliation is rejected while withdrawal is incomplete. Successful recovery records `outcome: withdrawn` on the original event.
++
++```bash
++uv run python -m cognee_lab.identity multi-fixture --root outputs/stage6_shared_failure
++uv run python -m cognee_lab.identity withdraw --root outputs/stage6_shared_failure --source doc01 --fault-stage withdraw_contributions
++# Expected injected error and recovery-event identifier.
++uv run python -m cognee_lab.identity retrieve --root outputs/stage6_shared_failure
++# Only doc02's interpreted fact; doc01 appears in unavailable_sources.
++uv run python -m cognee_lab.identity withdraw --root outputs/stage6_shared_failure --source doc01
++```
++
++Other injection boundaries are `withdraw_owners` and `withdraw_verification`. Deliberate retirement is absent from `unavailable_sources`; failed/pending publication is now reported there with any unresolved recovery-event identifier. The isolated CLI closes supported engine lifecycle handles before interpreter teardown, including handled operation failures. Existing-root fixture errors now give an argparse message instead of a raw traceback.
++
++The native test matrix covers both removal orders, repeated withdrawal before/after another retirement, shared payload/native owner survival, independent singleton retention, private/last-owner graph and vector cleanup, unresolved-marker retention, original fact ownership/evidence preservation, and caught failures after payload mutation and native deletion. Tests also retire the independent source between a failure and its retry. Hard process crashes, arbitrary native writes during a project mutation, coordinated native Data deletion, all-backend admission and corpus-wide identity traversal remain outside this checkpoint.
+--- a/results/cognee_identity_stage6_handoff.md
++++ b/results/cognee_identity_stage6_handoff.md
+@@ -223,7 +223,7 @@
+ 
+ This scope adjustment supersedes earlier first-build proposals for complete semantic capture and exact step-by-step replay. Keep guarded saved JSON, a publication ledger, source-aware writes/withdrawal, a minimal durable change plan and final verification. Defer automatic continuation from arbitrary intermediate writes, comprehensive semantic-output capture and automatic recovery orchestration. Preserve interfaces that allow later extension; no general replay framework or A/B copy is a prerequisite.
+ 
+-The ledger remains the sole publication-eligibility authority, keyed by dataset + generated Data ID: pending/current/failed, intended revision, verified published revision, attempt token and diagnostics. Mark pending before mutations; acknowledge only the matching verified revision/attempt. A failure or an incomplete attempt detected after restart remains unavailable until explicitly handled. Event history below is diagnostic, not a second currentness registry.
++The ledger remains the sole publication-eligibility authority, keyed by dataset + generated Data ID: pending/current/failed/withdrawn, intended revision, verified published revision, attempt token and diagnostics. Mark pending before mutations; acknowledge only the matching verified revision/attempt. Withdrawn records retain their description/revision for inspection but supply no active identity interpretation. A failure or an incomplete attempt detected after restart remains unavailable until explicitly handled. Event history below is diagnostic, not a second currentness registry.
+ 
+ The minimal durable change plan identifies the source/revisions/attempt, old and intended marker/edge/contribution keys, Entity declarations and withdrawal intent needed after a saved-record change or native removal. Preserve needed information before destructive operations; do not reconstruct retirement intent from vanished graph state. Files/ledger/graph are not one transaction. Missing/incompatible plans require a diagnostic and an explicit recovery choice. Full captured semantic payloads and guaranteed reproduction of interrupted fact extraction are deferred.
+ 
+@@ -397,4 +397,14 @@
+ 
+ A native interface mismatch was observed: legacy get_edges returns a shape/direction that differs from its interface annotation on this path. The project uses get_edge_delete_data for exact edge/provenance properties and iter_bounded_neighborhood for uniform EdgeData, without backend-specific queries. Record this as a reusable seam lesson; actual work bounds still depend on the configured adapter's implementation.
+ 
+-Remaining first-slice limits are explicit: no revision replacement/withdrawal lifecycle, standard entry-point transform or public SearchType yet; document-context retrieval is fixture-scoped and declines span-applicable variant expansion; complete multi-source traversal, unresolved/ambiguous passage delivery and offline diagnostics remain. Caught failures and dependency invalidation produce incidents, but a hard crash can still leave the writer reserved: pending-attempt inspection/explicit abandonment is later recovery work. Comprehensive semantic capture/replay, autonomous repair, A/B staging and metrics tooling remain deferred.
++At this first checkpoint, limits included revision replacement/withdrawal lifecycle, standard entry-point transform and public SearchType. The following multi-source checkpoint supersedes withdrawal status. Document-context retrieval remains fixture-scoped and declines span-applicable variant expansion; complete multi-source traversal, unresolved/ambiguous passage delivery and offline diagnostics remain. A hard crash can still leave the writer reserved: pending-attempt inspection/explicit abandonment is later recovery work. Comprehensive semantic capture/replay, autonomous repair, A/B staging and metrics tooling remain deferred.
++
++### Multi-source withdrawal checkpoint — 2026-10-17
++
++The two-source fixture and Publisher.withdraw implement the generated-source retirement portion of M2. Each original document has its own registered description, mention UUIDs, original-chunk-owned facts/evidence and unresolved group. Both descriptions independently retain a singleton and contribute document-scoped payloads to one shared physical variant edge. Tests exercise both retirement orders, repeated retirement, last-owner singleton/name-vector cleanup, borrowed ordinary-field preservation and original marker/fact/evidence survival.
++
++Withdrawal captures a durable minimal retirement plan under the existing revision/writer protocol, withholds the selected source, removes its contribution payloads and delegates ownership/graph/vector removal to Cognee's UnifiedStoreEngine.delete_by_source_ref over configured engines. Other contributions and owners survive. Completion is an explicit withdrawn ledger state; registered Data and the saved description remain for history. Withdrawal does not retract original semantic output or implement native original/generated Data deletion. Caught interruptions require an explicit withdrawal retry, with the original recovery event marked withdrawn on success; publication reconciliation cannot reverse pending retirement.
++
++One ownership correction emerged: creating a chunk-owned marker must explicitly attach that chunk's source ref to M as well. An unresolved M with no fact would otherwise be retained only by its generated identity source and could be deleted, cascading the independently owned marker. This endpoint rule is now exercised using unresolved groups without semantic facts.
++
++Retrieval diagnostics now include already-failed/pending sources and their unresolved recovery-event identifier. Deliberately withdrawn sources are inactive rather than recovery incidents. The seed-selection correction reads candidate names through the graph interface instead of assuming a vector payload field; the first Mac fixture and caught-publication-failure recovery were independently exercised by the user. See ../docs/stage6_identity_first_slice.md for reproducible commands and current test coverage. The broader revision-replacement, original-document lifecycle, standard pipeline and general retrieval milestones remain incomplete.
+--- a/results/cognee_knowledge_integration_playbook.md
++++ b/results/cognee_knowledge_integration_playbook.md
+@@ -51,9 +51,9 @@
+ | G01 | Explicit IDs and continuity rules are separate from display names and current offsets | D, P, M, R | Explicit-ID precedence is source-inspected; grouped continuity is selected design | Define identity for repeated equal-valued measurements and source revisions |
+ | G02 | Reference, retention and ordinary property persistence are different actions | D, P, M | Recursive overwrite/co-ownership observed; native ref attachment inspected | Link existing instrument/facility nodes without rewriting them |
+ | G03 | A saved description specifies exact graph intent; Publish executes declared rules | D, P, M | Selected design; custom Task/persistence seams inspected | Define edges/endpoints/aggregation explicitly instead of asking Publish to infer meaning |
+-| G04 | Native source ownership retains objects but does not aggregate application properties | D, P, M, R | Shared retention observed; upsert replacement inspected | Decide whether native shared-edge semantics suffice for values/qualifiers |
+-| G05 | Original evidence, generated-source ownership and producer attribution are distinct | D, P, M, R | Native mechanics inspected; combined identity path untested | State the original measurement evidence and ownership for generated structures separately |
+-| G06 | A generated registered Data item does not automatically follow its original input's lifecycle | D, P, M | Original/generated separation inspected | Map original inputs to generated measurement sources and retire/refresh them explicitly |
++| G04 | Native source ownership retains objects but does not aggregate application properties | D, P, M, R | Two-source fixture/tests exercise payload aggregation, both withdrawal orders, native owner survival and last-owner deletion | Decide whether native shared-edge semantics suffice for values/qualifiers |
++| G05 | Original evidence, generated-source ownership and producer attribution are distinct | D, P, M, R | Combined fixture checks original fact/marker/evidence survival after generated-source withdrawal; marked endpoints require explicit original retention | State original measurement evidence and endpoint retention separately from generated structure ownership |
++| G06 | A generated registered Data item does not automatically follow its original input's lifecycle | D, P, M | Explicit generated identity-output withdrawal implemented; coordinated original/generated Data deletion still unimplemented | Map original inputs to generated measurement sources and retire/refresh them explicitly |
+ | G07 | Actual supplied context and selection changes define operational dependencies | D, M, R | Selected dependency/locator policy | Capture calibration, unit definitions and corpus context actually supplied; handle newly inserted context |
+ | G08 | Saved meaning and graph materialization have separate failure points | P, M, R | Selected ledger/minimal change-plan protocol; full replay deferred | Reuse publication guards; diagnostic recovery events must not become a parallel currentness registry |
+ | G09 | Reconcile valid saved intent; explicitly reconsider when regeneration is required | D, P, M | Initial explicit recovery; comprehensive captured replay deferred | Distinguish restoring a projection from regenerating uncaptured interpretation; measure actual recovery needs before adding automation |
+@@ -65,7 +65,7 @@
+ | G15 | Bounded traversal and offline diagnostics should share predicates and counters | P, M, R | Selected design, unimplemented | Add measurement-specific structural/cost diagnostics without a second traversal implementation |
+ | G16 | Compact whole-source maintenance is a useful initial boundary | D, P, M | Selected identity document-level maintenance | Choose measurement source granularity; do not assume one source per document is universal |
+ | G17 | Provenance/ownership does not establish scientific support or correctness | D, P, M, R | Explicit scope boundary | Scientific justification/uncertainty/entailment need their own domain work |
+-| G18 | Test operation sequences and model quality separately | D, P, M, R | Existing characterization plus planned integration suites | Use captured decisions for lifecycle assertions; independently evaluate interpretation quality and consumer comprehension |
++| G18 | Test operation sequences and model quality separately | D, P, M, R | Captured native lifecycle tests cover both withdrawal orders and interrupted retries; model quality remains separate | Use captured decisions for lifecycle assertions; independently evaluate interpretation quality and consumer comprehension |
+ 
+ These are mechanisms and questions to reuse. A source-inspected primitive is not evidence that the new combined pipeline works. Record backend/configuration and evidence status when upgrading a row to demonstrated reuse.
+ 
+@@ -133,3 +133,16 @@
+ The first identity fixture uses configured native graph/vector/relational interfaces, captured decisions and local deterministic embeddings. Its focused/native tests exercise publication, original-source evidence, explicit reconciliation and recovery visibility. This is partial evidence for the reusable lessons rather than completion of all lifecycle/retrieval requirements. See ../docs/stage6_identity_first_slice.md for commands and limits.
+ 
+ A concrete interface lesson: verify actual read shapes/direction as well as method availability. The legacy get_edges result differed from its interface annotation on the tested path. The integration uses get_edge_delete_data and iter_bounded_neighborhood through the common interfaces, without backend-specific queries.
++
++## Multi-source lifecycle evidence — 2026-10-17
++
++| Finding | Activities | Reusable process and identity evidence | Measurement transfer |
++|---|---|---|---|
++| Physical ownership and application payload retirement are separate operations | P, M, R | First remove the selected contribution, then use native source-ref deletion; test two sources on the same physical edge in both removal orders | Retire one measurement's qualifiers/contribution without erasing another owner's supported value |
++| An independently owned edge needs retained endpoints | P, M | Original chunk explicitly retains the marked mention, including an unresolved group with no facts | A source-owned measurement/evidence link must not disappear because a generated overlay was the endpoint's only owner |
++| Destructive retries need durable retirement keys and current survivor obligations | M | Save the plan before mutation; preserve it after failure; account for another source legitimately retired before retry | Preserve measurement retirement intent without demanding that later-retired support remain forever |
++| Eligibility reporting must expose already-withheld sources | M, R | Report failed/pending ledger state and recovery-event ID; deliberate withdrawal is an inactive state | Surface incomplete measurement publications without turning diagnostic history into another eligibility registry |
++
++Reuse the native configured UnifiedStoreEngine source-ref deletion and portable ledger boundary; keep identity contribution matching and occurrence-marker rules in the identity adapter. The implemented CLI cleanly closes supported engine lifecycle handles before exit. These fixtures are partial lifecycle evidence, not proof of all-backend behavior, scientific interpretation or a reason to introduce a general integration runtime yet.
++
++Measure native cleanup cost as the corpus grows: this pinned source-ref removal path can scan the graph during orphaned EdgeType cleanup. The small fixtures validate retention/correctness, not corpus-scale withdrawal latency or bounded internal work. Carry that measurement question forward rather than adding backend-specific cleanup code now.

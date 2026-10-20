@@ -5,6 +5,14 @@ from .validation import IntentError, map_chunks
 from uuid import UUID
 
 FACT_TEXT = "it limits oscillations"
+ADDED_FACT_TEXT = "the controller limits oscillations"
+
+
+def captured_facts(source):
+    """Explicit fixture outputs, independent of model inference or label matching."""
+    yield "g01", FACT_TEXT
+    if "g03" in source.mention_groups:
+        yield "g03", ADDED_FACT_TEXT
 
 
 def fixture_mention_id(source):
@@ -44,7 +52,7 @@ def bind_chunks(payload, text, chunks):
         ]
 
 
-def fact_chunks(source, chunks):
+def fact_chunks(source, chunks, *, group_key="g01", fact_text=FACT_TEXT):
     """The captured fact starts at the explicitly stored 'it' occurrence.
 
     Its whole literal span is supplied fixture knowledge. This does not derive
@@ -63,22 +71,27 @@ def fact_chunks(source, chunks):
             "chunk_mapping",
             "Captured semantics requires the complete checked chunk mapping",
         )
-    group = source.mention_groups.get("g01")
+    group = source.mention_groups.get(group_key)
     if group is None:
         fixture_mention_id(source)
-        if FACT_TEXT in text:
+        if fact_text in text:
             raise IntentError(
                 "fixture_shape",
                 "Captured fact remains in text without its reviewed group",
             )
         return []
-    starts = [o.start for o in group.occurrences if o.text == "it"]
+    starts = [
+        o.start
+        for o in group.occurrences
+        if fact_text.startswith(o.text + " ")
+        and text[o.start : o.start + len(fact_text)] == fact_text
+    ]
     if len(starts) != 1:
         raise IntentError(
-            "fixture_shape", "Captured fact requires one explicit 'it' occurrence"
+            "fixture_shape", "Captured fact requires one exact reviewed occurrence"
         )
-    start, end = starts[0], starts[0] + len(FACT_TEXT)
-    if text[start:end] != FACT_TEXT:
+    start, end = starts[0], starts[0] + len(fact_text)
+    if text[start:end] != fact_text:
         raise IntentError(
             "fixture_shape", "Captured fact span differs from current text"
         )

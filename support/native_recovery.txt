@@ -1,0 +1,13 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.14, pytest-9.1.1, pluggy-1.6.0 -- /workspace/scratch/cfdfb9b99ad1/stage6_current_main/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /workspace/scratch/cfdfb9b99ad1/stage6_current_main
+configfile: pyproject.toml
+plugins: platformdirs-4.12.2, typeguard-4.6.0, asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 3 items / 1 deselected / 2 selected
+
+tests/test_identity_additions_native.py::test_native_addition_recovers_exact_new_group_and_fact[text_chunks] PASSED [ 50%]
+tests/test_identity_additions_native.py::test_native_addition_recovers_exact_new_group_and_fact[replace_published] PASSED [100%]
+
+================= 2 passed, 1 deselected in 1094.48s (0:18:14) =================

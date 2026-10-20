@@ -1,0 +1,1173 @@
+diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -34,12 +34,12 @@
+ Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
+ 
+ ### Stage 6 — Custom pipeline and intermediate representations
+-Status: deterministic publication/retrieval, shared-source withdrawal, unchanged-text identity correction and a captured source-text edit/rebuild implemented; broader integration in progress
++Status: deterministic publication/retrieval, shared-source withdrawal, unchanged-text identity correction and captured source-text edits with multi-chunk provenance implemented; broader integration in progress
+ Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
+ 
+ See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/two-source fixtures, selected identity-source withdrawal, focused tests, recovery-event visibility and remaining boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
+ 
+-Step 4 includes [guarded identity corrections](docs/stage6_identity_revision_replacement.md) and [captured source-text edits](docs/stage6_identity_text_changes.md). The text-edit slice remaps document positions, rebuilds native chunks/facts/evidence, preserves independent sources and explicitly recovers caught failures. Arbitrary edits, dependency propagation and standard Update wiring remain incomplete.
++Step 4 includes [guarded identity corrections](docs/stage6_identity_revision_replacement.md) and [captured source-text edits](docs/stage6_identity_text_changes.md). The text-edit slice remaps document positions, rebuilds native chunks/facts/evidence, preserves independent sources and explicitly recovers caught failures. The [multi-chunk checkpoint](docs/stage6_identity_multichunk.md) adds split occurrences, complete fact-continuation evidence, changing boundaries and repeated edits. Arbitrary edits, dependency propagation and standard Update wiring remain incomplete.
+ 
+ 
+ ## Setup and running the code
+diff --git a/ROADMAP.md b/ROADMAP.md
+--- a/ROADMAP.md
++++ b/ROADMAP.md
+@@ -3,7 +3,7 @@
+ **Last revised:** 2026-10-19
+ **Project:** `cognee-science-lab`  
+ **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
+-**Current work:** Stage 6 — steps 1–2 have native fixtures; step 3's multi-source withdrawal path is demonstrated; step 4 includes guarded unchanged-text identity corrections and a captured prefix-edit path with whole-document native rechunking, remapped positions and rebuilt fact evidence. See [the fixture guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md) and [text-edit guide](docs/stage6_identity_text_changes.md). Arbitrary edits, context/meaning reconsideration, dependent-source maintenance and full original-document removal remain lifecycle work. Earlier investigation entries retain historical wording; the reviewed handoff governs the design.
++**Current work:** Stage 6 — steps 1–2 have native fixtures; step 3's multi-source withdrawal path is demonstrated; step 4 includes guarded unchanged-text identity corrections and a captured prefix-edit path with whole-document native rechunking, remapped positions and rebuilt fact evidence, including multi-chunk markers and fact continuations. See [the fixture guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md). Arbitrary edits, context/meaning reconsideration, dependent-source maintenance and full original-document removal remain lifecycle work. Earlier investigation entries retain historical wording; the reviewed handoff governs the design.
+ 
+ This revision reconciles the previously saved roadmap with the later project discussion and the companion `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores describe particular experimental snapshots, not an assertion about the current live database. “Complete” refers to the exploration needed to proceed; it does not imply production implementation.
+ 
+@@ -20,7 +20,7 @@
+ | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
+ | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
+ | 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
+-| 6 | In progress | Guarded identity correction and captured prefix-edit/rebuild coordinate saved intent, registered originals/identity Data, graph and evidence; next arbitrary edits, multi-chunk semantic extraction, dependency propagation and original-source lifecycle, then standard wiring |
++| 6 | In progress | Guarded identity correction and captured prefix-edit/rebuild coordinate saved intent, registered originals/identity Data, graph and evidence; multi-chunk marker/evidence maintenance now demonstrated; next arbitrary edits, general extraction, dependency propagation and original-source lifecycle, then standard wiring |
+ | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
+ 
+ 
+diff --git a/docs/stage6_identity_first_slice.md b/docs/stage6_identity_first_slice.md
+--- a/docs/stage6_identity_first_slice.md
++++ b/docs/stage6_identity_first_slice.md
+@@ -60,7 +60,7 @@
+ 
+ The native run exposed a mismatch between `get_edges`' interface annotation and its actual legacy return shape/direction on this path. The integration uses `get_edge_delete_data` for exact edge/provenance reads and `iter_bounded_neighborhood` for uniform directed EdgeData, without an adapter-specific workaround. Default neighborhood implementations on some backends can read more than the returned cap; actual backend work bounds need separate admission tests.
+ 
+-Remaining work includes arbitrary text/occurrence-changing revisions beyond the captured prefix-edit path, coordinated original/generated Data removal and full document lifecycle, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
++Remaining work includes arbitrary text/occurrence-changing revisions beyond the captured prefix-edit path, coordinated original/generated Data removal and full document lifecycle, dependent-source maintenance, standard entry-point transformation, registered public SearchType, comprehensive context-sensitive traversal across sources, span-applicable variant traversal, unresolved/ambiguous passage delivery, full grouped evidence delivery and offline diagnostics. The [multi-chunk checkpoint](stage6_identity_multichunk.md) verifies split markers and complete captured fact evidence. The first retriever intentionally declines span-applicable variant expansion and only searches facts supported by the current source document; this is an internal fixture boundary, not a new public fact-source filtering feature. It is not the final corpus-wide retriever. Complex saved-record reasoning inputs require an input-reader adapter and currently fail explicitly.
+ 
+ The saved authoritative JSON is serialized in the project relational row, with a matching snapshot in the registered generated Data item. The [unchanged-text replacement checkpoint](stage6_identity_revision_replacement.md) coordinates advancing those representations and the graph. Pending/failed replacements are withheld until verified. The [text-edit checkpoint](stage6_identity_text_changes.md) adds a captured prefix insertion with exact occurrence remapping and a full native original-memory rebuild; broader text/meaning changes remain unsupported.
+ 
+diff --git a/docs/stage6_identity_multichunk.md b/docs/stage6_identity_multichunk.md
+new file mode 100644
+--- /dev/null
++++ b/docs/stage6_identity_multichunk.md
+@@ -0,0 +1,79 @@
++# Step 4 / M3: native multi-chunk maintenance
++
++This checkpoint adds a captured multi-chunk fixture to the existing text-replacement path. It exercises a grouped mention across chunks, a single occurrence split across a boundary, a fact whose literal text spans two chunks, changed boundaries, repeated edits, native evidence indexes, and explicit recovery. Decisions and fact spans are captured test input; this is not a general extraction or coreference algorithm.
++
++## Run
++
++Apply this incremental patch after the source-text changes patch. Use a fresh root:
++
++```bash
++uv run python -m cognee_lab.identity chunked-fixture --root outputs/stage6_multichunk
++uv run python -m cognee_lab.identity edit-text --root outputs/stage6_multichunk --source doc01 --expected-revision 1
++uv run python -m cognee_lab.identity reconcile --root outputs/stage6_multichunk --source doc01
++```
++
++The new profile uses native TextChunker with a deliberately small budget of 9 tokens. The original doc01 is:
++
++```text
++Helios controller (HC) regulates plasma heating, the controller adjusts coil current, and it limits oscillations.
++```
++
++There is a trailing newline. Doc02 has the same opening plus the existing startup sentence. Doc01 initially has six native chunks; doc02 has eight. Each source has its own local mention group, identity contribution and original-owned fact. The unresolved plasma group and independent singleton support remain present.
++
++The edit prepends exactly `Δ review: `: 10 Unicode code points, 11 UTF-8 bytes. The fixture supplies a captured review of unchanged interpretation. It does not infer that arbitrary new preceding text is irrelevant.
++
++| doc01 observation | Initial | After first edit |
++|---|---|---|
++| Saved / verified / registered identity revision | 1 / 1 / 1 | 2 / 2 / 2 |
++| Native chunk count | 6 | 6, with changed boundaries |
++| “the controller” | [49,63) | [59,73), crossing chunks 2 and 3 |
++| “it” | [90,92) | [100,102) |
++| Group's marker chunk indexes | 2, 4 | 2, 3, 4 |
++| Captured fact's owner/evidence chunk indexes | 4, 5 | 4, 5, with updated supporting content/mapping |
++| Group Entity ID / fact edge ID / referent | Existing | Preserved |
++| Doc02 revision and fact/evidence | Revision 1 | Unchanged |
++
++Indexes in this table are zero-based. A changed boundary can preserve total chunk count. Content-derived IDs can also recur when a chunk's text is unchanged; that does not establish that its position or index is unchanged.
++
++`multisource_result.json` contains the initial or reconciliation summary. `text_revision_result.json` contains the edit summary and `text_changes` diagnostics. Source summaries now expose the complete `chunk_mapping`, `mention_marker_chunk_ids` and `fact_evidence_chunk_ids`. Each mapping entry reports actual marker presence, ownership of the captured fact and evidence presence, so the diagnostic distinguishes expectations from stored graph/provenance observations. A later healthy reconcile replaces its completed mutation plan; the historical edit result remains the transition record.
++
++## Marker location and fact provenance are different sets
++
++`has_identity_mention` belongs only on native chunks overlapping the stored occurrence ranges. A group can have occurrences in several chunks, and a single occurrence can require markers on both sides of a boundary.
++
++The captured fact is the exact literal span `it limits oscillations`, starting at the group's explicitly stored `it` occurrence. The fixture computes its supporting chunks from the checked complete text/map. This fixture knowledge is not an assertion that a generic extractor can identify support spans mechanically.
++
++The fact writer attaches native ownership to the edge and both endpoints for every producing chunk, writes native contains/production bookkeeping, and captures edge evidence through Cognee's existing per-chunk buffer/persistence interfaces. It does not make every mention-marker chunk an owner of every fact. Verification requires the exact original-document fact owner set and exact current `(chunk_id, chunk_index)` evidence set, plus all expected chunk vectors.
++
++The final oscillations chunk supports the fact but contains no mention occurrence. The fixture retriever previously discarded evidence outside the mention-marker chunks, which would truncate this fact. It now requires at least one checked supporting chunk to overlap the group and preserves the complete checked native-owned evidence returned for that fact, including its continuation chunk. These are current-version evidence checks inside the existing bounded fixture route, not a new public fact-source filter or request parameter.
++
++Conversely, the earlier “the controller” occurrence supplies an identity marker but is not provenance for this particular captured `it limits oscillations` fact. The native tests assert both distinctions, including absence of markers and fact ownership where they do not belong.
++
++## Preserve construction policy and current evidence
++
++Healthy reconciliation and edits read the chunk budget from native `DocumentChunk.max_chunk_tokens` through the graph interface. Missing or inconsistent construction metadata is refused. The edit's existing durable TextChange plan retains that budget for recovery even if the original chunks have been removed. No schema field or parallel role registry was added.
++
++The full-document replacement strategy remains unchanged: save guarded intent, remove original memory/evidence through native Forget, ingest under the same original Data ID, rebuild chunks, write captured facts and identity materialization, verify, acknowledge. This is still a complete source rebuild, even when a newly constructed chunk has the same content-derived ID as an earlier chunk. Native incremental reuse is not implemented.
++
++The native happy-path test applies the prefix again at expected revision 2. The second edit reaches revision 3, creates seven doc01 chunks and shifts indexes of some content IDs that reappear. Verification checks evidence indexes against the new native chunks, not only UUID membership. Doc02 remains at revision 1. Subsequent identity withdrawal preserves the original-owned facts, evidence and mention markers under the current chunk mapping.
++
++## Interrupted rebuild
++
++Use another new root:
++
++```bash
++uv run python -m cognee_lab.identity chunked-fixture --root outputs/stage6_multichunk_failure
++uv run python -m cognee_lab.identity edit-text --root outputs/stage6_multichunk_failure --expected-revision 1 --fault-stage text_chunks
++# Expected injected failure.
++uv run python -m cognee_lab.identity retrieve --root outputs/stage6_multichunk_failure
++uv run python -m cognee_lab.identity status --root outputs/stage6_multichunk_failure
++uv run python -m cognee_lab.identity reconcile --root outputs/stage6_multichunk_failure --source doc01
++```
++
++Before recovery, doc01 is failed and withheld; doc02's fact remains available with both evidence chunks. Explicit reconciliation uses the saved budget/transition, repeats the whole-document rebuild, restores doc01 at 2 / 2 / 2 and resolves the same incident. Native tests cover interruption after chunk storage and after fact/identity graph publication. Existing earlier text-replacement failure boundaries remain regressions.
++
++## Scope and next work
++
++This is a native multi-chunk storage/provenance/maintenance demonstration with one captured fact per document. It does not evaluate multi-chunk LLM extraction, semantic interpretation of arbitrary edits, changes in group membership, span-specific aliases, automatic dependent-source reconsideration, generic source removal or standard Cognify/Update task-transform wiring. No backend-specific graph queries, provider code, schema changes or new dependencies are introduced. The only native runtime profile tested remains Cognee 1.6.2 with the existing configured stores.
++
++The original six-step build order is unchanged. Step 4 has stronger chunk-boundary and evidence coverage; arbitrary occurrence edits and dependency/source lifecycle work remain. Carry forward the distinction between occurrence location, consumed context and fact-producing provenance when building measurement or other structured overlays.
+diff --git a/docs/stage6_identity_text_changes.md b/docs/stage6_identity_text_changes.md
+--- a/docs/stage6_identity_text_changes.md
++++ b/docs/stage6_identity_text_changes.md
+@@ -44,7 +44,7 @@
+ 
+ The initial admission is deliberately narrow: one original plain-text Data item; a nonempty prefix insertion; stable group IDs, occurrence texts, group membership, assignments and construction recipes; exact shifted ranges; native TextChunker output and exact tiling. Arbitrary edits, changed interpretation/grouping, span-scoped variant remapping, span/record dependencies and additional consumed text documents require later work and are refused here. A dependent saved identity source referencing the edited original is refused before mutation; automatic reconsideration of that source is not implemented.
+ 
+-Maintain uses a full rebuild of this original document, even if an incremental update could preserve some chunks. The fixture still fits in one native chunk. A pure test exercises a split occurrence and requires both chunk references; this does not establish full native multi-chunk semantic extraction or cross-boundary interpretation.
++Maintain uses a full rebuild of this original document, even if an incremental update could preserve some chunks. The original default fixture still fits in one native chunk. The later [multi-chunk checkpoint](stage6_identity_multichunk.md) adds a native small-budget profile, split occurrence markers and two-chunk captured fact evidence. General multi-chunk semantic extraction and interpretation remain unevaluated.
+ 
+ ## Native write sequence
+ 
+@@ -91,4 +91,4 @@
+ 
+ Tests cover Unicode/document positions, stale offsets despite a current hash, changed interpretation admission, split occurrence coverage, dependent-source refusal, unsafe endpoint cascades, the real native edit/reopen/reconcile/withdraw sequence, doc02 preservation, and caught failures at all four boundaries above. Previous publication, withdrawal and unchanged-text revision tests remain regressions. The initial backend profile is still the only native profile exercised; code uses configured interfaces.
+ 
+-Remaining step-4 work includes arbitrary edits and deleted/replaced occurrences, context/meaning reconsideration, multi-chunk native fact extraction, incremental chunk reuse, span-scoped aliases, dependent-source propagation and coordinated full original/generated Data removal. Decision-model/LLM Describe quality remains a separate later evaluation. Saved previous/new text increases recovery-plan size; the existing planned size/metrics work should measure that overhead before introducing compression, shared blobs or a larger replay framework.
++Remaining step-4 work includes arbitrary edits and deleted/replaced occurrences, context/meaning reconsideration, general multi-chunk fact extraction beyond captured spans, incremental chunk reuse, span-scoped aliases, dependent-source propagation and coordinated full original/generated Data removal. Decision-model/LLM Describe quality remains a separate later evaluation. Saved previous/new text increases recovery-plan size; the existing planned size/metrics work should measure that overhead before introducing compression, shared blobs or a larger replay framework.
+diff --git a/results/cognee_identity_stage6_handoff.md b/results/cognee_identity_stage6_handoff.md
+--- a/results/cognee_identity_stage6_handoff.md
++++ b/results/cognee_identity_stage6_handoff.md
+@@ -362,7 +362,7 @@
+ | M0 / 1 | Validated runtime records/schema, exact native chunk mapping and portable bookkeeping/publication capability checks. First implementation exists; only the initial backend profile is tested |
+ | M1 / 2 | Tiny captured-decision custom Task pipeline -> real publication -> useful mention-anchored fact retrieval/original evidence -> explicit identity reconciliation. First native fixture demonstrated; this is not registered public SearchType or standard Cognify wiring |
+ | M2 / 3 | Multi-source overlap/support and withdrawal, plus broader exact-ID semantic conversion. Test both removal orders, shared contributions, singleton retention and unresolved mentions |
+-| M3 / 4 | Unchanged-text identity correction plus a captured prefix edit with native whole-document rechunking, shifted occurrences, evidence replacement and caught-failure reconciliation implemented. Arbitrary edits/group changes, multi-chunk semantic extraction, dependency propagation and abrupt-crash recovery remain |
++| M3 / 4 | Unchanged-text identity correction plus a captured prefix edit with native whole-document rechunking, shifted occurrences, evidence replacement and caught-failure reconciliation implemented. Captured multi-chunk fact ownership/evidence and split-occurrence maintenance also demonstrated. Arbitrary edits/group changes, general extraction, dependency propagation and abrupt-crash recovery remain |
+ | M4 / 5 | Complete B Task-transform wiring for standard Cognify/Remember/full Update/removal, consumed-store admission and broader context-sensitive traversal/delivery/offline diagnostics |
+ | M5 / 6 | Seeded rules/model Describe examples through the same pipeline, including abbreviations, shortenings and contextual references; separate consistency/model-quality evaluation |
+ | Checkpoint | Review R1–R6 evidence and G01–G18 transfer status before Stages 7–8 |
+@@ -428,3 +428,11 @@
+ The edit path refuses other saved sources depending on the edited original; it does not implement their reconsideration. Caught interruptions after original-memory removal, original ingestion, native chunk persistence and graph publication use the exact saved transition for an explicit full-rebuild retry. Pending/failed doc01 interpretation is withheld while doc02 remains usable. No LLM judgment occurs during replay; no rollback, atomic native visibility or hard-crash lock recovery is claimed.
+ 
+ This advances a bounded portion of step 4, not the complete milestone. The native fixture remains one chunk; pure mapping tests include an occurrence split across two chunks. Arbitrary edits, changed meanings/group membership, multi-chunk semantic extraction, span/record dependency remapping, dependent-source propagation, full source removal and standard pipeline wiring remain. The original six-step build order is unchanged. Commands, diagnostics and exact scope: ../docs/stage6_identity_text_changes.md.
++
++### Step 4 / M3: native multi-chunk checkpoint — 2026-10-19
++
++The captured chunked-fixture profile uses native budget 9, with six doc01 chunks and eight doc02 chunks. A 10-character Unicode prefix changes boundaries: doc01's “the controller” occurrence crosses two chunks and the group requires three marker chunks. Each captured fact has two original producing/evidence chunks; its final continuation contains no mention occurrence. Publication now records native production/contains/evidence for the exact captured fact span, separately from occurrence-marker placement, and verifies exact source-local owners plus current chunk UUID/index evidence.
++
++Retrieval requires some checked fact evidence to cover an occurrence and retains its checked continuation evidence. It does not discard the tail of a fact because that chunk lacks a mention marker, or assign every marker/context chunk as provenance. Healthy reconcile reads the actual native chunk budget; the durable text transition supplies it during failed-edit recovery. Repeated prefix edits verify that content IDs may recur while indexes change. Full-document rebuilding remains the implementation; content-ID continuity is not incremental execution reuse.
++
++Native sequence coverage includes publication, text edits, reopen/reconcile, another edit to revision 3, current original-memory survival after identity withdrawal, and explicit recovery after chunk storage or additive graph publication. Doc02's independent fact/evidence/contribution stays unchanged. The six-step build order and step-4 boundary remain: arbitrary occurrence/group changes, general extraction/Describe quality, dependency propagation and coordinated full source removal still require work. Commands and exact limits: ../docs/stage6_identity_multichunk.md.
+diff --git a/results/cognee_knowledge_integration_playbook.md b/results/cognee_knowledge_integration_playbook.md
+--- a/results/cognee_knowledge_integration_playbook.md
++++ b/results/cognee_knowledge_integration_playbook.md
+@@ -172,3 +172,14 @@
+ | Evidence currentness needs actual materialization checks | M, R | Native evidence cleanup/re-capture is verified; delivery additionally requires the checked current chunk map and the fact's native chunk owner | A surviving evidence row is not proof that a measurement still comes from the active source revision |
+ 
+ These are bounded native-interface results using captured decisions. They do not generalize a prefix-edit remapper into a Describe algorithm, establish scientific support, or implement automatic dependent-source propagation. The next integration should reuse the describe/publish/maintain/retrieve responsibility split, the endpoint/ownership checklist and these sequence tests, while supplying its own meaning and reconsideration rules. Size metrics, multi-chunk extraction and arbitrary-change selection remain follow-on work.
++
++## Multi-chunk maintenance evidence — 2026-10-19
++
++| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
++|---|---|---|---|
++| Occurrence markers and fact provenance are different chunk sets | D, P, M, R | One local mention group uses three marker chunks after an edit; a captured fact uses two producing/evidence chunks, including a continuation without a marker. Tests check required absences as well as presence | A value/unit/qualifier may extend beyond the chunk holding its reference; preserve actual producing provenance without treating all context as support |
++| Content identity does not establish current location or evidence index | D, M, R | Native content-derived chunk IDs can recur across edits while document ranges and indexes move; native evidence is re-captured and checked against current `(chunk_id, chunk_index)` | Keep source-version coordinates and table/section mapping separate from stable value or content IDs |
++| Construction policy must survive destructive maintenance | P, M | Reconcile reads native max_chunk_tokens; the saved failed-edit transition retains the same budget when chunks are absent. Missing/mixed native metadata is refused | Record the parser/segmentation policy needed to rebuild measurement structures before deleting the materialization; avoid silent default-policy fallback |
++| Retrieval must preserve complete admitted provenance fragments | P, M, R | The earlier marker-only evidence restriction would truncate a split fact. Delivery now retains checked native-owned continuation evidence once an occurrence-overlapping supporting chunk is present | Ensure a retrieved measurement includes its unit/qualifier fragment; source-location classification should not silently cut off the evidence needed to interpret it |
++
++These findings are demonstrated with captured fact spans and reviewed identity decisions. They do not establish scientific support or solve automatic span selection, semantic reconsideration or generic multi-chunk extraction. Reuse the responsibility split and sequence tests first; keep domain-specific extraction and meaning rules in the integration adapter.
+diff --git a/src/cognee_lab/identity/__main__.py b/src/cognee_lab/identity/__main__.py
+--- a/src/cognee_lab/identity/__main__.py
++++ b/src/cognee_lab/identity/__main__.py
+@@ -57,6 +57,7 @@
+         choices=[
+             "fixture",
+             "multi-fixture",
++            "chunked-fixture",
+             "revise",
+             "edit-text",
+             "withdraw",
+@@ -118,7 +119,7 @@
+             and args.fault_stage.startswith(("withdraw_", "replace_"))
+         ):
+             parser.error("Fault stage does not match the selected operation")
+-    if args.command in {"fixture", "multi-fixture"}:
++    if args.command in {"fixture", "multi-fixture", "chunked-fixture"}:
+         if root.exists():
+             parser.error("Fixture root already exists; choose a new directory")
+         root.mkdir(parents=True, exist_ok=False)
+@@ -133,7 +134,7 @@
+             from .text_fixture import run
+         elif args.command == "revise":
+             from .revisions import run
+-        elif args.command in {"multi-fixture", "withdraw"} or (
++        elif args.command in {"multi-fixture", "chunked-fixture", "withdraw"} or (
+             args.command == "reconcile" and (root / "multi-fixture-info.json").exists()
+         ):
+             from .multisource import run
+diff --git a/src/cognee_lab/identity/captured_chunks.py b/src/cognee_lab/identity/captured_chunks.py
+new file mode 100644
+--- /dev/null
++++ b/src/cognee_lab/identity/captured_chunks.py
+@@ -0,0 +1,86 @@
++"""Exact chunk binding and fact spans for the captured fixture, not inference."""
++
++from .models import ChunkInput
++from .validation import IntentError, map_chunks
++
++FACT_TEXT = "it limits oscillations"
++
++
++def bind_chunks(payload, text, chunks):
++    """Keep the complete native map; only occurrence-overlapping chunks mark M."""
++    key = payload["original_input_ref"]
++    payload["inputs"] = {
++        k: v for k, v in payload["inputs"].items() if v["kind"] != "chunk"
++    }
++    spans = map_chunks(text, chunks)
++    for i, chunk in enumerate(sorted(chunks, key=lambda c: c.chunk_index), 1):
++        start, end = spans[str(chunk.id)]
++        payload["inputs"][f"chunk{i:02}"] = dict(
++            kind="chunk", document_ref=key, chunk_id=str(chunk.id), start=start, end=end
++        )
++    for group in payload["mention_groups"].values():
++        group["chunk_refs"] = [
++            k
++            for k, item in payload["inputs"].items()
++            if item["kind"] == "chunk"
++            and item["document_ref"] == group["document_ref"]
++            and any(
++                o["start"] < item["end"] and item["start"] < o["end"]
++                for o in group["occurrences"]
++            )
++        ]
++
++
++def fact_chunks(source, chunks):
++    """The captured fact starts at the explicitly stored 'it' occurrence.
++
++    Its whole literal span is supplied fixture knowledge. This does not derive
++    facts from arbitrary text or assign all group chunks as fact evidence.
++    """
++    group = source.mention_groups["g01"]
++    starts = [o.start for o in group.occurrences if o.text == "it"]
++    if len(starts) != 1:
++        raise IntentError(
++            "fixture_shape", "Captured fact requires one explicit 'it' occurrence"
++        )
++    ordered = sorted(chunks, key=lambda c: c.chunk_index)
++    text = "".join(c.text for c in ordered)
++    mapping = map_chunks(text, ordered)
++    start, end = starts[0], starts[0] + len(FACT_TEXT)
++    if text[start:end] != FACT_TEXT:
++        raise IntentError(
++            "fixture_shape", "Captured fact span differs from current text"
++        )
++    declared = {
++        str(i.chunk_id): (i.start, i.end)
++        for i in source.inputs.values()
++        if isinstance(i, ChunkInput)
++    }
++    if mapping != declared:
++        raise IntentError(
++            "chunk_mapping",
++            "Captured semantics requires the complete checked chunk mapping",
++        )
++    return [
++        c
++        for c in ordered
++        if mapping[str(c.id)][0] < end and start < mapping[str(c.id)][1]
++    ]
++
++
++async def recorded_budget(source, graph):
++    """Native construction metadata, not an extra role/interpretation registry."""
++    values = set()
++    for item in source.inputs.values():
++        if isinstance(item, ChunkInput):
++            node = await graph.get_node(str(item.chunk_id))
++            if node is None or node.get("max_chunk_tokens") is None:
++                raise IntentError(
++                    "chunk_policy", "Native chunk budget is missing or inconsistent"
++                )
++            values.add(node["max_chunk_tokens"])
++    if len(values) != 1 or not all(type(n) is int and n > 0 for n in values):
++        raise IntentError(
++            "chunk_policy", "Native chunk budget is missing or inconsistent"
++        )
++    return values.pop()
+diff --git a/src/cognee_lab/identity/fixture.py b/src/cognee_lab/identity/fixture.py
+--- a/src/cognee_lab/identity/fixture.py
++++ b/src/cognee_lab/identity/fixture.py
+@@ -7,7 +7,7 @@
+ from .models import IdentitySource
+ from .publish import Publisher
+ from .retrieve import retrieve
+-from .validation import IntentError, map_chunks
++from .validation import IntentError
+ 
+ FIXTURES = Path(__file__).resolve().parents[3] / "tests/fixtures/identity"
+ SEED_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:seed-document")
+@@ -34,9 +34,18 @@
+     )
+ 
+ 
+-async def load_chunks(source, ctx):
++async def load_chunks(source, ctx, *, budget=None):
+     from cognee.modules.chunking.TextChunker import TextChunker
+     from cognee.modules.data.processing.document_types import TextDocument
++
++    if budget is None:
++        if source is None:
++            budget = 512
++        else:
++            from cognee.infrastructure.databases.graph import get_graph_engine
++            from .captured_chunks import recorded_budget
++
++            budget = await recorded_budget(source, await get_graph_engine())
+ 
+     doc = TextDocument(
+         id=ctx.data_item.id,
+@@ -45,23 +54,33 @@
+         external_metadata=None,
+     )
+     return [
+-        chunk async for chunk in doc.read(chunker_cls=TextChunker, max_chunk_size=512)
++        chunk
++        async for chunk in doc.read(chunker_cls=TextChunker, max_chunk_size=budget)
+     ]
+ 
+ 
+ async def write_semantics(publisher, source, chunks, ctx):
++    from cognee.modules.provenance.edge_evidence.persistence import (
++        flush_context_provenance,
++    )
++
++    from .captured_chunks import fact_chunks
++
++    selected = fact_chunks(source, chunks)
++    group = source.mention_groups["g01"]
++    for chunk in selected:
++        await write_fact_chunk(publisher, source, chunk, group, ctx)
++    await flush_context_provenance(ctx)
++
++
++async def write_fact_chunk(publisher, source, chunk, group, ctx):
+     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+     from cognee.modules.engine.models import Entity
+     from cognee.modules.graph.utils import ensure_default_edge_properties
+     from cognee.modules.provenance.edge_evidence.capture import capture_graph_provenance
+-    from cognee.modules.provenance.edge_evidence.persistence import (
+-        flush_context_provenance,
+-    )
+     from cognee.tasks.storage.index_data_points import index_data_points
+     from cognee.tasks.storage.index_graph_edges import index_graph_edges
+ 
+-    chunk = chunks[0]
+-    group = source.mention_groups["g01"]
+     ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunk.id)
+     target = await publisher.graph.get_node(str(OSCILLATIONS_ID))
+     if target is None:
+@@ -98,13 +117,13 @@
+     chunk._produced_edge_identities = [(edge[0], edge[1], edge[2])]
+     chunk._provenance_edges = edges
+     await capture_graph_provenance([chunk], [*edges, *contained], ctx)
+-    await flush_context_provenance(ctx)
+ 
+ 
+ async def verify_semantics(publisher, source, chunks, ctx):
+     from cognee.infrastructure.databases.provenance import (
+         EdgeIdentity,
+         make_chunk_source_ref_key,
++        parse_source_ref_key,
+     )
+     from cognee.modules.engine.utils import generate_edge_object_id
+     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
+@@ -112,25 +131,44 @@
+     mid = str(source.mention_groups["g01"].entity_id)
+     identity = EdgeIdentity(mid, str(OSCILLATIONS_ID), "limits")
+     metadata = (await publisher.graph.get_edge_delete_data([identity])).get(identity)
+-    ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunks[0].id)
+-    if metadata is None or ref not in metadata.source_ref_keys:
++    from .captured_chunks import fact_chunks
++
++    expected = fact_chunks(source, chunks)
++    refs = {
++        make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, c.id)
++        for c in expected
++    }
++    own_refs = set()
++    if metadata is not None:
++        for ref in metadata.source_ref_keys:
++            parsed = parse_source_ref_key(ref)
++            if (
++                parsed.dataset_id == source.dataset_id
++                and parsed.data_id == ctx.data_item.id
++            ):
++                own_refs.add(ref)
++    if metadata is None or own_refs != refs:
+         raise IntentError(
+             "semantic_missing",
+             "Original-chunk fact ownership missing; explicitly rebuild",
+         )
+     eid = UUID(generate_edge_object_id(mid, str(OSCILLATIONS_ID), "limits"))
+-    evidence = await get_edge_evidence_records([eid], source.dataset_id)
+-    if not any(
+-        e.data_id == ctx.data_item.id and e.chunk_id == chunks[0].id for e in evidence
+-    ):
++    evidence = await get_edge_evidence_records(
++        [eid], source.dataset_id, per_edge_limit=100, total_limit=100
++    )
++    own = {
++        (e.chunk_id, e.chunk_index) for e in evidence if e.data_id == ctx.data_item.id
++    }
++    if own != {(c.id, c.chunk_index) for c in expected}:
+         raise IntentError(
+             "evidence_missing", "Native original evidence missing; explicitly rebuild"
+         )
+-    if not await publisher.vector.retrieve("DocumentChunk_text", [str(chunks[0].id)]):
+-        raise IntentError("verify_index", "Original chunk vector missing")
+-
+-
+-async def prepare(root, *, multi=False):
++    for chunk in chunks:
++        if not await publisher.vector.retrieve("DocumentChunk_text", [str(chunk.id)]):
++            raise IntentError("verify_index", "Original chunk vector missing")
++
++
++async def prepare(root, *, multi=False, chunk_budget=512, source_text=None):
+     import cognee
+     from cognee.modules.engine.models import Entity
+     from cognee.tasks.ingestion.data_item import DataItem
+@@ -141,7 +179,28 @@
+     )
+     original_id = UUID(template["inputs"]["doc01"]["data_id"])
+     generated_id = UUID(template["identity_data_id"])
+-    (root / "source.txt").write_bytes((FIXTURES / "source.txt").read_bytes())
++    text = (
++        source_text
++        if source_text is not None
++        else (FIXTURES / "source.txt").read_text()
++    )
++    (root / "source.txt").write_text(text)
++    if source_text is not None:
++        from .validation import text_digest
++
++        template["inputs"]["doc01"]["text_sha256"] = text_digest(text)
++        template["mention_groups"]["g01"]["occurrences"] = [
++            dict(
++                start=text.index("the controller"),
++                end=text.index("the controller") + len("the controller"),
++                text="the controller",
++            ),
++            dict(
++                start=text.index("it limits"),
++                end=text.index("it limits") + 2,
++                text="it",
++            ),
++        ]
+     (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
+     await cognee.add(
+         [
+@@ -167,19 +226,14 @@
+     await publisher.graph.update_node(str(a), {"fixture_sentinel": "preserve me"})
+     # Deliberately different creation values must not overwrite a borrowed node.
+     recipe["description"] = "Creation seed only; never overwrite an existing Entity."
+-    chunks = await load_chunks(None, original_ctx)
+-    if len(chunks) != 1:
+-        raise IntentError("fixture_shape", "Tiny fixture expected one native chunk")
+-    text = (root / "source.txt").read_text()
+-    mapping = map_chunks(text, chunks)
+-    start, end = mapping[str(chunks[0].id)]
+-    template["inputs"]["chunk01"].update(
+-        chunk_id=str(chunks[0].id), start=start, end=end
+-    )
++    chunks = await load_chunks(None, original_ctx, budget=chunk_budget)
+     if multi:
+         from .multisource import add_lifecycle_records
+ 
+         add_lifecycle_records(template, "doc01", text)
++    from .captured_chunks import bind_chunks
++
++    bind_chunks(template, text, chunks)
+     await add_data_points(chunks, ctx=original_ctx)
+     source = IdentitySource.model_validate_json(json.dumps(template))
+     (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
+@@ -211,11 +265,8 @@
+         source = IdentitySource.model_validate_json(
+             (root / "identity.json").read_text()
+         )
+-        original_ctx = await context_for(
+-            source.inputs[source.original_input_ref].data_id
+-        )
+-        chunks = await load_chunks(source, original_ctx)
+         publisher = await Publisher.configured()
++        original_ctx, chunks = None, None
+     dataset_id = source.dataset_id
+     args._fixture_publisher = publisher
+     if args.command == "status":
+@@ -225,6 +276,11 @@
+         )
+     if args.command == "retrieve":
+         return await retrieve(publisher, dataset_id, args.query)
++    if chunks is None:
++        original_ctx = await context_for(
++            source.inputs[source.original_input_ref].data_id
++        )
++        chunks = await load_chunks(source, original_ctx)
+ 
+     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+     from cognee.modules.pipelines.tasks.task import Task
+diff --git a/src/cognee_lab/identity/multisource.py b/src/cognee_lab/identity/multisource.py
+--- a/src/cognee_lab/identity/multisource.py
++++ b/src/cognee_lab/identity/multisource.py
+@@ -7,7 +7,7 @@
+ from .native import edge_metadata
+ from .publish import Publisher, contributions
+ from .retrieve import retrieve
+-from .validation import IntentError, map_chunks, text_digest
++from .validation import IntentError, text_digest
+ 
+ 
+ def fixture_id(label):
+@@ -45,7 +45,7 @@
+     )
+ 
+ 
+-async def prepare(root):
++async def prepare(root, *, chunked=False):
+     import cognee
+     from cognee.tasks.ingestion.data_item import DataItem
+     from cognee.tasks.storage import add_data_points
+@@ -56,7 +56,20 @@
+             "unsupported_version", "First fixture requires inspected Cognee 1.6.2"
+         )
+ 
+-    first, chunks1, ctx1, publisher = await prepare_first(root, multi=True)
++    budget = 9 if chunked else 512
++    text = None
++    if chunked:
++        from .fixture import FIXTURES
++
++        text = (
++            (FIXTURES / "source.txt")
++            .read_text()
++            .replace(". The controller", ", the controller")
++            .replace("; it", ", and it")
++        )
++    first, chunks1, ctx1, publisher = await prepare_first(
++        root, multi=True, chunk_budget=budget, source_text=text
++    )
+     payload = first.model_dump(mode="json")
+     payload["identity_data_id"] = fixture_id("doc02:identity")
+     payload["inputs"]["doc01"]["data_id"] = fixture_id("doc02:original")
+@@ -72,17 +85,9 @@
+         skip_connection_test=True,
+     )
+     ctx2 = await context_for(fixture_id("doc02:original"))
+-    chunks2 = await load_chunks(None, ctx2)
++    chunks2 = await load_chunks(None, ctx2, budget=budget)
+     await add_data_points(chunks2, ctx=ctx2)
+-    if len(chunks2) != 1:
+-        raise IntentError(
+-            "fixture_shape", "Two-source example expects one chunk per document"
+-        )
+-    start, end = map_chunks(text, chunks2)[str(chunks2[0].id)]
+     payload["inputs"]["doc01"]["text_sha256"] = text_digest(text)
+-    payload["inputs"]["chunk01"].update(
+-        chunk_id=str(chunks2[0].id), start=start, end=end
+-    )
+     old_mid = str(first.mention_groups["g01"].entity_id)
+     new_mid = fixture_id("doc02:mention")
+     payload["entity_constructions"][new_mid] = payload["entity_constructions"].pop(
+@@ -92,6 +97,9 @@
+     for key in [fixture_id("doc01:singleton"), fixture_id("doc01:unresolved")]:
+         payload["entity_constructions"].pop(key)
+     add_lifecycle_records(payload, "doc02", text)
++    from .captured_chunks import bind_chunks
++
++    bind_chunks(payload, text, chunks2)
+     second = IdentitySource.model_validate_json(json.dumps(payload))
+     (root / "identity02.json").write_text(second.model_dump_json(indent=2) + "\n")
+     await cognee.add(
+@@ -104,6 +112,10 @@
+         sources={"doc01": "identity.json", "doc02": "identity02.json"},
+     )
+     (root / "multi-fixture-info.json").write_text(json.dumps(info, indent=2))
++    if chunked:
++        (root / "chunked-fixture-info.json").write_text(
++            json.dumps(dict(chunk_budget=budget, prefix="Δ review: "), indent=2)
++        )
+     return publisher, {
+         "doc01": (first, chunks1, ctx1),
+         "doc02": (second, chunks2, ctx2),
+@@ -184,6 +196,9 @@
+     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+     from cognee.modules.engine.utils import generate_edge_object_id
+     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
++    from .captured_chunks import fact_chunks
++    from .models import ChunkInput
++    from types import SimpleNamespace
+ 
+     first = sources["doc01"]
+     # Keep the original shared edge/controller visible after doc01 retargets.
+@@ -222,14 +237,57 @@
+         registered = await read_registered(source)
+         mid = source.mention_groups["g01"].entity_id
+         unresolved = source.mention_groups["g02"].entity_id
+-        chunk = source.inputs["chunk01"].chunk_id
++        group = source.mention_groups["g01"]
++        mapped = [i for i in source.inputs.values() if isinstance(i, ChunkInput)]
++        chunks = []
++        for item in mapped:
++            node = await publisher.graph.get_node(str(item.chunk_id))
++            if node is not None:
++                chunks.append(
++                    SimpleNamespace(
++                        id=item.chunk_id,
++                        chunk_index=node["chunk_index"],
++                        text=node["text"],
++                    )
++                )
++        selected = fact_chunks(source, chunks)
+         doc = source.inputs[source.original_input_ref]
+         fact = await edge_metadata(publisher.graph, mid, OSCILLATIONS_ID, "limits")
+-        ref = make_chunk_source_ref_key(source.dataset_id, doc.data_id, chunk)
++        refs = {
++            make_chunk_source_ref_key(source.dataset_id, doc.data_id, c.id)
++            for c in selected
++        }
+         evidence = await get_edge_evidence_records(
+             [UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))],
+             source.dataset_id,
+-        )
++            per_edge_limit=100,
++            total_limit=100,
++        )
++        chunk_checks = []
++        for i in mapped:
++            node = next(c for c in chunks if c.id == i.chunk_id)
++            chunk_ref = make_chunk_source_ref_key(
++                source.dataset_id, doc.data_id, i.chunk_id
++            )
++            chunk_checks.append(
++                dict(
++                    chunk_id=str(i.chunk_id),
++                    start=i.start,
++                    end=i.end,
++                    chunk_index=node.chunk_index,
++                    mention_marker_present=await publisher.graph.has_edge(
++                        str(i.chunk_id), str(mid), "has_identity_mention"
++                    ),
++                    owns_captured_fact=fact is not None
++                    and chunk_ref in fact.source_ref_keys,
++                    evidence_present=any(
++                        e.data_id == doc.data_id
++                        and e.chunk_id == i.chunk_id
++                        and e.chunk_index == node.chunk_index
++                        for e in evidence
++                    ),
++                )
++            )
+         result["sources"][label] = dict(
+             identity_data_id=str(source.identity_data_id),
+             state=rows[str(source.identity_data_id)]["state"],
+@@ -241,19 +299,34 @@
+                 source.mention_resolutions["r01"].target_entity_id
+             ),
+             mention_entity_id=str(mid),
+-            original_marker_present=await publisher.graph.has_edge(
+-                str(chunk), str(mid), "has_identity_mention"
++            original_marker_present=all(
++                [
++                    await publisher.graph.has_edge(
++                        str(source.inputs[k].chunk_id), str(mid), "has_identity_mention"
++                    )
++                    for k in group.chunk_refs
++                ]
+             ),
+             original_fact_present=await publisher.graph.has_edge(
+                 str(mid), str(OSCILLATIONS_ID), "limits"
+             ),
+             original_fact_owned_by_chunk=fact is not None
+-            and ref in fact.source_ref_keys,
+-            original_evidence_present=any(
+-                e.data_id == doc.data_id and e.chunk_id == chunk for e in evidence
+-            ),
+-            unresolved_marker_present=await publisher.graph.has_edge(
+-                str(chunk), str(unresolved), "has_identity_mention"
++            and refs <= set(fact.source_ref_keys),
++            original_evidence_present={
++                (e.chunk_id, e.chunk_index)
++                for e in evidence
++                if e.data_id == doc.data_id
++            }
++            == {(c.id, c.chunk_index) for c in selected},
++            unresolved_marker_present=all(
++                [
++                    await publisher.graph.has_edge(
++                        str(source.inputs[k].chunk_id),
++                        str(unresolved),
++                        "has_identity_mention",
++                    )
++                    for k in source.mention_groups["g02"].chunk_refs
++                ]
+             ),
+             unresolved_entity_present=await publisher.graph.get_node(str(unresolved))
+             is not None,
+@@ -266,6 +339,12 @@
+                     "Entity_name", [fixture_id(label + ":singleton")]
+                 )
+             ),
++            chunk_count=len(mapped),
++            chunk_mapping=chunk_checks,
++            mention_marker_chunk_ids=[
++                str(source.inputs[k].chunk_id) for k in group.chunk_refs
++            ],
++            fact_evidence_chunk_ids=[str(c.id) for c in selected],
+         )
+     for row in rows.values():
+         if row["plan"].get("text_change") and row["state"] == "current":
+@@ -280,8 +359,10 @@
+ async def run(args, root):
+     from .fixture import context_for, load_chunks
+ 
+-    if args.command == "multi-fixture":
+-        publisher, prepared = await prepare(root)
++    if args.command in {"multi-fixture", "chunked-fixture"}:
++        publisher, prepared = await prepare(
++            root, chunked=args.command == "chunked-fixture"
++        )
+         args._fixture_publisher = publisher
+         sources = {label: value[0] for label, value in prepared.items()}
+         for label, (source, chunks, ctx) in prepared.items():
+diff --git a/src/cognee_lab/identity/retrieve.py b/src/cognee_lab/identity/retrieve.py
+--- a/src/cognee_lab/identity/retrieve.py
++++ b/src/cognee_lab/identity/retrieve.py
+@@ -308,16 +308,16 @@
+                 )
+                 if subject in mentions:
+                     group, decision, key = mentions[subject]
+-                    # Native evidence is per chunk; ensure it actually covers this
+-                    # group, not a context-only passage.
++                    # At least one supporting chunk must cover an occurrence.
++                    # Additional checked chunks can hold the rest of the fact.
+                     allowed_chunks = {
+                         str(source.inputs[k].chunk_id) for k in group.chunk_refs
+                     }
+-                    entry["evidence"] = [
+-                        e for e in checked if e["chunk_id"] in allowed_chunks
+-                    ]
+-                    if not entry["evidence"]:
++                    if not any(e["chunk_id"] in allowed_chunks for e in checked):
+                         continue
++                    # A captured fact can span a marker chunk and a continuation
++                    # chunk. Keep its checked native-owned evidence together;
++                    # continuation evidence does not create a mention marker.
+                     entry["identity"] = dict(
+                         state="accepted",
+                         target_entity_id=str(decision.target_entity_id),
+diff --git a/src/cognee_lab/identity/text_fixture.py b/src/cognee_lab/identity/text_fixture.py
+--- a/src/cognee_lab/identity/text_fixture.py
++++ b/src/cognee_lab/identity/text_fixture.py
+@@ -7,12 +7,12 @@
+ from .multisource import current_sources, snapshot
+ from .publish import Publisher
+ from .text_changes import TextChange, chunk_text, original_context, read_original
+-from .validation import IntentError, map_chunks, text_digest
++from .validation import IntentError, text_digest
+ 
+ PREFIX = "Revision note: Δ calibration schedule updated.\n\n"
+ 
+ 
+-def describe_prefix_edit(old, text, chunks):
++def describe_prefix_edit(old, text, chunks, *, prefix=PREFIX):
+     """Exact remapping for a known edit, with captured review of all local groups.
+ 
+     Not a general Describe algorithm: no nearest-text matching, implicit identity
+@@ -22,15 +22,6 @@
+     payload["revision"] += 1
+     key = old.original_input_ref
+     payload["inputs"][key]["text_sha256"] = text_digest(text)
+-    payload["inputs"] = {
+-        k: v for k, v in payload["inputs"].items() if v["kind"] != "chunk"
+-    }
+-    spans = map_chunks(text, chunks)
+-    for i, chunk in enumerate(sorted(chunks, key=lambda c: c.chunk_index), 1):
+-        start, end = spans[str(chunk.id)]
+-        payload["inputs"][f"chunk{i:02}"] = dict(
+-            kind="chunk", document_ref=key, chunk_id=str(chunk.id), start=start, end=end
+-        )
+     payload["producers"]["text_review"] = dict(
+         method="captured_fixture",
+         implementation="stage6-captured-prefix-edit",
+@@ -40,23 +31,17 @@
+     )
+     for group in payload["mention_groups"].values():
+         for occurrence in group["occurrences"]:
+-            occurrence["start"] += len(PREFIX)
+-            occurrence["end"] += len(PREFIX)
+-        group["chunk_refs"] = [
+-            k
+-            for k, item in payload["inputs"].items()
+-            if item["kind"] == "chunk"
+-            and any(
+-                o["start"] < item["end"] and item["start"] < o["end"]
+-                for o in group["occurrences"]
+-            )
+-        ]
++            occurrence["start"] += len(prefix)
++            occurrence["end"] += len(prefix)
+         group["producer_ref"] = "text_review"
+     for item in [
+         *payload["mention_resolutions"].values(),
+         *payload["variant_assignments"].values(),
+     ]:
+         item["producer_ref"] = "text_review"
++    from .captured_chunks import bind_chunks
++
++    bind_chunks(payload, text, chunks)
+     return IdentitySource.model_validate_json(json.dumps(payload))
+ 
+ 
+@@ -89,11 +74,6 @@
+     generated = await context_for(source.identity_data_id)
+     original = await original_context(source, generated)
+     prepared = await chunk_text(change.text, original, change.chunk_budget)
+-    # This tiny captured fact writer is intentionally limited to a single chunk.
+-    if len(prepared) != 1:
+-        raise IntentError(
+-            "fixture_shape", "Captured text fixture expects one native chunk"
+-        )
+     chunks = {str(c.id): c for c in prepared}
+ 
+     async def write():
+@@ -193,6 +173,18 @@
+             g.entity_id == old.mention_groups[k].entity_id
+             for k, g in source.mention_groups.items()
+         ),
++        chunk_budget=change.chunk_budget,
++        previous_chunk_mapping=[
++            dict(chunk_id=str(i.chunk_id), start=i.start, end=i.end)
++            for i in old.inputs.values()
++            if isinstance(i, ChunkInput)
++        ],
++        chunk_mapping=[
++            dict(chunk_id=str(i.chunk_id), start=i.start, end=i.end)
++            for i in source.inputs.values()
++            if isinstance(i, ChunkInput)
++        ],
++        content_ids_present_in_both=sorted(old_ids & new_ids),
+         groups={
+             k: dict(
+                 previous_occurrences=[
+@@ -200,6 +192,11 @@
+                 ],
+                 occurrences=[o.model_dump() for o in g.occurrences],
+                 chunk_refs=g.chunk_refs,
++                previous_marker_chunk_ids=[
++                    str(old.inputs[k].chunk_id)
++                    for k in old.mention_groups[k].chunk_refs
++                ],
++                marker_chunk_ids=[str(source.inputs[k].chunk_id) for k in g.chunk_refs],
+             )
+             for k, g in source.mention_groups.items()
+         },
+@@ -231,11 +228,20 @@
+ 
+     ctx = await context_for(old.identity_data_id)
+     before = await read_original(old, ctx)
+-    change = TextChange(previous_text=before, text=PREFIX + before)
++    from .captured_chunks import recorded_budget
++
++    prefix = PREFIX
++    if (root / "chunked-fixture-info.json").exists():
++        prefix = json.loads((root / "chunked-fixture-info.json").read_text())["prefix"]
++    change = TextChange(
++        previous_text=before,
++        text=prefix + before,
++        chunk_budget=await recorded_budget(old, publisher.graph),
++    )
+     chunks = await chunk_text(
+         change.text, await original_context(old, ctx), change.chunk_budget
+     )
+-    intended = describe_prefix_edit(old, change.text, chunks)
++    intended = describe_prefix_edit(old, change.text, chunks, prefix=prefix)
+     (root / f"identity_doc01_text_revision{intended.revision}.json").write_text(
+         intended.model_dump_json(indent=2) + "\n"
+     )
+diff --git a/tests/test_identity_chunks.py b/tests/test_identity_chunks.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_identity_chunks.py
+@@ -0,0 +1,79 @@
++import json
++from types import SimpleNamespace
++from uuid import uuid4
++from pathlib import Path
++
++import pytest
++
++from cognee_lab.identity.captured_chunks import (
++    bind_chunks,
++    fact_chunks,
++    recorded_budget,
++)
++from cognee_lab.identity.models import IdentitySource
++from cognee_lab.identity.text_fixture import describe_prefix_edit
++from cognee_lab.identity.validation import IntentError
++
++
++def split_example(payload):
++    text = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
++    first, second = text.index("The controller") + 4, text.index("it limits") + 3
++    chunks = [
++        SimpleNamespace(id=uuid4(), chunk_index=i, text=value)
++        for i, value in enumerate([text[:first], text[first:second], text[second:]])
++    ]
++    bind_chunks(payload, text, chunks)
++    return text, chunks, IdentitySource.model_validate_json(json.dumps(payload))
++
++
++def test_fact_support_and_mention_markers_have_distinct_exact_chunk_sets(
++    source_payload,
++):
++    text, chunks, source = split_example(source_payload)
++    # The first occurrence crosses a boundary; the fact crosses a different one.
++    assert source.mention_groups["g01"].chunk_refs == ["chunk01", "chunk02"]
++    assert [c.id for c in fact_chunks(source, chunks)] == [chunks[1].id, chunks[2].id]
++    assert "it limits oscillations" in chunks[1].text + chunks[2].text
++    # Context containing an earlier occurrence is not evidence for this fact.
++    assert chunks[0].id not in {c.id for c in fact_chunks(source, chunks)}
++
++
++async def test_native_budget_is_read_from_all_chunk_construction_metadata(
++    source_payload,
++):
++    text, chunks, source = split_example(source_payload)
++
++    class Graph:
++        async def get_node(self, _):
++            return {"max_chunk_tokens": 9}
++
++    assert await recorded_budget(source, Graph()) == 9
++
++
++@pytest.mark.parametrize("values", [[None, None, None], [9, None, 9], [9, 10, 9]])
++async def test_missing_or_mixed_chunk_budget_is_refused(source_payload, values):
++    text, chunks, source = split_example(source_payload)
++    metadata = {str(c.id): n for c, n in zip(chunks, values)}
++
++    class Graph:
++        async def get_node(self, key):
++            return {"max_chunk_tokens": metadata[key]}
++
++    with pytest.raises(IntentError, match="missing or inconsistent"):
++        await recorded_budget(source, Graph())
++
++
++def test_captured_prefix_is_an_explicit_input_and_does_not_use_byte_offsets(
++    source_payload,
++):
++    text, chunks, source = split_example(source_payload)
++    prefix = "Δ review: "
++    new = [SimpleNamespace(id=uuid4(), chunk_index=0, text=prefix + text)]
++    intended = describe_prefix_edit(source, prefix + text, new, prefix=prefix)
++    for a, b in zip(
++        source.mention_groups["g01"].occurrences,
++        intended.mention_groups["g01"].occurrences,
++    ):
++        assert b.start - a.start == len(prefix) == 10
++        assert (prefix + text)[b.start : b.end] == b.text
++    assert len(prefix.encode("utf-8")) == 11
+diff --git a/tests/test_identity_chunks_native.py b/tests/test_identity_chunks_native.py
+new file mode 100644
+--- /dev/null
++++ b/tests/test_identity_chunks_native.py
+@@ -0,0 +1,169 @@
++"""Captured semantics across real native chunk boundaries and source revisions."""
++
++import json
++
++import pytest
++
++from test_identity_native import command
++from cognee_lab.identity.captured_chunks import FACT_TEXT
++
++PREFIX = "Δ review: "
++
++
++def check_chunks(result):
++    assert len(result["result"]["facts"]) == 2
++    for label, source in result["sources"].items():
++        assert source["chunk_count"] > 1
++        assert source["original_marker_present"]
++        assert (
++            source["original_fact_owned_by_chunk"]
++            and source["original_evidence_present"]
++        )
++        mapping = source["chunk_mapping"]
++        assert [c["chunk_index"] for c in mapping] == list(range(len(mapping)))
++        assert mapping[0]["start"] == 0
++        assert all(a["end"] == b["start"] for a, b in zip(mapping, mapping[1:]))
++        marker_ids = set(source["mention_marker_chunk_ids"])
++        support_ids = set(source["fact_evidence_chunk_ids"])
++        assert len(marker_ids) >= 2 and len(support_ids) == 2
++        assert support_ids - marker_ids  # fact continuation with no mention marker
++        assert marker_ids - support_ids  # another occurrence is not this fact's support
++        for c in mapping:
++            assert c["mention_marker_present"] == (c["chunk_id"] in marker_ids)
++            assert c["owns_captured_fact"] == (c["chunk_id"] in support_ids)
++            assert c["evidence_present"] == (c["chunk_id"] in support_ids)
++        fact = next(
++            f
++            for f in result["result"]["facts"]
++            if f["source_id"] == source["mention_entity_id"]
++        )
++        assert {e["chunk_id"] for e in fact["evidence"]} == support_ids
++        ordered = sorted(fact["evidence"], key=lambda e: e["chunk_index"])
++        assert FACT_TEXT in "".join(e["text"] for e in ordered)
++        for e in ordered:
++            assert e["chunk_index"] == next(
++                c["chunk_index"] for c in mapping if c["chunk_id"] == e["chunk_id"]
++            )
++
++
++def check_edit(before, after, revision=2):
++    check_chunks(after)
++    a, b = after["sources"]["doc01"], after["sources"]["doc02"]
++    assert (
++        a["saved_revision"]
++        == a["verified_revision"]
++        == a["registered_revision"]
++        == revision
++    )
++    assert b == before["sources"]["doc02"]
++    assert after["borrowed_entity"] == before["borrowed_entity"]
++    assert len(after["shared_variant"]["owners"]) == 2
++    old_other = next(
++        c
++        for c in before["shared_variant"]["contributions"]
++        if c["identity_data_id"] == b["identity_data_id"]
++    )
++    assert old_other in after["shared_variant"]["contributions"]
++    assert (
++        next(
++            c
++            for c in after["shared_variant"]["contributions"]
++            if c["identity_data_id"] == a["identity_data_id"]
++        )["revision"]
++        == revision
++    )
++    oldfacts = {f["source_id"]: f for f in before["result"]["facts"]}
++    for fact in after["result"]["facts"]:
++        old = oldfacts[fact["source_id"]]
++        assert fact["edge_id"] == old["edge_id"]
++        if fact["source_id"] == a["mention_entity_id"]:
++            for o, n in zip(
++                old["identity"]["occurrences"], fact["identity"]["occurrences"]
++            ):
++                assert n["start"] == o["start"] + len(PREFIX)
++                assert n["end"] == o["end"] + len(PREFIX)
++        else:
++            assert fact == old
++    assert a["chunk_mapping"] != before["sources"]["doc01"]["chunk_mapping"]
++    if "text_changes" in after:
++        change = after["text_changes"][0]
++        assert change["chunk_budget"] == 9 and change["position_shift"] == 10
++        assert (
++            change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
++        )
++        assert (
++            change["mention_ids_preserved"] and change["evidence_uses_current_chunks"]
++        )
++
++
++@pytest.mark.integration
++def test_native_multichunk_edit_reconcile_repeated_edit_and_withdraw(tmp_path):
++    root = tmp_path / "chunked"
++    command(root, "chunked-fixture")
++    before = json.loads((root / "multisource_result.json").read_text())
++    check_chunks(before)
++    assert before["sources"]["doc01"]["chunk_count"] == 6
++    command(root, "edit-text", "--expected-revision", "1")
++    after = json.loads((root / "text_revision_result.json").read_text())
++    check_edit(before, after)
++    # After the edit 'the controller' itself crosses a native chunk boundary.
++    change = after["text_changes"][0]
++    assert len(change["groups"]["g01"]["previous_marker_chunk_ids"]) == 2
++    assert len(change["groups"]["g01"]["marker_chunk_ids"]) == 3
++    assert change["content_ids_present_in_both"]
++    assert after["recovery_events"] == []
++    query = json.loads(command(root, "retrieve").stdout)
++    assert query["facts"] == after["result"]["facts"]
++    command(root, "reconcile", "--source", "doc01")
++    reconciled = json.loads((root / "multisource_result.json").read_text())
++    assert reconciled["result"]["facts"] == after["result"]["facts"]
++    command(root, "edit-text", "--expected-revision", "2")
++    again = json.loads((root / "text_revision_result.json").read_text())
++    check_edit(after, again, revision=3)
++    previous_indexes = {
++        c["chunk_id"]: c["chunk_index"]
++        for c in after["sources"]["doc01"]["chunk_mapping"]
++    }
++    assert any(
++        c["chunk_id"] in previous_indexes
++        and c["chunk_index"] != previous_indexes[c["chunk_id"]]
++        for c in again["sources"]["doc01"]["chunk_mapping"]
++    )
++    assert again["recovery_events"] == []
++    command(root, "withdraw", "--source", "doc01")
++    withdrawn = json.loads((root / "multisource_result.json").read_text())
++    assert len(withdrawn["result"]["facts"]) == 1
++    assert withdrawn["sources"]["doc01"]["original_fact_owned_by_chunk"]
++    assert withdrawn["sources"]["doc01"]["original_evidence_present"]
++    assert withdrawn["sources"]["doc01"]["original_marker_present"]
++
++
++@pytest.mark.integration
++@pytest.mark.parametrize("stage", ["text_chunks", "replace_published"])
++def test_native_multichunk_recovery_keeps_complete_fact_evidence(tmp_path, stage):
++    root = tmp_path / "chunked_failure"
++    command(root, "chunked-fixture")
++    before = json.loads((root / "multisource_result.json").read_text())
++    command(
++        root, "edit-text", "--expected-revision", "1", "--fault-stage", stage, expect=1
++    )
++    query = json.loads(command(root, "retrieve").stdout)
++    assert len(query["facts"]) == 1 and len(query["facts"][0]["evidence"]) == 2
++    assert (
++        query["facts"][0]["source_id"]
++        == before["sources"]["doc02"]["mention_entity_id"]
++    )
++    assert query["unavailable_sources"][0]["reason"] == "publication_failed"
++    status = json.loads(command(root, "status").stdout)
++    failed = next(r for r in status["publications"] if r["state"] == "failed")
++    assert failed["plan"]["text_change"]["chunk_budget"] == 9
++    command(root, "reconcile", "--source", "doc01")
++    recovered = json.loads((root / "multisource_result.json").read_text())
++    check_edit(before, recovered)
++    (event,) = recovered["recovery_events"]
++    assert (
++        event["outcome"] == "restored"
++        and event["resolved_at"]
++        and event["resolving_revision"] == 2
++    )
++    assert recovered["result"]["unavailable_sources"] == []

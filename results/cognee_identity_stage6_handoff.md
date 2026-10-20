@@ -2,7 +2,7 @@
 
 **Consolidated:** 2026-10-15 (America/Detroit).  
 **Baseline:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`; Ladybug/LanceDB/SQLite, shared physical storage.  
-**Current status (2026-10-20):** architecture review complete; bounded Stage-6 steps 1–4 have code and native evidence through resolved fact-bearing group retirement. Step 4 is partial; standard entry-point integration and broader retrieval remain. Start a new session with [the current session handoff](../docs/SESSION_HANDOFF.md), which records the exact delivery/verification boundary and next task. Section 12 is dated checkpoint history, not a cumulative list of unfinished work.
+**Current status (2026-10-20):** architecture review complete; bounded Stage-6 steps 1–4 have code and qualified native evidence through captured occurrence additions. Step 4 is partial; standard entry-point integration and broader retrieval remain. Start a new session with [the current session handoff](../docs/SESSION_HANDOFF.md), which records the exact delivery/verification boundary and next task. Section 12 is dated checkpoint history, not a cumulative list of unfinished work.
 
 ## 1. Authority, scope and first build
 
@@ -453,4 +453,10 @@ Final verification checks actual graph/Entity vector absence, resolution/fact ab
 
 The captured adapter now admits empty primary fact output only with a complete valid current chunk map and no remaining captured fact phrase. Empty output is not a general license to omit extraction. The known primary UUID used for fixture diagnostics after retirement is not a runtime classification registry. This case demonstrates independent support through a different physical doc02 fact, not every possible foreign owner on the same fact triple. Commands: ../docs/stage6_identity_resolved_retirement.md.
 
-Step 4 still needs occurrence additions/regrouping, changed interpretations with refreshed semantic output, dependent-source/span/record maintenance, coordinated original/generated Data removal and rebuild cases, and remaining failure/verification coverage across those operations. Rules/model Describe quality is step 6; standard entry-point wiring and broader retrieval are step 5. Incremental execution reuse, A/B staging, automatic retry and comprehensive replay remain deferred.
+At this resolved-retirement checkpoint, step 4 still needed occurrence additions/regrouping, changed interpretations with refreshed semantic output, dependent-source/span/record maintenance, coordinated original/generated Data removal and rebuild cases, and remaining failure/verification coverage across those operations. Rules/model Describe quality is step 6; standard entry-point wiring and broader retrieval are step 5. Incremental execution reuse, A/B staging, automatic retry and comprehensive replay remain deferred.
+
+### Step 4 / M3: captured occurrence additions — 2026-10-20
+
+The separately admitted `TextChange.occurrence_continuity` mode maps each old occurrence to its reviewed index in the intended group's new occurrence array. Existing groups/UUIDs, decisions and construction recipes continue; extra current occurrences and explicitly declared fresh groups are additions. Complete exact slices/fingerprints and native chunk mapping are checked before writes. The mode refuses removals, implicit retargeting, reused new-group UUIDs and new reusable recipes; it cannot be combined with occurrence retention/removal.
+
+The new captured command adds a reference to g01 and a separate paragraph-local g03 with the same surface text. g03 has a fresh UUID, resolution r03 to the existing reusable controller and an original-chunk-owned local fact/evidence. Common full-document replacement, publication, eligibility and explicit saved-intent recovery are reused. Diagnostics distinguish continuing and new groups. Automatic grouping/extraction, splits/combinations, interpretation changes, dependency propagation and full source lifecycle remain separate work. Execution evidence and commands are recorded in [the addition guide](../docs/stage6_identity_occurrence_addition.md) and [session handoff](../docs/SESSION_HANDOFF.md).

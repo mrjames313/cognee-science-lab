@@ -24,7 +24,7 @@ def command(root, operation, *args, expect=0):
         cwd=REPO,
         capture_output=True,
         text=True,
-        timeout=150,
+        timeout=300,  # Allow cold native imports/migrations on slower test hosts.
     )
     assert result.returncode == expect, result.stdout[-7000:] + result.stderr[-2000:]
     return result

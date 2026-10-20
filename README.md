@@ -38,7 +38,7 @@ Status: scoped identity/operational investigation and architecture handoff compl
 Goal: tackle the problems Stage 2 exposed directly, using the frameworks developed in stage 4.
 
 ### Stage 6 — Custom pipeline and intermediate representations
-Status: steps 1–2 and bounded portions of steps 3–4 implemented; captured publication/retrieval, shared-source withdrawal, corrections, native text/chunk rebuilding and occurrence/group retirement verified; additions, dependencies, full source lifecycle and steps 5–6 remain
+Status: steps 1–2 and bounded portions of steps 3–4 implemented; captured publication/retrieval, shared-source withdrawal, corrections, native text/chunk rebuilding, occurrence/group retirement and bounded additions implemented; regrouping, changed interpretation, dependencies, full source lifecycle and steps 5–6 remain
 Goal: stop treating cognify() as a black box and construct a custom processing pipeline from Cognee tasks.
 
 See [the Stage 6 fixture guide](docs/stage6_identity_first_slice.md) for single/two-source fixtures, selected identity-source withdrawal, focused tests, recovery-event visibility and remaining boundaries. Integration code uses Cognee's graph/vector/relational interfaces; Ladybug/LanceDB/SQLite is the initial test configuration.
@@ -49,6 +49,8 @@ The [reviewed occurrence-removal checkpoint](docs/stage6_identity_occurrence_rem
 
 The [resolved-group retirement checkpoint](docs/stage6_identity_resolved_retirement.md) removes the final occurrences of a fact-bearing group, verifies actual node/link/fact/evidence/index cleanup, and preserves doc02's distinct fact plus shared endpoints and relationship-text index. It uses the same guarded replace/rebuild/recovery path.
 
+
+The [occurrence-addition checkpoint](docs/stage6_identity_occurrence_addition.md) preserves a continuing group, introduces a separate same-text local group and produces its original-owned fact/evidence through the common maintenance path. See the handoff for its test evidence and remaining boundaries.
 
 ## Setup and running the code
 

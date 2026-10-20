@@ -82,6 +82,17 @@ async def run(args, root):
     before = await read_original(old, ctx)
     after, retention, describe = AFTER, RETENTION, describe_removal
     result_name = "occurrence_revision_result.json"
+    continuity = None
+    if args.command == "add-occurrences":
+        from .occurrence_addition import (
+            AFTER as added_text,
+            CONTINUITY,
+            describe_addition,
+        )
+
+        after, retention, describe = added_text, None, describe_addition
+        continuity = CONTINUITY
+        result_name = "occurrence_addition_result.json"
     if args.command == "retire-resolved-group":
         from .resolved_retirement import (
             AFTER as retired_text,
@@ -92,7 +103,11 @@ async def run(args, root):
         after, retention, describe = retired_text, retired_indices, describe_retirement
         result_name = "resolved_retirement_result.json"
     change = TextChange(
-        before, after, await recorded_budget(old, publisher.graph), retention
+        before,
+        after,
+        await recorded_budget(old, publisher.graph),
+        occurrence_retention=retention,
+        occurrence_continuity=continuity,
     )
     chunks = await chunk_text(
         after, await original_context(old, ctx), change.chunk_budget
