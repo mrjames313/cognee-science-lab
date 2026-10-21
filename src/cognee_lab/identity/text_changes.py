@@ -266,11 +266,6 @@ def check_new_slices(source, after):
 
 
 def check_carryover(old, source, continuing, fresh):
-    """Continuing groups keep their decisions and recipes; the rest are replaced.
-
-    Retired groups drop theirs and each fresh group declares exactly one new
-    resolution and recipe. Variants and span scopes must be unchanged.
-    """
     kept = {
         k: r for k, r in source.mention_resolutions.items() if r.group_ref in continuing
     }

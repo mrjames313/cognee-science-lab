@@ -39,7 +39,8 @@ def describe_addition(old, before, chunks):
         dict(start=start, end=start + len("the controller"), text="the controller")
     )
     # A separate local group deliberately has the same surface text. Its UUID
-    # comes from a saved source, revision and group key, never the surface name or offsets.
+    # comes from a saved source, revision and group key, never the surface
+    # name or offsets.
     mid = str(fresh_mention_id(old.identity_data_id, payload["revision"], "g03"))
     start = len(BASE) + len(FIRST) + len("After calibration, ")
     payload["entity_constructions"][mid] = dict(
