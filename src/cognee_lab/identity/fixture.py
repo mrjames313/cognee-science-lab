@@ -141,11 +141,7 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
 
     from .captured_chunks import fixture_mention_id
 
-    mid = str(
-        fixture_mention_id(source)
-        if group_key == "g01"
-        else source.mention_groups[group_key].entity_id
-    )
+    mid = str(fixture_mention_id(source, group_key))
     identity = EdgeIdentity(mid, str(OSCILLATIONS_ID), "limits")
     metadata = (await publisher.graph.get_edge_delete_data([identity])).get(identity)
     from .captured_chunks import fact_chunks

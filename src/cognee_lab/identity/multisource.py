@@ -362,7 +362,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             from .resolved_retirement import retirement_checks
 
             result["sources"][label]["resolved_group_retirement"] = (
-                await retirement_checks(publisher, source)
+                await retirement_checks(publisher, source, mid)
             )
     for row in rows.values():
         if row["plan"].get("text_change") and row["state"] == "current":

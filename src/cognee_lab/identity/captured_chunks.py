@@ -2,27 +2,36 @@
 
 from .models import ChunkInput
 from .validation import IntentError, map_chunks
-from uuid import UUID
+from uuid import UUID, uuid5
 
 FACT_TEXT = "it limits oscillations"
 ADDED_FACT_TEXT = "the controller limits oscillations"
-SPLIT_FACT_GROUP = "g05"  # carries FACT_TEXT after the captured group split
+# The captured groups that carry FACT_TEXT: g01 as captured, g05 after the
+# split and g06 after the combination. Absent ones are listed so their facts
+# are checked as physically gone.
+FACT_GROUPS = ("g01", "g05", "g06")
 
 
 def captured_facts(source):
     """Explicit fixture outputs, independent of model inference or label matching."""
-    yield "g01", FACT_TEXT
-    if SPLIT_FACT_GROUP in source.mention_groups:
-        yield SPLIT_FACT_GROUP, FACT_TEXT
+    for key in FACT_GROUPS:
+        yield key, FACT_TEXT
     if "g03" in source.mention_groups:
         yield "g03", ADDED_FACT_TEXT
 
 
-def fixture_mention_id(source):
+def fresh_mention_id(identity_data_id, key):
+    """Fresh group IDs come from the saved source and group key, never text or offsets."""
+    return uuid5(identity_data_id, f"mention:{key}")
+
+
+def fixture_mention_id(source, key="g01"):
     """Known captured fixture identity, including after its declaration retires."""
-    group = source.mention_groups.get("g01")
+    group = source.mention_groups.get(key)
     if group is not None:
         return group.entity_id
+    if key != "g01":
+        return fresh_mention_id(source.identity_data_id, key)
     if source.identity_data_id == UUID("718efce2-4251-5f6f-8318-417bb4dd3525"):
         return UUID("233cb019-3986-5864-88bc-91f334a64372")
     raise IntentError(
@@ -77,7 +86,9 @@ def fact_chunks(source, chunks, *, group_key="g01", fact_text=FACT_TEXT):
     group = source.mention_groups.get(group_key)
     if group is None:
         fixture_mention_id(source)
-        if fact_text in text and SPLIT_FACT_GROUP not in source.mention_groups:
+        if fact_text in text and not any(
+            k in source.mention_groups for k in FACT_GROUPS
+        ):
             raise IntentError(
                 "fixture_shape",
                 "Captured fact remains in text without its reviewed group",

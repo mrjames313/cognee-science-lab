@@ -1,9 +1,7 @@
 """Captured group split with explicit review; no automatic Describe."""
 
 import json
-from uuid import uuid5
-
-from .captured_chunks import bind_chunks
+from .captured_chunks import bind_chunks, fresh_mention_id
 from .models import IdentitySource
 from .occurrence_fixture import BEFORE
 from .validation import IntentError, text_digest
@@ -43,12 +41,11 @@ def describe_split(old, before, chunks):
     payload["mention_groups"]["g02"]["occurrences"][0].update(
         start=start, end=start + len("plasma")
     )
-    # Fresh IDs come from the saved source and group key, never text or offsets.
     for key, rid, name, start in [
         ("g04", "r04", "the controller", AFTER.index("the controller")),
         ("g05", "r05", "it", AFTER.index(" it limits") + 1),
     ]:
-        mid = str(uuid5(old.identity_data_id, f"mention:{key}"))
+        mid = str(fresh_mention_id(old.identity_data_id, key))
         payload["entity_constructions"][mid] = dict(
             name=name, description=f"Captured separate local reference group {key}."
         )

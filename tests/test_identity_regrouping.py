@@ -7,6 +7,7 @@ import pytest
 
 from test_identity_occurrences import example
 from cognee_lab.identity.captured_chunks import (
+    FACT_GROUPS,
     FACT_TEXT,
     captured_facts,
     fact_chunks,
@@ -78,7 +79,7 @@ async def test_reviewed_split_into_fresh_groups(source_payload):
         checked, texts={"doc01": AFTER}, chunks={str(chunk.id): chunk}, graph=None
     )
     # The fact is regenerated for the group that holds it now; g04 gets none.
-    assert list(captured_facts(intended)) == [("g01", FACT_TEXT), ("g05", FACT_TEXT)]
+    assert dict(captured_facts(intended)) == dict.fromkeys(FACT_GROUPS, FACT_TEXT)
     assert fact_chunks(intended, [chunk], group_key="g05") == [chunk]
     assert fact_chunks(intended, [chunk], group_key="g01") == []
     with pytest.raises(IntentError, match="prefix insertion"):

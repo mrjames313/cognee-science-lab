@@ -3,7 +3,7 @@
 import json
 from uuid import UUID
 
-from .captured_chunks import FACT_TEXT, bind_chunks, fixture_mention_id
+from .captured_chunks import FACT_TEXT, bind_chunks
 from .models import IdentitySource
 from .validation import IntentError, text_digest
 
@@ -50,8 +50,8 @@ def describe_retirement(old, before, chunks):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def retirement_checks(publisher, source):
-    """Check actual absence and independent shared objects, not only eligibility."""
+async def retirement_checks(publisher, source, mid):
+    """Check a retired mention and its fact are gone and the shared objects remain."""
     from .fixture import OSCILLATIONS_ID
     from .native import edge_metadata
     from cognee.modules.engine.utils import generate_edge_object_id, generate_node_id
@@ -59,7 +59,6 @@ async def retirement_checks(publisher, source):
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from .models import ChunkInput
 
-    mid = fixture_mention_id(source)
     target = source.variant_assignments["v01"].target_entity_id
     fact_id = UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))
     evidence = await get_edge_evidence_records(
@@ -109,8 +108,8 @@ async def retirement_checks(publisher, source):
     )
 
 
-async def verify_retirement(publisher, source):
-    checks = await retirement_checks(publisher, source)
+async def verify_retirement(publisher, source, mid):
+    checks = await retirement_checks(publisher, source, mid)
     absent = [
         "mention_entity_present",
         "mention_entity_indexed",

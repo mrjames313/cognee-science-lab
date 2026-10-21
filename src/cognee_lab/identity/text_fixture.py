@@ -90,9 +90,10 @@ async def maintain_one(
             publisher, source, list(chunks.values()), original
         )
         if "g01" not in source.mention_groups:
+            from .captured_chunks import fixture_mention_id
             from .resolved_retirement import verify_retirement
 
-            await verify_retirement(publisher, source)
+            await verify_retirement(publisher, source, fixture_mention_id(source))
         # This two-document fixture promises survival of the independent local
         # fact, in addition to the common publisher's identity-owner checks.
         from .fixture import load_chunks, verify_semantics
