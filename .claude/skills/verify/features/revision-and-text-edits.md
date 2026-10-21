@@ -31,10 +31,6 @@ Preconditions:
 **R1 revise, stale retry and reconcile.** Guide: revision replacement, the "Run the captured correction" table. The guide says doc01's mention keeps its UUID, fact and evidence. It says the old shared variant contribution and the private singleton are removed. Doc02 keeps its own interpretation. The `revise` command also queries the revised controller and returns doc01's fact alone. A repeated `revise` at revision 1 is stale.
 
 ```bash journey R1
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run revise)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- multi-fixture
 D01=$(val fixture '.sources.doc01.identity_data_id')
 D02=$(val fixture '.sources.doc02.identity_data_id')
@@ -79,17 +75,11 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns both facts'
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01"'") | .identity.target_entity_id] == ["'"$RT"'"]' 'a new process returns the doc01 fact with the corrected target'
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id != "'"$D01"'") | .identity.target_entity_id] == ["'"$T02"'"]' 'a new process returns the doc02 fact with the original target'
-$V cleanup "$RUN"
 ```
 
 **R2 revise fault and recovery.** Guide: revision replacement, "Interrupted replacement and explicit recovery". Run the block once per stage, each in its own run, with `STAGE` set to `replace_saved`, `replace_registered`, `replace_published` and `replace_retired`. The guide says that every stage leaves revision 2 failed with last verified revision 1. The guide also says `retrieve` withholds doc01 and keeps doc02, and `reconcile` completes revision 2 with outcome `restored`. The stage `replace_verification` exists, and the guide does not list it as covered, so this map does not drive it.
 
-```bash journey R2
-STAGE=${STAGE:-replace_saved}
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run "revise-fault-$STAGE")
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
+```bash journey R2 stages=replace_saved,replace_registered,replace_published,replace_retired
 $V drive "$RUN" main fixture -- multi-fixture
 M01=$(val fixture '.sources.doc01.mention_entity_id')
 M02=$(val fixture '.sources.doc02.mention_entity_id')
@@ -122,16 +112,11 @@ $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' '
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
 $V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
-$V cleanup "$RUN"
 ```
 
 **E1 prefix edit on one chunk.** Guide: text changes, the table under "Run on a fresh two-source fixture". The prefix has 48 Unicode code points. The guide says doc01 keeps its Data ID, group Entity IDs, fact ID and resolution target. It says doc01's chunk and fingerprint are new and its evidence is rebuilt. Doc02 is unchanged.
 
 ```bash journey E1
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run edit-text-prefix)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- multi-fixture
 D01=$(val fixture '.sources.doc01.identity_data_id')
 M01=$(val fixture '.sources.doc01.mention_entity_id')
@@ -167,16 +152,11 @@ $V check "$RUN" reconcile '(.result.facts | length) == 2 and .recovery_events ==
 $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns both facts'
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01"'") | .identity.occurrences[] | [.start, .end]] == [[97, 111], [134, 136]]' 'a new process returns the new doc01 positions'
-$V cleanup "$RUN"
 ```
 
 **E2 prefix edit on many chunks, repeated.** Guide: multichunk, the table with the "Initial" and "After first edit" columns. The prefix has 10 code points. The guide says the second edit at expected revision 2 reaches revision 3 with seven doc01 chunks. It says a later withdrawal preserves original-owned facts, evidence and markers under the current chunk mapping.
 
 ```bash journey E2
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run edit-text-multichunk)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- chunked-fixture
 M01=$(val fixture '.sources.doc01.mention_entity_id')
 T01=$(val fixture '.sources.doc01.resolution_target_entity_id')
@@ -217,17 +197,11 @@ $V check "$RUN" wd '.sources.doc01 | .state == "withdrawn" and .original_marker_
 $V check "$RUN" wd '.sources.doc01.mention_marker_chunk_ids == '"$MK"' and .sources.doc01.fact_evidence_chunk_ids == '"$FE" 'the markers and evidence still map to the current chunks'
 $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 1 and .unavailable_sources == []' 'a new process returns only the doc02 fact'
-$V cleanup "$RUN"
 ```
 
 **E3 prefix edit fault and recovery.** Guide: text changes, "Interrupted edit and recovery". Run the block once per stage, each in its own run, with `STAGE` set to `text_removed`, `text_registered`, `text_chunks` and `replace_published`. The guide says doc01 is failed and withheld while `retrieve` returns doc02 only. It says `reconcile` repeats the native rebuild, completes revision 2 and records `resolving_revision: 2` with `outcome: restored`.
 
-```bash journey E3
-STAGE=${STAGE:-text_registered}
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run "edit-text-fault-$STAGE")
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
+```bash journey E3 stages=text_removed,text_registered,text_chunks,replace_published
 $V drive "$RUN" main fixture -- multi-fixture
 D01=$(val fixture '.sources.doc01.identity_data_id')
 M01=$(val fixture '.sources.doc01.mention_entity_id')
@@ -258,16 +232,11 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns both facts and nothing is unavailable'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
-$V cleanup "$RUN"
 ```
 
 **E4 multi-chunk edit fault and recovery.** Guide: multichunk, "Interrupted rebuild". The guide says doc02's fact stays available with both evidence chunks. It says `reconcile` restores doc01 at 2/2/2 and resolves the same incident.
 
 ```bash journey E4
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run edit-text-multichunk-fault)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- chunked-fixture
 M02=$(val fixture '.sources.doc02.mention_entity_id')
 
@@ -291,7 +260,6 @@ $V check "$RUN" reconcile '(.result.facts | length) == 2' 'both facts are return
 
 $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns both facts and nothing is unavailable'
-$V cleanup "$RUN"
 ```
 
 ## Gotchas

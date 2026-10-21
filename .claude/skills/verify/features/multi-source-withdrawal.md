@@ -30,10 +30,6 @@ Preconditions:
 **W1 withdraw doc01, then doc02.** Guide: the "Two-source lifecycle fixture" table. The table says that withdrawing doc01 leaves 1 shared contribution and 1 owner, both from doc02. Withdrawing doc02 leaves no variant edge and no shared singleton. Original markers, mention nodes, facts, ownership and evidence remain after each step. The guide also says that repeated withdrawal works and that `reconcile --source doc02` checks the second source before it retires.
 
 ```bash journey W1
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run withdraw-doc01-first)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- multi-fixture
 $V check "$RUN" fixture '.shared_variant | (.contributions | length) == 2 and (.owners | length) == 2' 'both sources contribute to the shared variant edge'
 $V check "$RUN" fixture '(.result.facts | length) == 2' 'both facts are retrievable before withdrawal'
@@ -81,16 +77,11 @@ $V check "$RUN" ret2 '.facts == [] and .unavailable_sources == []' 'a new proces
 $V drive "$RUN" main status -- status
 $V check "$RUN" status '.publications | length == 2 and all(.state == "withdrawn" and .verified_revision == 1)' 'both publications are withdrawn at their last published revision'
 $V check "$RUN" status '.recovery_events == []' 'no incident'
-$V cleanup "$RUN"
 ```
 
 **W2 withdraw doc02, then doc01.** Guide: "Use a fresh root to try the reverse removal order", and the native test matrix "covers both removal orders". The guide's table states the doc01-first values. The values below are the same table with the two sources swapped, which is an inference from symmetry.
 
 ```bash journey W2
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run withdraw-doc02-first)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- multi-fixture
 $V check "$RUN" fixture '.shared_variant | (.contributions | length) == 2 and (.owners | length) == 2' 'both sources contribute to the shared variant edge'
 
@@ -119,7 +110,6 @@ $V drive "$RUN" main ret2 -- retrieve
 $V check "$RUN" ret2 '.facts == [] and .unavailable_sources == []' 'a new process returns no facts and no unavailable source'
 $V drive "$RUN" main status -- status
 $V check "$RUN" status '.publications | length == 2 and all(.state == "withdrawn" and .verified_revision == 1)' 'both publications are withdrawn'
-$V cleanup "$RUN"
 ```
 
 **W3 withdrawal fault and retry.** Guide: "Withdrawal implementation and failures". Run the block once per stage, each in its own run, with `STAGE` set to `withdraw_contributions`, `withdraw_owners` and `withdraw_verification`. The guide expects the following results.
@@ -130,12 +120,7 @@ $V cleanup "$RUN"
 - A retry records `outcome: withdrawn` on the same event.
 - After the retry, the deliberate retirement is absent from `unavailable_sources`.
 
-```bash journey W3
-STAGE=${STAGE:-withdraw_contributions}
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run "withdraw-fault-$STAGE")
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
+```bash journey W3 stages=withdraw_contributions,withdraw_owners,withdraw_verification
 $V drive "$RUN" main fixture -- multi-fixture
 M02=$(val fixture '.sources.doc02.mention_entity_id')
 
@@ -168,7 +153,6 @@ $V check "$RUN" after '(.facts | length) == 1 and .unavailable_sources == []' 'a
 $V drive "$RUN" main final -- status
 $V check "$RUN" final '[.publications[].state] | sort == ["current", "withdrawn"]' 'doc01 is withdrawn and doc02 is current'
 $V check "$RUN" final '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
-$V cleanup "$RUN"
 ```
 
 ## Gotchas

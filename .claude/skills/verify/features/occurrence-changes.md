@@ -32,10 +32,6 @@ Preconditions:
 **O1 remove an occurrence.** Guide: occurrence removal, "Concrete example" and "Run and inspect". The retention map is `{"g01": [1], "g02": []}`. The guide says g01 keeps only `it` at `[46, 48)` with its Entity UUID, resolution target and fact ID. It says g02 is retired with no Entity, index entry or marker. It says `position_shift` is null and a healthy `reconcile` does not bring g02 back.
 
 ```bash journey O1
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run remove-occurrences)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- chunked-fixture
 D01=$(val fixture '.sources.doc01.identity_data_id')
 D02=$(val fixture '.sources.doc02.identity_data_id')
@@ -71,17 +67,11 @@ $V check "$RUN" reconcile '(.result.facts | length) == 2 and .recovery_events ==
 $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns two facts'
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01"'") | .identity.occurrences[] | [.start, .end, .text]] == [[46, 48, "it"]]' 'a new process returns only it for doc01'
-$V cleanup "$RUN"
 ```
 
 **O2 remove fault and recovery.** Guide: occurrence removal, "Explicit recovery". Run the block once per stage, each in its own run, with `STAGE` set to `replace_published` and `text_chunks`. The guide gives the `replace_published` sequence. It says native tests also cover `text_chunks`. The guide says doc01 is withheld and doc02's complete fact stays available. It says `reconcile` completes retirement and resolves the same incident only after revision 2 verifies.
 
-```bash journey O2
-STAGE=${STAGE:-replace_published}
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run "remove-fault-$STAGE")
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
+```bash journey O2 stages=replace_published,text_chunks
 $V drive "$RUN" main fixture -- chunked-fixture
 D01=$(val fixture '.sources.doc01.identity_data_id')
 M02=$(val fixture '.sources.doc02.mention_entity_id')
@@ -111,16 +101,11 @@ $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' '
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
 $V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
-$V cleanup "$RUN"
 ```
 
 **O3 retire a resolved group.** Guide: resolved retirement, "Run" and "Scope". The replacement text is `Helios controller (HC) regulates plasma heating.` and the retention map is `{"g01": [], "g02": [0]}`. The guide says only doc02's fact is retrieved. It says doc01 has three chunks and no primary marker, fact or evidence, and g02 continues at `[33, 39)`. It lists the retirement fields that must be false or zero and the shared fields that must be true. A later withdrawal keeps doc02's facts and doc01's unresolved marker.
 
 ```bash journey O3
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run retire-resolved-group)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- chunked-fixture
 M02=$(val fixture '.sources.doc02.mention_entity_id')
 FACT02=$(val fixture '.sources.doc02.identity_data_id as $d | .result.facts[] | select(.identity.identity_data_id == $d) | .edge_id')
@@ -152,17 +137,11 @@ $V check "$RUN" wd '.sources.doc01.state == "withdrawn" and .sources.doc01.unres
 $V check "$RUN" wd '.sources.doc02 | .state == "current" and .original_fact_present and .original_evidence_present and .fact_evidence_chunk_ids == '"$EV02" 'withdrawal keeps doc02 fact and evidence'
 $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '[.facts[].source_id] == ["'"$M02"'"] and .unavailable_sources == []' 'a new process returns only the doc02 fact'
-$V cleanup "$RUN"
 ```
 
 **O4 retire fault and recovery.** Guide: resolved retirement, "Interrupted retirement". Run the block once per stage, each in its own run, with `STAGE` set to `replace_published` and `text_chunks`. The guide says doc01 is withheld and doc02's fact stays available. It says `reconcile` completes cleanup at revision 2 and resolves the same incident.
 
-```bash journey O4
-STAGE=${STAGE:-replace_published}
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run "retire-fault-$STAGE")
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
+```bash journey O4 stages=replace_published,text_chunks
 $V drive "$RUN" main fixture -- chunked-fixture
 M02=$(val fixture '.sources.doc02.mention_entity_id')
 
@@ -191,16 +170,11 @@ $V check "$RUN" reopen '[.facts[].source_id] == ["'"$M02"'"] and .unavailable_so
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
 $V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
-$V cleanup "$RUN"
 ```
 
 **O5 add occurrences, then edit and withdraw.** Guide: occurrence addition, "Captured edit", "Run" and "Reopen and reconcile". The continuity map is `{"g01": [0, 1], "g02": [0]}`. The guide says three facts, doc01 at 2/2/2, doc02 at 1/1/1, no unavailable source and no incident. It says g01 keeps its Entity ID and goes from two occurrences to three. It says g03 is new with its Entity, name index, accepted resolution `r03`, and current marker chunks. The handoff records two marker chunks for g03. The guide says a later prefix edit at expected revision 2 keeps g03 and its fact at revision 3. It says withdrawal withholds doc01's two facts and keeps doc02.
 
 ```bash journey O5
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run add-occurrences)
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
 $V drive "$RUN" main fixture -- chunked-fixture
 M01=$(val fixture '.sources.doc01.mention_entity_id')
 M02=$(val fixture '.sources.doc02.mention_entity_id')
@@ -245,17 +219,11 @@ $V drive "$RUN" main wd -- withdraw --source doc01
 $V check "$RUN" wd '.sources.doc01 | .state == "withdrawn" and .original_marker_present and .original_fact_present and .original_evidence_present' 'withdrawal keeps the original-owned marker, fact and evidence'
 $V drive "$RUN" main final -- retrieve
 $V check "$RUN" final '[.facts[].source_id] == ["'"$M02"'"] and .unavailable_sources == []' 'a new process returns only the doc02 fact'
-$V cleanup "$RUN"
 ```
 
 **O6 add fault and recovery.** Guide: occurrence addition, "Interrupted addition". Run the block once per stage, each in its own run, with `STAGE` set to `replace_published` and `text_chunks`. The guide says only doc02's fact returns and doc01 reports `publication_failed` with an incident ID. It says `reconcile` completes revision 2, returns three facts and resolves the same incident with one verified recovery attempt.
 
-```bash journey O6
-STAGE=${STAGE:-replace_published}
-V=.claude/skills/verify/scripts/verify.py
-RUN=$($V new-run "add-fault-$STAGE")
-val() { jq -r "$2" "$RUN"/evidence/[0-9][0-9]-"$1".json; }
-
+```bash journey O6 stages=replace_published,text_chunks
 $V drive "$RUN" main fixture -- chunked-fixture
 M02=$(val fixture '.sources.doc02.mention_entity_id')
 M01=$(val fixture '.sources.doc01.mention_entity_id')
@@ -284,7 +252,6 @@ $V check "$RUN" reopen '(.facts | length) == 3 and .unavailable_sources == []' '
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
 $V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
-$V cleanup "$RUN"
 ```
 
 ## Gotchas
