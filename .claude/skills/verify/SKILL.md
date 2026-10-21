@@ -34,7 +34,7 @@ Read `docs/SESSION_HANDOFF.md` before you verify a behavior change. It says whic
 ```bash
 V=.claude/skills/verify/scripts/verify.py
 $V journey ID [--stage S] [--include-env]  # run one journey block, clean up, print PASS/FAIL counts
-$V journey all [--include-env]             # run every journey block, print a summary table
+$V journey all [--include-env] [--jobs N]  # run every journey block, print a summary table
 $V new-run NAME                      # prints outputs/verify/<UTC stamp>-NAME
 $V doctor [RUN]                      # read-only health check, JSON, exit 1 on a failing gate
 $V drive RUN ROOT LABEL -- CMD ARGS  # runs: uv run python -m cognee_lab.identity CMD ARGS --root RUN/roots/ROOT
@@ -48,7 +48,7 @@ $V cleanup RUN                       # deletes RUN/roots (stores), keeps RUN/evi
 
 `drive` exits with the CLI's status (0 ok, 1 CLI error or timeout) and prints one line: step number, exit, seconds, whether JSON was found. Its default timeout is 600 s. Pass `--timeout N` before `--`. On timeout it kills only the process it started and records `timeout`.
 
-`journey` finds the block `bash journey ID` in `features/*.md`. It creates one run per journey, or one per stage, and exports `V`, `RUN` and `STAGE`. It defines `val` as a shell function and runs the block with `bash`. Then it runs cleanup and prints the PASS and FAIL counts from `assertions.tsv`. The block output goes to `evidence/journey.log`. A journey that lists stages runs every stage unless you pass `--stage`. `journey all` skips journeys that call the embedding API unless you pass `--include-env`. A named env journey also needs `--include-env`. Blocks have no branches, so the runner expects one row per `$V check` line. A run with fewer rows, or a bash syntax error, gets a FAIL row. The command exits 1 on any FAIL row.
+`journey` finds the block `bash journey ID` in `features/*.md`. It creates one run per journey, or one per stage, and exports `V`, `RUN` and `STAGE`. It defines `val` as a shell function and runs the block with `bash`. Then it runs cleanup and prints the PASS and FAIL counts from `assertions.tsv`. The block output goes to `evidence/journey.log`. A journey that lists stages runs every stage unless you pass `--stage`. `journey all` skips journeys that call the embedding API unless you pass `--include-env`. A named env journey also needs `--include-env`. Blocks have no branches, so the runner expects one row per `$V check` line. A run with fewer rows, or a bash syntax error, gets a FAIL row. The command exits 1 on any FAIL row. `--jobs N` runs N journey runs at once (default 1). Each run has its own directory and roots, so runs do not share state. The summary table keeps definition order. On macOS, `journey` also starts `caffeinate -i -w <its pid>` so the Mac does not idle-throttle an unattended run.
 
 ## Launch
 

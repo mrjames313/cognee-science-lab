@@ -29,6 +29,7 @@ import subprocess
 import sys
 import sysconfig
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from importlib.metadata import version as package_version
 from pathlib import Path
@@ -124,7 +125,12 @@ def lab_fingerprint():
 def make_run(name):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run = RUNS / f"{stamp}-{name}"
-    (run / "roots").mkdir(parents=True)
+    for n in range(2, 1000):
+        try:
+            (run / "roots").mkdir(parents=True)
+            break
+        except FileExistsError:
+            run = RUNS / f"{stamp}-{name}-{n}"
     (run / "evidence").mkdir()
     head = subprocess.run(
         ["git", "-C", str(REPO), "log", "-1", "--format=%h %s"],
@@ -529,7 +535,7 @@ def journey(args):
     gates, _, _ = health()
     if not all(gates.values()):
         fail(f"doctor gates failed: {[k for k, v in gates.items() if not v]}")
-    results = []
+    plan = []
     for journey_id in wanted:
         entry = journeys[journey_id]
         if args.stage and args.stage not in entry["stages"]:
@@ -537,10 +543,23 @@ def journey(args):
                 f"{journey_id} has stages {entry['stages'] or 'none'}, not {args.stage}"
             )
         for stage in [args.stage] if args.stage else entry["stages"] or [None]:
-            result = run_journey(entry, stage)
-            results.append(result)
+            plan.append((entry, stage))
+    if sys.platform == "darwin":
+        try:
+            subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
+        except OSError:
+            pass
+    results = [None] * len(plan)
+    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+        futures = {
+            pool.submit(run_journey, entry, stage): i
+            for i, (entry, stage) in enumerate(plan)
+        }
+        for future in as_completed(futures):
+            i = futures[future]
+            result = results[i] = future.result()
             print(
-                f"{journey_id} {stage or ''}: {result['passed']} PASS {result['failed']} FAIL",
+                f"{result['journey']} {result['stage']}: {result['passed']} PASS {result['failed']} FAIL",
                 flush=True,
             )
     print(f"\n{'journey':8}{'stage':26}{'PASS':>6}{'FAIL':>6}  run")
@@ -613,6 +632,9 @@ def main():
         "--include-env",
         action="store_true",
         help="also run journeys that call the embedding API",
+    )
+    p.add_argument(
+        "--jobs", type=int, default=1, help="journey runs to execute in parallel"
     )
     p.set_defaults(func=journey)
 
