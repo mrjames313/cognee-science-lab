@@ -33,10 +33,10 @@ Run the check when your diff touches any of these.
 
 All paths are under `src/cognee_lab/identity/`. The test `test_served_copies_the_retrieval_eligibility_test` fails if the eligibility condition in `valid_sources` changes.
 
-**Sync commit:** `6f1bdba`. On 2026-10-21 the checker described the covered code at this commit. To see whether the check needs another look, run this command:
+**Sync commit:** `50ec7ff`. On 2026-10-21 the checker described the covered code at this commit. To see whether the check needs another look, run this command:
 
 ```bash
-git diff 6f1bdba -- src/cognee_lab/identity/{storage,retrieve,publish,replace,withdraw,text_fixture,text_changes,revisions}.py
+git diff 50ec7ff -- src/cognee_lab/identity/{storage,retrieve,publish,replace,withdraw,text_fixture,text_changes,revisions}.py
 ```
 
 If the diff touches a function in the table, read the changed lines against `METHODS` and the intents functions in `support/ledger_model.py`. Move the sync commit only after you read that the checker still describes the code. A passing check is not enough, because a passing check can describe old code.
@@ -72,18 +72,11 @@ When the check fails on code that you did not mean to change, replay the reporte
 
 A traceback that is not a property failure is a checker error.
 
-## Add an operation (next: group split or combination)
+## Add an operation
 
-The expected shape for split and combination is the text-change path. `maintain_one` in `text_fixture.py` calls `replace` with a `text_change`. That reaches the store as method `replace` with `plan["text_change"]`. The checker already sends that shape as `plan=text<rN`, with the one `text_change` value `TEXT_CHANGE`.
+Group split reached the store as the text-change path. `maintain_one` in `text_fixture.py` calls `replace` with a `text_change`. That reaches the store as method `replace` with `plan["text_change"]`. The checker sends it as `plan=text<rN` with `TEXT_CHANGE`, and the regrouping variant as `plan=regroup<rN` with `TEXT_REGROUP`. `Plan.text` is `None`, `"text"` or `"regroup"`, and `TEXT_CHANGES` maps each name to its dict.
 
-A regrouping variant of replace sends a different `text_change` value, and the checker must tell the two plans apart. Make these changes in `support/ledger_model.py`:
-
-- Change `Plan.text` from a bool to a name, such as `None`, `"text"` or `"regroup"`. Map each name to its dict next to `TEXT_CHANGE`.
-- Make `Plan.tag` use the name as the tag prefix, so that the step labels differ. Make `Plan.as_dict` write the dict for the name.
-- Make `Plan.of` map a saved dict back to its name. Today `Plan.of` reduces the dict to a bool, so two different dicts give the same plan.
-- In `replace_intents`, send each name in the loop `for text in (False, True)`. In the retry branch, send the saved plan with each other name in place of `not saved.text`.
-
-If the operation adds a plan field that storage.py reads, add the field to `Plan` too. The step list changes, so update `PINNED`.
+A later operation of the same shape, such as group combination, needs one change in `support/ledger_model.py`. Add its `text_change` dict to `TEXT_CHANGES` under a new name and add the name to `Plan.text`. The tag prefix, `Plan.as_dict`, `Plan.of`, the new-plan loop and the retry swaps all follow `TEXT_CHANGES`. A new field in `TextChange` goes into every dict there, because `asdict(TextChange)` saves all fields. If the operation adds a plan field that storage.py reads, add the field to `Plan` too. The step list changes, so update `PINNED`.
 
 The model has one attempt per writer, and `--sources` accepts only 1 or 2. An operation that writes more than one source in one attempt needs more than a change to `op_source()` and P2. It needs a new attempt shape in `Attempt` and `Harness.apply`, and a higher `--sources` limit in `parse()`.
 

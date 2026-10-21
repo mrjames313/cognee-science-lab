@@ -21,7 +21,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - **Fence.** A journey is a fenced block with the info string `bash journey ID [stages=a,b,c] [env]`. The block holds only `drive`, `check` and shell lines. It never defines `V`, `RUN`, `val` or a cleanup.
 - **Stages.** `stages=` lists the fault stages. The runner sets `STAGE` for each one, in its own run. `--stage S` runs one.
 - **env.** The `env` token marks a journey that calls the embedding API.
-- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits and `O` is occurrence changes. The `E` journeys live in the revision file.
+- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes and `G` is group regrouping. The `E` journeys live in the revision file.
 - **Fault journeys.** A fault journey lives with the feature that it breaks.
 - **Cited values.** Every expected value comes from a guide under `docs/` or from `docs/SESSION_HANDOFF.md`. An inference from a guide says so in the paragraph.
 - **Non-vacuous checks.** A check on a field requires the field to exist. Use `length > 0`, a type test or `!= null` where a missing field would otherwise pass.
@@ -52,6 +52,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - [Multi-source withdrawal](./multi-source-withdrawal.md) covers `withdraw` in both orders, repeated withdrawal, and a withdrawal fault with its retry.
 - [Revision and text edits](./revision-and-text-edits.md) covers `revise` and `edit-text` on one chunk and on many chunks, with every documented fault stage and its recovery.
 - [Occurrence changes](./occurrence-changes.md) covers `remove-occurrences`, `retire-resolved-group` and `add-occurrences`, each with its recovery case.
+- [Group regrouping](./group-regrouping.md) covers `split-group`, with its `replace_published` recovery case.
 
 There is no separate failure-recovery file. Every fault journey lives with the feature that it breaks, so the recovery steps stay next to the happy path that they restore.
 
@@ -59,7 +60,7 @@ There is no separate failure-recovery file. Every fault journey lives with the f
 
 These are current refusals or gaps. They are not journeys. Do not write a journey that expects them to work.
 
-- Group splits and combinations are not supported. This is the next task in `docs/SESSION_HANDOFF.md`.
+- Group combinations are not supported. `split-group` covers only the captured split of one group into two fresh groups (`docs/stage6_identity_group_split.md`).
 - A single edit cannot mix occurrence removal and occurrence addition. Removal and addition modes do not combine (`docs/stage6_identity_occurrence_addition.md`).
 - Representation-kind changes, new reusable identities in an addition, and changed interpretations are not supported.
 - An edit that would affect a dependent saved identity source is refused before it changes anything. Automatic reconsideration of that source does not exist (`docs/stage6_identity_text_changes.md`).

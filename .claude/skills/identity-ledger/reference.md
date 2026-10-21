@@ -23,6 +23,7 @@ Each step is one call sequence that the named caller makes. The checker treats e
 | `Wn reconcile Sk rev=r expect=r plan=publish` | `Publisher.publish` with a saved revision, the `reconcile` CLI | `begin(method="reconcile")` |
 | `Wn replace Sk rev=r+1 expect=r plan=replace<rR` | `replace`, a new replacement plan from revision R | `begin(method="replace")` |
 | `Wn replace Sk rev=r+1 expect=r plan=text<rR` | `replace` with a `text_change` (`maintain_one`) | `begin(method="replace")` |
+| `Wn replace Sk rev=r+1 expect=r plan=regroup<rR` | `replace` with a regrouping `text_change` (`split-group`, `maintain_one`) | `begin(method="replace")` |
 | `Wn replace Sk rev=r expect=r plan=<saved>` | the retry branch of `replace` | `begin(method="replace")` with the saved plan |
 | `Wn withdraw Sk rev=r expect=r plan=withdraw` | `withdraw`, with the saved plan on retry | `begin(method="withdraw")` |
 | `Wn complete` | `Publisher._apply_pending`, `withdraw` | `assert_pending()` (not for withdraw), then `complete()`. If a call refuses, the caller's `fail()` runs. A publish whose `assert_pending()` refuses stops with the reservation held. |
@@ -42,7 +43,7 @@ From every row version, the intents functions also send arguments that `begin()`
 - Reconcile and withdraw at the saved revision plus one.
 - Publish from no row at revision 2, and replace at the saved revision plus two.
 - A replacement whose plan is a publish plan.
-- A replace retry whose plan changes `previous_description` or adds or drops `text_change`.
+- A replace retry whose plan changes `previous_description` or adds, drops or swaps `text_change` (a `text` plan for a `regroup` plan).
 
 ## Modeling choices
 
@@ -56,7 +57,7 @@ From every row version, the intents functions also send arguments that `begin()`
   `begin()` itself accepts reconcile and withdraw on a missing row at expected revision 0 and revision 1. Only replace has a `source_missing` guard in `begin()`. Because the checker does not send these calls, a break that removes that guard is not caught.
 - **Stage names.** storage.py only copies `stage` into the event. So the checker uses one fault stage per method. If storage.py begins to branch on `stage`, add each stage as a separate `Finish` step.
 - **Descriptions.** A description is a function of source, revision and variant. It is the fixture `tests/fixtures/identity/cognee_identity_source_example.json` with a new `identity_data_id` and `revision`. Variant 1 changes the original text digest.
-- **Plans.** A plan holds only the fields that storage.py reads: `operation`, `revision`, `previous_description`, `text_change` and `runtime_profile`. The plan tag is part of the step label, so dedupe and `--replay` tell plans apart.
+- **Plans.** A plan holds only the fields that storage.py reads: `operation`, `revision`, `previous_description`, `text_change` and `runtime_profile`. `text_change` is a name, `text` or `regroup`, for the one dict that the checker sends for it (`TEXT_CHANGES` in `support/ledger_model.py`). The plan tag is part of the step label, so dedupe and `--replay` tell plans apart.
 - **Symmetry.** Writers that never began are interchangeable, and sources that never had a row are interchangeable. Only the first of each kind can take a first step.
 - **No-op steps.** The checker checks a step that changes no row, event, reservation or checker state, but does not expand it. Every sequence after that step is also a sequence after its parent.
 - **Refused steps.** When a refused call leaves the tables equal to the parent's snapshot, the checker reuses the parent's observation and does not read `rows()` and `events()` again.
@@ -77,6 +78,8 @@ Measured on 2026-10-21 on the development Mac (10 cores). P = 0, 2 sources, 2 wr
 | 6 | PASS | 15763 / 15278 / 27.83 |
 | 7 | PASS | 87700 / 85448 / 163.85 |
 | 8 | PASS | 482109 / 470249 / 893.41 |
+
+After the regrouping plan joined the step list on 2026-10-21, depth 5 gives 3828 nodes and 3717 sequences in about 6.7 s. The depths 6 to 8 rows above predate that change.
 
 P5 later gained two checks: no step removes a recovery event, and no step changes a resolved one. After that change, depths 6, 7 and 8 passed again with the same counts. Those runs ran in parallel, so their times are not in the table.
 
