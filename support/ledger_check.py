@@ -52,7 +52,7 @@ from ledger_model import (
     variant_of,
     view_of,
 )
-from ledger_mutants import MUTANTS, load_storage
+from ledger_mutants import DEEP_MUTANTS, MUTANTS, load_storage
 
 LOCK_SCOPE = "shared-identity-publication"
 DEFAULT_DEPTH = 5
@@ -418,7 +418,8 @@ def p4_one_writer(step):
 def p5_explicit_forward_recovery(step):
     """Revisions move forward one at a time, only the method that owns a saved
     intent resumes it, and each failure has one recovery event that only its
-    completion resolves."""
+    completion resolves. No step deletes an event or changes a resolved
+    event."""
     op, before, after = step.op, step.obs_before, step.obs_after
     completing = isinstance(op, Finish) and op.stage is None and step.accepted
     for s in range(len(step.model_after.sources)):
@@ -432,11 +433,16 @@ def p5_explicit_forward_recovery(step):
             yield f"S{s + 1} is {state} with {len(open_events)} unresolved recovery events"
         now_by_id = {e["recovery_event_id"]: e for e in after.events[s]}
         for e in before.events[s]:
-            was = e.get("resolved_at")
-            now = now_by_id.get(e["recovery_event_id"], {}).get("resolved_at")
-            if was is not None and now != was:
-                yield f"S{s + 1} resolved recovery event reopened"
-            if was is None and now is not None and not completing:
+            now = now_by_id.get(e["recovery_event_id"])
+            if now is None:
+                yield f"S{s + 1} recovery event deleted by {op.label!r}"
+            elif e.get("resolved_at") is not None and now != e:
+                yield f"S{s + 1} resolved recovery event changed by {op.label!r}"
+            elif (
+                e.get("resolved_at") is None
+                and now.get("resolved_at") is not None
+                and not completing
+            ):
                 yield f"S{s + 1} recovery event resolved by {op.label!r}"
     if completing:
         attempt = step.model_before.writers[op.writer].holds
@@ -687,9 +693,11 @@ async def check_ledger(config: Config) -> Result:
                 )
                 return
             if noop:
-                # Every sequence after this step is a sequence after its
-                # parent, which this search already covers.
                 result.noops += 1
+            if noop and replay is None:
+                # Every sequence after this step is a sequence after its
+                # parent, which this search already covers. A replay goes on,
+                # because its later steps run only on this path.
                 result.nodes += 1
                 result.sequences += 1
                 dirty = False
@@ -775,7 +783,7 @@ def report(result: Result) -> str:
     elif c.skip_probability:
         mode = f"sampled (P={c.skip_probability}, seed={c.seed})"
     else:
-        mode = "exhaustive" if result.failure else "verified within bound"
+        mode = "verified within bound" if result.verdict == "PASS" else "exhaustive"
     lines = [
         f"{result.verdict} {mode}: depth={len(c.replay) if c.replay else c.depth} "
         f"sources={c.sources} writers={c.writers}"
@@ -826,7 +834,7 @@ def parse(argv):
     parser.add_argument(
         "--replay", help="'; '-separated step labels from a failure report"
     )
-    parser.add_argument("--mutant", choices=sorted(MUTANTS))
+    parser.add_argument("--mutant", choices=sorted(MUTANTS | DEEP_MUTANTS))
     parser.add_argument(
         "--mutants",
         action="store_true",

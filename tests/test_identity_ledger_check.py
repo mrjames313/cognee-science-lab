@@ -4,7 +4,7 @@ import pytest
 
 import ledger_check
 from ledger_check import Config
-from ledger_mutants import MUTANTS
+from ledger_mutants import DEEP_MUTANTS, MUTANTS
 
 # The default-bound search size. A change to the step list, the symmetry rule
 # or the no-op rule changes it; update it on purpose and say so in the commit.
@@ -43,9 +43,47 @@ def test_a_reported_sequence_replays_to_the_same_property():
     assert replayed.failure.sequence == found.failure.sequence
 
 
+def test_a_replay_runs_the_steps_after_a_refused_step():
+    replayed = ledger_check.run_one(
+        Config(
+            mutant="complete-skips-verified-revision",
+            replay=(
+                "W1 publish S1 rev=2 expect=0 plan=publish",
+                "W1 publish S1 rev=1 expect=0 plan=publish",
+                "W1 complete",
+            ),
+        )
+    )
+    assert replayed.verdict == "FAIL", ledger_check.report(replayed)
+    assert replayed.failure.prop == "P1"
+
+
+# The minimal sequence that a search at the named depth reports for each break.
+DEEP_SEQUENCES = {
+    "withdrawn-guard-admits-replace": (
+        "W1 publish S1 rev=1 expect=0 plan=publish",
+        "W1 complete",
+        "W1 replace S1 rev=2 expect=1 plan=replace<r1",
+        "W1 complete",
+        "W1 withdraw S1 rev=2 expect=2 plan=withdraw",
+        "W1 complete",
+        "W1 replace S1 rev=2 expect=2 plan=replace<r1",
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(DEEP_MUTANTS))
+def test_each_deep_break_fails_on_its_recorded_sequence(name):
+    replayed = ledger_check.run_one(Config(mutant=name, replay=DEEP_SEQUENCES[name]))
+    assert replayed.failure.prop == DEEP_MUTANTS[name].prop, ledger_check.report(
+        replayed
+    )
+
+
 def test_a_search_that_reaches_no_failure_is_inconclusive(capsys):
     assert ledger_check.main(["--depth", "1"]) == 2
-    assert capsys.readouterr().out.startswith("INCONCLUSIVE")
+    out = capsys.readouterr().out
+    assert out.startswith("INCONCLUSIVE") and "verified" not in out
 
 
 def test_replay_takes_no_skip_probability():

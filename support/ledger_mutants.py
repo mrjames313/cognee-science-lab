@@ -183,6 +183,29 @@ MUTANTS = {
         '                    info["resolved_at"] = now()\n',
         "P5",
     ),
+    "complete-deletes-open-events": Mutant(
+        '                if info.get("resolved_at") is None:\n'
+        "                    info.update(\n",
+        '                if info.get("resolved_at") is None:\n'
+        "                    await session.delete(event)\n"
+        "                    continue\n"
+        "                    info.update(\n",
+        "P5",
+    ),
+    "begin-drops-open-event": Mutant(
+        '                    info.setdefault("recovery_attempts", []).append(\n'
+        '                        {"attempt_id": attempt, "method": method, "started_at": now()}\n'
+        "                    )\n"
+        "                    event.details = encode(info)\n",
+        "                    await session.delete(event)\n",
+        "P5",
+    ),
+    "begin-links-resolved-events": Mutant(
+        '                if info.get("resolved_at") is None:\n'
+        "                    info.setdefault(",
+        "                if True:\n                    info.setdefault(",
+        "P5",
+    ),
     "complete-always-refuses": Mutant(
         "            if result.rowcount != 1:",
         "            if True:",
@@ -200,11 +223,24 @@ MUTANTS = {
     ),
 }
 
+# Breaks that the default bound misses and a deeper manual search catches.
+# --mutants and the pytest file leave them out. Run one with
+# --mutant NAME --depth N. The test replays the minimal sequence of each.
+DEEP_MUTANTS = {
+    # Caught at depth 7: a replace retry built from a stale read of the
+    # current replacement row, sent after the row was withdrawn.
+    "withdrawn-guard-admits-replace": Mutant(
+        '            if row and row.state == "withdrawn" and method != "withdraw":',
+        '            if row and row.state == "withdrawn" and method not in ("withdraw", "replace"):',
+        "P5",
+    ),
+}
+
 
 def load_storage(mutant):
     if mutant is None:
         return real_storage
-    old, new, _ = MUTANTS[mutant]
+    old, new, _ = (MUTANTS | DEEP_MUTANTS)[mutant]
     text = STORAGE_PATH.read_text()
     if text.count(old) != 1:
         raise SystemExit(
