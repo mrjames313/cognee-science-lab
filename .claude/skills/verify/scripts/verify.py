@@ -634,7 +634,7 @@ def main():
         help="also run journeys that call the embedding API",
     )
     p.add_argument(
-        "--jobs", type=int, default=1, help="journey runs to execute in parallel"
+        "--jobs", type=int, default=4, help="journey runs to execute in parallel"
     )
     p.set_defaults(func=journey)
 
