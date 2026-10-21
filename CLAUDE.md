@@ -20,10 +20,13 @@ Read [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) first. It gives the curr
 
 ## Verify a change
 
-1. Run `uv run pytest -q -m 'not integration'`. CI runs the same command on every push.
-2. For a change to `src/cognee_lab/identity/`, run `.claude/skills/verify/scripts/verify.py journey all`. Read `.claude/skills/verify/SKILL.md` first.
-3. For a change that touches `RecordStore` or its callers, run `uv run python support/ledger_check.py`. Read `.claude/skills/identity-ledger/SKILL.md` first.
-4. Run the integration suite, `uv run pytest -q -m integration`, only on a local machine. It takes about 10 minutes.
+The user agreed this routine on 2026-10-21.
+
+1. On every commit, run `uv run pytest -q -m 'not integration'`. CI runs the same command on every push.
+2. For a change that touches `RecordStore` or its callers, run `uv run python support/ledger_check.py`. Read `.claude/skills/identity-ledger/SKILL.md` first.
+3. For each feature change, run the changed feature's journeys with `.claude/skills/verify/scripts/verify.py journey <ID>`. The feature files in `.claude/skills/verify/features/` list the journeys. Read `.claude/skills/verify/SKILL.md` first.
+4. Once per checkpoint, before the merge to `main`, run `.claude/skills/verify/scripts/verify.py journey all`.
+5. Run the integration suite, `uv run pytest -q -m integration`, only on a local machine. It takes about 10 minutes.
 
 ## Land a change
 
@@ -31,7 +34,7 @@ Follow [.agents/playbooks/landing-on-main.md](.agents/playbooks/landing-on-main.
 
 1. Work on a branch off `main`.
 2. Review the branch with `/pstack:thermos`. Fix each finding, or dismiss it with a reason.
-3. Run the unit tests on the branch.
+3. Run the unit tests on the branch. At a checkpoint, also run `verify.py journey all`.
 4. Merge with `git merge --ff-only <branch>`. Do not open a pull request.
 5. Push `main` only when the user asks.
 
