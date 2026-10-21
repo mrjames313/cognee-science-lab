@@ -124,9 +124,9 @@ async def write_fact_chunk(
 
 
 async def verify_semantics(publisher, source, chunks, ctx):
-    from .captured_chunks import captured_facts
+    from .captured_chunks import captured_facts, retired_facts
 
-    for key, text in captured_facts(source):
+    for key, text in (*captured_facts(source), *retired_facts(source)):
         await verify_fact(publisher, source, chunks, ctx, group_key=key, fact_text=text)
 
 

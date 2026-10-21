@@ -7,10 +7,10 @@ import pytest
 
 from test_identity_occurrences import example
 from cognee_lab.identity.captured_chunks import (
-    FACT_GROUPS,
     FACT_TEXT,
     captured_facts,
     fact_chunks,
+    retired_facts,
     retired_mentions,
 )
 from cognee_lab.identity.group_regrouping import (
@@ -92,7 +92,9 @@ async def test_reviewed_split_into_fresh_groups(source_payload):
     await validate_inputs(
         checked, texts={"doc01": SPLIT_AFTER}, chunks={str(chunk.id): chunk}, graph=None
     )
-    assert dict(captured_facts(intended)) == dict.fromkeys(FACT_GROUPS, FACT_TEXT)
+    assert dict(captured_facts(intended)) == {"g05": FACT_TEXT}
+    assert dict(retired_facts(intended)) == {"g01": FACT_TEXT}
+    assert set(retired_mentions(intended)) == {"g01"}
     assert fact_chunks(intended, [chunk], group_key="g05") == [chunk]
     assert fact_chunks(intended, [chunk], group_key="g01") == []
     with pytest.raises(IntentError, match="prefix insertion"):
@@ -324,7 +326,8 @@ async def test_reviewed_combination_into_one_fresh_group(source_payload):
     )
     assert "g01" not in intended.mention_groups
     assert g06.entity_id != UUID("233cb019-3986-5864-88bc-91f334a64372")
-    assert dict(captured_facts(intended)) == dict.fromkeys(FACT_GROUPS, FACT_TEXT)
+    assert dict(captured_facts(intended)) == {"g06": FACT_TEXT}
+    assert dict(retired_facts(intended)) == {"g01": FACT_TEXT, "g05": FACT_TEXT}
     assert fact_chunks(intended, [chunk], group_key="g06") == [chunk]
     for gone in ("g01", "g05"):
         assert fact_chunks(intended, [chunk], group_key=gone) == []

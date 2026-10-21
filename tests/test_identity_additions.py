@@ -6,7 +6,13 @@ from uuid import uuid4
 import pytest
 
 from test_identity_occurrences import example
-from cognee_lab.identity.captured_chunks import ADDED_FACT_TEXT, fact_chunks
+from cognee_lab.identity.captured_chunks import (
+    ADDED_FACT_TEXT,
+    FACT_TEXT,
+    captured_facts,
+    fact_chunks,
+    retired_mentions,
+)
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import fixture_id
 from cognee_lab.identity.occurrence_addition import (
@@ -61,6 +67,11 @@ async def test_reviewed_continuation_and_same_text_new_group(source_payload):
     assert fact_chunks(
         intended, [chunk], group_key="g03", fact_text=ADDED_FACT_TEXT
     ) == [chunk]
+    assert dict(captured_facts(intended)) == {
+        "g01": FACT_TEXT,
+        "g03": ADDED_FACT_TEXT,
+    }
+    assert retired_mentions(intended) == {}
     with pytest.raises(IntentError, match="prefix insertion"):
         admit_remap(old, intended, BEFORE, AFTER)
     # Manifest is durable recovery intent, including its separately named mode.

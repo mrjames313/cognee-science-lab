@@ -1,21 +1,55 @@
 """Exact chunk binding and fact spans for the captured fixture, not inference."""
 
+from dataclasses import dataclass
+from uuid import UUID
+
 from .models import ChunkInput
 from .validation import IntentError, fresh_mention_id, map_chunks
-from uuid import UUID
 
 FACT_TEXT = "it limits oscillations"
 ADDED_FACT_TEXT = "the controller limits oscillations"
-FACT_GROUPS = ("g01", "g05", "g06")
-GROUP_CREATED = {"g03": 2, "g04": 2, "g05": 2, "g06": 3}
+
+
+@dataclass(frozen=True)
+class CapturedGroup:
+    created: int
+    retired: int | None
+    fact: str | None
+
+
+# `retired` is the revision at which a fixture edit drops the group. A source
+# that still declares the key is live whatever its revision: addition and
+# removal keep g01, the retirement and the split drop it.
+CAPTURED_GROUPS = {
+    "g01": CapturedGroup(1, 2, FACT_TEXT),
+    "g03": CapturedGroup(2, None, ADDED_FACT_TEXT),
+    "g04": CapturedGroup(2, 3, None),
+    "g05": CapturedGroup(2, 3, FACT_TEXT),
+    "g06": CapturedGroup(3, None, FACT_TEXT),
+}
 
 
 def captured_facts(source):
     """Explicit fixture outputs, independent of model inference or label matching."""
-    for key in FACT_GROUPS:
-        yield key, FACT_TEXT
-    if "g03" in source.mention_groups:
-        yield "g03", ADDED_FACT_TEXT
+    for key, group in CAPTURED_GROUPS.items():
+        if group.fact and key in source.mention_groups:
+            yield key, group.fact
+
+
+def retired_keys(source):
+    return [
+        key
+        for key, group in CAPTURED_GROUPS.items()
+        if group.retired is not None
+        and group.retired <= source.revision
+        and key not in source.mention_groups
+    ]
+
+
+def retired_facts(source):
+    for key in retired_keys(source):
+        if CAPTURED_GROUPS[key].fact:
+            yield key, CAPTURED_GROUPS[key].fact
 
 
 def fixture_mention_id(source, key="g01"):
@@ -24,7 +58,11 @@ def fixture_mention_id(source, key="g01"):
     if group is not None:
         return group.entity_id
     if key != "g01":
-        return fresh_mention_id(source.identity_data_id, GROUP_CREATED[key], key)
+        if key not in CAPTURED_GROUPS:
+            raise IntentError("fixture_shape", f"Unknown captured group {key}")
+        return fresh_mention_id(
+            source.identity_data_id, CAPTURED_GROUPS[key].created, key
+        )
     if source.identity_data_id == UUID("718efce2-4251-5f6f-8318-417bb4dd3525"):
         return UUID("233cb019-3986-5864-88bc-91f334a64372")
     raise IntentError(
@@ -33,10 +71,7 @@ def fixture_mention_id(source, key="g01"):
 
 
 def retired_mentions(source):
-    keys = ("g01", "g04", "g05") if "g06" in source.mention_groups else ("g01",)
-    return {
-        k: fixture_mention_id(source, k) for k in keys if k not in source.mention_groups
-    }
+    return {key: fixture_mention_id(source, key) for key in retired_keys(source)}
 
 
 def bind_chunks(payload, text, chunks):
@@ -87,7 +122,9 @@ def fact_chunks(source, chunks, *, group_key="g01", fact_text=FACT_TEXT):
     if group is None:
         fixture_mention_id(source)
         if fact_text in text and not any(
-            k in source.mention_groups for k in FACT_GROUPS
+            k in source.mention_groups
+            for k, g in CAPTURED_GROUPS.items()
+            if g.fact == fact_text
         ):
             raise IntentError(
                 "fixture_shape",
