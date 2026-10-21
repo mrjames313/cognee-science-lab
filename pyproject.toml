@@ -29,6 +29,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["support"]
 markers = ["integration: fresh native Cognee graph/vector/relational fixture (no LLM)"]
 asyncio_mode = "auto"
 
