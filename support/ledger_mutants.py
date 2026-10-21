@@ -82,6 +82,11 @@ MUTANTS = {
         "",
         "P3",
     ),
+    "assert-pending-ignores-attempt": Mutant(
+        '            or row["attempt"] != attempt\n',
+        "",
+        "P3",
+    ),
     "no-writer-reservation": Mutant(
         "            if locked.rowcount != 1:",
         "            if False:",

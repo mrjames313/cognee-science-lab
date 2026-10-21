@@ -218,6 +218,15 @@ class Harness:
                 kind, attempt, detail = world.writers[op.writer].last
                 source = description(attempt.source, attempt.revision, attempt.variant)
                 if kind == "complete":
+                    # A duplicated finish runs the whole path again: the guard
+                    # before graph writes, then complete(). If the guard lets an
+                    # ended attempt through, its graph writes would start.
+                    if METHODS[attempt.method].asserts_pending:
+                        ok, _ = await call(
+                            self.store.assert_pending(source, attempt.id)
+                        )
+                        if ok:
+                            return ACCEPTED
                     ok, _ = await call(
                         self.store.complete(source, attempt.id, state=detail)
                     )

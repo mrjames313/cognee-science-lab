@@ -102,6 +102,7 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `complete-ignores-attempt` | P3 | `W1 publish S1 rev=1`, `W1 complete`, `W1 repeat` |
 | `fail-ignores-attempt` | P3 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1`, `reject S1` |
 | `assert-pending-ignores-description` | P3 | `W1 publish S1 rev=1`, `W1 complete desc=alt` |
+| `assert-pending-ignores-attempt` | P3 | `W1 publish S1 rev=1`, `W1 complete`, `W2 reconcile S1 rev=1`, `W1 repeat` |
 | `no-writer-reservation` | P4 | `W1 publish S1 rev=1`, `W2 publish S2 rev=1` |
 | `complete-keeps-reservation` | P4 | `W1 publish S1 rev=1`, `W1 complete` |
 | `fail-always-new-event` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1`, `W1 reconcile S1 rev=1`, `W1 fail@nodes` |
