@@ -75,6 +75,7 @@ DEEP_SEQUENCES = {
 @pytest.mark.parametrize("name", sorted(DEEP_MUTANTS))
 def test_each_deep_break_fails_on_its_recorded_sequence(name):
     replayed = ledger_check.run_one(Config(mutant=name, replay=DEEP_SEQUENCES[name]))
+    assert replayed.failure is not None, ledger_check.report(replayed)
     assert replayed.failure.prop == DEEP_MUTANTS[name].prop, ledger_check.report(
         replayed
     )
