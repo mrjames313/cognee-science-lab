@@ -11,7 +11,7 @@ Every journey names its guide under `docs/` and takes each expected value from t
 - Run `$V doctor` and require `"ok": true`. The Cognee version must be `1.6.2`.
 - Run a journey with `$V journey ID`. The runner gives each journey, and each stage, its own run. By hand, start each journey with its own `RUN=$($V new-run NAME)`.
 - Use the helper's run roots only. Never pass `--root` yourself and never use a root under `outputs/stage6_*`.
-- `cleanup` checks that the lab stores are unchanged and logs the result in `assertions.tsv`. Do not touch `.cognee_data/`, `.cognee_system/` or the site-packages of `.venv`.
+- `cleanup` compares the lab stores with the fingerprint that `new-run` saved and logs the result in `assertions.tsv`. Do not touch `.cognee_data/`, `.cognee_system/` or the site-packages of `.venv`.
 - Only `P5` needs `.env`. It reads `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` and calls the embedding API, so `journey all` skips it unless you pass `--include-env`.
 
 ## Feature entry contract

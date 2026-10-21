@@ -36,7 +36,7 @@ V=.claude/skills/verify/scripts/verify.py
 $V journey ID [--stage S] [--include-env]  # run one journey block, clean up, print PASS/FAIL counts
 $V journey all [--include-env]             # run every journey block, print a summary table
 $V new-run NAME                      # prints outputs/verify/<UTC stamp>-NAME
-$V doctor [RUN]                      # read-only health check, JSON, exit 1 on any problem
+$V doctor [RUN]                      # read-only health check, JSON, exit 1 on a failing gate
 $V drive RUN ROOT LABEL -- CMD ARGS  # runs: uv run python -m cognee_lab.identity CMD ARGS --root RUN/roots/ROOT
 $V check RUN LABEL 'JQ' 'what it proves'   # jq -e over that step's JSON, logged PASS/FAIL
 $V val RUN LABEL 'JQ'                # prints jq -r over that step's JSON, for a later check
@@ -48,7 +48,7 @@ $V cleanup RUN                       # deletes RUN/roots (stores), keeps RUN/evi
 
 `drive` exits with the CLI's status (0 ok, 1 CLI error or timeout) and prints one line: step number, exit, seconds, whether JSON was found. Its default timeout is 600 s. Pass `--timeout N` before `--`. On timeout it kills only the process it started and records `timeout`.
 
-`journey` finds the block `bash journey ID` in `features/*.md`. It creates one run per journey, or one per stage, and exports `V`, `RUN` and `STAGE`. It defines `val` as a shell function and runs the block with `bash`. Then it runs cleanup and prints the PASS and FAIL counts from `assertions.tsv`. The block output goes to `evidence/journey.log`. A journey that lists stages runs every stage unless you pass `--stage`. `journey all` skips journeys that call the embedding API unless you pass `--include-env`. A named env journey also needs `--include-env`. The command exits 1 on any FAIL row or any run with no PASS row.
+`journey` finds the block `bash journey ID` in `features/*.md`. It creates one run per journey, or one per stage, and exports `V`, `RUN` and `STAGE`. It defines `val` as a shell function and runs the block with `bash`. Then it runs cleanup and prints the PASS and FAIL counts from `assertions.tsv`. The block output goes to `evidence/journey.log`. A journey that lists stages runs every stage unless you pass `--stage`. `journey all` skips journeys that call the embedding API unless you pass `--include-env`. A named env journey also needs `--include-env`. Blocks have no branches, so the runner expects one row per `$V check` line. A run with fewer rows, or a bash syntax error, gets a FAIL row. The command exits 1 on any FAIL row.
 
 ## Launch
 
@@ -108,7 +108,7 @@ Proof standards:
 - A reopened `retrieve` in a new process must return the same facts. That separates persisted state from in-process state.
 - `--fault-stage` is a deliberate test-only failure injection. Its incident has `origin: "test/fault_injection"`. It proves recovery mechanics only.
 - Captured decisions prove lifecycle mechanics, with either embedding profile. They don't prove extraction or search quality. Say so in any report.
-- `cleanup` compares the lab stores with the fingerprint that `new-run` saved. The stores are the `cognee_db` modification time and the `.cognee_data` file count. It logs two PASS or FAIL rows. A FAIL means something wrote to the lab store.
+- `cleanup` compares the lab stores with the fingerprint that `new-run` saved. The fingerprint is the newest modification time and the file count under `.cognee_system` (relational, graph, vector and SQLite `-wal` files), plus the `.cognee_data` file count. It logs three PASS or FAIL rows. A FAIL means something wrote to the lab store.
 - Report the counts from `assertions.tsv` and quote the FAIL lines. Never weaken a `check` to make it pass. If an expectation is wrong, show why, with the guide line it came from.
 
 ## Cleanup

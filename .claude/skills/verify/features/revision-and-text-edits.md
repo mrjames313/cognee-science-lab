@@ -84,6 +84,7 @@ $V drive "$RUN" main fixture -- multi-fixture
 M01=$(val fixture '.sources.doc01.mention_entity_id')
 M02=$(val fixture '.sources.doc02.mention_entity_id')
 T01=$(val fixture '.sources.doc01.resolution_target_entity_id')
+$V check "$RUN" fixture '(.sources.doc01.resolution_target_entity_id | type) == "string"' 'the fixture names the doc01 resolution target'
 
 $V drive "$RUN" main fail -- revise --expected-revision 1 --fault-stage "$STAGE"
 $V check "$RUN" fail '.error == "IntentError" and (.message | test("recovery_event_id=[0-9a-f-]{36}"))' 'the injected failure names a recovery event'

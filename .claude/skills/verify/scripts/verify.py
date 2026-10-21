@@ -36,7 +36,6 @@ from pathlib import Path
 from cognee_lab.identity.environment import (
     CREATION_COMMANDS,
     MARKER,
-    _operator_embedding,
     read_embedding,
     reopen_problem,
 )
@@ -48,7 +47,7 @@ FEATURES = Path(__file__).resolve().parents[1] / "features"
 CLI = [sys.executable, "-m", "cognee_lab.identity"]
 EXPECTED_COGNEE = "1.6.2"
 TOKENIZER_PATCH = REPO / "patches" / "cognee-1.6.2-openai-compatible-tokenizer.patch"
-LAB_DB = REPO / ".cognee_system" / "databases" / "cognee_db"
+LAB_SYSTEM = REPO / ".cognee_system"
 LAB_DATA = REPO / ".cognee_data"
 FENCE = re.compile(r"^```bash journey (?P<id>[A-Z]\d+)(?P<options>( \S+)*)\s*$")
 PRELUDE = 'val() { "$V" val "$RUN" "$1" "$2"; }\n'
@@ -99,15 +98,26 @@ def live_cli_processes(run):
     ]
 
 
+LAB_GUARD = (
+    ("system_newest_mtime_ns", "no file in the lab .cognee_system changed"),
+    ("system_files", "the lab .cognee_system file count is unchanged"),
+    ("cognee_data_files", "the lab .cognee_data file count is unchanged"),
+)
+
+
 def lab_fingerprint():
-    """Portable fingerprint of the lab stores that no verify run may touch."""
+    """Portable fingerprint of the lab stores that no verify run may touch.
+
+    Covers every file under .cognee_system (relational, graph, vector, and the
+    SQLite -wal file a killed writer can leave), not just cognee_db.
+    """
+    system = [p for p in LAB_SYSTEM.rglob("*") if p.is_file()]
     return dict(
-        cognee_db_mtime_ns=LAB_DB.stat().st_mtime_ns if LAB_DB.exists() else None,
-        cognee_data_files=(
-            sum(1 for p in LAB_DATA.rglob("*") if p.is_file())
-            if LAB_DATA.is_dir()
-            else None
+        system_newest_mtime_ns=max(
+            (p.stat().st_mtime_ns for p in system), default=None
         ),
+        system_files=len(system),
+        cognee_data_files=sum(1 for p in LAB_DATA.rglob("*") if p.is_file()),
     )
 
 
@@ -346,6 +356,9 @@ def probe(args):
         fail(f"{args.root} is not a root of this run")
     import lancedb
 
+    # Private on purpose: a rename should break probe only, not doctor.
+    from cognee_lab.identity.environment import _operator_embedding
+
     db = lancedb.connect(str(root / "vector"))
     record, _ = root_embedding(root)
     try:
@@ -394,10 +407,9 @@ def cleanup_run(run):
     verdicts = []
     if before:
         after = lab_fingerprint()
-        for key, description in (
-            ("cognee_db_mtime_ns", "the lab cognee_db modification time is unchanged"),
-            ("cognee_data_files", "the lab .cognee_data file count is unchanged"),
-        ):
+        for key, description in LAB_GUARD:
+            if key not in before:  # a run made before this guard field existed
+                continue
             verdict = "PASS" if before[key] == after[key] else "FAIL"
             verdicts.append(verdict)
             log_assertion(run, verdict, "run.json", f"lab_store.{key}", description)
@@ -426,10 +438,14 @@ def load_journeys():
             i += 1
             if not match:
                 continue
+            if match["id"] in journeys:
+                fail(f"journey {match['id']} is defined twice ({path.name})")
             body = []
-            while lines[i] != "```":
+            while i < len(lines) and lines[i].rstrip() != "```":
                 body.append(lines[i])
                 i += 1
+            if i == len(lines):
+                fail(f"journey {match['id']} in {path.name} has no closing fence")
             options = match["options"].split()
             stages = next(
                 (
@@ -457,20 +473,36 @@ def run_journey(journey, stage):
         "STAGE": stage or "",
     }
     log = run / "evidence" / "journey.log"
-    with open(log, "w") as handle:
-        subprocess.run(
-            ["bash", "-c", PRELUDE + journey["body"]],
-            cwd=REPO,
-            env=env,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-        )
-    cleanup_run(run)
-    rows = (
-        list(csv.reader((run / "evidence" / "assertions.tsv").open(), delimiter="\t"))
-        if (run / "evidence" / "assertions.tsv").exists()
-        else []
+    try:
+        with open(log, "w") as handle:
+            status = subprocess.run(
+                ["bash", "-c", PRELUDE + journey["body"]],
+                cwd=REPO,
+                env=env,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+            ).returncode
+    finally:
+        cleanup_run(run)
+    tsv = run / "evidence" / "assertions.tsv"
+    rows = list(csv.reader(tsv.open(), delimiter="\t")) if tsv.exists() else []
+    # Blocks have no branches, so every `$V check` line must leave exactly one row;
+    # fewer means bash stopped early (syntax error, exit) and the rest never ran.
+    expected = sum(
+        1
+        for line in journey["body"].splitlines()
+        if line.lstrip().startswith("$V check")
     )
+    got = sum(1 for r in rows if r[1] != "run.json")
+    if got != expected or status == 2:
+        log_assertion(
+            run,
+            "FAIL",
+            "journey.log",
+            f"bash exit {status}",
+            f"expected {expected} check rows, got {got}; read evidence/journey.log",
+        )
+        rows = list(csv.reader(tsv.open(), delimiter="\t"))
     passed = sum(1 for r in rows if r[0] == "PASS")
     failed = [r for r in rows if r[0] == "FAIL"]
     return dict(
@@ -523,10 +555,7 @@ def journey(args):
     print(f"{'total':34}{total_pass:>6}{total_fail:>6}  {len(results)} runs")
     if skipped:
         print(f"skipped (embedding API, add --include-env): {', '.join(skipped)}")
-    empty = [r["run"] for r in results if r["passed"] == 0]
-    if empty:
-        print(f"no assertion passed in: {', '.join(empty)}; read evidence/journey.log")
-    raise SystemExit(1 if total_fail or empty else 0)
+    raise SystemExit(1 if total_fail else 0)
 
 
 def main():
