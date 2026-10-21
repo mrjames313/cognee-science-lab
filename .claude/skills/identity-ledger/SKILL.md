@@ -131,6 +131,16 @@ These breaks would not be caught, because no reachable sequence separates them f
 - Removing `Publication.revision == source.revision` from `complete()`. The attempt filter already binds the revision.
 - Choosing the row by attempt in `fail()`. Attempt ids are unique per source.
 
+## Proof that this skill works
+
+On 2026-10-21 an agent followed this skill on a scratch edit of the real `storage.py` file. The edit was not in `MUTANTS`. It removed `Writer.owner == attempt,` from the reservation release in `fail()`. The results:
+
+1. The `git diff 6f1bdba` command showed the change in `storage.py`.
+2. `uv run python support/ledger_check.py` printed `FAIL` and exited with code 1, in 0.44 s. The message was `P4: reservation owner=None but open attempts=[...]`.
+3. The shortest sequence was: W1 publish S1, W1 complete, W1 publish S2, reject S1. Retrieval failed S1 and released the reservation that W1 held for S2.
+4. The `--replay` command from the report gave the same failure.
+5. After `git checkout -- src/cognee_lab/identity/storage.py`, the check printed `PASS verified within bound` with the starting counts (917 nodes, 837 sequences).
+
 ## Findings at the sync commit
 
 None. Every property holds in the exhaustive run at depth 8 with 2 sources and 2 writers. The sampled runs at depth 9 and 10 (P = 0.5) also pass. See Measurements.
