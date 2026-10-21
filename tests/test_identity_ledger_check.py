@@ -5,6 +5,8 @@ import pytest
 import ledger_check
 from ledger_check import Config
 from ledger_mutants import DEEP_MUTANTS, MUTANTS
+from ledger_model import TEXT_REGROUP
+from cognee_lab.identity.group_regrouping import SPLIT_REGROUPING
 
 # The default-bound search size. A change to the step list, the symmetry rule
 # or the no-op rule changes it; update it on purpose and say so in the commit.
@@ -79,6 +81,10 @@ def test_each_deep_break_fails_on_its_recorded_sequence(name):
     assert replayed.failure.prop == DEEP_MUTANTS[name].prop, ledger_check.report(
         replayed
     )
+
+
+def test_the_modelled_regrouping_is_the_one_split_group_sends():
+    assert TEXT_REGROUP["occurrence_regrouping"] == SPLIT_REGROUPING
 
 
 def test_a_retry_cannot_swap_a_text_change_for_a_regrouping():

@@ -83,14 +83,14 @@ class Plan:
     operation: Literal["publish", "replace", "withdraw"]
     revision: int
     previous: tuple[int, int] | None = None  # (revision, variant) it replaces
-    text: Literal["text", "regroup"] | None = None
+    change: Literal["text", "regroup"] | None = None
 
     @property
     def tag(self):
         if self.operation != "replace":
             return self.operation
         revision, variant = self.previous
-        kind = self.text or "replace"
+        kind = self.change or "replace"
         return f"{kind}<r{revision}" + ("alt" if variant else "")
 
     def as_dict(self, s):
@@ -103,8 +103,8 @@ class Plan:
             plan["previous_description"] = description(
                 s, *self.previous
             ).model_dump_json()
-        if self.text:
-            plan["text_change"] = dict(TEXT_CHANGES[self.text])
+        if self.change:
+            plan["text_change"] = dict(TEXT_CHANGES[self.change])
         return plan
 
     @classmethod
@@ -114,16 +114,16 @@ class Plan:
             old = json.loads(saved["previous_description"])
             previous = (old["revision"], variant_of(s, old))
         change = saved.get("text_change")
-        text = None
+        kind = None
         if change is not None:
-            text = next((k for k, v in TEXT_CHANGES.items() if v == change), None)
-            if text is None:
+            kind = next((k for k, v in TEXT_CHANGES.items() if v == change), None)
+            if kind is None:
                 raise ValueError(f"S{s + 1} saved a text_change the checker never sent")
         return cls(
             saved["operation"].removeprefix("identity_"),
             saved["revision"],
             previous,
-            text,
+            kind,
         )
 
 
@@ -246,8 +246,8 @@ def replace_intents(w, s, view):
         return []
     r, v = view.revision, view.variant
     ops = [
-        Begin(w, s, "replace", r, r + 1, Plan("replace", r + 1, (r, v), text))
-        for text in TEXT_PLANS
+        Begin(w, s, "replace", r, r + 1, Plan("replace", r + 1, (r, v), change))
+        for change in TEXT_PLANS
     ]
     ops += [
         Begin(w, s, "replace", r, r + 2, Plan("replace", r + 2, (r, v))),
@@ -260,9 +260,9 @@ def replace_intents(w, s, view):
             Begin(w, s, "replace", r, r, saved, v),
             Begin(w, s, "replace", r, r, saved, 1 - v),
             *[
-                Begin(w, s, "replace", r, r, replace(saved, text=text), v)
-                for text in TEXT_PLANS
-                if text != saved.text
+                Begin(w, s, "replace", r, r, replace(saved, change=change), v)
+                for change in TEXT_PLANS
+                if change != saved.change
             ],
             Begin(
                 w,
@@ -371,7 +371,7 @@ METHODS = {
             owns_failed_plan="replace",
             owns_withdrawn=False,
             requires_plan="replace",
-            preserved_on_retry=("previous", "text"),
+            preserved_on_retry=("previous", "change"),
             recovers="replace",
         ),
         Method(  # withdraw()
