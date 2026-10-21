@@ -29,7 +29,7 @@ Preconditions:
 - Each journey uses a new run and a new `chunked-fixture` root. Both sources are current at revision 1.
 - The fixture's doc01 text is `Helios controller (HC) regulates plasma heating, the controller adjusts coil current, and it limits oscillations.` with a trailing newline.
 
-**O1 remove an occurrence.** Guide: occurrence removal, "Concrete example" and "Run and inspect". The retention map is `{"g01": [1], "g02": []}`. The guide says g01 keeps only `it` at `[46, 48)` with its Entity UUID, resolution target and fact ID. It says g02 is retired with no Entity, index entry or marker. It says `position_shift` is null and a healthy `reconcile` does not bring g02 back.
+**O1 remove an occurrence.** Proves `remove-partial`. Guide: occurrence removal, "Concrete example" and "Run and inspect". The retention map is `{"g01": [1], "g02": []}`. The guide says g01 keeps only `it` at `[46, 48)` with its Entity UUID, resolution target and fact ID. It says g02 is retired with no Entity, index entry or marker. It says `position_shift` is null and a healthy `reconcile` does not bring g02 back.
 
 ```bash journey O1
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -69,7 +69,7 @@ $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' '
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01"'") | .identity.occurrences[] | [.start, .end, .text]] == [[46, 48, "it"]]' 'a new process returns only it for doc01'
 ```
 
-**O2 remove fault and recovery.** Guide: occurrence removal, "Explicit recovery". Run the block once per stage, each in its own run, with `STAGE` set to `replace_published` and `text_chunks`. The guide gives the `replace_published` sequence. It says native tests also cover `text_chunks`. The guide says doc01 is withheld and doc02's complete fact stays available. It says `reconcile` completes retirement and resolves the same incident only after revision 2 verifies.
+**O2 remove fault and recovery.** Proves `remove-fault`. Guide: occurrence removal, "Explicit recovery". The fence lists the stages (`replace_published` and `text_chunks`). The runner runs each stage in its own run. The guide gives the `replace_published` sequence. It says native tests also cover `text_chunks`. The guide says doc01 is withheld and doc02's complete fact stays available. It says `reconcile` completes retirement and resolves the same incident only after revision 2 verifies.
 
 ```bash journey O2 stages=replace_published,text_chunks
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -103,7 +103,7 @@ $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revisi
 $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
-**O3 retire a resolved group.** Guide: resolved retirement, "Run" and "Scope". The replacement text is `Helios controller (HC) regulates plasma heating.` and the retention map is `{"g01": [], "g02": [0]}`. The guide says only doc02's fact is retrieved. It says doc01 has three chunks and no primary marker, fact or evidence, and g02 continues at `[33, 39)`. It lists the retirement fields that must be false or zero and the shared fields that must be true. A later withdrawal keeps doc02's facts and doc01's unresolved marker.
+**O3 retire a resolved group.** Proves `retire-resolved`. Guide: resolved retirement, "Run" and "Scope". The replacement text is `Helios controller (HC) regulates plasma heating.` and the retention map is `{"g01": [], "g02": [0]}`. The guide says only doc02's fact is retrieved. It says doc01 has three chunks and no primary marker, fact or evidence, and g02 continues at `[33, 39)`. It lists the retirement fields that must be false or zero and the shared fields that must be true. A later withdrawal keeps doc02's facts and doc01's unresolved marker.
 
 ```bash journey O3
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -139,7 +139,7 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '[.facts[].source_id] == ["'"$M02"'"] and .unavailable_sources == []' 'a new process returns only the doc02 fact'
 ```
 
-**O4 retire fault and recovery.** Guide: resolved retirement, "Interrupted retirement". Run the block once per stage, each in its own run, with `STAGE` set to `replace_published` and `text_chunks`. The guide says doc01 is withheld and doc02's fact stays available. It says `reconcile` completes cleanup at revision 2 and resolves the same incident.
+**O4 retire fault and recovery.** Proves `retire-fault`. Guide: resolved retirement, "Interrupted retirement". The fence lists the stages (`replace_published` and `text_chunks`). The runner runs each stage in its own run. The guide says doc01 is withheld and doc02's fact stays available. It says `reconcile` completes cleanup at revision 2 and resolves the same incident.
 
 ```bash journey O4 stages=replace_published,text_chunks
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -172,7 +172,7 @@ $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revisi
 $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
-**O5 add occurrences, then edit and withdraw.** Guide: occurrence addition, "Captured edit", "Run" and "Reopen and reconcile". The continuity map is `{"g01": [0, 1], "g02": [0]}`. The guide says three facts, doc01 at 2/2/2, doc02 at 1/1/1, no unavailable source and no incident. It says g01 keeps its Entity ID and goes from two occurrences to three. It says g03 is new with its Entity, name index, accepted resolution `r03`, and current marker chunks. The handoff records two marker chunks for g03. The guide says a later prefix edit at expected revision 2 keeps g03 and its fact at revision 3. It says withdrawal withholds doc01's two facts and keeps doc02.
+**O5 add occurrences, then edit and withdraw.** Proves `add-continuing` and `add-follow-up`. Guide: occurrence addition, "Captured edit", "Run" and "Reopen and reconcile". The continuity map is `{"g01": [0, 1], "g02": [0]}`. The guide says three facts, doc01 at 2/2/2, doc02 at 1/1/1, no unavailable source and no incident. It says g01 keeps its Entity ID and goes from two occurrences to three. It says g03 is new with its Entity, name index, accepted resolution `r03`, and current marker chunks. The handoff records two marker chunks for g03. The guide says a later prefix edit at expected revision 2 keeps g03 and its fact at revision 3. It says withdrawal withholds doc01's two facts and keeps doc02.
 
 ```bash journey O5
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -221,7 +221,7 @@ $V drive "$RUN" main final -- retrieve
 $V check "$RUN" final '[.facts[].source_id] == ["'"$M02"'"] and .unavailable_sources == []' 'a new process returns only the doc02 fact'
 ```
 
-**O6 add fault and recovery.** Guide: occurrence addition, "Interrupted addition". Run the block once per stage, each in its own run, with `STAGE` set to `replace_published` and `text_chunks`. The guide says only doc02's fact returns and doc01 reports `publication_failed` with an incident ID. It says `reconcile` completes revision 2, returns three facts and resolves the same incident with one verified recovery attempt.
+**O6 add fault and recovery.** Proves `add-fault`. Guide: occurrence addition, "Interrupted addition". The fence lists the stages (`replace_published` and `text_chunks`). The runner runs each stage in its own run. The guide says only doc02's fact returns and doc01 reports `publication_failed` with an incident ID. It says `reconcile` completes revision 2, returns three facts and resolves the same incident with one verified recovery attempt.
 
 ```bash journey O6 stages=replace_published,text_chunks
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -259,7 +259,6 @@ $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != nul
 - The three commands accept only their captured doc01 edit. They do not locate arbitrary phrases or infer continuity. See "Not yet supported" in the README.
 - The retention and continuity maps are checked exactly. A map from a different guide version fails the check, and that is a real mismatch.
 - `position_shift` is null for removal, retirement and addition. A deletion has no single global shift.
-- The `replace_published` stage records its incident under a stage named `replacement_cleanup`. Do not assert the incident `stage` field against the flag value.
 - After a successful retirement, the primary mention ID stays in `resolved_group_retirement` as a diagnostic constant. Its absence checks are the proof, not the ID.
 - `O5` runs `edit-text` at expected revision 2 on a root that already has an addition. The guide documents this sequence. If it is refused, report the refusal text.
 - Only doc02's fact survives a retirement. Do not expect doc01 facts from `retrieve` until a later addition publishes new ones.

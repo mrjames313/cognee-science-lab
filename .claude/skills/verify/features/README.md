@@ -9,30 +9,37 @@ Every journey names its guide under `docs/` and takes each expected value from t
 - Work from the repo root on a checkout where `uv sync --group dev` has run.
 - Define the helper once per shell with `V=.claude/skills/verify/scripts/verify.py`.
 - Run `$V doctor` and require `"ok": true`. The Cognee version must be `1.6.2`.
-- Start each journey with its own `RUN=$($V new-run NAME)`. A journey never shares a run with another journey.
+- Run a journey with `$V journey ID`. The runner gives each journey, and each stage, its own run. By hand, start each journey with its own `RUN=$($V new-run NAME)`.
 - Use the helper's run roots only. Never pass `--root` yourself and never use a root under `outputs/stage6_*`.
-- Record the lab store before and after you run any journeys. Both values must be unchanged.
-  - `stat -f %Sm .cognee_system/databases/cognee_db`
-  - `ls .cognee_data | wc -l`
-- Loopback journeys need no network and no `.env`. The one `env` journey (`P5` in the publication file) reads `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` from the repo `.env` and calls the embedding API.
-- Do not touch `.cognee_data/`, `.cognee_system/` or the site-packages of `.venv`.
+- `cleanup` checks that the lab stores are unchanged and logs the result in `assertions.tsv`. Do not touch `.cognee_data/`, `.cognee_system/` or the site-packages of `.venv`.
+- Only `P5` needs `.env`. It reads `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` and calls the embedding API, so `journey all` skips it unless you pass `--include-env`.
+
+## Feature entry contract
+
+Each feature file lists its sub-features and holds one bold-led paragraph per journey. The paragraph names the sub-features that the journey proves, cites its guide, and states the expected values with the guide line that gives each one. A journey that disagrees with its guide reports a failure.
+
+- **Fence.** A journey is a fenced block with the info string `bash journey ID [stages=a,b,c] [env]`. The block holds only `drive`, `check` and shell lines. It never defines `V`, `RUN`, `val` or a cleanup.
+- **Stages.** `stages=` lists the fault stages. The runner sets `STAGE` for each one, in its own run. `--stage S` runs one.
+- **env.** The `env` token marks a journey that calls the embedding API.
+- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits and `O` is occurrence changes. The `E` journeys live in the revision file.
+- **Fault journeys.** A fault journey lives with the feature that it breaks.
+- **Cited values.** Every expected value comes from a guide under `docs/` or from `docs/SESSION_HANDOFF.md`. An inference from a guide says so in the paragraph.
+- **Non-vacuous checks.** A check on a field requires the field to exist. Use `length > 0`, a type test or `!= null` where a missing field would otherwise pass.
 
 ## Driving conventions
 
-- Each journey is one fenced block labeled `bash journey ID`. The block is self-contained and runs top to bottom with `bash`. It ends with `$V cleanup "$RUN"`.
-- Some journeys take a fault stage. Their block starts with `STAGE=${STAGE:-<first stage>}`. Run the block once per listed stage, each in its own run, with `STAGE=<stage> bash ...`.
-- `$V drive` adds `--root`. For `fixture`, `multi-fixture` and `chunked-fixture` it also adds `--embedding loopback` unless the line passes `--embedding`. The `.cmd` evidence file records the effective command.
-- Later commands read the profile from the root marker. They never take `--embedding`.
+- The runner exports `V`, `RUN` and `STAGE` and defines `val LABEL 'JQ'`. `val` prints a value from that step's JSON so that a later check can compare across steps.
+- `$V drive` adds `--root`. Later commands read the profile from the root marker and never take `--embedding`.
 - Keep labels unique within a run. `$V check` reads the latest step with that label.
-- `val LABEL 'JQ'` is a shell function in each block. It prints a value from that step's JSON so that a later check can compare across steps.
 - A step that is meant to fail still runs through `drive`. The step exits 1, and a `check` on `.error` proves the failure.
 - Read `retrieve` facts at `.facts`. Read every other command's facts at `.result.facts`. `status` returns only `.publications` and `.recovery_events`.
 - Compare UUIDs only within one run.
+- The `replace_published` stage records its incident under a stage named `replacement_cleanup`. Do not assert the incident `stage` field against the flag value.
 
 ## Proof and skip reporting
 
-- Report the PASS and FAIL counts from `RUN/evidence/assertions.tsv` for every run. Quote each FAIL line.
-- A passing journey proves that the lifecycle mechanics work through the real Ladybug, LanceDB and SQLite stores. Captured decisions do not prove extraction or search quality. Say so.
+- Report the PASS and FAIL counts from `RUN/evidence/assertions.tsv` for every run. Quote each FAIL line. `$V journey` prints them.
+- A passing journey proves that the lifecycle mechanics work through the real Ladybug, LanceDB and SQLite stores. `SKILL.md` says what captured decisions do not prove.
 - A journey proves side effects, not only returned facts. That means revision triples, `recovery_events`, `unavailable_sources`, retired chunks and vectors, and a reopen in a new process.
 - An injected fault has `origin: "test/fault_injection"`. It proves recovery mechanics only.
 - If a precondition is unmet, report the command you tried and the precondition. Do not report the journey as verified through a different path.

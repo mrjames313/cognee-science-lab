@@ -28,7 +28,7 @@ Preconditions:
 - Each journey uses a new run and a new root. Both commands refuse a stale `--expected-revision`.
 - The fixture's sources are current at revision 1 before the first edit.
 
-**R1 revise, stale retry and reconcile.** Guide: revision replacement, the "Run the captured correction" table. The guide says doc01's mention keeps its UUID, fact and evidence. It says the old shared variant contribution and the private singleton are removed. Doc02 keeps its own interpretation. The `revise` command also queries the revised controller and returns doc01's fact alone. A repeated `revise` at revision 1 is stale.
+**R1 revise, stale retry and reconcile.** Proves `revise-correction` and `revise-stale`. Guide: revision replacement, the "Run the captured correction" table. The guide says doc01's mention keeps its UUID, fact and evidence. It says the old shared variant contribution and the private singleton are removed. Doc02 keeps its own interpretation. The `revise` command also queries the revised controller and returns doc01's fact alone. A repeated `revise` at revision 1 is stale.
 
 ```bash journey R1
 $V drive "$RUN" main fixture -- multi-fixture
@@ -77,7 +77,7 @@ $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id != "'"$D01"'") | .identity.target_entity_id] == ["'"$T02"'"]' 'a new process returns the doc02 fact with the original target'
 ```
 
-**R2 revise fault and recovery.** Guide: revision replacement, "Interrupted replacement and explicit recovery". Run the block once per stage, each in its own run, with `STAGE` set to `replace_saved`, `replace_registered`, `replace_published` and `replace_retired`. The guide says that every stage leaves revision 2 failed with last verified revision 1. The guide also says `retrieve` withholds doc01 and keeps doc02, and `reconcile` completes revision 2 with outcome `restored`. The stage `replace_verification` exists, and the guide does not list it as covered, so this map does not drive it.
+**R2 revise fault and recovery.** Proves `revise-fault`. Guide: revision replacement, "Interrupted replacement and explicit recovery". The fence lists the stages (`replace_saved`, `replace_registered`, `replace_published` and `replace_retired`). The runner runs each stage in its own run. The guide says that every stage leaves revision 2 failed with last verified revision 1. The guide also says `retrieve` withholds doc01 and keeps doc02, and `reconcile` completes revision 2 with outcome `restored`. The stage `replace_verification` exists, and the guide does not list it as covered, so this map does not drive it.
 
 ```bash journey R2 stages=replace_saved,replace_registered,replace_published,replace_retired
 $V drive "$RUN" main fixture -- multi-fixture
@@ -114,7 +114,7 @@ $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revisi
 $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
-**E1 prefix edit on one chunk.** Guide: text changes, the table under "Run on a fresh two-source fixture". The prefix has 48 Unicode code points. The guide says doc01 keeps its Data ID, group Entity IDs, fact ID and resolution target. It says doc01's chunk and fingerprint are new and its evidence is rebuilt. Doc02 is unchanged.
+**E1 prefix edit on one chunk.** Proves `edit-prefix`. Guide: text changes, the table under "Run on a fresh two-source fixture". The prefix has 48 Unicode code points. The guide says doc01 keeps its Data ID, group Entity IDs, fact ID and resolution target. It says doc01's chunk and fingerprint are new and its evidence is rebuilt. Doc02 is unchanged.
 
 ```bash journey E1
 $V drive "$RUN" main fixture -- multi-fixture
@@ -154,7 +154,7 @@ $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' '
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01"'") | .identity.occurrences[] | [.start, .end]] == [[97, 111], [134, 136]]' 'a new process returns the new doc01 positions'
 ```
 
-**E2 prefix edit on many chunks, repeated.** Guide: multichunk, the table with the "Initial" and "After first edit" columns. The prefix has 10 code points. The guide says the second edit at expected revision 2 reaches revision 3 with seven doc01 chunks. It says a later withdrawal preserves original-owned facts, evidence and markers under the current chunk mapping.
+**E2 prefix edit on many chunks, repeated.** Proves `edit-multichunk`. Guide: multichunk, the table with the "Initial" and "After first edit" columns. The prefix has 10 code points. The guide says the second edit at expected revision 2 reaches revision 3 with seven doc01 chunks. It says a later withdrawal preserves original-owned facts, evidence and markers under the current chunk mapping.
 
 ```bash journey E2
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -199,7 +199,7 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 1 and .unavailable_sources == []' 'a new process returns only the doc02 fact'
 ```
 
-**E3 prefix edit fault and recovery.** Guide: text changes, "Interrupted edit and recovery". Run the block once per stage, each in its own run, with `STAGE` set to `text_removed`, `text_registered`, `text_chunks` and `replace_published`. The guide says doc01 is failed and withheld while `retrieve` returns doc02 only. It says `reconcile` repeats the native rebuild, completes revision 2 and records `resolving_revision: 2` with `outcome: restored`.
+**E3 prefix edit fault and recovery.** Proves `edit-fault`. Guide: text changes, "Interrupted edit and recovery". The fence lists the stages (`text_removed`, `text_registered`, `text_chunks` and `replace_published`). The runner runs each stage in its own run. The guide says doc01 is failed and withheld while `retrieve` returns doc02 only. It says `reconcile` repeats the native rebuild, completes revision 2 and records `resolving_revision: 2` with `outcome: restored`.
 
 ```bash journey E3 stages=text_removed,text_registered,text_chunks,replace_published
 $V drive "$RUN" main fixture -- multi-fixture
@@ -234,7 +234,7 @@ $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
 ```
 
-**E4 multi-chunk edit fault and recovery.** Guide: multichunk, "Interrupted rebuild". The guide says doc02's fact stays available with both evidence chunks. It says `reconcile` restores doc01 at 2/2/2 and resolves the same incident.
+**E4 multi-chunk edit fault and recovery.** Proves `edit-fault` and `edit-multichunk`. Guide: multichunk, "Interrupted rebuild". The guide says doc02's fact stays available with both evidence chunks. It says `reconcile` restores doc01 at 2/2/2 and resolves the same incident.
 
 ```bash journey E4
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -267,8 +267,6 @@ $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' '
 - `revise` has no `text_changes`. It returns `corrected_entity_result` instead. `edit-text` returns `text_changes` and no `corrected_entity_result`.
 - A repeated `revise` or `edit-text` with the old `--expected-revision` is stale. Use `reconcile` to check a current revision.
 - `--fault-stage` must match the command. `revise` takes `replace_*`. `edit-text` takes `text_*` or `replace_*`.
-- The `replace_published` stage records its incident under a stage named `replacement_cleanup`. Do not assert the incident `stage` field against the flag value.
 - A boundary change can leave the chunk count unchanged. Equal content-derived chunk IDs do not prove equal positions. Check chunk indexes, not only IDs.
 - The edit result files (`revision_result.json`, `text_revision_result.json`) are the transition record. A later healthy `reconcile` does not repeat them. Read `text_changes` from the `edit` step.
 - `edit-text` applies only the captured prefix. It does not infer that arbitrary new text is irrelevant. See "Not yet supported" in the README.
-- The captured fixture proves lifecycle mechanics. It does not prove that the correction or the edit is semantically right.

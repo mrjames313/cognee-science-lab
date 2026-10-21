@@ -27,7 +27,7 @@ Preconditions:
 - Each journey uses a new run and a new `multi-fixture` root. Withdrawal changes the root for good.
 - The fixture's two sources are current at revision 1 before the first withdrawal.
 
-**W1 withdraw doc01, then doc02.** Guide: the "Two-source lifecycle fixture" table. The table says that withdrawing doc01 leaves 1 shared contribution and 1 owner, both from doc02. Withdrawing doc02 leaves no variant edge and no shared singleton. Original markers, mention nodes, facts, ownership and evidence remain after each step. The guide also says that repeated withdrawal works and that `reconcile --source doc02` checks the second source before it retires.
+**W1 withdraw doc01, then doc02.** Proves `withdraw-first` and `withdraw-repeat`. Guide: the "Two-source lifecycle fixture" table. The table says that withdrawing doc01 leaves 1 shared contribution and 1 owner, both from doc02. Withdrawing doc02 leaves no variant edge and no shared singleton. Original markers, mention nodes, facts, ownership and evidence remain after each step. The guide also says that repeated withdrawal works and that `reconcile --source doc02` checks the second source before it retires.
 
 ```bash journey W1
 $V drive "$RUN" main fixture -- multi-fixture
@@ -79,7 +79,7 @@ $V check "$RUN" status '.publications | length == 2 and all(.state == "withdrawn
 $V check "$RUN" status '.recovery_events == []' 'no incident'
 ```
 
-**W2 withdraw doc02, then doc01.** Guide: "Use a fresh root to try the reverse removal order", and the native test matrix "covers both removal orders". The guide's table states the doc01-first values. The values below are the same table with the two sources swapped, which is an inference from symmetry.
+**W2 withdraw doc02, then doc01.** Proves `withdraw-reverse`. Guide: "Use a fresh root to try the reverse removal order", and the native test matrix "covers both removal orders". The guide's table states the doc01-first values. The values below are the same table with the two sources swapped, which is an inference from symmetry.
 
 ```bash journey W2
 $V drive "$RUN" main fixture -- multi-fixture
@@ -112,7 +112,7 @@ $V drive "$RUN" main status -- status
 $V check "$RUN" status '.publications | length == 2 and all(.state == "withdrawn" and .verified_revision == 1)' 'both publications are withdrawn'
 ```
 
-**W3 withdrawal fault and retry.** Guide: "Withdrawal implementation and failures". Run the block once per stage, each in its own run, with `STAGE` set to `withdraw_contributions`, `withdraw_owners` and `withdraw_verification`. The guide expects the following results.
+**W3 withdrawal fault and retry.** Proves `withdraw-fault` and `withdraw-reconcile-guard`. Guide: "Withdrawal implementation and failures". The fence lists the stages (`withdraw_contributions`, `withdraw_owners` and `withdraw_verification`). The runner runs each stage in its own run. The guide expects the following results.
 
 - The command fails with an injected error and a recovery event.
 - `retrieve` returns only doc02's fact, and doc01 appears in `unavailable_sources`.

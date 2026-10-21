@@ -30,9 +30,8 @@ Preconditions:
 
 - `$V doctor` reports `"ok": true`.
 - Each journey runs in its own `RUN`. The helper builds the root path. The root does not exist yet.
-- Journeys `P1` to `P4` use the helper's loopback default. They need no network and no `.env`.
 
-**P1 single publication.** Guide: first slice, "Run it" and "Expected result".
+**P1 single publication.** Proves `publish-single`, `retrieve-reopen`, `reconcile-healthy` and `status`. Guide: first slice, "Run it" and "Expected result".
 
 ```bash journey P1
 $V drive "$RUN" main fixture -- fixture
@@ -60,7 +59,7 @@ $V check "$RUN" status '.publications | length == 1 and (.[0] | .state == "curre
 $V check "$RUN" status '.recovery_events == []' 'status shows no incident'
 ```
 
-**P2 two-source publication.** Guide: first slice, "Two-source lifecycle fixture" table, row "Both published".
+**P2 two-source publication.** Proves `publish-two-source`, `retrieve-reopen`, `reconcile-healthy` and `status`. Guide: first slice, "Two-source lifecycle fixture" table, row "Both published".
 
 ```bash journey P2
 $V drive "$RUN" main fixture -- multi-fixture
@@ -89,7 +88,7 @@ $V drive "$RUN" main status -- status
 $V check "$RUN" status '.publications | length == 2 and all(.state == "current" and .revision == 1 and .verified_revision == 1)' 'status shows two current publications'
 ```
 
-**P3 chunked publication.** Guide: multichunk, "Run" and the "Initial" column of the table.
+**P3 chunked publication.** Proves `publish-chunked`, `retrieve-reopen` and `reconcile-healthy`. Guide: multichunk, "Run" and the "Initial" column of the table.
 
 ```bash journey P3
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -115,7 +114,7 @@ $V check "$RUN" reconcile '(.result.facts | length) == 2 and .recovery_events ==
 $V check "$RUN" reconcile '.sources.doc01.chunk_count == 6 and .sources.doc01.saved_revision == 1 and .sources.doc01.verified_revision == 1' 'healthy reconcile keeps doc01 at revision 1 with 6 chunks'
 ```
 
-**P4 failed first publication.** Guide: first slice, "Failure visibility and recovery". The CLI exits 1 with `recovery_event_id` in the message. Deliberate injections carry `origin: "test/fault_injection"`. The stages `nodes` and `verification` also exist. The guide gives no expected result for them beyond a refusal, so this map does not drive them.
+**P4 failed first publication.** Proves `publish-failure`, `retrieve-reopen` and `status`. Guide: first slice, "Failure visibility and recovery". The CLI exits 1 with `recovery_event_id` in the message. Deliberate injections carry `origin: "test/fault_injection"`. The stages `nodes` and `verification` also exist. The guide gives no expected result for them beyond a refusal, so this map does not drive them.
 
 ```bash journey P4
 $V drive "$RUN" main fail -- fixture --fault-stage identity_edges
@@ -140,7 +139,7 @@ $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | length == 1 and .[0].state == "current"' 'the publication is current'
 ```
 
-**P5 env profile. This journey calls the embedding API named in `.env` and costs a few API calls.** It runs `chunked-fixture`, `add-occurrences`, `reconcile` and `retrieve` with `--embedding env`. Guide: `docs/SESSION_HANDOFF.md`, "Evidence after the fix". The handoff records the marker `nvidia/nemotron-3-embed-1b` with 2048 dimensions for this `.env`. A different `.env` model makes the marker check fail, and that is a real mismatch to report. The journey prints key names only. It never prints a `.env` value.
+**P5 env profile. This journey calls the embedding API named in `.env` and costs a few API calls.** Proves `profile-env`. It runs `chunked-fixture`, `add-occurrences`, `reconcile` and `retrieve` with `--embedding env`. Guide: `docs/SESSION_HANDOFF.md`, "Evidence after the fix". The handoff records the marker `nvidia/nemotron-3-embed-1b` with 2048 dimensions for this `.env`. A different `.env` model makes the marker check fail, and that is a real mismatch to report. The journey never prints or records a `.env` value. The probe scans the root and the evidence for the API key and writes only a yes or no.
 
 ```bash journey P5 env
 $V drive "$RUN" main fixture -- chunked-fixture --embedding env
@@ -167,10 +166,8 @@ $V check "$RUN" probe '.key_scanned == true and .key_leak == false' 'the embeddi
 ## Gotchas
 
 - `fixture`, `multi-fixture` and `chunked-fixture` print Cognee log lines before the JSON. `drive` extracts the JSON. Do not `jq` the raw `.stdout`.
-- `fixture` returns `.embedding`. `multi-fixture` and `chunked-fixture` do not. Read their profile from `$V doctor "$RUN"` (`root_embeddings`).
+- `fixture` returns `.embedding`. `multi-fixture` and `chunked-fixture` do not. Read their profile with `$V probe "$RUN" main LABEL` (`.marker`).
 - `status` shows `.publications[].source` as an identity-data UUID, not `doc01`.
-- The CLI default is `--embedding env`. `drive` adds `loopback` only when the line passes no `--embedding`. A hand-typed command without the flag calls the embedding API.
 - A fixture command refuses an existing root. To repeat a journey, start a new run.
-- `P5` fails at the first step if `.env` lacks `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS`. Creation then leaves no root. `doctor` reports the key names that are missing.
-- An unapplied tokenizer fix does not fail `P5`. It makes Cognee fall back to an approximate tokenizer for `env` roots. `doctor` reports this as a warning with `tokenizer_fix: "not applied"`. See `patches/README.md`.
-- The loopback profile proves storage and index mechanics. It does not prove embedding quality or search quality.
+- `P5` fails at the first step if `.env` lacks `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS`. Creation fails before any root exists, so `doctor` cannot report it. The CLI error names the missing keys.
+- An unapplied tokenizer fix does not fail `P5`. It makes Cognee fall back to an approximate tokenizer for `env` roots. `probe` records `tokenizer_fix`, and `doctor RUN` warns about it while the run still has an env root. See `patches/README.md`.
