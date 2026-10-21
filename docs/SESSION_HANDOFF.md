@@ -139,7 +139,14 @@ The assistant measured these results on the user's Mac after the fix:
 
 ### Verification skill
 
-The draft project verification skill (`.claude/skills/verify/`) found this issue and was paused on it. The fix removes that blocker. The skill's feature map and proof run are not finished. Its grounding-run evidence is in `outputs/verify/20261020T201147Z-grounding/evidence/`. The 24 lab data files that the probe and grounding runs of that session wrote are listed in `outputs/verify/lab-data-leaked-files-2026-10-20.txt`. The lab relational store does not reference them.
+The project verification skill (`.claude/skills/verify/`) found this issue, and the fix removed its blocker. Its grounding-run evidence is in `outputs/verify/20261020T201147Z-grounding/evidence/`. The 24 lab data files that the probe and grounding runs of that session wrote are listed in `outputs/verify/lab-data-leaked-files-2026-10-20.txt`. The lab relational store does not reference them.
+
+Proof history, 2026-10-20 to 2026-10-21:
+
+- 2026-10-20. The 20 journey blocks ran as 31 runs on the Mac against Cognee 1.6.2, with 500 assertions and 0 failures. The tokenizer fix was applied.
+- 2026-10-21. A fix round added the `journey` runner, `probe`, the lab-store guard and `reopen_problem`. The rerun passed all 31 runs with 567 assertions and 0 failures. `journey all` ran the 30 loopback runs, and `journey P5 --include-env` ran the env run.
+- Not exercised against an env root. The warning path for a missing tokenizer fix, and the doctor failure path for an operator file that lacks a key.
+- Exercised. The doctor failure path for a pre-profile marker, a malformed marker, and an env root whose operator file names another model.
 
 ## Original six-step implementation sequence
 
