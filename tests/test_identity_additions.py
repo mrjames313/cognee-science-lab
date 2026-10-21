@@ -42,7 +42,7 @@ def admit(old, source, mapping=CONTINUITY):
 
 async def test_reviewed_continuation_and_same_text_new_group(source_payload):
     old, chunk, intended = addition(source_payload)
-    assert admit(old, intended) is None
+    assert admit(old, intended).fresh == {"g03"}
     assert len(intended.mention_groups["g01"].occurrences) == 3
     assert (
         intended.mention_groups["g01"].entity_id == old.mention_groups["g01"].entity_id

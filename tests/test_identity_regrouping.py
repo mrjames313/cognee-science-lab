@@ -62,7 +62,8 @@ def rebuilt(intended, mutate):
 
 async def test_reviewed_split_into_fresh_groups(source_payload):
     old, chunk, intended = split(source_payload)
-    plan = admit(old, intended)
+    assert admit(old, intended).fresh == {"g04", "g05"}
+    plan = classify_regrouping(old, intended, SPLIT_REGROUPING)
     assert (plan.continuing, plan.retired, plan.fresh) == (
         {"g02"},
         {"g01"},
@@ -292,7 +293,8 @@ def admit_combination(old, source, mapping=COMBINE_REGROUPING):
 
 async def test_reviewed_combination_into_one_fresh_group(source_payload):
     old, chunk, intended = combine(source_payload)
-    plan = admit_combination(old, intended)
+    assert admit_combination(old, intended).fresh == {"g06"}
+    plan = classify_regrouping(old, intended, COMBINE_REGROUPING)
     assert (plan.continuing, plan.retired, plan.fresh) == (
         {"g02"},
         {"g04", "g05"},

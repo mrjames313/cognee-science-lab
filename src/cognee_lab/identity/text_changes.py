@@ -121,6 +121,11 @@ async def chunk_text(text, ctx, budget=512):
     ]
 
 
+@dataclass(frozen=True)
+class Admission:
+    fresh: frozenset[str] = frozenset()
+
+
 def admit_remap(
     old,
     source,
@@ -130,18 +135,13 @@ def admit_remap(
     occurrence_continuity=None,
     occurrence_regrouping=None,
 ):
-    modes = [
-        m
-        for m in (occurrence_retention, occurrence_continuity, occurrence_regrouping)
-        if m is not None
-    ]
-    if len(modes) > 1:
-        raise IntentError("not_admitted", "Select one occurrence transition mode")
-    if not modes and (not before or not after.endswith(before) or after == before):
-        raise IntentError(
-            "not_admitted", "Text slice requires a nonempty prefix insertion"
-        )
-    delta = len(after) - len(before)
+    kind, reviewed = TextChange(
+        before,
+        after,
+        occurrence_retention=occurrence_retention,
+        occurrence_continuity=occurrence_continuity,
+        occurrence_regrouping=occurrence_regrouping,
+    ).mode
     key = old.original_input_ref
     if (source.dataset_id, source.identity_data_id, source.original_input_ref) != (
         old.dataset_id,
@@ -173,18 +173,15 @@ def admit_remap(
         raise IntentError(
             "source_changed", "Saved text transition fingerprints disagree"
         )
-    if occurrence_regrouping is not None:
-        return admit_occurrence_regrouping(
-            old, source, before, after, occurrence_regrouping
+    return ADMITTERS[kind](old, source, before, after, reviewed)
+
+
+def admit_prefix_shift(old, source, before, after, _):
+    if not before or not after.endswith(before) or after == before:
+        raise IntentError(
+            "not_admitted", "Text slice requires a nonempty prefix insertion"
         )
-    if occurrence_continuity is not None:
-        return admit_occurrence_addition(
-            old, source, before, after, occurrence_continuity
-        )
-    if occurrence_retention is not None:
-        return admit_occurrence_removal(
-            old, source, before, after, occurrence_retention
-        )
+    delta = len(after) - len(before)
     if set(old.mention_groups) != set(source.mention_groups):
         raise IntentError("not_admitted", "This slice preserves group membership")
     for name, previous in old.mention_groups.items():
@@ -223,7 +220,7 @@ def admit_remap(
         raise IntentError(
             "not_admitted", "Span-scoped variants require explicit scope remapping"
         )
-    return delta
+    return Admission()
 
 
 ATTRIBUTION_FIELDS = frozenset({"producer_ref", "input_refs", "explanation"})
@@ -383,7 +380,7 @@ def admit_occurrence_removal(old, source, before, after, retention):
             "not_admitted", "This reviewed slice removes at least one occurrence"
         )
     check_carryover(old, source, kept, frozenset())
-    return None  # An arbitrary reviewed removal has no single global offset shift.
+    return Admission()
 
 
 def admit_occurrence_addition(old, source, before, after, continuity):
@@ -440,7 +437,7 @@ def admit_occurrence_addition(old, source, before, after, continuity):
         raise IntentError(
             "not_admitted", "This reviewed slice adds at least one occurrence"
         )
-    return None
+    return Admission(new_groups)
 
 
 @dataclass(frozen=True)
@@ -536,7 +533,22 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
     for key in plan.fresh:
         check_fresh_group(old, source, key)
     check_carryover(old, source, plan.continuing, plan.fresh)
-    return plan
+    return Admission(plan.fresh)
+
+
+ADMITTERS = {
+    "prefix": admit_prefix_shift,
+    "retention": admit_occurrence_removal,
+    "continuity": admit_occurrence_addition,
+    "regrouping": admit_occurrence_regrouping,
+}
+
+
+MODE_FIELDS = (
+    ("retention", "occurrence_retention"),
+    ("continuity", "occurrence_continuity"),
+    ("regrouping", "occurrence_regrouping"),
+)
 
 
 @dataclass(frozen=True)
@@ -547,6 +559,17 @@ class TextChange:
     occurrence_retention: dict[str, list[int]] | None = None
     occurrence_continuity: dict[str, list[int]] | None = None
     occurrence_regrouping: dict[str, list[list[str | int]]] | None = None
+
+    @property
+    def mode(self):
+        chosen = [
+            (kind, getattr(self, field))
+            for kind, field in MODE_FIELDS
+            if getattr(self, field) is not None
+        ]
+        if len(chosen) > 1:
+            raise IntentError("not_admitted", "Select one occurrence transition mode")
+        return chosen[0] if chosen else ("prefix", None)
 
     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
         from cognee.infrastructure.databases.provenance.markers import (
@@ -563,14 +586,8 @@ class TextChange:
             self.occurrence_continuity,
             self.occurrence_regrouping,
         )
-        if self.occurrence_regrouping is not None:
-            fresh = admitted.fresh
-        elif self.occurrence_continuity is not None:
-            fresh = set(source.mention_groups) - set(old.mention_groups)
-        else:
-            fresh = set()
         if not retry:
-            for key in fresh:
+            for key in admitted.fresh:
                 if (
                     await publisher.graph.get_node(
                         str(source.mention_groups[key].entity_id)

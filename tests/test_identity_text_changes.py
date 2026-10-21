@@ -7,9 +7,20 @@ import pytest
 from pydantic import ValidationError
 
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.text_changes import admit_remap
+from cognee_lab.identity.text_changes import TextChange, admit_remap
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.validation import IntentError, validate_inputs
+
+
+def test_a_text_change_names_one_transition_mode():
+    assert TextChange("a", "ba").mode == ("prefix", None)
+    assert TextChange("a", "b", occurrence_retention={"g": []}).mode == (
+        "retention",
+        {"g": []},
+    )
+    assert TextChange("a", "b", occurrence_regrouping={}).mode == ("regrouping", {})
+    with pytest.raises(IntentError, match="Select one"):
+        TextChange("a", "b", occurrence_continuity={}, occurrence_regrouping={}).mode
 
 
 def example(source_payload):
@@ -29,7 +40,7 @@ def test_exact_unicode_remap_preserves_occurrence_identity_and_reviews_context(
     source_payload,
 ):
     old, before, after, chunk, intended = example(source_payload)
-    assert admit_remap(old, intended, before, after) == len(PREFIX)
+    assert admit_remap(old, intended, before, after).fresh == frozenset()
     assert len(PREFIX.encode("utf-8")) != len(PREFIX)
     assert intended.inputs["chunk01"].chunk_id == chunk.id
     assert (

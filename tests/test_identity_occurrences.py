@@ -36,7 +36,7 @@ def example(payload):
 
 async def test_reviewed_partial_and_empty_group_removal(source_payload):
     old, chunk, intended = example(source_payload)
-    assert admit_remap(old, intended, BEFORE, AFTER, RETENTION) is None
+    assert admit_remap(old, intended, BEFORE, AFTER, RETENTION).fresh == frozenset()
     assert list(intended.mention_groups) == ["g01"]
     assert (
         intended.mention_groups["g01"].entity_id == old.mention_groups["g01"].entity_id

@@ -32,7 +32,7 @@ def retired_example(payload):
 
 def test_last_resolved_group_retirement_keeps_unrelated_declarations(source_payload):
     old, chunk, intended = retired_example(source_payload)
-    assert admit_remap(old, intended, BEFORE, AFTER, RETENTION) is None
+    assert admit_remap(old, intended, BEFORE, AFTER, RETENTION).fresh == frozenset()
     assert list(intended.mention_groups) == ["g02"]
     assert list(intended.mention_resolutions) == ["r02"]
     assert (

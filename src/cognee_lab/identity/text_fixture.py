@@ -10,6 +10,12 @@ from .text_changes import TextChange, chunk_text, original_context, read_origina
 from .validation import IntentError, text_digest
 
 PREFIX = "Revision note: Δ calibration schedule updated.\n\n"
+DECISION_METHODS = dict(
+    prefix="Captured review of unchanged interpretation; programmatic exact offset remap",
+    retention="Captured survivor review; programmatic exact span validation and whole-document rebuild",
+    continuity="Captured addition review; explicit old-to-new occurrence mapping and whole-document rebuild",
+    regrouping="Captured regrouping review; explicit old-to-new group and occurrence mapping, fresh groups, regenerated facts and whole-document rebuild",
+)
 
 
 def describe_prefix_edit(old, text, chunks, *, prefix=PREFIX):
@@ -165,10 +171,8 @@ async def transition_summary(publisher, row):
         original_data_id=str(source.inputs[key].data_id),
         position_unit="Unicode code points; document-relative [start, end)",
         position_shift=(
-            (len(change.text) - len(change.previous_text))
-            if change.occurrence_retention is None
-            and change.occurrence_continuity is None
-            and change.occurrence_regrouping is None
+            len(change.text) - len(change.previous_text)
+            if change.mode[0] == "prefix"
             else None
         ),
         text_length_delta=len(change.text) - len(change.previous_text),
@@ -273,19 +277,7 @@ async def transition_summary(publisher, row):
             for k, g in old.mention_groups.items()
             if k not in source.mention_groups
         },
-        decision_method=(
-            "Captured regrouping review; explicit old-to-new group and occurrence mapping, fresh groups, regenerated facts and whole-document rebuild"
-            if change.occurrence_regrouping is not None
-            else (
-                "Captured addition review; explicit old-to-new occurrence mapping and whole-document rebuild"
-                if change.occurrence_continuity is not None
-                else (
-                    "Captured survivor review; programmatic exact span validation and whole-document rebuild"
-                    if change.occurrence_retention is not None
-                    else "Captured review of unchanged interpretation; programmatic exact offset remap"
-                )
-            )
-        ),
+        decision_method=DECISION_METHODS[change.mode[0]],
     )
 
 
