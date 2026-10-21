@@ -39,7 +39,7 @@ BD=$(val fixture '.borrowed_entity.description')
 $V drive "$RUN" main wd01 -- withdraw --source doc01
 $V check "$RUN" wd01 '[.sources.doc01.state, .sources.doc02.state] == ["withdrawn", "current"]' 'doc01 is withdrawn and doc02 is current'
 $V check "$RUN" wd01 '.shared_variant | (.contributions | length) == 1 and (.owners | length) == 1' 'one shared contribution and one owner remain'
-$V check "$RUN" wd01 '.shared_variant.contributions[0].identity_data_id == .sources.doc02.identity_data_id' 'the remaining contribution belongs to doc02'
+$V check "$RUN" wd01 '.sources.doc02.identity_data_id as $d | $d != null and .shared_variant.contributions[0].identity_data_id == $d' 'the remaining contribution belongs to doc02'
 $V check "$RUN" wd01 '.shared_singleton_present and .shared_singleton_indexed' 'the shared singleton stays present and indexed'
 $V check "$RUN" wd01 '. as $r | [$r.result.facts[].source_id] == [$r.sources.doc02.mention_entity_id]' 'only the doc02 fact is returned'
 $V check "$RUN" wd01 '.sources.doc01 | .private_singleton_present == false and .private_singleton_indexed == false' 'the doc01 private singleton and its name vector are removed'
@@ -88,7 +88,7 @@ $V check "$RUN" fixture '.shared_variant | (.contributions | length) == 2 and (.
 $V drive "$RUN" main wd02 -- withdraw --source doc02
 $V check "$RUN" wd02 '[.sources.doc01.state, .sources.doc02.state] == ["current", "withdrawn"]' 'doc02 is withdrawn and doc01 is current'
 $V check "$RUN" wd02 '.shared_variant | (.contributions | length) == 1 and (.owners | length) == 1' 'one shared contribution and one owner remain'
-$V check "$RUN" wd02 '.shared_variant.contributions[0].identity_data_id == .sources.doc01.identity_data_id' 'the remaining contribution belongs to doc01'
+$V check "$RUN" wd02 '.sources.doc01.identity_data_id as $d | $d != null and .shared_variant.contributions[0].identity_data_id == $d' 'the remaining contribution belongs to doc01'
 $V check "$RUN" wd02 '.shared_singleton_present and .shared_singleton_indexed' 'the shared singleton stays present and indexed'
 $V check "$RUN" wd02 '. as $r | [$r.result.facts[].source_id] == [$r.sources.doc01.mention_entity_id]' 'only the doc01 fact is returned'
 $V check "$RUN" wd02 '.sources.doc02 | .private_singleton_present == false and .private_singleton_indexed == false' 'the doc02 private singleton and its name vector are removed'
@@ -137,14 +137,14 @@ $V check "$RUN" before '[.publications[].state] | sort == ["current", "failed"]'
 $V check "$RUN" before '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .operation == "withdraw" and .origin == "test/fault_injection" and .resolved_at == null)' 'one open withdraw incident labeled as fault injection'
 
 $V drive "$RUN" main blocked -- reconcile --source doc01
-$V check "$RUN" blocked 'has("error")' 'reconcile is rejected while the withdrawal is incomplete'
+$V check "$RUN" blocked '.error == "IntentError" and (.message | contains("Retry the failed withdrawal explicitly"))' 'reconcile is rejected with the retry instruction while the withdrawal is incomplete'
 
 $V drive "$RUN" main retry -- withdraw --source doc01
 $V check "$RUN" retry '[.sources.doc01.state, .sources.doc02.state] == ["withdrawn", "current"]' 'the retry withdraws doc01 and leaves doc02 current'
 $V check "$RUN" retry '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .outcome == "withdrawn" and .resolved_at != null)' 'the same incident records outcome withdrawn'
 $V check "$RUN" retry '. as $r | [$r.result.facts[].source_id] == [$r.sources.doc02.mention_entity_id]' 'only the doc02 fact is returned'
 $V check "$RUN" retry '.shared_variant | (.contributions | length) == 1 and (.owners | length) == 1' 'one shared contribution and one owner remain'
-$V check "$RUN" retry '.shared_variant.contributions[0].identity_data_id == .sources.doc02.identity_data_id' 'the remaining contribution belongs to doc02'
+$V check "$RUN" retry '.sources.doc02.identity_data_id as $d | $d != null and .shared_variant.contributions[0].identity_data_id == $d' 'the remaining contribution belongs to doc02'
 $V check "$RUN" retry '.sources.doc01 | .private_singleton_present == false and .private_singleton_indexed == false' 'the doc01 private singleton and its name vector are removed'
 $V check "$RUN" retry '.sources.doc01 | .original_marker_present and .original_fact_present and .original_fact_owned_by_chunk and .original_evidence_present' 'doc01 original marker, fact, ownership and evidence remain'
 
@@ -152,7 +152,7 @@ $V drive "$RUN" main after -- retrieve
 $V check "$RUN" after '(.facts | length) == 1 and .unavailable_sources == []' 'a deliberate retirement is not unavailable'
 $V drive "$RUN" main final -- status
 $V check "$RUN" final '[.publications[].state] | sort == ["current", "withdrawn"]' 'doc01 is withdrawn and doc02 is current'
-$V check "$RUN" final '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
+$V check "$RUN" final '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
 ## Gotchas

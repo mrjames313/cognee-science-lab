@@ -52,7 +52,7 @@ $V check "$RUN" remove '.sources.doc01.identity_data_id as $d | [.result.facts[]
 $V check "$RUN" remove '.sources.doc01 | .unresolved_marker_present == false and .unresolved_entity_present == false' 'the unresolved Entity and marker flags are false'
 $V check "$RUN" remove '.text_changes[0].retired_groups.g02 | .entity_present == false and .entity_indexed == false and .marker_present == false' 'g02 has no Entity, index entry or marker'
 $V check "$RUN" remove '.text_changes[0].occurrence_retention == {"g01": [1], "g02": []}' 'the retention map is the reviewed one'
-$V check "$RUN" remove '.text_changes[0] | .position_shift == null and .text_length_delta < 0' 'the shift is null and the text shrinks'
+$V check "$RUN" remove '.text_changes[0] | .position_shift == null and (.text_length_delta | type) == "number" and .text_length_delta < 0' 'the shift is null and the text shrinks'
 $V check "$RUN" remove '.text_changes[0] | .retired_chunks_absent and .retired_chunk_vectors_absent and .evidence_uses_current_chunks and .mention_ids_preserved' 'retired chunks and vectors are absent and evidence uses current chunks'
 $V check "$RUN" remove '.sources.doc02 | .original_fact_present and .original_evidence_present and .unresolved_marker_present and .unresolved_entity_present and .fact_evidence_chunk_ids == '"$EV02" 'doc02 fact, evidence and unresolved group are unchanged'
 $V check "$RUN" remove '.sources.doc02.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT02"'"]' 'the doc02 fact is unchanged'
@@ -100,7 +100,7 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns two facts and nothing is unavailable'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
-$V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
+$V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
 **O3 retire a resolved group.** Guide: resolved retirement, "Run" and "Scope". The replacement text is `Helios controller (HC) regulates plasma heating.` and the retention map is `{"g01": [], "g02": [0]}`. The guide says only doc02's fact is retrieved. It says doc01 has three chunks and no primary marker, fact or evidence, and g02 continues at `[33, 39)`. It lists the retirement fields that must be false or zero and the shared fields that must be true. A later withdrawal keeps doc02's facts and doc01's unresolved marker.
@@ -169,7 +169,7 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '[.facts[].source_id] == ["'"$M02"'"] and .unavailable_sources == []' 'a new process returns only the doc02 fact and nothing is unavailable'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
-$V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
+$V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
 **O5 add occurrences, then edit and withdraw.** Guide: occurrence addition, "Captured edit", "Run" and "Reopen and reconcile". The continuity map is `{"g01": [0, 1], "g02": [0]}`. The guide says three facts, doc01 at 2/2/2, doc02 at 1/1/1, no unavailable source and no incident. It says g01 keeps its Entity ID and goes from two occurrences to three. It says g03 is new with its Entity, name index, accepted resolution `r03`, and current marker chunks. The handoff records two marker chunks for g03. The guide says a later prefix edit at expected revision 2 keeps g03 and its fact at revision 3. It says withdrawal withholds doc01's two facts and keeps doc02.
@@ -196,7 +196,7 @@ $V check "$RUN" add '.text_changes[0].groups.g03 | (.previous_occurrences | leng
 $V check "$RUN" add '.text_changes[0].added_groups.g03 | .entity_present and .entity_indexed and (.marker_chunk_ids | length) == 2' 'g03 has its node, name index and two current marker chunks'
 $V check "$RUN" add '.text_changes[0] | .retired_groups == {} and .retired_chunks_absent and .retired_chunk_vectors_absent and .evidence_uses_current_chunks and .mention_ids_preserved' 'no group is retired, retired chunks and vectors are absent and evidence uses current chunks'
 $V check "$RUN" add '. as $r | [$r.result.facts[] | select(.identity.assignment_id == "r03") | [.source_id, .identity.target_entity_id]] == [[$r.text_changes[0].added_groups.g03.entity_id, $r.borrowed_entity.id]]' 'the new fact is r03 from the g03 Entity to the reusable controller'
-$V check "$RUN" add '.text_changes[0].chunk_ids as $c | [.result.facts[] | select(.identity.assignment_id == "r03") | .evidence[].chunk_id] | all(. as $e | $c | index($e) != null)' 'the new fact evidence uses current doc01 chunks'
+$V check "$RUN" add '.text_changes[0].chunk_ids as $c | [.result.facts[] | select(.identity.assignment_id == "r03") | .evidence[].chunk_id] | length > 0 and all(. as $e | $c | index($e) != null)' 'the new fact evidence uses current doc01 chunks'
 $V check "$RUN" add '.sources.doc02 | .original_fact_present and .original_evidence_present and .fact_evidence_chunk_ids == '"$EV02" 'doc02 fact and evidence are unchanged'
 $V check "$RUN" add '.sources.doc02.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT02"'"]' 'the doc02 fact is unchanged'
 $V check "$RUN" add '.borrowed_entity.updated_at == '"$BU"' and .borrowed_entity.description == "'"$BD"'"' 'the borrowed controller fields are unchanged'
@@ -251,7 +251,7 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 3 and .unavailable_sources == []' 'a new process returns three facts and nothing is unavailable'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
-$V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
+$V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
 ## Gotchas

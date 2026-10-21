@@ -45,7 +45,7 @@ T02=$(val fixture '.sources.doc02.resolution_target_entity_id')
 $V drive "$RUN" main revise -- revise --source doc01 --expected-revision 1
 $V check "$RUN" revise '[.sources.doc01, .sources.doc02] | map([.saved_revision, .verified_revision, .registered_revision]) == [[2, 2, 2], [1, 1, 1]]' 'doc01 is at 2/2/2 and doc02 stays at 1/1/1'
 $V check "$RUN" revise '.sources.doc01.registered_matches_saved and .sources.doc01.state == "current"' 'doc01 registered snapshot matches the saved record'
-$V check "$RUN" revise '.sources.doc01.resolution_target_entity_id != "'"$T01"'" and .sources.doc02.resolution_target_entity_id == "'"$T02"'"' 'doc01 targets the revised controller and doc02 keeps the original'
+$V check "$RUN" revise '(.sources.doc01.resolution_target_entity_id | type) == "string" and .sources.doc01.resolution_target_entity_id != "'"$T01"'" and .sources.doc02.resolution_target_entity_id == "'"$T02"'"' 'doc01 targets the revised controller and doc02 keeps the original'
 $V check "$RUN" revise '(.result.facts | length) == 2' 'the default query returns both facts'
 $V check "$RUN" revise '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .source_id] == ["'"$M01"'"]' 'the doc01 fact keeps the same local mention UUID'
 $V check "$RUN" revise '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT01"'"]' 'the doc01 fact keeps the same edge ID'
@@ -100,7 +100,7 @@ $V check "$RUN" before '.recovery_events | length == 1 and (.[0] | .recovery_eve
 
 $V drive "$RUN" main reconcile -- reconcile --source doc01
 $V check "$RUN" reconcile '[.sources.doc01, .sources.doc02] | map([.state, .saved_revision, .verified_revision, .registered_revision]) == [["current", 2, 2, 2], ["current", 1, 1, 1]]' 'reconcile completes revision 2 for doc01 and leaves doc02 at revision 1'
-$V check "$RUN" reconcile '.sources.doc01.resolution_target_entity_id != "'"$T01"'"' 'doc01 targets the revised controller, not revision 1'
+$V check "$RUN" reconcile '(.sources.doc01.resolution_target_entity_id | type) == "string" and .sources.doc01.resolution_target_entity_id != "'"$T01"'"' 'doc01 targets the revised controller, not revision 1'
 $V check "$RUN" reconcile '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .source_id] == ["'"$M01"'"]' 'the doc01 fact keeps the same local mention UUID'
 $V check "$RUN" reconcile '(.result.facts | length) == 2' 'both facts are returned'
 $V check "$RUN" reconcile '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .outcome == "restored" and .resolving_revision == 2 and .resolved_at != null and (.recovery_attempts | length) == 1 and .recovery_attempts[0].outcome == "verified")' 'the same incident is restored at revision 2 by one verified attempt'
@@ -111,7 +111,7 @@ $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns both facts and nothing is unavailable'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]' 'both publications are current at revisions 1 and 2'
-$V check "$RUN" after '.recovery_events | all(.resolved_at != null)' 'no incident stays open'
+$V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
 **E1 prefix edit on one chunk.** Guide: text changes, the table under "Run on a fresh two-source fixture". The prefix has 48 Unicode code points. The guide says doc01 keeps its Data ID, group Entity IDs, fact ID and resolution target. It says doc01's chunk and fingerprint are new and its evidence is rebuilt. Doc02 is unchanged.
@@ -140,7 +140,7 @@ $V check "$RUN" edit '(.result.facts | length) == 2' 'both facts are returned'
 $V check "$RUN" edit '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT01"'"]' 'the doc01 fact ID is preserved'
 $V check "$RUN" edit '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .identity.occurrences[] | [.start, .end]] == [[97, 111], [134, 136]]' 'the returned doc01 annotation has the new positions'
 $V check "$RUN" edit '.sources.doc01 | .original_marker_present and .original_fact_present and .original_fact_owned_by_chunk and .original_evidence_present' 'doc01 marker, fact, ownership and evidence are rebuilt'
-$V check "$RUN" edit '.sources.doc01.fact_evidence_chunk_ids == .text_changes[0].evidence_chunk_ids and .sources.doc01.fact_evidence_chunk_ids != '"$EV01" 'doc01 evidence moved to the new chunk'
+$V check "$RUN" edit '(.sources.doc01.fact_evidence_chunk_ids | length) > 0 and .sources.doc01.fact_evidence_chunk_ids == .text_changes[0].evidence_chunk_ids and .sources.doc01.fact_evidence_chunk_ids != '"$EV01" 'doc01 evidence moved to the new chunk'
 $V check "$RUN" edit '.sources.doc02.fact_evidence_chunk_ids == '"$EV02"' and .sources.doc02.resolution_target_entity_id == "'"$T02"'"' 'doc02 evidence and interpretation are unchanged'
 $V check "$RUN" edit '.sources.doc02.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT02"'"]' 'the doc02 fact is unchanged'
 $V check "$RUN" edit '.recovery_events == []' 'no incident'
