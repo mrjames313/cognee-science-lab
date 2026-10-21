@@ -11,7 +11,7 @@ description: Bounded exhaustive check of the Stage 6 identity publication ledger
 - **P2. Independent sources.** A step on one source never changes another source's row or recovery events.
 - **P3. Stale calls are refused.** A stale expected revision, an acknowledgement for an ended or replaced attempt, or one for a description that was not begun, is refused. A refusal changes nothing.
 - **P4. One writer at a time.** At most one attempt is open, and the reservation names exactly that attempt.
-- **P5. Recovery is explicit and forward.** Revisions go up by one, only through a first publish or a replacement of a current row. Only the method that owns a saved intent resumes it. A retry keeps the saved plan. Each failure has one recovery event, and only its completion resolves it.
+- **P5. Recovery is explicit and forward.** Revisions go up by one, only through a first publish or a replacement of a current row. Only the method that owns a saved intent resumes it. A retry keeps the saved plan. Each failure has one recovery event, and only its completion resolves it. No step removes an event, and no step changes a resolved event.
 - **P6. Failed rows can recover.** From a failed row and a free reservation, the method that owns the saved plan, called with the saved arguments, is accepted and completes.
 
 Each property is a function `p1_...` to `p6_...` in `ledger_check.py`. The docstring of each function states the property. The harm of each break, the code that makes each promise, and all measurements are in [reference.md](reference.md).
@@ -47,16 +47,17 @@ If the diff touches a function in the table, read the changed lines against `MET
 uv run python support/ledger_check.py                    # depth 5, about 5.5 s
 uv run python support/ledger_check.py --depth 6          # about 30 s
 uv run python support/ledger_check.py --depth 7          # about 3 minutes; depth 8 takes about 15
-uv run python support/ledger_check.py --mutants          # every scratch break, about 5 s
-uv run pytest -q tests/test_identity_ledger_check.py     # default bound and every break, about 8 s
+uv run python support/ledger_check.py --mutants          # every scratch break, about 8 s
+uv run python support/ledger_check.py --mutant withdrawn-guard-admits-replace --depth 7   # a deep break, FAIL P5, about 7 s
+uv run pytest -q tests/test_identity_ledger_check.py     # default bound and every break, about 10 s
 ```
 
 - The exit code is 0 for `PASS`, 1 for `FAIL` and 2 for `INCONCLUSIVE`.
-- Only a run with P = 0 prints `PASS verified within bound`. A run with `--skip-probability P` prints `sampled (P=..., seed=...)`. The same seed gives the same search.
+- Only a `PASS` run with P = 0 prints `verified within bound`. A run with `--skip-probability P` prints `sampled (P=..., seed=...)`. The same seed gives the same search.
 - `--skip-probability P` skips each candidate step at each node independently, the first step included. The skip removes the subtree under that step.
 - `INCONCLUSIVE` means the search never reached one of the outcomes in `REACHABLE`. These are a row in each state, an accepted call of each step kind, and a failed row that completes as current again. The report names the missing outcomes.
 - The symmetry rule leaves one first step that `begin()` accepts, `W1 publish S1 rev=1`. At P = 0.5 about half the seeds skip it, and then the run reaches nothing and is `INCONCLUSIVE`. Use another seed.
-- A `FAIL` report gives the property, a minimal sequence, the state before and after the last step, and a `--replay` command. `--replay` prints the rows, events and reservation after every step. It refuses `--skip-probability`.
+- A `FAIL` report gives the property, a minimal sequence, the state before and after the last step, and a `--replay` command. `--replay` prints the rows, events and reservation after every step. It runs every step it names, also the steps after a step that changes nothing. It refuses `--skip-probability`.
 - Labels name attempts by writer and count. `W1#2` is the second attempt that writer 1 began.
 - The test pins the node and sequence counts of the default run. A change to the step list changes them. Update `PINNED` on purpose and say so in the commit.
 
@@ -73,19 +74,32 @@ A traceback that is not a property failure is a checker error.
 
 ## Add an operation (next: group split or combination)
 
-The expected shape for split and combination is the text-change path. `maintain_one` in `text_fixture.py` calls `replace` with a `text_change`. That reaches the store as method `replace` with `plan["text_change"]`. The checker already sends that shape as `plan=text<rN`. If the new operation uses it, add any new plan field that storage reads to `Plan`. Otherwise, follow every step. Steps 1 to 3 change `support/ledger_model.py`, and steps 4 to 6 change `support/ledger_check.py`.
+The expected shape for split and combination is the text-change path. `maintain_one` in `text_fixture.py` calls `replace` with a `text_change`. That reaches the store as method `replace` with `plan["text_change"]`. The checker already sends that shape as `plan=text<rN`, with the one `text_change` value `TEXT_CHANGE`.
+
+A regrouping variant of replace sends a different `text_change` value, and the checker must tell the two plans apart. Make these changes in `support/ledger_model.py`:
+
+- Change `Plan.text` from a bool to a name, such as `None`, `"text"` or `"regroup"`. Map each name to its dict next to `TEXT_CHANGE`.
+- Make `Plan.tag` use the name as the tag prefix, so that the step labels differ. Make `Plan.as_dict` write the dict for the name.
+- Make `Plan.of` map a saved dict back to its name. Today `Plan.of` reduces the dict to a bool, so two different dicts give the same plan.
+- In `replace_intents`, send each name in the loop `for text in (False, True)`. In the retry branch, send the saved plan with each other name in place of `not saved.text`.
+
+If the operation adds a plan field that storage.py reads, add the field to `Plan` too. The step list changes, so update `PINNED`.
+
+The model has one attempt per writer, and `--sources` accepts only 1 or 2. An operation that writes more than one source in one attempt needs more than a change to `op_source()` and P2. It needs a new attempt shape in `Attempt` and `Harness.apply`, and a higher `--sources` limit in `parse()`.
+
+For any other operation, follow every step. Steps 1 to 3 change `support/ledger_model.py`, and steps 4 to 6 change `support/ledger_check.py`.
 
 1. Write an intents function. Build each `Begin` from a `View` the way the caller builds it from `rows()`. Add the arguments that `begin()` must refuse.
 2. Add a `Method` to `METHODS`. Set every field, with a comment that names the caller.
 3. If the plan has a new shape, extend `Plan`. Change `operation`, `tag`, `as_dict` and `of`.
 4. `Harness.apply` reads the table. Add a `case` only if the caller's calls differ from begin, optional `assert_pending`, then `complete` or `fail`.
 5. P5 (`begin_rules`) reads `advances_from`, `owns_failed_plan`, `owns_withdrawn`, `requires_plan` and `preserved_on_retry`. P6 reads `recovers`. `REACHABLE` adds the new method.
-6. If the operation writes more than one source, update `op_source()` and P2. Raise the `--sources` bound.
-7. For each new guard in storage.py, add a break to `support/ledger_mutants.py`. Run `--mutants`.
+6. If the operation writes more than one source, read the paragraph above the steps.
+7. For each new guard in storage.py, add a break to `MUTANTS` in `support/ledger_mutants.py`. Run `--mutants`. If only a deeper search catches the break, add it to `DEEP_MUTANTS` and its sequence to `DEEP_SEQUENCES` in the test file.
 8. Update the coverage table, `PINNED`, reference.md and the sync commit.
 
 ## Scope
 
-- **Checked:** every sequence up to depth 5 (default and pytest). Manual runs passed up to depth 8 on 2026-10-21. The runs use 1 or 2 sources and 1 or 2 writers in one dataset.
+- **Checked:** every sequence up to depth 5 (default and pytest). Depth 5 catches every break in `MUTANTS`. It does not catch the breaks in `DEEP_MUTANTS`. Manual runs passed up to depth 8 on 2026-10-21. The runs use 1 or 2 sources and 1 or 2 writers in one dataset.
 - **Not checked:** graph and vector writes, `rows()` across datasets, the CLI, more than two writers or sources, and SQLite or driver failures. Each RecordStore call runs to its end before the next step.
-- **Modeling choices:** these are in reference.md. They cover stale reads, skipped caller pre-checks, one fault stage per method, descriptions, symmetry and no-op steps.
+- **Modeling choices:** these are in reference.md. They cover stale reads, skipped caller pre-checks, missing rows, one fault stage per method, descriptions, symmetry and no-op steps.

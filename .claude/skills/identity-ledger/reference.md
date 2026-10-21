@@ -10,7 +10,7 @@ All functions are in `src/cognee_lab/identity/storage.py` unless the entry names
 - **P2. Independent sources.** Harm: a failure or recovery on one source withholds, resolves or corrupts another source. Code: every row and event query in `begin`, `fail` and `complete` filters on dataset and source.
 - **P3. Stale calls are refused.** Harm: a writer that works from an old read overwrites newer intent. Or a late acknowledgement marks the wrong attempt or description as verified. Code: the `stale_revision` guard in `begin`, the attempt check in `fail`, the attempt and `pending` filter in `complete`, and the description check in `assert_pending`. A guard raises before the commit, so the session rolls back.
 - **P4. One writer at a time.** Harm: two writers interleave graph writes for overlapping intents. Code: `begin` takes the `Writer` row only when it has no owner. `fail` and `complete` release it only for their own attempt.
-- **P5. Recovery is explicit and forward.** Harm: an operator loses track of an incident or sees two incidents for one failure. Or a method that does not own the saved intent rolls it back, replaces it or drops its retirement plan. Code: the guards in `begin` (`recovery_choice`, `withdrawn_source`, `revision_reuse`, `revision_sequence`, `recovery_plan`). Also `begin` links a recovery attempt to the open event, `fail` reuses the open event, and `complete` resolves it.
+- **P5. Recovery is explicit and forward.** Harm: an operator loses track of an incident, sees two incidents for one failure, or sees the record of a resolved incident change. Or a method that does not own the saved intent rolls it back, replaces it or drops its retirement plan. Code: the guards in `begin` (`recovery_choice`, `withdrawn_source`, `revision_reuse`, `revision_sequence`, `recovery_plan`). Also `begin` links a recovery attempt to the open event, `fail` reuses the open event, and `complete` resolves it. No call removes an event row, and `begin`, `fail` and `complete` change only unresolved events.
 - **P6. Failed rows can recover.** Harm: a failure that no explicit recovery can clear withholds the source forever. Code: `begin` accepts the owning method on a failed row with the saved revision, description and plan. `assert_pending` and `complete` then accept that attempt.
 
 ## Steps
@@ -47,7 +47,13 @@ From every row version, the intents functions also send arguments that `begin()`
 ## Modeling choices
 
 - **Stale reads.** A caller reads the row without the reservation and calls `begin()` later. So a writer may call `begin()` with arguments built from any row version that the source had earlier on the path.
-- **Caller pre-checks.** The checker skips the pre-checks in `Publisher.publish`, `replace` and `withdraw`, because `begin()` must hold on its own.
+- **Caller pre-checks.** The checker skips the pre-checks in `Publisher.publish`, `replace` and `withdraw`, because `begin()` must hold on its own. The one exception is a missing row (the next item).
+- **Missing rows.** The intents functions send no reconcile, replace or withdraw step for a source that has no row. The callers never make that call:
+  - `withdraw` and `replace` read the row first and raise `source_missing` when it is missing.
+  - `Publisher.publish` uses method `reconcile` only with an expected revision of 1 or more. `begin()` refuses that on a missing row as `stale_revision`.
+  - No code removes a `Publication` row. So a row that a caller read once is never missing later, and a stale read cannot send these calls.
+
+  `begin()` itself accepts reconcile and withdraw on a missing row at expected revision 0 and revision 1. Only replace has a `source_missing` guard in `begin()`. Because the checker does not send these calls, a break that removes that guard is not caught.
 - **Stage names.** storage.py only copies `stage` into the event. So the checker uses one fault stage per method. If storage.py begins to branch on `stage`, add each stage as a separate `Finish` step.
 - **Descriptions.** A description is a function of source, revision and variant. It is the fixture `tests/fixtures/identity/cognee_identity_source_example.json` with a new `identity_data_id` and `revision`. Variant 1 changes the original text digest.
 - **Plans.** A plan holds only the fields that storage.py reads: `operation`, `revision`, `previous_description`, `text_change` and `runtime_profile`. The plan tag is part of the step label, so dedupe and `--replay` tell plans apart.
@@ -72,6 +78,8 @@ Measured on 2026-10-21 on the development Mac (10 cores). P = 0, 2 sources, 2 wr
 | 7 | PASS | 87700 / 85448 / 163.85 |
 | 8 | PASS | 482109 / 470249 / 893.41 |
 
+P5 later gained two checks: no step removes a recovery event, and no step changes a resolved one. After that change, depths 6, 7 and 8 passed again with the same counts. Those runs ran in parallel, so their times are not in the table.
+
 Sampled runs, depth 8 and 9, 2 sources, 2 writers, P = 0.5:
 
 | Depth | Seed | Result | nodes / skipped / sequences / s |
@@ -85,7 +93,7 @@ Sampled runs, depth 8 and 9, 2 sources, 2 writers, P = 0.5:
 
 A checked state costs about 2 ms. Most of that time is the wait for aiosqlite's thread: about 34 thread round trips per node. Each extra depth multiplies the nodes by about 5.5. No-op steps, mostly refused calls, are 84 % to 88 % of the nodes.
 
-The default bound is depth 5. Depth 5 is the shallowest bound that catches every break in `ledger_mutants.py`, because several breaks need five steps. The pytest file runs the default bound and every break in parallel spawn processes, in about 8 s on this machine. Depth 6 (about 30 s), depth 7 (about 3 minutes) and depth 8 (about 15 minutes) are manual bounds.
+The default bound is depth 5. Depth 5 is the shallowest bound that catches every break in `MUTANTS`, because several of those breaks need five steps. It does not catch the break in `DEEP_MUTANTS`, which needs seven steps. The pytest file runs the default bound and every break in parallel spawn processes, in about 10 s on this machine. Depth 6 (about 30 s), depth 7 (about 3 minutes) and depth 8 (about 15 minutes) are manual bounds.
 
 ## Scratch breaks
 
@@ -117,22 +125,44 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `no-replace-plan-preservation` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=text<r1` |
 | `no-text-change-preservation` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=text<r1` |
 | `begin-resolves-open-event` | P5 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 reconcile S1 rev=1` |
+| `complete-deletes-open-events` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1`, `W1 reconcile S1 rev=1`, `W1 complete` |
+| `begin-drops-open-event` | P5 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 reconcile S1 rev=1` |
+| `begin-links-resolved-events` | P5 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 reconcile S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1` |
 | `complete-always-refuses` | P6 | `W1 publish S1 rev=1`, `W1 complete` |
 | `failed-row-never-recoverable` | P6 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1` |
 | `begin-always-busy` | INCONCLUSIVE | none: no `begin()` is accepted, so the run is `INCONCLUSIVE` |
 
-These breaks are not caught, because no reachable sequence separates them from the real code. Each one gives the same node count as the real code at depth 6 (15763 nodes). They are not in `ledger_mutants.py`.
+### Deep breaks
+
+`DEEP_MUTANTS` in `support/ledger_mutants.py` holds breaks that only a search deeper than the default bound catches. `--mutants` and the default pytest run leave them out. The pytest file replays the minimal sequence of each one, recorded in `DEEP_SEQUENCES`. The full search is a manual command, for example:
+
+```bash
+uv run python support/ledger_check.py --mutant withdrawn-guard-admits-replace --depth 7
+```
+
+| Break | Depth | Property | Minimal sequence |
+| --- | --- | --- | --- |
+| `withdrawn-guard-admits-replace` | 7 | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete`, `W1 withdraw S1 rev=2`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1` |
+
+The withdrawn guard is the only guard that refuses the last step. That step is the retry branch of `replace`, built from a stale read of the current replacement row. Its plan is a replace plan, so the plan guard accepts it. The row is withdrawn, not failed, so the plan preservation guard does not apply. At depth 6 the search passes with the real node count (15763 nodes). At depth 7 it fails after 4032 nodes, in about 7 s.
+
+### Breaks that are not caught
+
+These breaks are not caught. They are not in `ledger_mutants.py`.
 
 - `complete` without `Publication.revision == source.revision`. The attempt filter already binds the revision.
 - `fail` that finds the row by attempt. Attempt ids are unique per source.
 - `complete(state="withdrawn")` that also sets `verified_revision`. A withdrawn row is never served.
-- The withdrawn guard in `begin` that also admits `replace`. A withdrawn row always holds a withdraw plan, so `replace` refuses through its revision or plan guard.
+
+For these three, no reachable sequence separates the break from the real code. Each one gives the same node count as the real code at depth 6 (15763 nodes).
+
+- `begin` without its `source_missing` guard. The checker does not send replace for a missing row (see "Missing rows" in the modeling choices).
 
 ## Proof that this skill works
 
 On 2026-10-21 an agent followed SKILL.md on scratch edits of the real `storage.py` file. Neither edit was in `ledger_mutants.py`.
 
-1. The first edit let `replace` pass the withdrawn guard in `begin`. The check printed `PASS` with the counts from before the edit. The break is not observable (see the last item above), so the agent chose another edit.
+1. The first edit let `replace` pass the withdrawn guard in `begin`. The check printed `PASS` with the counts from before the edit, because the default depth 5 cannot reach the break. The agent then called the break not observable, and chose another edit. That claim was wrong. A depth 7 search catches the break (see "Deep breaks").
 2. The second edit removed `details.get("resolved_at") is None and` from the event search in `fail`. So `fail` can reuse a resolved event.
 3. The `git diff 6f1bdba` command from SKILL.md showed the change.
 4. `uv run python support/ledger_check.py` printed `FAIL` and exited with code 1, in 3.99 s. The message was `P5: S1 is failed with 0 unresolved recovery events`.
