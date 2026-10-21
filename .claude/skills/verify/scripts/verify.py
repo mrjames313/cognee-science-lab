@@ -4,6 +4,11 @@
 Run from the repository root:
 
     V=.claude/skills/verify/scripts/verify.py
+    $V journey P1
+    $V journey all
+
+or by hand:
+
     RUN=$($V new-run additions)
     $V doctor "$RUN"
     $V drive "$RUN" main fixture -- chunked-fixture
@@ -18,6 +23,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -27,17 +33,25 @@ from datetime import datetime, timezone
 from importlib.metadata import version as package_version
 from pathlib import Path
 
-from dotenv import dotenv_values
-
-from cognee_lab.identity.environment import read_embedding
+from cognee_lab.identity.environment import (
+    CREATION_COMMANDS,
+    MARKER,
+    _operator_embedding,
+    read_embedding,
+    reopen_problem,
+)
 
 REPO = Path(__file__).resolve().parents[4]
 RUNS = REPO / "outputs" / "verify"
+SCRIPT = Path(__file__).resolve().relative_to(REPO)
+FEATURES = Path(__file__).resolve().parents[1] / "features"
 CLI = [sys.executable, "-m", "cognee_lab.identity"]
 EXPECTED_COGNEE = "1.6.2"
-CREATING = {"fixture", "multi-fixture", "chunked-fixture"}
-ENV_EMBEDDING_KEYS = ("EMBEDDING_MODEL", "EMBEDDING_DIMENSIONS")
 TOKENIZER_PATCH = REPO / "patches" / "cognee-1.6.2-openai-compatible-tokenizer.patch"
+LAB_DB = REPO / ".cognee_system" / "databases" / "cognee_db"
+LAB_DATA = REPO / ".cognee_data"
+FENCE = re.compile(r"^```bash journey (?P<id>[A-Z]\d+)(?P<options>( \S+)*)\s*$")
+PRELUDE = 'val() { "$V" val "$RUN" "$1" "$2"; }\n'
 
 
 def fail(message):
@@ -56,6 +70,22 @@ def evidence_steps(run):
     return sorted((run / "evidence").glob("[0-9][0-9]-*.cmd"))
 
 
+def latest_json(run, label):
+    matches = [
+        p.with_suffix(".json")
+        for p in evidence_steps(run)
+        if p.stem.split("-", 1)[1] == label
+    ]
+    return matches[-1] if matches and matches[-1].exists() else None
+
+
+def log_assertion(run, verdict, source, expression, description):
+    with open(run / "evidence" / "assertions.tsv", "a", newline="") as handle:
+        csv.writer(handle, delimiter="\t").writerow(
+            [verdict, source, expression, description]
+        )
+
+
 def live_cli_processes(run):
     """PIDs of identity CLI processes whose --root is inside this run."""
     ps = subprocess.run(
@@ -69,9 +99,21 @@ def live_cli_processes(run):
     ]
 
 
-def new_run(args):
+def lab_fingerprint():
+    """Portable fingerprint of the lab stores that no verify run may touch."""
+    return dict(
+        cognee_db_mtime_ns=LAB_DB.stat().st_mtime_ns if LAB_DB.exists() else None,
+        cognee_data_files=(
+            sum(1 for p in LAB_DATA.rglob("*") if p.is_file())
+            if LAB_DATA.is_dir()
+            else None
+        ),
+    )
+
+
+def make_run(name):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run = RUNS / f"{stamp}-{args.name}"
+    run = RUNS / f"{stamp}-{name}"
     (run / "roots").mkdir(parents=True)
     (run / "evidence").mkdir()
     head = subprocess.run(
@@ -84,91 +126,91 @@ def new_run(args):
     ).stdout.strip()
     (run / "run.json").write_text(
         json.dumps(
-            dict(started=stamp, git_head=head, worktree_dirty=bool(dirty)), indent=2
+            dict(
+                started=stamp,
+                git_head=head,
+                worktree_dirty=bool(dirty),
+                lab_store=lab_fingerprint(),
+            ),
+            indent=2,
         )
     )
-    print(run.relative_to(REPO))
+    return run
+
+
+def new_run(args):
+    print(make_run(args.name).relative_to(REPO))
 
 
 def root_embedding(root):
-    """The marker's embedding record, or a string that names why it is unusable."""
+    """The marker's embedding record and the reason this root cannot reopen, if any."""
     try:
         record = read_embedding(root)
     except ValueError as exc:
-        return f"malformed: {exc}"
-    return record or "pre-profile root: no embedding record"
+        return None, str(exc)
+    if record is None:
+        return None, "pre-profile root: no embedding record"
+    return record, reopen_problem(root)
 
 
-def env_file_key_status():
-    """Which required embedding keys the env file sets non-empty. Names only, never values."""
-    named = os.environ.get("COGNEE_ENV_FILE", "").strip()
-    source = Path(named).expanduser() if named else REPO / ".env"
-    values = dotenv_values(source) if source.is_file() else {}
-    return {
-        "env_file": "COGNEE_ENV_FILE" if named else ".env",
-        "env_file_exists": source.is_file(),
-        "keys_set": {
-            key: bool((values.get(key) or "").strip()) for key in ENV_EMBEDDING_KEYS
-        },
-    }
-
-
-def tokenizer_fix_state():
+def tokenizer_fix_state(site=None):
     """Reverse dry-run of the tokenizer patch; never applies or reverts it."""
     result = subprocess.run(
-        ["patch", "-p1", "-R", "--dry-run", "-i", str(TOKENIZER_PATCH)],
+        ["patch", "-p1", "-R", "-f", "--dry-run", "-i", str(TOKENIZER_PATCH)],
         capture_output=True,
         text=True,
-        cwd=sysconfig.get_paths()["purelib"],
+        stdin=subprocess.DEVNULL,
+        cwd=site or sysconfig.get_paths()["purelib"],
     )
     return "applied" if result.returncode == 0 else "not applied"
 
 
-def doctor(args):
-    checks = {}
-    warnings = []
-    checks["repo_root"] = (REPO / "src/cognee_lab/identity/__main__.py").exists()
-    checks["python_3_12"] = sys.version_info[:2] == (3, 12)
+def health(run_arg=None):
+    """Gates fail the doctor. Info and warnings never do."""
+    gates, info, warnings = {}, {}, []
+    gates["repo_root"] = (REPO / "src/cognee_lab/identity/__main__.py").exists()
+    gates["python_3_12"] = sys.version_info[:2] == (3, 12)
     try:
         # Metadata only: importing cognee would load the lab .env.
-        checks["cognee_version"] = package_version("cognee")
+        info["cognee_version"] = package_version("cognee")
     except Exception as exc:  # report, don't crash the doctor
-        checks["cognee_version"] = f"not installed: {exc}"
-    checks["cognee_is_1_6_2"] = checks["cognee_version"] == EXPECTED_COGNEE
-    checks["jq_available"] = shutil.which("jq") is not None
-    checks["cli_parses"] = (
+        info["cognee_version"] = f"not installed: {exc}"
+    gates["cognee_is_1_6_2"] = info["cognee_version"] == EXPECTED_COGNEE
+    gates["jq_available"] = shutil.which("jq") is not None
+    gates["cli_parses"] = (
         subprocess.run(CLI + ["--help"], capture_output=True, cwd=REPO).returncode == 0
     )
-    if args.run:
-        run = run_dir(args.run)
-        checks["run"] = str(run.relative_to(REPO))
-        roots = sorted(p for p in (run / "roots").iterdir() if p.is_dir())
-        checks["roots"] = {
-            p.name: (p / "stage6-fixture.json").exists() for p in roots
-        }
-        checks["roots_are_fixtures"] = all(checks["roots"].values())
-        checks["root_embeddings"] = {p.name: root_embedding(p) for p in roots}
-        checks["roots_record_embedding"] = all(
-            isinstance(record, dict) for record in checks["root_embeddings"].values()
+    if run_arg:
+        run = run_dir(run_arg)
+        info["run"] = str(run.relative_to(REPO))
+        roots_dir = run / "roots"
+        roots = (
+            sorted(p for p in roots_dir.iterdir() if p.is_dir())
+            if roots_dir.is_dir()
+            else []
         )
-        if any(
-            isinstance(r, dict) and r["profile"] == "env"
-            for r in checks["root_embeddings"].values()
-        ):
-            checks["env_embedding_file"] = env_file_key_status()
-            checks["env_embedding_keys_set"] = all(
-                checks["env_embedding_file"]["keys_set"].values()
-            )
-            checks["tokenizer_fix"] = tokenizer_fix_state()
-            if checks["tokenizer_fix"] != "applied":
+        states = {p.name: root_embedding(p) for p in roots}
+        info["root_embeddings"] = {name: record for name, (record, _) in states.items()}
+        info["root_problems"] = {
+            name: problem for name, (_, problem) in states.items() if problem
+        }
+        gates["roots_reopen"] = not info["root_problems"]
+        if any(r and r["profile"] == "env" for r, _ in states.values()):
+            info["tokenizer_fix"] = tokenizer_fix_state()
+            if info["tokenizer_fix"] != "applied":
                 warnings.append(
                     "tokenizer fix is not applied; env roots fall back to an approximate "
                     "tokenizer (see patches/README.md). Loopback runs are unaffected."
                 )
-        checks["live_cli_pids"] = live_cli_processes(run)
-        checks["no_live_cli"] = not checks["live_cli_pids"]
-    ok = all(v for k, v in checks.items() if isinstance(v, bool))
-    print(json.dumps(dict(ok=ok, warnings=warnings, **checks), indent=2))
+        info["live_cli_pids"] = live_cli_processes(run)
+        gates["no_live_cli"] = not info["live_cli_pids"]
+    return gates, info, warnings
+
+
+def doctor(args):
+    gates, info, warnings = health(args.run)
+    ok = all(gates.values())
+    print(json.dumps(dict(ok=ok, warnings=warnings, **gates, **info), indent=2))
     raise SystemExit(0 if ok else 1)
 
 
@@ -184,6 +226,26 @@ def extract_json(stdout):
     return None
 
 
+def supplies_embedding(cli_args):
+    """True for --embedding and every abbreviation argparse accepts, with or without =value."""
+    return any(
+        len(flag) >= 3 and "--embedding".startswith(flag)
+        for flag in (arg.split("=", 1)[0] for arg in cli_args)
+    )
+
+
+def next_stem(run, label):
+    n = len(evidence_steps(run)) + 1
+    return n, run / "evidence" / f"{n:02d}-{label}"
+
+
+def record_step(run, n, label, root, status, seconds, has_json):
+    with open(run / "evidence" / "steps.tsv", "a", newline="") as handle:
+        csv.writer(handle, delimiter="\t").writerow(
+            [f"{n:02d}", label, root, status, seconds, has_json]
+        )
+
+
 def drive(args):
     run = run_dir(args.run)
     cli_args = args.cli_args[1:] if args.cli_args[:1] == ["--"] else args.cli_args
@@ -191,17 +253,21 @@ def drive(args):
         fail("give the CLI command after --, e.g. -- chunked-fixture")
     if "--root" in cli_args:
         fail("drive adds --root itself; name the root with the ROOT argument")
-    if CREATING & set(cli_args) and not any(
-        a == "--embedding" or a.startswith("--embedding=") for a in cli_args
-    ):
+    if cli_args[0] in CREATION_COMMANDS and not supplies_embedding(cli_args):
         # The CLI default is env, which calls the embedding API. Verify offline unless asked.
         cli_args = [*cli_args, "--embedding", "loopback"]
     root = run / "roots" / args.root
     command = CLI + cli_args + ["--root", str(root)]
-    n = len(evidence_steps(run)) + 1
-    stem = run / "evidence" / f"{n:02d}-{args.label}"
+    n, stem = next_stem(run, args.label)
     stem.with_suffix(".cmd").write_text(
-        " ".join(["uv run python -m cognee_lab.identity", *cli_args, "--root", str(root.relative_to(REPO))])
+        " ".join(
+            [
+                "uv run python -m cognee_lab.identity",
+                *cli_args,
+                "--root",
+                str(root.relative_to(REPO)),
+            ]
+        )
         + "\n"
     )
     started = time.monotonic()
@@ -221,10 +287,7 @@ def drive(args):
     payload = extract_json(stdout)
     if payload is not None:
         stem.with_suffix(".json").write_text(json.dumps(payload, indent=2) + "\n")
-    with open(run / "evidence" / "steps.tsv", "a", newline="") as handle:
-        csv.writer(handle, delimiter="\t").writerow(
-            [f"{n:02d}", args.label, args.root, status, seconds, payload is not None]
-        )
+    record_step(run, n, args.label, args.root, status, seconds, payload is not None)
     print(
         f"step {n:02d} {args.label}: exit={status} {seconds}s "
         f"json={'yes' if payload is not None else 'NO'} -> {stem.relative_to(REPO)}.*"
@@ -236,44 +299,234 @@ def drive(args):
 
 def check(args):
     run = run_dir(args.run)
-    matches = [
-        p.with_suffix(".json")
-        for p in evidence_steps(run)
-        if p.stem.split("-", 1)[1] == args.label
-    ]
-    if not matches or not matches[-1].exists():
-        fail(f"no JSON evidence for step label {args.label!r}")
-    target = matches[-1]
+    target = latest_json(run, args.label)
+    if target is None:
+        log_assertion(
+            run,
+            "FAIL",
+            f"no JSON for step {args.label}",
+            args.filter,
+            args.description or "",
+        )
+        print(
+            f"FAIL no JSON evidence for step label {args.label!r}: {args.description or args.filter}"
+        )
+        raise SystemExit(1)
     result = subprocess.run(
         ["jq", "-e", args.filter, str(target)], capture_output=True, text=True
     )
     verdict = "PASS" if result.returncode == 0 else "FAIL"
-    with open(run / "evidence" / "assertions.tsv", "a", newline="") as handle:
-        csv.writer(handle, delimiter="\t").writerow(
-            [verdict, target.name, args.filter, args.description or ""]
-        )
+    log_assertion(run, verdict, target.name, args.filter, args.description or "")
     shown = (result.stdout or result.stderr).strip().replace("\n", " ")[:200]
     print(f"{verdict} {target.name}: {args.description or args.filter}  [{shown}]")
     raise SystemExit(0 if verdict == "PASS" else 1)
 
 
-def cleanup(args):
+def val(args):
     run = run_dir(args.run)
+    target = latest_json(run, args.label)
+    if target is None:
+        fail(f"no JSON evidence for step label {args.label!r}")
+    result = subprocess.run(
+        ["jq", "-r", args.filter, str(target)], capture_output=True, text=True
+    )
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    raise SystemExit(result.returncode)
+
+
+def probe(args):
+    """Evidence about a live root: marker, data files, vector widths, key leakage.
+
+    The key is read the way the CLI reads it and is never printed or written.
+    """
+    run = run_dir(args.run)
+    root = run / "roots" / args.root
+    if not (root / MARKER).exists():
+        fail(f"{args.root} is not a root of this run")
+    import lancedb
+
+    db = lancedb.connect(str(root / "vector"))
+    record, _ = root_embedding(root)
+    try:
+        key = _operator_embedding().get("EMBEDDING_API_KEY", "").strip().encode()
+    except ValueError:
+        key = b""
+    scanned = [p for p in root.rglob("*") if p.is_file()] + [
+        p for p in (run / "evidence").iterdir() if p.is_file()
+    ]
+    payload = dict(
+        root=args.root,
+        marker=record,
+        reopen_problem=reopen_problem(root),
+        data_dir_files=sum(1 for p in (root / "data").rglob("*") if p.is_file()),
+        vector_dims={
+            name: db.open_table(name).schema.field("vector").type.list_size
+            for name in db.table_names()
+        },
+        key_scanned=bool(key),
+        scanned_files=len(scanned),
+        key_leak=bool(key) and any(key in p.read_bytes() for p in scanned),
+        tokenizer_fix=tokenizer_fix_state(),
+    )
+    n, stem = next_stem(run, args.label)
+    stem.with_suffix(".cmd").write_text(f"verify probe {args.root}\n")
+    stem.with_suffix(".json").write_text(json.dumps(payload, indent=2) + "\n")
+    record_step(run, n, args.label, args.root, "0", 0, True)
+    print(f"step {n:02d} {args.label}: probe -> {stem.relative_to(REPO)}.json")
+
+
+def cleanup_run(run):
     live = live_cli_processes(run)
     if live:
         fail(f"identity CLI still running against this run (pids {live}); not deleting")
     kept = run / "evidence" / "root-files"
     roots = run / "roots"
-    for root in sorted(p for p in roots.iterdir() if p.is_dir()):
-        # Result/review files sit at the root's top level; stores are subdirectories.
-        for item in root.iterdir():
-            if item.is_file():
-                (kept / root.name).mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, kept / root.name / item.name)
-    shutil.rmtree(roots)
-    steps = len(evidence_steps(run))
-    print(f"removed {roots.relative_to(REPO)}; kept {steps} steps of evidence in "
-          f"{(run / 'evidence').relative_to(REPO)}")
+    if roots.is_dir():
+        for root in sorted(p for p in roots.iterdir() if p.is_dir()):
+            # Result/review files sit at the root's top level; stores are subdirectories.
+            for item in root.iterdir():
+                if item.is_file():
+                    (kept / root.name).mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(item, kept / root.name / item.name)
+        shutil.rmtree(roots)
+    before = json.loads((run / "run.json").read_text()).get("lab_store")
+    verdicts = []
+    if before:
+        after = lab_fingerprint()
+        for key, description in (
+            ("cognee_db_mtime_ns", "the lab cognee_db modification time is unchanged"),
+            ("cognee_data_files", "the lab .cognee_data file count is unchanged"),
+        ):
+            verdict = "PASS" if before[key] == after[key] else "FAIL"
+            verdicts.append(verdict)
+            log_assertion(run, verdict, "run.json", f"lab_store.{key}", description)
+    return verdicts
+
+
+def cleanup(args):
+    run = run_dir(args.run)
+    verdicts = cleanup_run(run)
+    print(
+        f"removed {(run / 'roots').relative_to(REPO)}; kept {len(evidence_steps(run))} "
+        f"steps of evidence in {(run / 'evidence').relative_to(REPO)}; "
+        f"lab store guard {verdicts.count('PASS')} PASS {verdicts.count('FAIL')} FAIL"
+    )
+    raise SystemExit(1 if "FAIL" in verdicts else 0)
+
+
+def load_journeys():
+    """Every ```bash journey ID [stages=a,b] [env]``` block in features/*.md."""
+    journeys = {}
+    for path in sorted(FEATURES.glob("*.md")):
+        lines = path.read_text().splitlines()
+        i = 0
+        while i < len(lines):
+            match = FENCE.match(lines[i])
+            i += 1
+            if not match:
+                continue
+            body = []
+            while lines[i] != "```":
+                body.append(lines[i])
+                i += 1
+            options = match["options"].split()
+            stages = next(
+                (
+                    o.removeprefix("stages=").split(",")
+                    for o in options
+                    if o.startswith("stages=")
+                ),
+                [],
+            )
+            journeys[match["id"]] = dict(
+                id=match["id"],
+                file=path.name,
+                stages=stages,
+                env="env" in options,
+                body="\n".join(body) + "\n",
+            )
+    return journeys
+
+
+def run_journey(journey, stage):
+    run = make_run(journey["id"].lower() + (f"-{stage}" if stage else ""))
+    env = os.environ | {
+        "V": str(SCRIPT),
+        "RUN": str(run.relative_to(REPO)),
+        "STAGE": stage or "",
+    }
+    log = run / "evidence" / "journey.log"
+    with open(log, "w") as handle:
+        subprocess.run(
+            ["bash", "-c", PRELUDE + journey["body"]],
+            cwd=REPO,
+            env=env,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+        )
+    cleanup_run(run)
+    rows = (
+        list(csv.reader((run / "evidence" / "assertions.tsv").open(), delimiter="\t"))
+        if (run / "evidence" / "assertions.tsv").exists()
+        else []
+    )
+    passed = sum(1 for r in rows if r[0] == "PASS")
+    failed = [r for r in rows if r[0] == "FAIL"]
+    return dict(
+        journey=journey["id"],
+        stage=stage or "",
+        passed=passed,
+        failed=len(failed),
+        failures=failed,
+        run=str(run.relative_to(REPO)),
+    )
+
+
+def journey(args):
+    journeys = load_journeys()
+    wanted = list(journeys) if args.id == "all" else [args.id]
+    if args.id != "all" and args.id not in journeys:
+        fail(f"no journey {args.id}; known: {', '.join(journeys)}")
+    if args.stage and args.id == "all":
+        fail("--stage needs one journey ID")
+    skipped = [i for i in wanted if journeys[i]["env"] and not args.include_env]
+    if args.id != "all" and skipped:
+        fail(f"{args.id} calls the embedding API; add --include-env to run it")
+    wanted = [i for i in wanted if i not in skipped]
+    gates, _, _ = health()
+    if not all(gates.values()):
+        fail(f"doctor gates failed: {[k for k, v in gates.items() if not v]}")
+    results = []
+    for journey_id in wanted:
+        entry = journeys[journey_id]
+        if args.stage and args.stage not in entry["stages"]:
+            fail(
+                f"{journey_id} has stages {entry['stages'] or 'none'}, not {args.stage}"
+            )
+        for stage in [args.stage] if args.stage else entry["stages"] or [None]:
+            result = run_journey(entry, stage)
+            results.append(result)
+            print(
+                f"{journey_id} {stage or ''}: {result['passed']} PASS {result['failed']} FAIL",
+                flush=True,
+            )
+    print(f"\n{'journey':8}{'stage':26}{'PASS':>6}{'FAIL':>6}  run")
+    for r in results:
+        print(
+            f"{r['journey']:8}{r['stage']:26}{r['passed']:>6}{r['failed']:>6}  {r['run']}"
+        )
+        for row in r["failures"]:
+            print(f"    FAIL {row[1]}: {row[3] or row[2]}")
+    total_pass = sum(r["passed"] for r in results)
+    total_fail = sum(r["failed"] for r in results)
+    print(f"{'total':34}{total_pass:>6}{total_fail:>6}  {len(results)} runs")
+    if skipped:
+        print(f"skipped (embedding API, add --include-env): {', '.join(skipped)}")
+    empty = [r["run"] for r in results if r["passed"] == 0]
+    if empty:
+        print(f"no assertion passed in: {', '.join(empty)}; read evidence/journey.log")
+    raise SystemExit(1 if total_fail or empty else 0)
 
 
 def main():
@@ -304,9 +557,35 @@ def main():
     p.add_argument("description", nargs="?")
     p.set_defaults(func=check)
 
-    p = sub.add_parser("cleanup", help="delete fixture stores, keep evidence")
+    p = sub.add_parser("val", help="print jq -r over a step's JSON, for later checks")
+    p.add_argument("run")
+    p.add_argument("label")
+    p.add_argument("filter")
+    p.set_defaults(func=val)
+
+    p = sub.add_parser(
+        "probe", help="record marker, data files, vector widths and key leakage"
+    )
+    p.add_argument("run")
+    p.add_argument("root")
+    p.add_argument("label")
+    p.set_defaults(func=probe)
+
+    p = sub.add_parser(
+        "cleanup", help="delete fixture stores, keep evidence, guard the lab store"
+    )
     p.add_argument("run")
     p.set_defaults(func=cleanup)
+
+    p = sub.add_parser("journey", help="run journey blocks from features/*.md, or all")
+    p.add_argument("id", help="journey ID such as P1, or all")
+    p.add_argument("--stage", help="one fault stage of a journey that lists stages")
+    p.add_argument(
+        "--include-env",
+        action="store_true",
+        help="also run journeys that call the embedding API",
+    )
+    p.set_defaults(func=journey)
 
     args = parser.parse_args()
     args.func(args)
