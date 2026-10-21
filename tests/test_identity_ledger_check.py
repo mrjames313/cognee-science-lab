@@ -8,7 +8,7 @@ from ledger_mutants import DEEP_MUTANTS, MUTANTS
 
 # The default-bound search size. A change to the step list, the symmetry rule
 # or the no-op rule changes it; update it on purpose and say so in the commit.
-PINNED = dict(nodes=3062, sequences=2961)
+PINNED = dict(nodes=3828, sequences=3717)
 
 
 @pytest.fixture(scope="module")
@@ -79,6 +79,21 @@ def test_each_deep_break_fails_on_its_recorded_sequence(name):
     assert replayed.failure.prop == DEEP_MUTANTS[name].prop, ledger_check.report(
         replayed
     )
+
+
+def test_a_retry_cannot_swap_a_text_change_for_a_regrouping():
+    swap = (
+        "W1 publish S1 rev=1 expect=0 plan=publish",
+        "W1 complete",
+        "W1 replace S1 rev=2 expect=1 plan=text<r1",
+        "W1 fail@replace_saved",
+        "W1 replace S1 rev=2 expect=2 plan=regroup<r1",
+    )
+    assert ledger_check.run_one(Config(replay=swap)).verdict == "PASS"
+    broken = ledger_check.run_one(
+        Config(mutant="no-text-change-preservation", replay=swap)
+    )
+    assert broken.failure.prop == "P5"
 
 
 def test_a_search_that_reaches_no_failure_is_inconclusive(capsys):

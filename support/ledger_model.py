@@ -31,7 +31,15 @@ TEXT_CHANGE = dict(
     chunk_budget=512,
     occurrence_retention=None,
     occurrence_continuity=None,
+    occurrence_regrouping=None,
 )
+# The regrouping variant of the same plan (split-group, group_regrouping.py).
+TEXT_REGROUP = dict(
+    TEXT_CHANGE,
+    occurrence_regrouping={"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]},
+)
+TEXT_CHANGES = dict(text=TEXT_CHANGE, regroup=TEXT_REGROUP)
+TEXT_PLANS = (None, *TEXT_CHANGES)
 
 
 def source_id(s):
@@ -76,14 +84,14 @@ class Plan:
     operation: Literal["publish", "replace", "withdraw"]
     revision: int
     previous: tuple[int, int] | None = None  # (revision, variant) it replaces
-    text: bool = False  # carries a text_change (text_fixture.py)
+    text: Literal["text", "regroup"] | None = None  # the text_change it carries
 
     @property
     def tag(self):
         if self.operation != "replace":
             return self.operation
         revision, variant = self.previous
-        kind = "text" if self.text else "replace"
+        kind = self.text or "replace"
         return f"{kind}<r{revision}" + ("alt" if variant else "")
 
     def as_dict(self, s):
@@ -97,7 +105,7 @@ class Plan:
                 s, *self.previous
             ).model_dump_json()
         if self.text:
-            plan["text_change"] = dict(TEXT_CHANGE)
+            plan["text_change"] = dict(TEXT_CHANGES[self.text])
         return plan
 
     @classmethod
@@ -106,11 +114,17 @@ class Plan:
         if "previous_description" in saved:
             old = json.loads(saved["previous_description"])
             previous = (old["revision"], variant_of(s, old))
+        change = saved.get("text_change")
+        text = None
+        if change is not None:
+            text = next((k for k, v in TEXT_CHANGES.items() if v == change), None)
+            if text is None:
+                raise ValueError(f"S{s + 1} saved a text_change the checker never sent")
         return cls(
             saved["operation"].removeprefix("identity_"),
             saved["revision"],
             previous,
-            saved.get("text_change") is not None,
+            text,
         )
 
 
@@ -234,7 +248,7 @@ def replace_intents(w, s, view):
     r, v = view.revision, view.variant
     ops = [
         Begin(w, s, "replace", r, r + 1, Plan("replace", r + 1, (r, v), text))
-        for text in (False, True)
+        for text in TEXT_PLANS
     ]
     ops += [
         Begin(w, s, "replace", r, r + 2, Plan("replace", r + 2, (r, v))),
@@ -246,7 +260,11 @@ def replace_intents(w, s, view):
         ops += [
             Begin(w, s, "replace", r, r, saved, v),
             Begin(w, s, "replace", r, r, saved, 1 - v),
-            Begin(w, s, "replace", r, r, replace(saved, text=not saved.text), v),
+            *[
+                Begin(w, s, "replace", r, r, replace(saved, text=text), v)
+                for text in TEXT_PLANS
+                if text != saved.text
+            ],
             Begin(
                 w,
                 s,
