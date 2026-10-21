@@ -196,7 +196,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
-    from .captured_chunks import fact_chunks, fixture_mention_id
+    from .captured_chunks import fact_chunks, fixture_mention_id, retired_mentions
     from .models import ChunkInput
     from types import SimpleNamespace
 
@@ -364,6 +364,13 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             result["sources"][label]["resolved_group_retirement"] = (
                 await retirement_checks(publisher, source, mid)
             )
+            combined = {
+                k: await retirement_checks(publisher, source, rid)
+                for k, rid in retired_mentions(source).items()
+                if k != "g01"
+            }
+            if combined:
+                result["sources"][label]["combined_group_retirement"] = combined
     for row in rows.values():
         if row["plan"].get("text_change") and row["state"] == "current":
             from .text_fixture import transition_summary

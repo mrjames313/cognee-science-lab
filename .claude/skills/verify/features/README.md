@@ -52,7 +52,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - [Multi-source withdrawal](./multi-source-withdrawal.md) covers `withdraw` in both orders, repeated withdrawal, and a withdrawal fault with its retry.
 - [Revision and text edits](./revision-and-text-edits.md) covers `revise` and `edit-text` on one chunk and on many chunks, with every documented fault stage and its recovery.
 - [Occurrence changes](./occurrence-changes.md) covers `remove-occurrences`, `retire-resolved-group` and `add-occurrences`, each with its recovery case.
-- [Group regrouping](./group-regrouping.md) covers `split-group`, with its `replace_published` recovery case.
+- [Group regrouping](./group-regrouping.md) covers `split-group` and `combine-groups`, each with its `replace_published` recovery case.
 
 There is no separate failure-recovery file. Every fault journey lives with the feature that it breaks, so the recovery steps stay next to the happy path that they restore.
 
@@ -60,11 +60,10 @@ There is no separate failure-recovery file. Every fault journey lives with the f
 
 These are current refusals or gaps. They are not journeys. Do not write a journey that expects them to work.
 
-- Group combinations are not supported. `split-group` covers only the captured split of one group into two fresh groups (`docs/stage6_identity_group_split.md`).
 - A single edit cannot mix occurrence removal and occurrence addition. Removal and addition modes do not combine (`docs/stage6_identity_occurrence_addition.md`).
 - Representation-kind changes, new reusable identities in an addition, and changed interpretations are not supported.
 - An edit that would affect a dependent saved identity source is refused before it changes anything. Automatic reconsideration of that source does not exist (`docs/stage6_identity_text_changes.md`).
-- Arbitrary text edits are not supported. `edit-text` applies only the captured prefix insertion, and the removal, retirement and addition commands apply only their captured edits.
+- Arbitrary text edits are not supported. `edit-text` applies only the captured prefix insertion, and the removal, retirement, addition, split and combination commands apply only their captured edits (`docs/stage6_identity_group_split.md` for the last two).
 - Identity withdrawal is not a full source Forget. It keeps the original Data, its facts, markers and evidence.
 - A root made before embedding profiles opens only for `status` and `retrieve`. Do not use one as a verification root.
 - A hard process crash can leave the project writer reserved. The map covers only caught, injected failures.

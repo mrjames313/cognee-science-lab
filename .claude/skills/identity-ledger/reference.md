@@ -23,7 +23,7 @@ Each step is one call sequence that the named caller makes. The checker treats e
 | `Wn reconcile Sk rev=r expect=r plan=publish` | `Publisher.publish` with a saved revision, the `reconcile` CLI | `begin(method="reconcile")` |
 | `Wn replace Sk rev=r+1 expect=r plan=replace<rR` | `replace`, a new replacement plan from revision R | `begin(method="replace")` |
 | `Wn replace Sk rev=r+1 expect=r plan=text<rR` | `replace` with a `text_change` (`maintain_one`) | `begin(method="replace")` |
-| `Wn replace Sk rev=r+1 expect=r plan=regroup<rR` | `replace` with a regrouping `text_change` (`split-group`, `maintain_one`) | `begin(method="replace")` |
+| `Wn replace Sk rev=r+1 expect=r plan=regroup<rR` | `replace` with a regrouping `text_change` (`split-group`, `combine-groups`, `maintain_one`) | `begin(method="replace")` |
 | `Wn replace Sk rev=r expect=r plan=<saved>` | the retry branch of `replace` | `begin(method="replace")` with the saved plan |
 | `Wn withdraw Sk rev=r expect=r plan=withdraw` | `withdraw`, with the saved plan on retry | `begin(method="withdraw")` |
 | `Wn complete` | `Publisher._apply_pending`, `withdraw` | `assert_pending()` (not for withdraw), then `complete()`. If a call refuses, the caller's `fail()` runs. A publish whose `assert_pending()` refuses stops with the reservation held. |

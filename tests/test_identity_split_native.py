@@ -7,7 +7,7 @@ import pytest
 
 from test_identity_native import command
 from cognee_lab.identity.captured_chunks import FACT_TEXT
-from cognee_lab.identity.group_regrouping import AFTER, REGROUPING
+from cognee_lab.identity.group_regrouping import SPLIT_AFTER, SPLIT_REGROUPING
 
 
 def check_split(root, before, after):
@@ -44,7 +44,7 @@ def check_split(root, before, after):
     assert gone["shared_relationship_text_indexed"]
     if "text_changes" in after:
         (change,) = after["text_changes"]
-        assert change["occurrence_regrouping"] == REGROUPING
+        assert change["occurrence_regrouping"] == SPLIT_REGROUPING
         assert change["occurrence_retention"] is None
         assert change["occurrence_continuity"] is None
         assert change["position_shift"] is None
@@ -99,7 +99,7 @@ def check_split(root, before, after):
     for e in new["evidence"]:
         span = allowed[e["chunk_id"]]
         assert e["chunk_index"] == span["chunk_index"]
-        assert e["text"] == AFTER[span["start"] : span["end"]]
+        assert e["text"] == SPLIT_AFTER[span["start"] : span["end"]]
     assert not any(f["source_id"] in (retired, g04) for f in facts)
 
 
@@ -151,7 +151,7 @@ def test_native_split_recovers_the_exact_saved_groups(tmp_path):
         for r in json.loads(command(root, "status").stdout)["publications"]
         if r["state"] == "failed"
     )
-    assert row["plan"]["text_change"]["occurrence_regrouping"] == REGROUPING
+    assert row["plan"]["text_change"]["occurrence_regrouping"] == SPLIT_REGROUPING
     intended = json.loads(row["description"])
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())

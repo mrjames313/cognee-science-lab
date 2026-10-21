@@ -2,6 +2,7 @@
 
 from hashlib import sha256
 from typing import Any
+from uuid import UUID, uuid5
 
 import rfc8785
 
@@ -26,6 +27,11 @@ class IntentError(ValueError):
 
 def text_digest(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
+
+
+def fresh_mention_id(identity_data_id: UUID, key: str) -> UUID:
+    """Fresh group IDs come from the saved source and group key, never text or offsets."""
+    return uuid5(identity_data_id, f"mention:{key}")
 
 
 def object_digest(value: Any) -> str:

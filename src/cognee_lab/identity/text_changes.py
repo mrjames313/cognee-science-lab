@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from .models import ChunkInput, CorpusObjectInput, SourceTextInput
-from .validation import IntentError, map_chunks, text_digest
+from .validation import IntentError, fresh_mention_id, map_chunks, text_digest
 
 
 def reject_dependents(old, rows):
@@ -546,9 +546,16 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
                 "occurrence_changed", "A continuing group keeps its Entity UUID"
             )
     for key in plan.fresh:
-        if source.mention_groups[key].entity_id in old.entity_constructions:
+        entity_id = source.mention_groups[key].entity_id
+        if entity_id in old.entity_constructions:
             raise IntentError(
                 "incompatible_group", "A fresh group requires a fresh Entity UUID"
+            )
+        # Retired UUIDs are not in old, so only a derived ID keeps one from returning.
+        if entity_id != fresh_mention_id(old.identity_data_id, key):
+            raise IntentError(
+                "incompatible_group",
+                "A fresh group's Entity UUID derives from its source and group key",
             )
     kept = {
         k: r

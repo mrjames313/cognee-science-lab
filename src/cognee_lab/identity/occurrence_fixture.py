@@ -94,11 +94,21 @@ async def run(args, root):
         continuity = CONTINUITY
         result_name = "occurrence_addition_result.json"
     if args.command == "split-group":
-        from .group_regrouping import AFTER as split_text, REGROUPING, describe_split
+        from .group_regrouping import SPLIT_AFTER, SPLIT_REGROUPING, describe_split
 
-        after, retention, describe = split_text, None, describe_split
-        regrouping = REGROUPING
+        after, retention, describe = SPLIT_AFTER, None, describe_split
+        regrouping = SPLIT_REGROUPING
         result_name = "group_split_result.json"
+    if args.command == "combine-groups":
+        from .group_regrouping import (
+            COMBINE_AFTER,
+            COMBINE_REGROUPING,
+            describe_combination,
+        )
+
+        after, retention, describe = COMBINE_AFTER, None, describe_combination
+        regrouping = COMBINE_REGROUPING
+        result_name = "group_combination_result.json"
     if args.command == "retire-resolved-group":
         from .resolved_retirement import (
             AFTER as retired_text,

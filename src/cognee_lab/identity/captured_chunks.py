@@ -1,8 +1,8 @@
 """Exact chunk binding and fact spans for the captured fixture, not inference."""
 
 from .models import ChunkInput
-from .validation import IntentError, map_chunks
-from uuid import UUID, uuid5
+from .validation import IntentError, fresh_mention_id, map_chunks
+from uuid import UUID
 
 FACT_TEXT = "it limits oscillations"
 ADDED_FACT_TEXT = "the controller limits oscillations"
@@ -20,11 +20,6 @@ def captured_facts(source):
         yield "g03", ADDED_FACT_TEXT
 
 
-def fresh_mention_id(identity_data_id, key):
-    """Fresh group IDs come from the saved source and group key, never text or offsets."""
-    return uuid5(identity_data_id, f"mention:{key}")
-
-
 def fixture_mention_id(source, key="g01"):
     """Known captured fixture identity, including after its declaration retires."""
     group = source.mention_groups.get(key)
@@ -37,6 +32,18 @@ def fixture_mention_id(source, key="g01"):
     raise IntentError(
         "fixture_shape", "Missing primary group outside the captured retirement fixture"
     )
+
+
+def retired_mentions(source):
+    """Captured mentions this source no longer declares, by group key.
+
+    g01 retires in the resolved retirement and the split. g04 and g05 retire in
+    the combination, which is the only state that holds g06.
+    """
+    keys = ("g01", "g04", "g05") if "g06" in source.mention_groups else ("g01",)
+    return {
+        k: fixture_mention_id(source, k) for k in keys if k not in source.mention_groups
+    }
 
 
 def bind_chunks(payload, text, chunks):

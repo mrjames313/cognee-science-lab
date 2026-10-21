@@ -21,6 +21,7 @@ OCCURRENCE_COMMANDS = {
     "retire-resolved-group",
     "add-occurrences",
     "split-group",
+    "combine-groups",
 }
 TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
 
@@ -52,6 +53,7 @@ def main():
             "retire-resolved-group",
             "add-occurrences",
             "split-group",
+            "combine-groups",
             "withdraw",
             "retrieve",
             "status",
