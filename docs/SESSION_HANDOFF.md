@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-20 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. **Next task:** review a concrete group split/combination case. This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-21 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The verify journeys and the identity-ledger check are in place, and unit tests run in CI. **Next task:** draft a concrete group split/combination case for the user to review, then implement it. This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -22,7 +22,17 @@ Runtime code is in `src/cognee_lab/identity/`. The implementation includes **cap
 
 The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The next task is the concrete group split/combination review below.
 
-Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was first delivered as patches. That hash identifies only the generation base. The code and documents are now committed. Before branch `fix/fixture-embedding-profile`, `main` was at `ccc85d6` and in sync with `origin/main`. That branch adds the `.env` fix (commits `ab67118`, `9048b71`, `dbcf727`) and this documentation update. When this update was written, the branch was not pushed.
+Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was first delivered as patches. That hash identifies only the generation base. The code and documents are now committed.
+
+Before branch `docs/handoff-2026-10-21`, `main` was at `c3becf2` and in sync with `origin/main`. GitHub Actions `unit-tests` passed on `c3becf2` with 143 passed and 29 deselected. The work after `ccc85d6` landed on `main` by local `git merge --ff-only` merges after `/pstack:thermos` reviews. No pull requests were opened. That work is:
+
+- The `.env` fix and per-root embedding profiles (2026-10-20). See [the resolved `.env` issue](#resolved-the-repository-env-overrode-the-fixture-profile).
+- The build fix (2026-10-20). `pyproject.toml` misspelled the key as `build_backend`, so the build used setuptools. It now sets `build-backend = "uv_build"` and requires `uv_build>=0.12,<0.13`. Git no longer tracks the `*.egg-info/` directory and ignores it. The `pytest-timeout` dependency is removed.
+- The project verify skill and its journeys (2026-10-20 to 2026-10-21).
+- The identity-ledger check (2026-10-21).
+- The unit-test workflow and the landing playbook.
+
+[Verification and landing](#verification-and-landing) describes the tools and the landing steps.
 
 The following patch order records past deliveries. Use it only to reconstruct an older checkout:
 
@@ -87,7 +97,7 @@ For these reviewed maintenance checkpoints, doc01 reaches saved/registered/verif
 
 The addition recovery was reviewed on 2026-10-20, from the run ending approximately 10:49 America/Detroit. Incident `f93491d5-3f5a-58c0-b786-a3874c27059c` records the injected failure and a single verified recovery attempt ending `restored` at revision 2. Fresh g03 `a75636db-c46d-5261-a21e-010647bfe4f4` survives recovery with its node/name index, accepted r03 and two current evidence/marker chunks. Continuing mention IDs, doc02's full fact/evidence and source summary, and borrowed Entity fields are unchanged; retired chunks/vectors are absent.
 
-These Mac results cover successful addition, reopen/healthy reconcile and post-publication recovery. Mac `text_chunks` failure, a subsequent prefix edit and withdrawal after addition have not yet been reviewed. Their generation-environment native tests retain the host-only-launcher qualification above; the Mac results do not establish clean ordinary Linux interpreter teardown.
+These Mac results cover successful addition, reopen/healthy reconcile and post-publication recovery. The user did not review three later cases: a `text_chunks` failure after addition, a prefix edit after addition and withdrawal after addition. On 2026-10-21 the assistant ran verify journeys O5 and O6 on the user's Mac with loopback embeddings, and they cover these three cases. O5 runs the addition, a later prefix edit and the withdrawal. O6 injects the `text_chunks` failure, and also `replace_published`, and recovers each one. These are the assistant's runs in fresh roots, not reviews of the roots in the table. The generation-environment native tests retain the host-only-launcher qualification above. The Mac results do not establish clean ordinary Linux interpreter teardown.
 
 Raw terminal transcripts were supplied in chat and are not asserted to be committed. This table is the durable verification summary. The roots above are user-local existing stores: reuse them for inspection only, and use new roots for new fixture creation. Dataset IDs vary by root; never substitute IDs from another run.
 
@@ -104,7 +114,7 @@ The assistant measured these results on the user's Mac on 2026-10-20, before the
 - A new `chunked-fixture` root had no `data/` directory. Two new `text_*.txt` files appeared in the lab `.cognee_data/`. The LanceDB vectors in the root had 2048 dimensions.
 - `uv run pytest -q -m 'not integration'` changed the lab `.cognee_system/databases/cognee_db` (mtime 16:55:12, during the run). That database has rows in `lab_identity_publications` (4), `lab_identity_writers` (1) and `lab_identity_recovery_events` (4). Unit tests such as `tests/test_identity_storage.py` wrote them through the default relational engine.
 
-**The unit-test rows are still in the lab database.** Removing them is the user's decision.
+Later on 2026-10-20 the user deleted these unit-test rows from the lab database. The user made a backup first and later deleted the backup.
 
 ### The fix
 
@@ -145,6 +155,7 @@ Proof history, 2026-10-20 to 2026-10-21:
 
 - 2026-10-20. The 20 journey blocks ran as 31 runs on the Mac against Cognee 1.6.2, with 500 assertions and 0 failures. The tokenizer fix was applied.
 - 2026-10-21. A fix round added the `journey` runner, `probe`, the lab-store guard and `reopen_problem`. The rerun passed all 31 runs with 567 assertions and 0 failures. `journey all` ran the 30 loopback runs, and `journey P5 --include-env` ran the env run.
+- 2026-10-21, latest run. The assistant ran `journey all` on the Mac. The 19 loopback journey blocks ran as 30 runs, with 586 PASS rows and 0 FAIL rows. P5 is the 20th block. It needs `--include-env` and did not run in this pass.
 - Not exercised against an env root. The warning path for a missing tokenizer fix, and the doctor failure path for an operator file that lacks a key.
 - Exercised. The doctor failure path for a pre-profile marker, a malformed marker, and an env root whose operator file names another model.
 
@@ -170,6 +181,15 @@ This is **step 4 within Stage 6**, not project Stage 4.
 5. **Verification/recovery coverage:** extend current revision/attempt/currentness, ownership/index/evidence and retirement checks across those operations, including incomplete/missing-plan diagnostics. Do not make a general crash-recovery framework a new prerequisite.
 
 The next task is to **review a concrete group split/combination case**. Then implement the smallest captured regrouping example. Identify retired old groups, replacement IDs, reviewed decisions and semantic output that needs regeneration. Do not infer fact transfer from group continuity.
+
+Do the task in this order:
+
+1. Draft the concrete case and give it to the user for approval before you write code. The draft names which old occurrences go to which fresh groups. It also names the captured decisions, the retired groups, the replacement IDs, and the facts and evidence to regenerate.
+2. After the user approves the case, implement the smallest captured regrouping example.
+3. Add a verify journey for the new command in `.claude/skills/verify/features/`. Then move the split/combination item out of "Not yet supported" in `features/README.md`.
+4. Extend the identity-ledger checker. Follow "Add an operation" in `.claude/skills/identity-ledger/SKILL.md`. Regrouping reaches `RecordStore` as method `replace` with `plan["text_change"]`, so `Plan.text` in `support/ledger_model.py` becomes a name. Update `PINNED` in `tests/test_identity_ledger_check.py` on purpose and say so in the commit.
+5. Add a fixture guide under `docs/`. Update this handoff and [ROADMAP.md](../ROADMAP.md).
+6. Land the branch through [the landing playbook](../.agents/playbooks/landing-on-main.md).
 
 The `occurrence_retention` mode handles removals. The `occurrence_continuity` mode maps each old occurrence to a reviewed new index and permits additions. Neither mode permits splits/combinations or mixed removal/addition. Reuse the whole-document rebuild and common publisher. Preserve independent doc02 support. A generic Describe algorithm is not required for this example.
 
@@ -208,7 +228,7 @@ uv run python -c "import cognee; print(cognee.__version__)"
 uv run pytest -q -m 'not integration'
 ```
 
-The inspected native version must be **1.6.2**. If the version differs, inspect compatibility again. Do not identify another version as the tested profile. Run focused native tests for the changed path first. The full native suite is `uv run pytest -q -m integration`. It creates fresh stores and can take minutes.
+On `c3becf2` the unit suite gives 143 passed and 29 deselected. The inspected native version must be **1.6.2**. If the version differs, inspect compatibility again. Do not identify another version as the tested profile. Run focused native tests for the changed path first. The full native suite is `uv run pytest -q -m integration`. It creates fresh stores and can take minutes.
 
 The latest happy path, with a **new** root, is:
 
@@ -221,6 +241,24 @@ uv run python -m cognee_lab.identity reconcile --root outputs/stage6_resume_chec
 `chunked-fixture` uses the default `--embedding env` profile. That profile needs `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in the repository `.env`, and it calls that embedding endpoint. For an offline root, add `--embedding loopback` to the creation command. Later commands read the profile from the root marker, so they do not need the flag. pytest always uses loopback and does not need `.env`.
 
 Expected: three facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, stable g01 plus fresh g03 and its local fact, g02/shared support present, no recovery incident. The guide has a separate fresh-root `replace_published` failure/recovery sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
+
+## Verification and landing
+
+Use three checks on a change to `src/cognee_lab/identity/`:
+
+1. **Unit tests.** Run `uv run pytest -q -m 'not integration'`. The suite uses loopback embeddings and includes the identity-ledger check at its default depth. GitHub Actions runs the same command on every push (`.github/workflows/unit-tests.yml`). The integration suite, `uv run pytest -q -m integration`, takes about 10 minutes and runs only on a local machine.
+2. **Verify journeys.** Run `.claude/skills/verify/scripts/verify.py journey all`. It drives the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 20 journey blocks. `journey all` runs the 19 loopback blocks as 30 runs. On 2026-10-21 that gave 586 PASS rows and 0 FAIL rows on the Mac. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules.
+3. **Identity-ledger check.** Run `uv run python support/ledger_check.py`. It runs every sequence of real `RecordStore` calls up to a depth bound, with two sources and two writers. It checks properties P1 to P6 after each step. The default depth is 5: 3062 nodes in about 6 s. Depths 6 to 8 are manual runs. `--skip-probability P --seed S` samples a deeper search, and a sampled run never reports `verified within bound`. At depth 5 the check catches all 30 scratch breaks in `support/ledger_mutants.py`: 29 as a property failure and one as `INCONCLUSIVE`. One more break, in `DEEP_MUTANTS`, needs depth 7. The check found no bug in the current code. The user chose a Python checker over TLA+. `.claude/skills/identity-ledger/SKILL.md` says when to run it, and `reference.md` holds the measurements.
+
+To land a branch, follow [the landing playbook](../.agents/playbooks/landing-on-main.md). In short:
+
+1. Work on a branch off `main`.
+2. Review `main..<branch>` with `/pstack:thermos`. Fix each finding, or dismiss it with a concrete reason.
+3. Run `uv run pytest -q -m 'not integration'` on the branch.
+4. Merge with `git merge --ff-only <branch>` into `main`.
+5. Push `main` only when the user asks.
+
+The user prefers the NVIDIA embeddings in the repository `.env` for real fixture runs, and loopback for pytest and verify journeys. The user works in auto mode. A user auto-mode rule allows deletion under `outputs/`. The user approves each other deletion.
 
 ## Constraints to preserve
 

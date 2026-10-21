@@ -2,13 +2,13 @@
 
 **Consolidated:** 2026-10-15 (America/Detroit).
 
-**Editorial revision:** 2026-10-20. STE-flavored technical prose.
+**Editorial revision:** 2026-10-21. STE-flavored technical prose.
 
 **Inspected baseline:** Cognee 1.6.2, commit `ba3631f2ed363a6ea50d649c34c56885af6b36fe`.
 
 **Test configuration:** Ladybug, LanceDB and SQLite.
 
-**Current status (2026-10-20):** This playbook records a reusable process and bounded identity evidence through captured occurrence additions. Fixtures exercise supplied decisions through Publish/Maintain and Retrieve. Automatic Describe, full source/dependency lifecycle, standard entry points and general retrieval remain incomplete.
+**Current status (2026-10-21):** This playbook records a reusable process and bounded identity evidence through captured occurrence additions. It also records fixture isolation and two verification tools for Maintain. Fixtures exercise supplied decisions through Publish/Maintain and Retrieve. Automatic Describe, full source/dependency lifecycle, standard entry points and general retrieval remain incomplete.
 
 Measurement examples illustrate transfer questions. They do not select a scientific schema. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records current code and verification. The [Stage-6 contract](cognee_identity_stage6_handoff.md) defines identity behavior and the implementation plan. Dated evidence below describes each checkpoint.
 
@@ -90,12 +90,14 @@ The [extension reference](cognee_extension_architecture_reference_v1.6.2.md), se
 | G16 | Whole-source maintenance can provide a bounded initial policy. | D, P, M | Identity selects document-level maintenance. | Choose suitable measurement source granularity. One source per document is not universal. |
 | G17 | Provenance/ownership does not establish scientific support or correctness. | D, P, M, R | Explicit scope boundary. | Address scientific justification, uncertainty and entailment in separate domain work. |
 | G18 | Evaluate operation sequences and model quality separately. | D, P, M, R | Captured lifecycle tests cover withdrawal orders and interrupted retries. Model quality remains separate. | Use captured decisions for lifecycle tests. Evaluate interpretation and consumer comprehension independently. |
+| G19 | Isolate the fixture runtime environment from the operator's env file. | P, M, R | Cognee 1.6.2 loads an env file at its first import with `override=True`. The repository `.env` replaced the fixture settings until the CLI pointed `COGNEE_ENV_FILE` at a comment-only file. Each root now keeps its stores inside the root and records its embedding profile. A unit test checks that unit tests do not use the lab stores. | Set the env file before the first Cognee import. In a new root, check the vector dimensions and the file locations, not only the returned results. |
+| G20 | Verify Maintain at two layers, and prove that each check can fail. | P, M, R | Verify journeys drive the CLI through real stores with injected failures and check side effects. A bounded exhaustive check drives the real publication ledger. Seeded breaks make each of its six properties fail. | Add a journey for each new operation and fault stage. Extend the ledger check for each new ledger caller. For each new guard, add a break that the check catches. |
 
 Source inspection of a primitive does not establish a complete integration. Record version/configuration and evidence status before describing a mechanism as demonstrated reuse.
 
 The addition checkpoint's native assertions used a host-only launcher after ordinary Linux CLI output exposed an interpreter-teardown timeout. Application code has no forced-exit workaround. Those results do not establish clean ordinary Linux teardown.
 
-The user separately reproduced ordinary Mac addition, reopened retrieval, healthy reconcile and `replace_published` recovery. Mac `text_chunks` failure, a later prefix edit and withdrawal after addition remain unreviewed. The session handoff records the exact evidence boundary.
+The user separately reproduced ordinary Mac addition, reopened retrieval, healthy reconcile and `replace_published` recovery. The user did not review a `text_chunks` failure, a later prefix edit or withdrawal after addition. On 2026-10-21 the assistant ran verify journeys O5 and O6 on the user's Mac with loopback embeddings, and they cover these three cases. The session handoff records the exact evidence boundary.
 
 ## 4. Reuse boundaries in code
 
@@ -288,3 +290,15 @@ This case reuses guarded whole-document rebuilding and explicit forward recovery
 This bounded addition uses the common guarded whole-document rebuild. Lifecycle tests verify materialization. Paragraph grouping, reference selection and identity judgment remain adapter inputs. This case adds no generic framework or scientific-support rule.
 
 The [addition guide](../docs/stage6_identity_occurrence_addition.md) and [session handoff](../docs/SESSION_HANDOFF.md) record execution evidence and remaining scope. The launcher and Mac-verification qualifications stated above apply. They do not establish untested recovery paths or clean ordinary Linux teardown.
+
+## Fixture isolation and verification tooling, 2026-10-20 to 2026-10-21
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| The operator's env file can replace fixture settings. | P, M, R | Cognee loaded the repository `.env` at import with `override=True`. Fixture roots then used the `.env` embeddings (2048 dimensions) and wrote raw text into the lab data directory. Unit tests wrote ledger rows into the lab relational store. Returned facts still matched, so result checks did not show the problem. | Check where a fixture writes and which embedding it used. Correct results do not prove isolation. |
+| A store-shaping setting belongs to the root. | P, M, R | The root marker records the embedding profile, model and dimensions, and no key or endpoint. Later commands refuse another profile, or an `env` root whose `.env` model or dimensions changed. | Record each setting that shapes stored data with the root. Refuse to reopen the root under another setting. |
+| End-to-end journeys check side effects through real stores. | P, M, R | 20 journey blocks drive the CLI in fresh roots. They check revision triples, recovery events, retired chunks and vectors, and a reopen in a new process. They also check that the lab stores did not change. On 2026-10-21 the 30 loopback runs gave 586 PASS rows and 0 FAIL rows on the user's Mac. | Write a journey for each operation and each fault stage. Check required absence as well as presence. |
+| A bounded exhaustive check covers ledger sequences that journeys do not reach. | P, M | The checker calls the real `RecordStore` in every sequence up to depth 5 (3062 nodes, about 6 s), with two sources and two writers. It checks six properties after each step. It found no bug in the current code. | Reuse the checker if the integration reuses the ledger. Model each new caller's calls, including the arguments that a guard must refuse. |
+| A passing check needs a break that makes it fail. | P, M | 30 scratch breaks fail at depth 5. One break fails only at depth 7. An agent first called that break not observable because depth 5 passed. | For each new guard, add a break and show that the check catches it. A pass at one bound does not prove that a break is harmless. |
+
+These tools check lifecycle mechanics with captured decisions. They do not check extraction quality, retrieval quality or scientific support. The ledger check does not cover graph or vector writes, more than two sources or writers, or SQLite failures. The assistant ran the journeys on the user's Mac with loopback embeddings. Only journey P5 calls the `.env` embedding API. The [session handoff](../docs/SESSION_HANDOFF.md) records the commands, and `.claude/skills/identity-ledger/reference.md` records the checker measurements.

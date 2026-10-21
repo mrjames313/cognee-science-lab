@@ -1,6 +1,6 @@
 # Cognee Science Lab Roadmap
 
-**Last revised:** 2026-10-20
+**Last revised:** 2026-10-21
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
 **Current work:** Stage 6 is in progress. Steps 1–2 have native fixtures. Step 3 demonstrates multi-source withdrawal. Step 4 demonstrates guarded unchanged-text identity corrections and captured prefix edits. Prefix edits use whole-document native rechunking, remapped positions and rebuilt fact evidence. The multi-chunk fixture covers split markers and fact continuations. See the [first-slice guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md).
@@ -767,13 +767,15 @@ Expected concerns include:
 
 ---
 
-# Current immediate work — 2026-10-20
+# Current immediate work — 2026-10-21
 
 Current stage: **Stage 6, accepted implementation step 4 / M3, partially complete**. Stage-5.4.5 architecture/handoff review is complete. Bounded native publication, shared-source withdrawal, correction, text/rechunk rebuild, partial occurrence removal and unresolved/resolved group-retirement checkpoints have been implemented and independently exercised by the user.
 
 Captured occurrence additions now have a separate explicit old-to-new continuity admission. The new example extends a continuing group and publishes a fresh same-text local group, its accepted link and original-owned fact/evidence through the existing maintenance path. The next task is to review a concrete **group split/combination** case before implementing that bounded admission. See [the addition guide](docs/stage6_identity_occurrence_addition.md).
 
 Remaining step-4 areas are broader additions/regrouping (including mixed changes and kind changes), changed interpretation with refreshed semantic output, dependency-aware multi-document/span/record maintenance, coordinated original/generated Data lifecycle, and verification/recovery coverage across those operations. General exact-ID semantic conversion remains broader than the captured writer. See [the session handoff](docs/SESSION_HANDOFF.md) for code locations, delivery baseline, test versus Mac-reproduction evidence and commands.
+
+Two tools now check the demonstrated operations. The project verify skill drives the fixture CLI through real Cognee stores. The identity-ledger check runs every bounded sequence of publication-ledger calls. The regrouping example must add a journey and extend the ledger check. The session handoff lists these steps.
 
 Step 5 owns standard B Task-transform Cognify/Remember/full Update/removal hooks and broader retrieval/delivery/offline diagnostics. Step 6 owns seeded rules/model Describe and its separate quality/consistency evaluation. A/B staging, incremental chunk reuse, comprehensive replay, automatic orchestration and metrics tooling remain deferred; they are not new step-4 gates. The post-Stage-6 architecture check-in and later scientific stages remain unchanged.
 
@@ -946,3 +948,7 @@ Reconcile older global “not implemented” and “next review” statements wi
 ### Captured occurrence additions — 2026-10-20
 
 Extend the common maintenance path with a separate explicit old-to-new occurrence continuity mode. Preserve continuing groups and decisions, allocate a fresh local group ID despite repeated surface text, and publish its captured original-owned semantic fact/evidence. Retain the existing coordinator, saved-source schema and backend interfaces. Commands, test evidence and remaining boundaries are in [the addition guide](docs/stage6_identity_occurrence_addition.md) and current session handoff. Stage-6 step 4 remains partial; broader regrouping, meaning changes, dependencies and full source lifecycle are still pending.
+
+### Fixture isolation and verification tooling, 2026-10-20 to 2026-10-21
+
+Fix the repository `.env` override. Cognee loaded `.env` at import and replaced the fixture settings, so fixture roots used the `.env` embeddings and wrote raw text into the lab stores. Each root now keeps its stores inside the root and records its embedding profile, `env` or `loopback`. Fix the build backend key, so the build uses `uv_build`. Add the project verify skill. Its 20 journey blocks drive the CLI through real stores, and the assistant ran them on the user's Mac. Add a bounded exhaustive check of the identity publication ledger with seeded breaks. Run unit tests in GitHub Actions on every push, and land reviewed branches on `main` by local fast-forward merges. This work adds no Stage-6 behavior. The next task is still a concrete group split/combination case. [SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) records the evidence and commands.
