@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-21 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The verify journeys and the identity-ledger check are in place, and unit tests run in CI. **Next task:** draft a concrete group split/combination case for the user to review, then implement it. This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-21 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The captured group split and combination checkpoint is implemented and verified. **Next task:** pick the next step-4 item. The proposed default is mixed occurrence addition and removal, as a concrete case for the user to review before any code. This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -11,16 +11,16 @@ Read this document first, then:
 1. [ROADMAP.md](../ROADMAP.md): project stages and current scope.
 2. [Stage-6 architecture/contract](../results/cognee_identity_stage6_handoff.md): physical representation, ownership, continuity, recovery and original six-step build order. Its dated implementation subsections are checkpoint history.
 3. [R1–R6 requirements](../results/cognee_stage5_4_5_requirements_review.md): outcome constraints, not a claim of complete coverage.
-4. [Latest fixture guide](stage6_identity_occurrence_addition.md), followed by the earlier guides linked below for individual commands.
+4. [Latest fixture guide](stage6_identity_group_split.md), followed by the earlier guides linked below for individual commands.
 5. [Integration playbook](../results/cognee_knowledge_integration_playbook.md): findings tagged with Describe/Publish/Maintain/Retrieve and transfer questions for other integrations.
 
 The [representation decision record](../results/cognee_stage5_4_5_identity_representation_proposal.md) and [pinned native extension reference](../results/cognee_extension_architecture_reference_v1.6.2.md) explain rationale and native behavior. Do not treat their early dated “next” or “not implemented at that checkpoint” statements as current implementation status. The roadmap and this handoff identify current work; later explicit approved scope changes supersede earlier proposals.
 
 ## Code baseline and delivery status
 
-Runtime code is in `src/cognee_lab/identity/`. The implementation includes **captured occurrence additions and new-group publication**, following resolved fact-bearing group retirement. It does not include split/combine, automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The addition update extends transition admission, captured semantic output, diagnostics, CLI commands and tests. The saved-source schema and dependencies are unchanged.
+Runtime code is in `src/cognee_lab/identity/`. The implementation includes a **captured group split and combination** through the `occurrence_regrouping` admission mode, following captured occurrence additions and new-group publication. It does not include general regrouping, automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The regrouping update extends transition admission, captured semantic output, diagnostics, CLI commands, the ledger model, verify journeys and tests. The saved-source schema and dependencies are unchanged.
 
-The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The next task is the concrete group split/combination review below.
+The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The user approved the split and combination case on 2026-10-21. The assistant's subagents verified the implementation on the user's Mac with loopback embeddings. This handoff records no user-reviewed fixture roots for it. [Next task](#next-task) gives the next task.
 
 Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was first delivered as patches. That hash identifies only the generation base. The code and documents are now committed.
 
@@ -31,6 +31,8 @@ Before branch `docs/handoff-2026-10-21`, `main` was at `c3becf2` and in sync wit
 - The project verify skill and its journeys (2026-10-20 to 2026-10-21).
 - The identity-ledger check (2026-10-21).
 - The unit-test workflow and the landing playbook.
+
+Branch `stage6-group-combine` (2026-10-21) adds the captured group split and combination, the fresh-ID rule and the revised verification routine. It lands through the same playbook.
 
 [Verification and landing](#verification-and-landing) describes the tools and the landing steps.
 
@@ -66,6 +68,7 @@ At session start, inspect `git status --short`, `git log -1 --oneline`, the file
 | Partial/empty unresolved groups | Explicit old-occurrence retention indices, stable continuing group, retirement of empty unresolved group/node/vector/markers, independent support preserved | [Occurrence removal](stage6_identity_occurrence_removal.md) |
 | Empty resolved fact-bearing group | Retire saved group/resolution/declaration, physical mention/node vector, resolution link, local fact/evidence/markers; preserve doc02's distinct fact and shared endpoint/index | [Resolved retirement](stage6_identity_resolved_retirement.md) |
 | Occurrence additions and new group | Explicit old-to-new continuity, stable continuing IDs/fresh same-text local group, accepted link and new original-owned local fact/evidence, reopen/reconcile and explicit recovery | [Occurrence addition](stage6_identity_occurrence_addition.md) |
+| Group split and combination | Explicit `occurrence_regrouping` map; g01 splits into fresh g04 and g05, then g04 and g05 combine into fresh g06; retired groups, links, facts, evidence and triplets physically removed; facts generated again from the fresh groups, never transferred; fresh IDs from source, new revision and key; reopen/reconcile and explicit recovery | [Group split](stage6_identity_group_split.md) |
 
 ### Tests run in the generation environment
 
@@ -74,6 +77,8 @@ The previous resolved-retirement code checkpoint recorded **59 programmatic test
 Tests used Python 3.12.14, Cognee 1.6.2, actual configured Ladybug/LanceDB/SQLite stores, deterministic loopback embeddings and no LLM. The generation environment had no `.env`, so these tests used loopback. Only that native profile is demonstrated in the generation environment. Final code-patch application and affected-file byte equality were checked. The preceding documentation-only update did not rerun the runtime suite.
 
 The **2026-10-20 addition checkpoint** passed **81 programmatic tests and 3 new native sequence tests (84 distinct cases)**; the other 26 native cases were not rerun. The native selection covers addition/reopen/reconcile/another prefix edit/withdrawal, plus exact forward recovery after `text_chunks` and `replace_published`. User-Mac reproduction is recorded separately below. The test runs for the `.env` fix were on the user's Mac, not in the generation environment. The [resolved `.env` issue](#resolved-the-repository-env-overrode-the-fixture-profile) records them.
+
+The **2026-10-21 group split and combination checkpoint** ran on the user's Mac, not in the generation environment. The assistant's subagents ran it with loopback embeddings. The unit suite gave 207 passed and 34 deselected. A focused integration run of the split, combination, addition and resolved-retirement native tests gave 11 passed in 236 s. The other native cases were not rerun in that pass. [Verification skill](#verification-skill) lists the journey results, and the [group split guide](stage6_identity_group_split.md#verification-profile-and-evidence) has the full list.
 
 Native assertions used actual configured stores and fresh child processes. A **host-only test launcher** exited after the ordinary CLI returned and its explicit engine-close path completed. This bypassed interpreter finalization.
 
@@ -155,7 +160,9 @@ Proof history, 2026-10-20 to 2026-10-21:
 
 - 2026-10-20. The 20 journey blocks ran as 31 runs on the Mac against Cognee 1.6.2, with 500 assertions and 0 failures. The tokenizer fix was applied.
 - 2026-10-21. A fix round added the `journey` runner, `probe`, the lab-store guard and `reopen_problem`. The rerun passed all 31 runs with 567 assertions and 0 failures. `journey all` ran the 30 loopback runs, and `journey P5 --include-env` ran the env run.
-- 2026-10-21, latest run. The assistant ran `journey all` on the Mac. The 19 loopback journey blocks ran as 30 runs, with 586 PASS rows and 0 FAIL rows. P5 is the 20th block. It needs `--include-env` and did not run in this pass.
+- 2026-10-21, before the regrouping journeys. The assistant ran `journey all` on the Mac. The 19 loopback journey blocks ran as 30 runs, with 586 PASS rows and 0 FAIL rows. P5 is the 20th block. It needs `--include-env` and did not run in this pass.
+- 2026-10-21, group split and combination. The assistant's subagents ran journeys G1 (32 PASS rows), G2 (20), G3 (36) and G4 (21) on the Mac with loopback embeddings, with 0 FAIL rows. After the fresh-ID change they reran O5 (27), O6 `replace_published` (17) and O6 `text_chunks` (17), with 0 FAIL rows. The map now has 24 journey blocks, and `journey all` runs the 23 loopback blocks as 34 runs.
+- CHECKPOINT-JOURNEY-ALL: <pending>
 - Not exercised against an env root. The warning path for a missing tokenizer fix, and the doctor failure path for an operator file that lacks a key.
 - Exercised. The doctor failure path for a pre-profile marker, a malformed marker, and an env root whose operator file names another model.
 
@@ -168,30 +175,46 @@ This is **step 4 within Stage 6**, not project Stage 4.
 | 1 / M0 | Runtime forms/schema, exact chunk mapping, portable bookkeeping and capability checks implemented for the initial profile |
 | 2 / M1 | Captured Task → native publication → useful fact/evidence retrieval → reconcile demonstrated |
 | 3 / M2 | Multi-source ownership/withdrawal demonstrated; general exact-ID semantic conversion remains broader than the captured writer |
-| 4 / M3 | Partly complete: corrections, prefix/rechunk edits, partial occurrence removal, empty unresolved and resolved fact-bearing group retirement, captured additions/new group and explicit caught-failure recovery |
+| 4 / M3 | Partly complete: corrections, prefix/rechunk edits, partial occurrence removal, empty unresolved and resolved fact-bearing group retirement, captured additions/new group, captured group split and combination, and explicit caught-failure recovery |
 | 5 / M4 | Standard Cognify/Remember/full Update B Task-transform wiring, source-removal entry-point hooks, public Retriever/SearchType, broader traversal/delivery/diagnostics not implemented |
 | 6 / M5 | Seeded rules/model Describe and separate quality/consistency evaluation not implemented |
 
 ### Remaining step-4 work
 
-1. **Occurrence/group changes:** explicit splits/combinations with fresh resulting IDs, mixed addition/removal, representation-kind changes using separate suitable Entities and broader addition cases. Captured continuing-group additions, new-group publication and unresolved/resolved removal are implemented; their fixtures do not establish general regrouping or automatic matching.
+1. **Occurrence/group changes:** mixed addition/removal, representation-kind changes using separate suitable Entities, and broader addition and regrouping cases. Captured continuing-group additions, new-group publication, unresolved/resolved removal and one captured split and combination are implemented. Their fixtures do not establish general regrouping or automatic matching.
 2. **Changed interpretation and semantic refresh:** edits changing a referent/definition/scope, with coordinated saved decisions and regenerated facts/evidence. Existing unchanged-text retargeting and captured same-binding edits do not establish this generally.
 3. **Dependencies:** identify and reconsider affected sources that consumed another document, corpus fields or saved records; support admitted span/record remapping. Current code rejects known dependent-document text edits rather than silently propagating them. New-corpus opportunity selection is not solved by positive dependencies alone.
 4. **Full source lifecycle:** coordinate original removal with generated-source retirement, generated-source rebuild and authorized endpoint reconstruction; preserve remaining owners and distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal alone keeps Data/description and original facts; it is not full source Forget.
 5. **Verification/recovery coverage:** extend current revision/attempt/currentness, ownership/index/evidence and retirement checks across those operations, including incomplete/missing-plan diagnostics. Do not make a general crash-recovery framework a new prerequisite.
 
-The next task is to **review a concrete group split/combination case**. Then implement the smallest captured regrouping example. Identify retired old groups, replacement IDs, reviewed decisions and semantic output that needs regeneration. Do not infer fact transfer from group continuity.
+### Group split and combination, completed 2026-10-21
 
-Do the task in this order:
+The user approved this case on 2026-10-21, before implementation. The [group split guide](stage6_identity_group_split.md) gives the exact texts, offsets, maps and UUIDs.
 
-1. Draft the concrete case and give it to the user for approval before you write code. The draft names which old occurrences go to which fresh groups. It also names the captured decisions, the retired groups, the replacement IDs, and the facts and evidence to regenerate.
-2. After the user approves the case, implement the smallest captured regrouping example.
-3. Add a verify journey for the new command in `.claude/skills/verify/features/`. Then move the split/combination item out of "Not yet supported" in `features/README.md`.
-4. Extend the identity-ledger checker. Follow "Add an operation" in `.claude/skills/identity-ledger/SKILL.md`. Regrouping reaches `RecordStore` as method `replace` with `plan["text_change"]`, so `Plan.text` in `support/ledger_model.py` becomes a name. Update `PINNED` in `tests/test_identity_ledger_check.py` on purpose and say so in the commit.
-5. Add a fixture guide under `docs/`. Update this handoff and [ROADMAP.md](../ROADMAP.md).
+- **Split, revision 1 to 2.** A paragraph break splits g01 into fresh g04 (`the controller`) and fresh g05 (`it`). Accepted resolutions r04 and r05 link both to the same Helios controller. g02 continues. The `it limits oscillations` fact is generated again from g05, never transferred. g01, r01 and g01's fact edge, evidence and triplets are physically retired.
+- **Combination, revision 2 to 3.** Rejoining the paragraphs merges g04 and g05 into fresh g06, with resolution r06. g04, g05, r04, r05 and g05's fact retire. The fact is generated again from g06. g01 is never resurrected.
+
+The `occurrence_regrouping` mode maps each old occurrence to one `[new group, new index]` pair. `occurrence_retention` handles removals, and `occurrence_continuity` handles additions. One change selects only one mode, so mixed removal and addition stays unsupported.
+
+The review added the fresh-ID rule. A fresh group's UUID is `uuid5(identity_data_id, f"mention:r{revision}:{key}")` with the new revision, and both addition and regrouping admission enforce it. Both also require the source revision to be the old revision plus one. The record store keeps only the current revision, so a key-only derivation re-derived a retired UUID when a key returned. The guide explains why the rule is sound and lists the old and new UUIDs. Roots reviewed before this change keep their key-only IDs as history.
+
+### Next task
+
+Pick the next step-4 item. The assistant proposes **mixed occurrence addition and removal** as the default next case. This is a proposal, and the user decides. Do the task in this order:
+
+1. Draft the concrete case and give it to the user for approval before you write code. Name each old occurrence that continues, each one that is removed, each addition and each fresh group. Name the captured decisions, the retired groups, the replacement IDs and the facts and evidence to regenerate.
+2. After the user approves the case, implement the smallest captured example. Reuse the whole-document rebuild and the common publisher. Preserve independent doc02 support. Do not infer fact transfer from group continuity.
+3. Add verify journeys in `.claude/skills/verify/features/`, and update "Not yet supported" in `features/README.md`.
+4. Extend the identity-ledger checker if the plan sent to `RecordStore` changes. Follow "Add an operation" in `.claude/skills/identity-ledger/SKILL.md`.
+5. Add a fixture guide under `docs/`. Update this handoff, [ROADMAP.md](../ROADMAP.md) and the integration playbook.
 6. Land the branch through [the landing playbook](../.agents/playbooks/landing-on-main.md).
 
-The `occurrence_retention` mode handles removals. The `occurrence_continuity` mode maps each old occurrence to a reviewed new index and permits additions. Neither mode permits splits/combinations or mixed removal/addition. Reuse the whole-document rebuild and common publisher. Preserve independent doc02 support. A generic Describe algorithm is not required for this example.
+### Tracked follow-ups
+
+These came out of the 2026-10-21 review. Neither blocks the next case.
+
+- Replace the three nullable map fields on `TextChange` with a tagged union. Parse saved plans with a versioned reader and use typed occurrence references. Merge the removal, addition and regrouping maps into one partial occurrence map. Mixed addition and removal may be the natural place to do this.
+- Move the admitters out of `text_changes.py` into their own module.
 
 ## Code map
 
@@ -205,12 +228,14 @@ Paths below are relative to `src/cognee_lab/identity/`.
 | `registered.py` | Real Data JSON/raw-text ingestion/readback and registered snapshot checks |
 | `publish.py` | Missing-node creation, safe existing-node retention, original markers, aggregated generated-source identity contributions and verification |
 | `replace.py`, `withdraw.py` | Guarded replacement/withdrawal, durable old/new intent, selective retirement and explicit forward recovery |
-| `text_changes.py` | Prefix/removal/addition admission, dependency/cascade guards, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
+| `text_changes.py` | `TextChange` and its `mode`, prefix/removal/addition/regrouping admission (`admit_occurrence_regrouping`, shared `check_fresh_group`, `check_next_revision` and `check_carryover`), dependency/cascade guards, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
 | `retrieve.py` | Bounded fixture retrieval, saved-source eligibility, scoped identity links/local mention facts and native current evidence; not a public corpus-wide retriever |
 | `native.py` | Normalizers over graph/provenance/neighborhood interfaces |
-| `fixture.py`, `multisource.py`, `captured_chunks.py` | Captured facts, source contexts, exact producing/evidence chunk binding, single/two-source setup and diagnostics |
+| `fixture.py`, `multisource.py`, `captured_chunks.py` | Captured facts, source contexts, exact producing/evidence chunk binding, single/two-source setup and diagnostics. `CAPTURED_GROUPS` in `captured_chunks.py` names each captured group's creating revision, retiring revision and fact |
+| `captured_text.py` | The original doc01 text `BEFORE`, shared by the captured edits |
 | `revisions.py`, `text_fixture.py` | Captured identity correction/prefix edit, shared maintenance callbacks and transition diagnostics |
-| `occurrence_fixture.py`, `occurrence_addition.py`, `resolved_retirement.py` | Captured addition/removal/retirement examples and physical absence/shared-survival checks |
+| `occurrence_fixture.py`, `occurrence_addition.py`, `resolved_retirement.py` | Captured addition/removal/retirement examples and physical absence/shared-survival checks. `COMMANDS` in `occurrence_fixture.py` maps each occurrence command to its text, describer, result file and transition map |
+| `group_regrouping.py` | Captured split and combination texts, regrouping maps and the `describe_split` and `describe_combination` intended descriptions |
 | `__main__.py` | Fixture CLI arguments, `--embedding` reopen checks and command dispatch |
 | `environment.py`, `fixture.env`, `fixture_embeddings.py` | Root marker, per-root embedding profile and store isolation. `environment.py` imports no Cognee. Cognee loads the comment-only `fixture.env` instead of `.env`. `fixture_embeddings.py` is the deterministic loopback embedding service |
 
@@ -228,33 +253,43 @@ uv run python -c "import cognee; print(cognee.__version__)"
 uv run pytest -q -m 'not integration'
 ```
 
-On `c3becf2` the unit suite gives 143 passed and 29 deselected. The inspected native version must be **1.6.2**. If the version differs, inspect compatibility again. Do not identify another version as the tested profile. Run focused native tests for the changed path first. The full native suite is `uv run pytest -q -m integration`. It creates fresh stores and can take minutes.
+On branch `stage6-group-combine` (2026-10-21) the unit suite gives 207 passed and 34 deselected. On `c3becf2` it gave 143 passed and 29 deselected. The inspected native version must be **1.6.2**. If the version differs, inspect compatibility again. Do not identify another version as the tested profile. Run focused native tests for the changed path first. The full native suite is `uv run pytest -q -m integration`. It creates fresh stores and can take minutes.
 
 The latest happy path, with a **new** root, is:
 
 ```bash
-uv run python -m cognee_lab.identity chunked-fixture --root outputs/stage6_resume_check
-uv run python -m cognee_lab.identity add-occurrences --root outputs/stage6_resume_check --source doc01 --expected-revision 1
+uv run python -m cognee_lab.identity chunked-fixture --root outputs/stage6_resume_check --embedding loopback
+uv run python -m cognee_lab.identity split-group --root outputs/stage6_resume_check --source doc01 --expected-revision 1
+uv run python -m cognee_lab.identity combine-groups --root outputs/stage6_resume_check --source doc01 --expected-revision 2
 uv run python -m cognee_lab.identity reconcile --root outputs/stage6_resume_check --source doc01
 ```
 
-`chunked-fixture` uses the default `--embedding env` profile. That profile needs `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in the repository `.env`, and it calls that embedding endpoint. For an offline root, add `--embedding loopback` to the creation command. Later commands read the profile from the root marker, so they do not need the flag. pytest always uses loopback and does not need `.env`.
+This sequence uses loopback embeddings. Without `--embedding loopback`, `chunked-fixture` uses the default `--embedding env` profile. That profile needs `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in the repository `.env`, and it calls that embedding endpoint. Later commands read the profile from the root marker, so they do not need the flag. pytest always uses loopback and does not need `.env`.
 
-Expected: three facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, stable g01 plus fresh g03 and its local fact, g02/shared support present, no recovery incident. The guide has a separate fresh-root `replace_published` failure/recovery sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
+Expected: two facts after the split and after the combination, doc01 current at 2/2/2 after the split and 3/3/3 after the combination, doc02 unchanged at 1/1/1, fresh g06 and its generated fact, g01, g04 and g05 absent, g02/shared support present, no recovery incident. The [group split guide](stage6_identity_group_split.md) has the expected values and separate fresh-root `replace_published` failure/recovery sequences. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
 
 ## Verification and landing
 
-Use three checks on a change to `src/cognee_lab/identity/`:
+The user agreed this routine on 2026-10-21:
 
-1. **Unit tests.** Run `uv run pytest -q -m 'not integration'`. The suite uses loopback embeddings and includes the identity-ledger check at its default depth. GitHub Actions runs the same command on every push (`.github/workflows/unit-tests.yml`). The integration suite, `uv run pytest -q -m integration`, takes about 10 minutes and runs only on a local machine.
-2. **Verify journeys.** Run `.claude/skills/verify/scripts/verify.py journey all`. It drives the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 20 journey blocks. `journey all` runs the 19 loopback blocks as 30 runs. On 2026-10-21 that gave 586 PASS rows and 0 FAIL rows on the Mac. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules.
-3. **Identity-ledger check.** Run `uv run python support/ledger_check.py`. It runs every sequence of real `RecordStore` calls up to a depth bound, with two sources and two writers. It checks properties P1 to P6 after each step. The default depth is 5: 3062 nodes in about 6 s. Depths 6 to 8 are manual runs. `--skip-probability P --seed S` samples a deeper search, and a sampled run never reports `verified within bound`. At depth 5 the check catches all 30 scratch breaks in `support/ledger_mutants.py`: 29 as a property failure and one as `INCONCLUSIVE`. One more break, in `DEEP_MUTANTS`, needs depth 7. The check found no bug in the current code. The user chose a Python checker over TLA+. `.claude/skills/identity-ledger/SKILL.md` says when to run it, and `reference.md` holds the measurements.
+1. **Unit tests on every commit.** Run `uv run pytest -q -m 'not integration'`. The suite uses loopback embeddings and includes the identity-ledger check at its default depth. GitHub Actions runs the same command on every push (`.github/workflows/unit-tests.yml`).
+2. **Identity-ledger check when `RecordStore` or its callers change.** Run `uv run python support/ledger_check.py`.
+3. **The changed feature's verify journeys on every feature change.** Run `.claude/skills/verify/scripts/verify.py journey <ID>` for each journey in the changed feature's file under `.claude/skills/verify/features/`. For example, a regrouping change runs G1 to G4.
+4. **`verify.py journey all` once per checkpoint, before the merge to `main`.**
+
+The integration suite, `uv run pytest -q -m integration`, takes about 10 minutes and runs only on a local machine. Run the focused native tests for the changed path.
+
+**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 24 journey blocks. `journey all` runs the 23 loopback blocks as 34 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. The earlier `journey all` run on 2026-10-21, before the regrouping journeys, gave 586 PASS rows and 0 FAIL rows on the Mac.
+
+An earlier full run on 2026-10-21 took about 2 hours. The step timings suggest that macOS idle throttling caused most of it. Every step took a flat 40 s or so until `caffeinate` started, and about 4 s after. This is an inference from the timings, not a proven cause. A warm step costs about 3.6 to 6.7 s, and about 2.4 s of that is imports. An unthrottled full run is estimated at about 11 minutes. A separate branch is adding `--jobs N` and automatic `caffeinate` to `verify.py`. That work is in progress.
+
+**Identity-ledger check.** It runs every sequence of real `RecordStore` calls up to a depth bound, with two sources and two writers. It checks properties P1 to P6 after each step. The default depth is 5. Since the regrouping plan joined the model on 2026-10-21, depth 5 gives 3828 nodes and 3717 sequences in about 6.7 s. Before that it gave 3062 nodes. `PINNED` in `tests/test_identity_ledger_check.py` holds the current counts. Depths 6 to 8 are manual runs. `--skip-probability P --seed S` samples a deeper search, and a sampled run never reports `verified within bound`. At depth 5 the check catches all 30 scratch breaks in `support/ledger_mutants.py`: 29 as a property failure and one as `INCONCLUSIVE`. The unit suite runs each break. One more break, in `DEEP_MUTANTS`, needs depth 7. The check found no bug in the current code. The user chose a Python checker over TLA+. `.claude/skills/identity-ledger/SKILL.md` says when to run it, and `reference.md` holds the measurements.
 
 To land a branch, follow [the landing playbook](../.agents/playbooks/landing-on-main.md). In short:
 
 1. Work on a branch off `main`.
 2. Review `main..<branch>` with `/pstack:thermos`. Fix each finding, or dismiss it with a concrete reason.
-3. Run `uv run pytest -q -m 'not integration'` on the branch.
+3. Run `uv run pytest -q -m 'not integration'` on the branch. At a checkpoint, also run `verify.py journey all`.
 4. Merge with `git merge --ff-only <branch>` into `main`.
 5. Push `main` only when the user asks.
 
