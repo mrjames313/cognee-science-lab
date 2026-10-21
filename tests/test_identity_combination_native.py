@@ -1,11 +1,12 @@
 import json
-from uuid import UUID, uuid5
+from uuid import UUID
 
 import pytest
 
 from test_identity_native import command
 from cognee_lab.identity.captured_chunks import FACT_TEXT
 from cognee_lab.identity.group_regrouping import COMBINE_AFTER, COMBINE_REGROUPING
+from cognee_lab.identity.validation import fresh_mention_id
 
 G01 = "233cb019-3986-5864-88bc-91f334a64372"
 
@@ -21,10 +22,9 @@ def check_combination(root, before, after):
     a, b = after["sources"]["doc01"], after["sources"]["doc02"]
     old = json.loads((root / "identity.json").read_text())
     identity_id = UUID(old["identity_data_id"])
-    g04, g05, g06 = (
-        str(uuid5(identity_id, f"mention:{k}")) for k in ("g04", "g05", "g06")
-    )
-    assert g06 == "3bda245c-19be-5f6e-b722-3785f6bc9447"
+    g04, g05 = (str(fresh_mention_id(identity_id, 2, k)) for k in ("g04", "g05"))
+    g06 = str(fresh_mention_id(identity_id, 3, "g06"))
+    assert g06 == "da6e1b3e-2e1e-570b-893d-9fe8996abe83"
     assert a["state"] == "current"
     assert (
         a["saved_revision"] == a["registered_revision"] == a["verified_revision"] == 3

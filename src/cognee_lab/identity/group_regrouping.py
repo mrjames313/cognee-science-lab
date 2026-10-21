@@ -43,7 +43,7 @@ def describe_split(old, before, chunks):
         ("g04", "r04", "the controller", SPLIT_AFTER.index("the controller")),
         ("g05", "r05", "it", SPLIT_AFTER.index(" it limits") + 1),
     ]:
-        mid = str(fresh_mention_id(old.identity_data_id, key))
+        mid = str(fresh_mention_id(old.identity_data_id, payload["revision"], key))
         payload["entity_constructions"][mid] = dict(
             name=name, description=f"Captured separate local reference group {key}."
         )
@@ -117,7 +117,7 @@ def describe_combination(old, before, chunks):
     payload["mention_groups"]["g02"]["occurrences"][0].update(
         start=start, end=start + len("plasma")
     )
-    mid = str(fresh_mention_id(old.identity_data_id, "g06"))
+    mid = str(fresh_mention_id(old.identity_data_id, payload["revision"], "g06"))
     payload["entity_constructions"][mid] = dict(
         name="the controller; it",
         description="Captured paragraph-local reference group g06.",

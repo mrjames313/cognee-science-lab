@@ -1,18 +1,19 @@
 import json
-from uuid import UUID, uuid5
+from uuid import UUID
 
 import pytest
 
 from test_identity_native import command
 from cognee_lab.identity.captured_chunks import FACT_TEXT
 from cognee_lab.identity.group_regrouping import SPLIT_AFTER, SPLIT_REGROUPING
+from cognee_lab.identity.validation import fresh_mention_id
 
 
 def check_split(root, before, after):
     a, b = after["sources"]["doc01"], after["sources"]["doc02"]
     old = json.loads((root / "identity.json").read_text())
     identity_id = UUID(old["identity_data_id"])
-    g04, g05 = (str(uuid5(identity_id, f"mention:{k}")) for k in ("g04", "g05"))
+    g04, g05 = (str(fresh_mention_id(identity_id, 2, k)) for k in ("g04", "g05"))
     retired = old["mention_groups"]["g01"]["entity_id"]
     assert a["state"] == "current"
     assert (

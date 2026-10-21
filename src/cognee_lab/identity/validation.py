@@ -29,8 +29,8 @@ def text_digest(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
 
 
-def fresh_mention_id(identity_data_id: UUID, key: str) -> UUID:
-    return uuid5(identity_data_id, f"mention:{key}")
+def fresh_mention_id(identity_data_id: UUID, revision: int, key: str) -> UUID:
+    return uuid5(identity_data_id, f"mention:r{revision}:{key}")
 
 
 def object_digest(value: Any) -> str:

@@ -247,6 +247,32 @@ def reviewed_decisions(values):
     }
 
 
+def check_fresh_group(old, source, key):
+    """A fresh group's UUID is derived from its source, new revision and key.
+
+    The record store advances one revision per step and refuses a changed
+    description at a used revision, so no (source, revision, key) repeats and a
+    retired key that returns gets a different UUID.
+    """
+    entity_id = source.mention_groups[key].entity_id
+    if entity_id in old.entity_constructions:
+        raise IntentError(
+            "incompatible_group", "A fresh group requires a fresh Entity UUID"
+        )
+    if entity_id != fresh_mention_id(old.identity_data_id, source.revision, key):
+        raise IntentError(
+            "incompatible_group",
+            "A fresh group's Entity UUID derives from its source, revision and group key",
+        )
+
+
+def check_next_revision(old, source):
+    if source.revision != old.revision + 1:
+        raise IntentError(
+            "not_admitted", "A group change advances exactly one revision"
+        )
+
+
 def admit_occurrence_removal(old, source, before, after, retention):
     """Validate explicit reviewed continuity; never infer matches from text.
 
@@ -344,6 +370,7 @@ def admit_occurrence_addition(old, source, before, after, continuity):
     """
     if not before or not after or before == after:
         raise IntentError("not_admitted", "Occurrence addition requires changed text")
+    check_next_revision(old, source)
     if not isinstance(continuity, dict) or set(continuity) != set(old.mention_groups):
         raise IntentError(
             "occurrence_changed", "Declare continuity for every old group"
@@ -381,10 +408,7 @@ def admit_occurrence_addition(old, source, before, after, continuity):
         added |= len(current.occurrences) > len(previous.occurrences)
     new_groups = set(source.mention_groups) - set(old.mention_groups)
     for key in new_groups:
-        if source.mention_groups[key].entity_id in old.entity_constructions:
-            raise IntentError(
-                "incompatible_group", "A new group requires a fresh Entity UUID"
-            )
+        check_fresh_group(old, source, key)
     for group in source.mention_groups.values():
         if any(after[o.start : o.end] != o.text for o in group.occurrences):
             raise IntentError(
@@ -494,6 +518,7 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
         raise IntentError(
             "not_admitted", "This reviewed slice regroups at least one group"
         )
+    check_next_revision(old, source)
     for key, previous in old.mention_groups.items():
         for occurrence, (target, index) in zip(
             previous.occurrences, plan.images[key], strict=True
@@ -523,16 +548,7 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
                 "occurrence_changed", "A continuing group keeps its Entity UUID"
             )
     for key in plan.fresh:
-        entity_id = source.mention_groups[key].entity_id
-        if entity_id in old.entity_constructions:
-            raise IntentError(
-                "incompatible_group", "A fresh group requires a fresh Entity UUID"
-            )
-        if entity_id != fresh_mention_id(old.identity_data_id, key):
-            raise IntentError(
-                "incompatible_group",
-                "A fresh group's Entity UUID derives from its source and group key",
-            )
+        check_fresh_group(old, source, key)
     kept = {
         k: r
         for k, r in source.mention_resolutions.items()

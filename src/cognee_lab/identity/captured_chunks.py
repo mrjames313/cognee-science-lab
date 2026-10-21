@@ -7,6 +7,7 @@ from uuid import UUID
 FACT_TEXT = "it limits oscillations"
 ADDED_FACT_TEXT = "the controller limits oscillations"
 FACT_GROUPS = ("g01", "g05", "g06")
+GROUP_CREATED = {"g03": 2, "g04": 2, "g05": 2, "g06": 3}
 
 
 def captured_facts(source):
@@ -23,7 +24,7 @@ def fixture_mention_id(source, key="g01"):
     if group is not None:
         return group.entity_id
     if key != "g01":
-        return fresh_mention_id(source.identity_data_id, key)
+        return fresh_mention_id(source.identity_data_id, GROUP_CREATED[key], key)
     if source.identity_data_id == UUID("718efce2-4251-5f6f-8318-417bb4dd3525"):
         return UUID("233cb019-3986-5864-88bc-91f334a64372")
     raise IntentError(

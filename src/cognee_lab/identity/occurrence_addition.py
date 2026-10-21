@@ -1,12 +1,11 @@
 """Captured additions with explicit group continuity; no automatic Describe."""
 
 import json
-from uuid import uuid5
 
 from .captured_chunks import bind_chunks
 from .models import IdentitySource
 from .occurrence_fixture import BEFORE
-from .validation import IntentError, text_digest
+from .validation import IntentError, fresh_mention_id, text_digest
 
 FIRST = " During startup, the controller remains active.\n\n"
 SECOND = "After calibration, the controller limits oscillations.\n"
@@ -40,8 +39,8 @@ def describe_addition(old, before, chunks):
         dict(start=start, end=start + len("the controller"), text="the controller")
     )
     # A separate local group deliberately has the same surface text. Its UUID
-    # comes from a saved source/group key, never the surface name or offsets.
-    mid = str(uuid5(old.identity_data_id, "mention:g03"))
+    # comes from a saved source, revision and group key, never the surface name or offsets.
+    mid = str(fresh_mention_id(old.identity_data_id, payload["revision"], "g03"))
     start = len(BASE) + len(FIRST) + len("After calibration, ")
     payload["entity_constructions"][mid] = dict(
         name="the controller",

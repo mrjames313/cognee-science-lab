@@ -1,7 +1,7 @@
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
-from uuid import UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -21,6 +21,7 @@ from cognee_lab.identity.group_regrouping import (
     describe_combination,
     describe_split,
 )
+from cognee_lab.identity.captured_chunks import bind_chunks
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import fixture_id
 from cognee_lab.identity.occurrence_fixture import BEFORE
@@ -30,7 +31,12 @@ from cognee_lab.identity.text_changes import (
     admit_remap,
     classify_regrouping,
 )
-from cognee_lab.identity.validation import IntentError, validate_inputs
+from cognee_lab.identity.validation import (
+    IntentError,
+    fresh_mention_id,
+    text_digest,
+    validate_inputs,
+)
 
 
 def split(payload):
@@ -73,7 +79,7 @@ async def test_reviewed_split_into_fresh_groups(source_payload):
     for key, rid in [("g04", "r04"), ("g05", "r05")]:
         group = intended.mention_groups[key]
         assert group.entity_id not in old.entity_constructions
-        assert group.entity_id == uuid5(old.identity_data_id, f"mention:{key}")
+        assert group.entity_id == fresh_mention_id(old.identity_data_id, 2, key)
         assert intended.mention_resolutions[rid].group_ref == key
         assert intended.mention_resolutions[rid].target_entity_id == target
     payload = intended.model_dump(mode="json")
@@ -257,10 +263,10 @@ def test_the_split_fixture_ids_follow_the_saved_source(source_payload):
     old, _, intended = split(source_payload)
     assert old.identity_data_id == UUID("718efce2-4251-5f6f-8318-417bb4dd3525")
     assert intended.mention_groups["g04"].entity_id == UUID(
-        "7b93ccfe-fe9d-5126-b484-1b1c5eb39f6e"
+        "b584813e-92d6-5eb4-b330-cbb0414866cf"
     )
     assert intended.mention_groups["g05"].entity_id == UUID(
-        "e6307cfe-012a-53c4-abf7-30dc1d8d904d"
+        "2de73cc9-c7ff-5e83-b1e7-a189bedb1d37"
     )
     assert fixture_id("doc01:singleton") in map(str, intended.entity_constructions)
 
@@ -293,8 +299,8 @@ async def test_reviewed_combination_into_one_fresh_group(source_payload):
     assert list(intended.mention_groups) == ["g02", "g06"]
     assert intended.revision == 3
     g06 = intended.mention_groups["g06"]
-    assert g06.entity_id == UUID("3bda245c-19be-5f6e-b722-3785f6bc9447")
-    assert g06.entity_id == uuid5(old.identity_data_id, "mention:g06")
+    assert g06.entity_id == UUID("da6e1b3e-2e1e-570b-893d-9fe8996abe83")
+    assert g06.entity_id == fresh_mention_id(old.identity_data_id, 3, "g06")
     assert [(o.start, o.end, o.text) for o in g06.occurrences] == [
         (49, 63, "the controller"),
         (109, 111, "it"),
@@ -465,6 +471,54 @@ def test_combination_rejects_hidden_semantic_and_representation_changes(
 def test_the_combination_fixture_ids_follow_the_saved_source(source_payload):
     old, _, intended = combine(source_payload)
     assert intended.mention_groups["g06"].entity_id == UUID(
-        "3bda245c-19be-5f6e-b722-3785f6bc9447"
+        "da6e1b3e-2e1e-570b-893d-9fe8996abe83"
     )
     assert fixture_id("doc01:singleton") in map(str, intended.entity_constructions)
+
+
+def resplit(combined, chunk, ids):
+    p = combined.model_dump(mode="json")
+    p["revision"] = 4
+    p["inputs"]["doc01"]["text_sha256"] = text_digest(SPLIT_AFTER)
+    resolution = p["mention_resolutions"].pop("r06")
+    p["entity_constructions"].pop(p["mention_groups"].pop("g06")["entity_id"])
+    plasma = SPLIT_AFTER.index("plasma")
+    p["mention_groups"]["g02"]["occurrences"][0].update(
+        start=plasma, end=plasma + len("plasma")
+    )
+    for key, rid, text, start in [
+        ("g04", "r04", "the controller", SPLIT_AFTER.index("the controller")),
+        ("g05", "r05", "it", SPLIT_AFTER.index(" it limits") + 1),
+    ]:
+        mid = str(ids[key])
+        p["entity_constructions"][mid] = dict(name=text, description=key)
+        p["mention_groups"][key] = dict(
+            entity_id=mid,
+            document_ref="doc01",
+            occurrences=[dict(start=start, end=start + len(text), text=text)],
+            chunk_refs=["chunk01"],
+            input_refs=["doc01"],
+            producer_ref="regrouping_review",
+        )
+        p["mention_resolutions"][rid] = dict(resolution, group_ref=key)
+    bind_chunks(p, SPLIT_AFTER, [chunk])
+    return IdentitySource.model_validate_json(json.dumps(p))
+
+
+def test_a_returning_group_key_cannot_reuse_a_retired_uuid(source_payload):
+    _, chunk, split_source = split(source_payload)
+    _, _, combined = combine(source_payload)
+    rev2 = {k: split_source.mention_groups[k].entity_id for k in ("g04", "g05")}
+    again = {"g06": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}
+
+    def admit_again(source):
+        return admit_remap(
+            combined, source, COMBINE_AFTER, SPLIT_AFTER, occurrence_regrouping=again
+        )
+
+    with pytest.raises(IntentError) as refusal:
+        admit_again(resplit(combined, chunk, rev2))
+    assert refusal.value.code == "incompatible_group"
+    derived = {k: fresh_mention_id(combined.identity_data_id, 4, k) for k in rev2}
+    admit_again(resplit(combined, chunk, derived))
+    assert all(derived[k] != rev2[k] for k in rev2)
