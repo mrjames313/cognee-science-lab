@@ -6,11 +6,14 @@ from uuid import UUID
 
 FACT_TEXT = "it limits oscillations"
 ADDED_FACT_TEXT = "the controller limits oscillations"
+SPLIT_FACT_GROUP = "g05"  # carries FACT_TEXT after the captured group split
 
 
 def captured_facts(source):
     """Explicit fixture outputs, independent of model inference or label matching."""
     yield "g01", FACT_TEXT
+    if SPLIT_FACT_GROUP in source.mention_groups:
+        yield SPLIT_FACT_GROUP, FACT_TEXT
     if "g03" in source.mention_groups:
         yield "g03", ADDED_FACT_TEXT
 
@@ -74,7 +77,7 @@ def fact_chunks(source, chunks, *, group_key="g01", fact_text=FACT_TEXT):
     group = source.mention_groups.get(group_key)
     if group is None:
         fixture_mention_id(source)
-        if fact_text in text:
+        if fact_text in text and SPLIT_FACT_GROUP not in source.mention_groups:
             raise IntentError(
                 "fixture_shape",
                 "Captured fact remains in text without its reviewed group",

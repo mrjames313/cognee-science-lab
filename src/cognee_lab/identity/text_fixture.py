@@ -167,6 +167,7 @@ async def transition_summary(publisher, row):
             (len(change.text) - len(change.previous_text))
             if change.occurrence_retention is None
             and change.occurrence_continuity is None
+            and change.occurrence_regrouping is None
             else None
         ),
         text_length_delta=len(change.text) - len(change.previous_text),
@@ -229,6 +230,7 @@ async def transition_summary(publisher, row):
         },
         occurrence_retention=change.occurrence_retention,
         occurrence_continuity=change.occurrence_continuity,
+        occurrence_regrouping=change.occurrence_regrouping,
         added_groups={
             k: dict(
                 entity_id=str(g.entity_id),
@@ -271,12 +273,16 @@ async def transition_summary(publisher, row):
             if k not in source.mention_groups
         },
         decision_method=(
-            "Captured addition review; explicit old-to-new occurrence mapping and whole-document rebuild"
-            if change.occurrence_continuity is not None
+            "Captured regrouping review; explicit old-to-new group and occurrence mapping, fresh groups, regenerated facts and whole-document rebuild"
+            if change.occurrence_regrouping is not None
             else (
-                "Captured survivor review; programmatic exact span validation and whole-document rebuild"
-                if change.occurrence_retention is not None
-                else "Captured review of unchanged interpretation; programmatic exact offset remap"
+                "Captured addition review; explicit old-to-new occurrence mapping and whole-document rebuild"
+                if change.occurrence_continuity is not None
+                else (
+                    "Captured survivor review; programmatic exact span validation and whole-document rebuild"
+                    if change.occurrence_retention is not None
+                    else "Captured review of unchanged interpretation; programmatic exact offset remap"
+                )
             )
         ),
     )

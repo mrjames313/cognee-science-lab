@@ -16,6 +16,15 @@ from .environment import (
 )
 
 
+OCCURRENCE_COMMANDS = {
+    "remove-occurrences",
+    "retire-resolved-group",
+    "add-occurrences",
+    "split-group",
+}
+TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
+
+
 def _reopen_error(args, root: Path) -> str | None:
     recorded = read_embedding(root)
     if recorded is None:
@@ -42,6 +51,7 @@ def main():
             "remove-occurrences",
             "retire-resolved-group",
             "add-occurrences",
+            "split-group",
             "withdraw",
             "retrieve",
             "status",
@@ -89,24 +99,12 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     if (
-        args.command
-        in {
-            "revise",
-            "edit-text",
-            "remove-occurrences",
-            "retire-resolved-group",
-            "add-occurrences",
-        }
+        args.command in {"revise", "edit-text", *OCCURRENCE_COMMANDS}
         and args.expected_revision is None
     ):
         parser.error(f"{args.command} requires --expected-revision")
     if args.fault_stage:
-        if args.command in {
-            "edit-text",
-            "remove-occurrences",
-            "retire-resolved-group",
-            "add-occurrences",
-        }:
+        if args.command in TEXT_COMMANDS:
             if not args.fault_stage.startswith(("text_", "replace_")):
                 parser.error("Fault stage does not match the selected operation")
         elif args.fault_stage.startswith("text_"):
@@ -118,13 +116,7 @@ def main():
         )
         if (prefix and not args.fault_stage.startswith(prefix)) or (
             not prefix
-            and args.command
-            not in {
-                "edit-text",
-                "remove-occurrences",
-                "retire-resolved-group",
-                "add-occurrences",
-            }
+            and args.command not in TEXT_COMMANDS
             and args.fault_stage.startswith(("withdraw_", "replace_"))
         ):
             parser.error("Fault stage does not match the selected operation")
@@ -148,11 +140,7 @@ def main():
             root.rmdir()
         parser.error(str(exc))
     with environment:
-        if args.command in {
-            "remove-occurrences",
-            "retire-resolved-group",
-            "add-occurrences",
-        }:
+        if args.command in OCCURRENCE_COMMANDS:
             from .occurrence_fixture import run
         elif args.command == "edit-text":
             from .text_fixture import run

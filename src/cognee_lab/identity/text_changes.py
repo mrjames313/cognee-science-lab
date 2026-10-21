@@ -122,22 +122,31 @@ async def chunk_text(text, ctx, budget=512):
 
 
 def admit_remap(
-    old, source, before, after, occurrence_retention=None, occurrence_continuity=None
+    old,
+    source,
+    before,
+    after,
+    occurrence_retention=None,
+    occurrence_continuity=None,
+    occurrence_regrouping=None,
 ):
     """The caller supplies reviewed decisions; this check does not infer identity.
 
     Default: a prefix insertion with exact uniform offsets. The optional
     retention manifest admits explicit reviewed occurrence removal instead;
-    continuity admits additions with explicit old-to-new occurrence indices.
-    These modes do not match text or reconsider identity semantics.
+    continuity admits additions with explicit old-to-new occurrence indices;
+    regrouping admits splits and combinations with explicit old-to-new
+    group/occurrence pairs. These modes do not match text or reconsider
+    identity semantics.
     """
-    if occurrence_retention is not None and occurrence_continuity is not None:
+    modes = [
+        m
+        for m in (occurrence_retention, occurrence_continuity, occurrence_regrouping)
+        if m is not None
+    ]
+    if len(modes) > 1:
         raise IntentError("not_admitted", "Select one occurrence transition mode")
-    if (
-        occurrence_retention is None
-        and occurrence_continuity is None
-        and (not before or not after.endswith(before) or after == before)
-    ):
+    if not modes and (not before or not after.endswith(before) or after == before):
         raise IntentError(
             "not_admitted", "Text slice requires a nonempty prefix insertion"
         )
@@ -172,6 +181,10 @@ def admit_remap(
     if text_digest(before) != a.text_sha256 or text_digest(after) != b.text_sha256:
         raise IntentError(
             "source_changed", "Saved text transition fingerprints disagree"
+        )
+    if occurrence_regrouping is not None:
+        return admit_occurrence_regrouping(
+            old, source, before, after, occurrence_regrouping
         )
     if occurrence_continuity is not None:
         return admit_occurrence_addition(
@@ -230,6 +243,18 @@ def admit_remap(
             "not_admitted", "Span-scoped variants require explicit scope remapping"
         )
     return delta
+
+
+def reviewed_decisions(values):
+    """Decision content that must survive a reviewed change; attribution may differ."""
+    return {
+        k: {
+            f: v
+            for f, v in item.model_dump(mode="json").items()
+            if f not in {"producer_ref", "input_refs", "explanation"}
+        }
+        for k, item in values.items()
+    }
 
 
 def admit_occurrence_removal(old, source, before, after, retention):
@@ -294,22 +319,14 @@ def admit_occurrence_removal(old, source, before, after, retention):
             "not_admitted", "This reviewed slice removes at least one occurrence"
         )
 
-    def decisions(values):
-        return {
-            k: {
-                field: v
-                for field, v in item.model_dump(mode="json").items()
-                if field not in {"producer_ref", "input_refs", "explanation"}
-            }
-            for k, item in values.items()
-        }
-
     expected_resolutions = {
         k: r for k, r in old.mention_resolutions.items() if r.group_ref in kept
     }
     if (
-        decisions(source.mention_resolutions) != decisions(expected_resolutions)
-        or decisions(source.variant_assignments) != decisions(old.variant_assignments)
+        reviewed_decisions(source.mention_resolutions)
+        != reviewed_decisions(expected_resolutions)
+        or reviewed_decisions(source.variant_assignments)
+        != reviewed_decisions(old.variant_assignments)
         or source.entity_constructions
         != {
             k: v
@@ -385,16 +402,6 @@ def admit_occurrence_addition(old, source, before, after, continuity):
                 "New occurrence does not match its exact document slice",
             )
 
-    def decisions(values):
-        return {
-            k: {
-                f: v
-                for f, v in item.model_dump(mode="json").items()
-                if f not in {"producer_ref", "input_refs", "explanation"}
-            }
-            for k, item in values.items()
-        }
-
     continuing = {
         k: r
         for k, r in source.mention_resolutions.items()
@@ -408,8 +415,9 @@ def admit_occurrence_addition(old, source, before, after, continuity):
         eid = source.mention_groups[key].entity_id
         expected_recipes[eid] = source.entity_constructions[eid]
     if (
-        decisions(continuing) != decisions(old.mention_resolutions)
-        or decisions(source.variant_assignments) != decisions(old.variant_assignments)
+        reviewed_decisions(continuing) != reviewed_decisions(old.mention_resolutions)
+        or reviewed_decisions(source.variant_assignments)
+        != reviewed_decisions(old.variant_assignments)
         or set(new_resolutions)
         & (set(old.mention_resolutions) | set(old.variant_assignments))
         or {r.group_ref for r in new_resolutions.values()} != new_groups
@@ -431,12 +439,169 @@ def admit_occurrence_addition(old, source, before, after, continuity):
 
 
 @dataclass(frozen=True)
+class Regrouping:
+    """An explicit old-to-new occurrence map, classified by group key."""
+
+    images: dict[str, list[tuple[str, int]]]
+    continuing: frozenset[str]
+    retired: frozenset[str]
+    fresh: frozenset[str]
+
+
+def classify_regrouping(old, source, regrouping):
+    """Partition old and new group keys from the reviewed occurrence map.
+
+    A group continues only when every old occurrence lands, in order, on its
+    own key and nothing else lands there. Every other old group retires and
+    every other new group is fresh.
+    """
+    if not isinstance(regrouping, dict) or set(regrouping) != set(old.mention_groups):
+        raise IntentError(
+            "occurrence_changed", "Declare regrouping for every old group"
+        )
+    images = {}
+    for key, previous in old.mention_groups.items():
+        pairs = regrouping[key]
+        if (
+            not isinstance(pairs, list)
+            or len(pairs) != len(previous.occurrences)
+            or any(
+                not isinstance(p, list)
+                or len(p) != 2
+                or not isinstance(p[0], str)
+                or type(p[1]) is not int
+                for p in pairs
+            )
+        ):
+            raise IntentError(
+                "occurrence_changed",
+                "Map each old occurrence, in order, to one [group, index] pair",
+            )
+        images[key] = [tuple(p) for p in pairs]
+    targets = [t for pairs in images.values() for t in pairs]
+    current = {
+        (key, i)
+        for key, group in source.mention_groups.items()
+        for i in range(len(group.occurrences))
+    }
+    if len(targets) != len(set(targets)) or set(targets) != current:
+        raise IntentError(
+            "occurrence_changed",
+            "Every old occurrence maps once and every new occurrence has one origin",
+        )
+    continuing = frozenset(
+        key
+        for key, pairs in images.items()
+        if key in source.mention_groups
+        and pairs == [(key, i) for i in range(len(pairs))]
+        and len(source.mention_groups[key].occurrences) == len(pairs)
+    )
+    return Regrouping(
+        images=images,
+        continuing=continuing,
+        retired=frozenset(old.mention_groups) - continuing,
+        fresh=frozenset(source.mention_groups) - continuing,
+    )
+
+
+def admit_occurrence_regrouping(old, source, before, after, regrouping):
+    """Admit a reviewed split or combination with fresh resulting groups.
+
+    Facts are regenerated for the new groups, never transferred. Positions,
+    groups and resolutions are supplied, never inferred from text.
+    """
+    if not before or not after or before == after:
+        raise IntentError("not_admitted", "Occurrence regrouping requires changed text")
+    plan = classify_regrouping(old, source, regrouping)
+    if not plan.retired:
+        raise IntentError(
+            "not_admitted", "This reviewed slice regroups at least one group"
+        )
+    for key, previous in old.mention_groups.items():
+        for occurrence, (target, index) in zip(
+            previous.occurrences, plan.images[key], strict=True
+        ):
+            if (
+                before[occurrence.start : occurrence.end] != occurrence.text
+                or source.mention_groups[target].occurrences[index].text
+                != occurrence.text
+            ):
+                raise IntentError(
+                    "occurrence_changed",
+                    "Regrouped occurrence text differs from reviewed mapping",
+                )
+    for group in source.mention_groups.values():
+        if any(after[o.start : o.end] != o.text for o in group.occurrences):
+            raise IntentError(
+                "occurrence_changed",
+                "New occurrence does not match its exact document slice",
+            )
+    for key in plan.continuing:
+        previous, current = old.mention_groups[key], source.mention_groups[key]
+        if (current.entity_id, current.document_ref) != (
+            previous.entity_id,
+            previous.document_ref,
+        ):
+            raise IntentError(
+                "occurrence_changed", "A continuing group keeps its Entity UUID"
+            )
+    for key in plan.fresh:
+        if source.mention_groups[key].entity_id in old.entity_constructions:
+            raise IntentError(
+                "incompatible_group", "A fresh group requires a fresh Entity UUID"
+            )
+    kept = {
+        k: r
+        for k, r in source.mention_resolutions.items()
+        if r.group_ref in plan.continuing
+    }
+    declared = {
+        k: r for k, r in source.mention_resolutions.items() if r.group_ref in plan.fresh
+    }
+    retired_entities = {old.mention_groups[k].entity_id for k in plan.retired}
+    expected_recipes = {
+        eid: recipe
+        for eid, recipe in old.entity_constructions.items()
+        if eid not in retired_entities
+    }
+    for key in plan.fresh:
+        eid = source.mention_groups[key].entity_id
+        expected_recipes[eid] = source.entity_constructions[eid]
+    if (
+        reviewed_decisions(kept)
+        != reviewed_decisions(
+            {
+                k: r
+                for k, r in old.mention_resolutions.items()
+                if r.group_ref in plan.continuing
+            }
+        )
+        or reviewed_decisions(source.variant_assignments)
+        != reviewed_decisions(old.variant_assignments)
+        or set(declared) & (set(old.mention_resolutions) | set(old.variant_assignments))
+        or len(declared) != len(plan.fresh)
+        or {r.group_ref for r in declared.values()} != plan.fresh
+        or source.entity_constructions != expected_recipes
+        or any(
+            v.applicability.kind == "text_spans"
+            for v in source.variant_assignments.values()
+        )
+    ):
+        raise IntentError(
+            "not_admitted",
+            "Retire the old groups' decisions and recipes; declare one resolution per fresh group",
+        )
+    return plan
+
+
+@dataclass(frozen=True)
 class TextChange:
     previous_text: str
     text: str
     chunk_budget: int = 512
     occurrence_retention: dict[str, list[int]] | None = None
     occurrence_continuity: dict[str, list[int]] | None = None
+    occurrence_regrouping: dict[str, list[list[str | int]]] | None = None
 
     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
         from cognee.infrastructure.databases.provenance.markers import (
@@ -444,16 +609,23 @@ class TextChange:
         )
         from cognee.infrastructure.databases.unified import get_unified_engine
 
-        admit_remap(
+        admitted = admit_remap(
             old,
             source,
             self.previous_text,
             self.text,
             self.occurrence_retention,
             self.occurrence_continuity,
+            self.occurrence_regrouping,
         )
-        if self.occurrence_continuity is not None and not retry:
-            for key in set(source.mention_groups) - set(old.mention_groups):
+        if self.occurrence_regrouping is not None:
+            fresh = admitted.fresh
+        elif self.occurrence_continuity is not None:
+            fresh = set(source.mention_groups) - set(old.mention_groups)
+        else:
+            fresh = set()
+        if not retry:
+            for key in fresh:
                 if (
                     await publisher.graph.get_node(
                         str(source.mention_groups[key].entity_id)

@@ -82,7 +82,7 @@ async def run(args, root):
     before = await read_original(old, ctx)
     after, retention, describe = AFTER, RETENTION, describe_removal
     result_name = "occurrence_revision_result.json"
-    continuity = None
+    continuity = regrouping = None
     if args.command == "add-occurrences":
         from .occurrence_addition import (
             AFTER as added_text,
@@ -93,6 +93,12 @@ async def run(args, root):
         after, retention, describe = added_text, None, describe_addition
         continuity = CONTINUITY
         result_name = "occurrence_addition_result.json"
+    if args.command == "split-group":
+        from .group_regrouping import AFTER as split_text, REGROUPING, describe_split
+
+        after, retention, describe = split_text, None, describe_split
+        regrouping = REGROUPING
+        result_name = "group_split_result.json"
     if args.command == "retire-resolved-group":
         from .resolved_retirement import (
             AFTER as retired_text,
@@ -108,6 +114,7 @@ async def run(args, root):
         await recorded_budget(old, publisher.graph),
         occurrence_retention=retention,
         occurrence_continuity=continuity,
+        occurrence_regrouping=regrouping,
     )
     chunks = await chunk_text(
         after, await original_context(old, ctx), change.chunk_budget
