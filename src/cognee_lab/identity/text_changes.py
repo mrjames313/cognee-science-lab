@@ -205,21 +205,11 @@ def admit_remap(
 
     # Reusing a local fact is admitted only for unchanged assignment semantics.
     # Captured producer attribution may change after a fresh review of context.
-    def decisions(value):
-        return {
-            name: {
-                k: v
-                for k, v in item.model_dump(mode="json").items()
-                if k not in {"producer_ref", "input_refs", "explanation"}
-            }
-            for name, item in {
-                **value.mention_resolutions,
-                **value.variant_assignments,
-            }.items()
-        }
-
     if (
-        decisions(old) != decisions(source)
+        reviewed_decisions({**old.mention_resolutions, **old.variant_assignments})
+        != reviewed_decisions(
+            {**source.mention_resolutions, **source.variant_assignments}
+        )
         or old.entity_constructions != source.entity_constructions
     ):
         raise IntentError(
@@ -236,12 +226,15 @@ def admit_remap(
     return delta
 
 
+ATTRIBUTION_FIELDS = frozenset({"producer_ref", "input_refs", "explanation"})
+
+
 def reviewed_decisions(values):
     return {
         k: {
             f: v
             for f, v in item.model_dump(mode="json").items()
-            if f not in {"producer_ref", "input_refs", "explanation"}
+            if f not in ATTRIBUTION_FIELDS
         }
         for k, item in values.items()
     }
