@@ -3,8 +3,8 @@
 import json
 
 from .captured_chunks import bind_chunks
+from .captured_text import BEFORE
 from .models import IdentitySource
-from .occurrence_fixture import BEFORE
 from .validation import IntentError, fresh_mention_id, text_digest
 
 FIRST = " During startup, the controller remains active.\n\n"

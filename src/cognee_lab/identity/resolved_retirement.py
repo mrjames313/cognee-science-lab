@@ -4,6 +4,7 @@ import json
 from uuid import UUID
 
 from .captured_chunks import FACT_TEXT, bind_chunks
+from .captured_text import BEFORE
 from .models import IdentitySource
 from .validation import IntentError, text_digest
 
@@ -12,8 +13,6 @@ RETENTION = {"g01": [], "g02": [0]}
 
 
 def describe_retirement(old, before, chunks):
-    from .occurrence_fixture import BEFORE
-
     if (
         old.revision != 1
         or before != BEFORE

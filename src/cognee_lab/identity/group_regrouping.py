@@ -1,8 +1,8 @@
 import json
 
 from .captured_chunks import bind_chunks
+from .captured_text import BEFORE
 from .models import IdentitySource
-from .occurrence_fixture import BEFORE
 from .validation import IntentError, fresh_mention_id, text_digest
 
 SPLIT_AFTER = (
@@ -10,6 +10,88 @@ SPLIT_AFTER = (
     "coil current.\n\nDuring calibration, it limits oscillations.\n"
 )
 SPLIT_REGROUPING = {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}
+SPLIT_FRESH = (
+    ("g04", "r04", "the controller", None),
+    ("g05", "r05", "it", " it limits"),
+)
+COMBINE_AFTER = (
+    "Helios controller (HC) regulates plasma heating, the controller adjusts coil "
+    "current, and during calibration it limits oscillations.\n"
+)
+COMBINE_REGROUPING = {
+    "g04": [["g06", 0]],
+    "g05": [["g06", 1]],
+    "g02": [["g02", 0]],
+}
+
+
+def begin_revision(old, after, ref, implementation, policy):
+    payload = old.model_dump(mode="json")
+    payload["revision"] += 1
+    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(after)
+    payload["producers"][ref] = dict(
+        method="captured_fixture",
+        implementation=implementation,
+        version="0.1",
+        configuration={"policy": policy},
+        run_id=None,
+    )
+    return payload
+
+
+def retire_group(payload, key):
+    entity_id = payload["mention_groups"].pop(key)["entity_id"]
+    payload["entity_constructions"].pop(entity_id)
+    payload["mention_resolutions"] = {
+        k: r for k, r in payload["mention_resolutions"].items() if r["group_ref"] != key
+    }
+
+
+def place_plasma(payload, after):
+    start = after.index("plasma")
+    payload["mention_groups"]["g02"]["occurrences"][0].update(
+        start=start, end=start + len("plasma")
+    )
+
+
+def occurrence(after, text, anchor=None):
+    anchor = anchor or text
+    start = after.index(anchor) + anchor.index(text)
+    return dict(start=start, end=start + len(text), text=text)
+
+
+def declare_group(
+    payload, old, key, rid, name, description, occurrences, resolution, ref
+):
+    entity_id = str(fresh_mention_id(old.identity_data_id, payload["revision"], key))
+    payload["entity_constructions"][entity_id] = dict(
+        name=name, description=description
+    )
+    payload["mention_groups"][key] = dict(
+        entity_id=entity_id,
+        document_ref=old.original_input_ref,
+        occurrences=occurrences,
+        chunk_refs=["chunk01"],
+        input_refs=[old.original_input_ref],
+        producer_ref=ref,
+    )
+    payload["mention_resolutions"][rid] = dict(
+        group_ref=key,
+        status="accepted",
+        target_entity_id=str(resolution.target_entity_id),
+        input_refs=list(resolution.input_refs),
+        producer_ref=ref,
+        explanation=None,
+    )
+
+
+def stamp_producer(payload, ref):
+    for record in [
+        *payload["mention_groups"].values(),
+        *payload["mention_resolutions"].values(),
+        *payload["variant_assignments"].values(),
+    ]:
+        record["producer_ref"] = ref
 
 
 def describe_split(old, before, chunks):
@@ -21,67 +103,32 @@ def describe_split(old, before, chunks):
         raise IntentError(
             "fixture_scope", "Group split requires doc01 of a fresh chunked-fixture"
         )
-    payload = old.model_dump(mode="json")
-    payload["revision"] += 1
-    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(SPLIT_AFTER)
-    payload["producers"]["regrouping_review"] = dict(
-        method="captured_fixture",
-        implementation="stage6-captured-group-split",
-        version="0.1",
-        configuration={"policy": "explicit-paragraph-regrouping-v1"},
-        run_id=None,
+    ref = "regrouping_review"
+    payload = begin_revision(
+        old,
+        SPLIT_AFTER,
+        ref,
+        "stage6-captured-group-split",
+        "explicit-paragraph-regrouping-v1",
     )
     resolution = old.mention_resolutions["r01"]
-    retired = payload["mention_groups"].pop("g01")["entity_id"]
-    payload["entity_constructions"].pop(retired)
-    payload["mention_resolutions"].pop("r01")
-    start = SPLIT_AFTER.index("plasma")
-    payload["mention_groups"]["g02"]["occurrences"][0].update(
-        start=start, end=start + len("plasma")
-    )
-    for key, rid, name, start in [
-        ("g04", "r04", "the controller", SPLIT_AFTER.index("the controller")),
-        ("g05", "r05", "it", SPLIT_AFTER.index(" it limits") + 1),
-    ]:
-        mid = str(fresh_mention_id(old.identity_data_id, payload["revision"], key))
-        payload["entity_constructions"][mid] = dict(
-            name=name, description=f"Captured separate local reference group {key}."
+    retire_group(payload, "g01")
+    place_plasma(payload, SPLIT_AFTER)
+    for key, rid, text, anchor in SPLIT_FRESH:
+        declare_group(
+            payload,
+            old,
+            key,
+            rid,
+            text,
+            f"Captured separate local reference group {key}.",
+            [occurrence(SPLIT_AFTER, text, anchor)],
+            resolution,
+            ref,
         )
-        payload["mention_groups"][key] = dict(
-            entity_id=mid,
-            document_ref=old.original_input_ref,
-            occurrences=[dict(start=start, end=start + len(name), text=name)],
-            chunk_refs=["chunk01"],
-            input_refs=[old.original_input_ref],
-            producer_ref="regrouping_review",
-        )
-        payload["mention_resolutions"][rid] = dict(
-            group_ref=key,
-            status="accepted",
-            target_entity_id=str(resolution.target_entity_id),
-            input_refs=list(resolution.input_refs),
-            producer_ref="regrouping_review",
-            explanation=None,
-        )
-    for record in [
-        *payload["mention_groups"].values(),
-        *payload["mention_resolutions"].values(),
-        *payload["variant_assignments"].values(),
-    ]:
-        record["producer_ref"] = "regrouping_review"
+    stamp_producer(payload, ref)
     bind_chunks(payload, SPLIT_AFTER, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))
-
-
-COMBINE_AFTER = (
-    "Helios controller (HC) regulates plasma heating, the controller adjusts coil "
-    "current, and during calibration it limits oscillations.\n"
-)
-COMBINE_REGROUPING = {
-    "g04": [["g06", 0]],
-    "g05": [["g06", 1]],
-    "g02": [["g02", 0]],
-}
 
 
 def describe_combination(old, before, chunks):
@@ -96,60 +143,32 @@ def describe_combination(old, before, chunks):
         raise IntentError(
             "fixture_scope", "Group combination requires doc01 produced by split-group"
         )
-    payload = old.model_dump(mode="json")
-    payload["revision"] += 1
-    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(
-        COMBINE_AFTER
-    )
-    payload["producers"]["combination_review"] = dict(
-        method="captured_fixture",
-        implementation="stage6-captured-group-combination",
-        version="0.1",
-        configuration={"policy": "explicit-paragraph-combination-v1"},
-        run_id=None,
+    ref = "combination_review"
+    payload = begin_revision(
+        old,
+        COMBINE_AFTER,
+        ref,
+        "stage6-captured-group-combination",
+        "explicit-paragraph-combination-v1",
     )
     resolution = old.mention_resolutions["r04"]
-    for key, rid in [("g04", "r04"), ("g05", "r05")]:
-        retired = payload["mention_groups"].pop(key)["entity_id"]
-        payload["entity_constructions"].pop(retired)
-        payload["mention_resolutions"].pop(rid)
-    start = COMBINE_AFTER.index("plasma")
-    payload["mention_groups"]["g02"]["occurrences"][0].update(
-        start=start, end=start + len("plasma")
+    retire_group(payload, "g04")
+    retire_group(payload, "g05")
+    place_plasma(payload, COMBINE_AFTER)
+    declare_group(
+        payload,
+        old,
+        "g06",
+        "r06",
+        "the controller; it",
+        "Captured paragraph-local reference group g06.",
+        [
+            occurrence(COMBINE_AFTER, "the controller"),
+            occurrence(COMBINE_AFTER, "it", " it limits"),
+        ],
+        resolution,
+        ref,
     )
-    mid = str(fresh_mention_id(old.identity_data_id, payload["revision"], "g06"))
-    payload["entity_constructions"][mid] = dict(
-        name="the controller; it",
-        description="Captured paragraph-local reference group g06.",
-    )
-    occurrences = [
-        dict(start=start, end=start + len(text), text=text)
-        for text, start in [
-            ("the controller", COMBINE_AFTER.index("the controller")),
-            ("it", COMBINE_AFTER.index(" it limits") + 1),
-        ]
-    ]
-    payload["mention_groups"]["g06"] = dict(
-        entity_id=mid,
-        document_ref=old.original_input_ref,
-        occurrences=occurrences,
-        chunk_refs=["chunk01"],
-        input_refs=[old.original_input_ref],
-        producer_ref="combination_review",
-    )
-    payload["mention_resolutions"]["r06"] = dict(
-        group_ref="g06",
-        status="accepted",
-        target_entity_id=str(resolution.target_entity_id),
-        input_refs=list(resolution.input_refs),
-        producer_ref="combination_review",
-        explanation=None,
-    )
-    for record in [
-        *payload["mention_groups"].values(),
-        *payload["mention_resolutions"].values(),
-        *payload["variant_assignments"].values(),
-    ]:
-        record["producer_ref"] = "combination_review"
+    stamp_producer(payload, ref)
     bind_chunks(payload, COMBINE_AFTER, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))

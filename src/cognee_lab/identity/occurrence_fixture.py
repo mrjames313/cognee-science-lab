@@ -3,13 +3,10 @@
 import json
 
 from .captured_chunks import bind_chunks
+from .captured_text import BEFORE
 from .models import IdentitySource
 from .validation import IntentError, text_digest
 
-BEFORE = (
-    "Helios controller (HC) regulates plasma heating, the controller adjusts "
-    "coil current, and it limits oscillations.\n"
-)
 AFTER = "Helios controller (HC) regulates heating, and it limits oscillations.\n"
 RETENTION = {"g01": [1], "g02": []}
 

@@ -9,7 +9,7 @@ import pytest
 from test_identity_occurrences import example
 from cognee_lab.identity.captured_chunks import fact_chunks, fixture_mention_id
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.occurrence_fixture import BEFORE
+from cognee_lab.identity.captured_text import BEFORE
 from cognee_lab.identity.resolved_retirement import (
     AFTER,
     RETENTION,

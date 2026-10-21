@@ -24,7 +24,7 @@ from cognee_lab.identity.group_regrouping import (
 from cognee_lab.identity.captured_chunks import bind_chunks
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import fixture_id
-from cognee_lab.identity.occurrence_fixture import BEFORE
+from cognee_lab.identity.captured_text import BEFORE
 from cognee_lab.identity.text_changes import (
     TextChange,
     admit_occurrence_regrouping,
