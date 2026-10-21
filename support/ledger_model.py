@@ -33,8 +33,6 @@ TEXT_CHANGE = dict(
     occurrence_continuity=None,
     occurrence_regrouping=None,
 )
-# The regrouping variant of the same plan (split-group and combine-groups,
-# group_regrouping.py). storage.py never reads the map, so one dict covers both.
 TEXT_REGROUP = dict(
     TEXT_CHANGE,
     occurrence_regrouping={"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]},
@@ -85,7 +83,7 @@ class Plan:
     operation: Literal["publish", "replace", "withdraw"]
     revision: int
     previous: tuple[int, int] | None = None  # (revision, variant) it replaces
-    text: Literal["text", "regroup"] | None = None  # the text_change it carries
+    text: Literal["text", "regroup"] | None = None
 
     @property
     def tag(self):

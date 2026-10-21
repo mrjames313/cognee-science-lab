@@ -1,5 +1,3 @@
-"""Captured group split and combination with explicit review; no automatic Describe."""
-
 import json
 
 from .captured_chunks import bind_chunks
@@ -11,7 +9,6 @@ SPLIT_AFTER = (
     "Helios controller (HC) regulates plasma heating, and the controller adjusts "
     "coil current.\n\nDuring calibration, it limits oscillations.\n"
 )
-# Each old occurrence, in order, maps to its [new group, new index] pair.
 SPLIT_REGROUPING = {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}
 
 

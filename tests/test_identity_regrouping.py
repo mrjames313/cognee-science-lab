@@ -86,13 +86,11 @@ async def test_reviewed_split_into_fresh_groups(source_payload):
     await validate_inputs(
         checked, texts={"doc01": SPLIT_AFTER}, chunks={str(chunk.id): chunk}, graph=None
     )
-    # The fact is regenerated for the group that holds it now; g04 gets none.
     assert dict(captured_facts(intended)) == dict.fromkeys(FACT_GROUPS, FACT_TEXT)
     assert fact_chunks(intended, [chunk], group_key="g05") == [chunk]
     assert fact_chunks(intended, [chunk], group_key="g01") == []
     with pytest.raises(IntentError, match="prefix insertion"):
         admit_remap(old, intended, BEFORE, SPLIT_AFTER)
-    # The map is durable recovery intent, under its own named mode.
     change = TextChange(BEFORE, SPLIT_AFTER, occurrence_regrouping=SPLIT_REGROUPING)
     assert TextChange(**json.loads(json.dumps(asdict(change)))) == change
 
@@ -137,13 +135,11 @@ def test_a_group_continues_only_when_it_alone_receives_its_occurrences(
     old, _, intended = split(source_payload)
     plan = classify_regrouping(old, intended, SPLIT_REGROUPING)
     assert plan.images["g01"] == [("g04", 0), ("g05", 0)]
-    # Identity map over the old shape: nothing retires, so nothing regroups.
     identity = {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}
     nothing = classify_regrouping(old, old, identity)
     assert nothing.retired == nothing.fresh == frozenset()
     with pytest.raises(IntentError, match="regroups at least one"):
         admit_occurrence_regrouping(old, old, BEFORE, SPLIT_AFTER, identity)
-    # g01 keeps its key but loses an occurrence to g05: it retires, g01 is fresh.
     kept_key = {"g01": [["g01", 0], ["g05", 0]], "g02": [["g02", 0]]}
 
     def reshape(p):
@@ -320,7 +316,6 @@ async def test_reviewed_combination_into_one_fresh_group(source_payload):
     assert intended.mention_groups["g02"].entity_id == (
         old.mention_groups["g02"].entity_id
     )
-    # g01 is never resurrected; the fact is regenerated for g06 alone.
     assert "g01" not in intended.mention_groups
     assert g06.entity_id != UUID("233cb019-3986-5864-88bc-91f334a64372")
     assert dict(captured_facts(intended)) == dict.fromkeys(FACT_GROUPS, FACT_TEXT)

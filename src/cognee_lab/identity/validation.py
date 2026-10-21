@@ -30,7 +30,6 @@ def text_digest(text: str) -> str:
 
 
 def fresh_mention_id(identity_data_id: UUID, key: str) -> UUID:
-    """Fresh group IDs come from the saved source and group key, never text or offsets."""
     return uuid5(identity_data_id, f"mention:{key}")
 
 

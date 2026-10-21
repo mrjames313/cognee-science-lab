@@ -130,15 +130,6 @@ def admit_remap(
     occurrence_continuity=None,
     occurrence_regrouping=None,
 ):
-    """The caller supplies reviewed decisions; this check does not infer identity.
-
-    Default: a prefix insertion with exact uniform offsets. The optional
-    retention manifest admits explicit reviewed occurrence removal instead;
-    continuity admits additions with explicit old-to-new occurrence indices;
-    regrouping admits splits and combinations with explicit old-to-new
-    group/occurrence pairs. These modes do not match text or reconsider
-    identity semantics.
-    """
     modes = [
         m
         for m in (occurrence_retention, occurrence_continuity, occurrence_regrouping)
@@ -246,7 +237,6 @@ def admit_remap(
 
 
 def reviewed_decisions(values):
-    """Decision content that must survive a reviewed change; attribution may differ."""
     return {
         k: {
             f: v
@@ -440,8 +430,6 @@ def admit_occurrence_addition(old, source, before, after, continuity):
 
 @dataclass(frozen=True)
 class Regrouping:
-    """An explicit old-to-new occurrence map, classified by group key."""
-
     images: dict[str, list[tuple[str, int]]]
     continuing: frozenset[str]
     retired: frozenset[str]
@@ -449,12 +437,6 @@ class Regrouping:
 
 
 def classify_regrouping(old, source, regrouping):
-    """Partition old and new group keys from the reviewed occurrence map.
-
-    A group continues only when every old occurrence lands, in order, on its
-    own key and nothing else lands there. Every other old group retires and
-    every other new group is fresh.
-    """
     if not isinstance(regrouping, dict) or set(regrouping) != set(old.mention_groups):
         raise IntentError(
             "occurrence_changed", "Declare regrouping for every old group"
@@ -505,11 +487,6 @@ def classify_regrouping(old, source, regrouping):
 
 
 def admit_occurrence_regrouping(old, source, before, after, regrouping):
-    """Admit a reviewed split or combination with fresh resulting groups.
-
-    Facts are regenerated for the new groups, never transferred. Positions,
-    groups and resolutions are supplied, never inferred from text.
-    """
     if not before or not after or before == after:
         raise IntentError("not_admitted", "Occurrence regrouping requires changed text")
     plan = classify_regrouping(old, source, regrouping)
@@ -551,7 +528,6 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
             raise IntentError(
                 "incompatible_group", "A fresh group requires a fresh Entity UUID"
             )
-        # Retired UUIDs are not in old, so only a derived ID keeps one from returning.
         if entity_id != fresh_mention_id(old.identity_data_id, key):
             raise IntentError(
                 "incompatible_group",

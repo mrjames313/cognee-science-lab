@@ -1,5 +1,3 @@
-"""Group split through native stores, reopen and forward recovery."""
-
 import json
 from uuid import UUID, uuid5
 
@@ -25,8 +23,6 @@ def check_split(root, before, after):
     assert after["borrowed_entity"] == before["borrowed_entity"]
     assert a["unresolved_marker_present"] and a["unresolved_entity_present"]
     assert len(after["shared_variant"]["owners"]) == 2
-    # The retired group's declaration, markers, resolution and old fact are gone;
-    # the shared endpoint and the shared relationship text index remain.
     gone = a["resolved_group_retirement"]
     assert gone["mention_entity_id"] == retired
     for name in (
@@ -76,7 +72,7 @@ def check_split(root, before, after):
             == old["mention_groups"]["g02"]["entity_id"]
         )
     facts = after["result"]["facts"]
-    assert len(facts) == 2  # doc01's regenerated g05 fact and doc02's unchanged fact
+    assert len(facts) == 2
     prior = next(
         f for f in before["result"]["facts"] if f["source_id"] == b["mention_entity_id"]
     )
@@ -156,7 +152,6 @@ def test_native_split_recovers_the_exact_saved_groups(tmp_path):
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())
     check_split(root, before, after)
-    # Forward completion keeps the saved fresh IDs instead of choosing new ones.
     for key in ("g04", "g05"):
         assert (
             after["text_changes"][0]["added_groups"][key]["entity_id"]

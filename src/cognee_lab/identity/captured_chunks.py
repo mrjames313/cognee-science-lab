@@ -6,9 +6,6 @@ from uuid import UUID
 
 FACT_TEXT = "it limits oscillations"
 ADDED_FACT_TEXT = "the controller limits oscillations"
-# The captured groups that carry FACT_TEXT: g01 as captured, g05 after the
-# split and g06 after the combination. Absent ones are listed so their facts
-# are checked as physically gone.
 FACT_GROUPS = ("g01", "g05", "g06")
 
 
@@ -35,11 +32,6 @@ def fixture_mention_id(source, key="g01"):
 
 
 def retired_mentions(source):
-    """Captured mentions this source no longer declares, by group key.
-
-    g01 retires in the resolved retirement and the split. g04 and g05 retire in
-    the combination, which is the only state that holds g06.
-    """
     keys = ("g01", "g04", "g05") if "g06" in source.mention_groups else ("g01",)
     return {
         k: fixture_mention_id(source, k) for k in keys if k not in source.mention_groups

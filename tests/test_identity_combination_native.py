@@ -1,5 +1,3 @@
-"""Group combination through native stores, reopen and forward recovery."""
-
 import json
 from uuid import UUID, uuid5
 
@@ -36,7 +34,6 @@ def check_combination(root, before, after):
     assert after["borrowed_entity"] == before["borrowed_entity"]
     assert a["unresolved_marker_present"] and a["unresolved_entity_present"]
     assert len(after["shared_variant"]["owners"]) == 2
-    # g01 stays gone and g04 and g05 leave with their markers, links and the old fact.
     assert a["resolved_group_retirement"]["mention_entity_id"] == G01
     gone = {"g01": a["resolved_group_retirement"], **a["combined_group_retirement"]}
     assert set(gone) == {"g01", "g04", "g05"}
@@ -91,7 +88,7 @@ def check_combination(root, before, after):
             == old["mention_groups"]["g02"]["entity_id"]
         )
     facts = after["result"]["facts"]
-    assert len(facts) == 2  # doc01's regenerated g06 fact and doc02's unchanged fact
+    assert len(facts) == 2
     prior = next(
         f for f in before["result"]["facts"] if f["source_id"] == b["mention_entity_id"]
     )
@@ -184,7 +181,6 @@ def test_native_combine_recovers_the_exact_saved_group(tmp_path):
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())
     check_combination(root, before, after)
-    # Forward completion keeps the saved fresh ID instead of choosing a new one.
     assert (
         after["text_changes"][0]["added_groups"]["g06"]["entity_id"]
         == intended["mention_groups"]["g06"]["entity_id"]

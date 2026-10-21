@@ -51,7 +51,6 @@ def describe_retirement(old, before, chunks):
 
 
 async def retirement_checks(publisher, source, mid):
-    """Check a retired mention and its fact are gone and the shared objects remain."""
     from .fixture import OSCILLATIONS_ID
     from .native import edge_metadata
     from cognee.modules.engine.utils import generate_edge_object_id, generate_node_id
