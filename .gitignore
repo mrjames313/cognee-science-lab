@@ -13,3 +13,4 @@ outputs/*
 .obsidian/
 .claude/settings.local.json
 *.egg-info/
+.claude/worktrees/
