@@ -124,13 +124,19 @@ def lab_fingerprint():
 
 def make_run(name):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run = RUNS / f"{stamp}-{name}"
-    for n in range(2, 1000):
+    RUNS.mkdir(parents=True, exist_ok=True)
+    # Names are unique within one invocation; this retry covers two concurrent
+    # verify processes or a rerun in the same second.
+    for suffix in ["", *(f"-{n}" for n in range(2, 1000))]:
+        run = RUNS / f"{stamp}-{name}{suffix}"
         try:
-            (run / "roots").mkdir(parents=True)
+            run.mkdir()
             break
         except FileExistsError:
-            run = RUNS / f"{stamp}-{name}-{n}"
+            continue
+    else:
+        fail(f"no free run directory for {stamp}-{name} under {RUNS}")
+    (run / "roots").mkdir()
     (run / "evidence").mkdir()
     head = subprocess.run(
         ["git", "-C", str(REPO), "log", "-1", "--format=%h %s"],
@@ -521,6 +527,34 @@ def run_journey(journey, stage):
     )
 
 
+def run_journey_or_fail(journey, stage):
+    try:
+        return run_journey(journey, stage)
+    except (Exception, SystemExit) as error:
+        message = f"{type(error).__name__}: {error}"
+        return dict(
+            journey=journey["id"],
+            stage=stage or "",
+            passed=0,
+            failed=1,
+            failures=[["FAIL", "runner", "", message]],
+            run="",
+        )
+
+
+def keep_awake():
+    """Start caffeinate on macOS to prevent idle sleep.
+
+    The Popen is intentionally not waited on: `-w` ties caffeinate to this process.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
+    except OSError:
+        pass
+
+
 def journey(args):
     journeys = load_journeys()
     wanted = list(journeys) if args.id == "all" else [args.id]
@@ -544,24 +578,24 @@ def journey(args):
             )
         for stage in [args.stage] if args.stage else entry["stages"] or [None]:
             plan.append((entry, stage))
-    if sys.platform == "darwin":
-        try:
-            subprocess.Popen(["caffeinate", "-i", "-w", str(os.getpid())])
-        except OSError:
-            pass
-    results = [None] * len(plan)
-    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        futures = {
-            pool.submit(run_journey, entry, stage): i
-            for i, (entry, stage) in enumerate(plan)
-        }
+    keep_awake()
+    jobs = args.jobs or (1 if args.include_env else 4)
+    pool = ThreadPoolExecutor(max_workers=jobs)
+    try:
+        futures = [
+            pool.submit(run_journey_or_fail, entry, stage) for entry, stage in plan
+        ]
         for future in as_completed(futures):
-            i = futures[future]
-            result = results[i] = future.result()
+            result = future.result()
             print(
                 f"{result['journey']} {result['stage']}: {result['passed']} PASS {result['failed']} FAIL",
                 flush=True,
             )
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown()
+    results = [future.result() for future in futures]
     print(f"\n{'journey':8}{'stage':26}{'PASS':>6}{'FAIL':>6}  run")
     for r in results:
         print(
@@ -575,6 +609,13 @@ def journey(args):
     if skipped:
         print(f"skipped (embedding API, add --include-env): {', '.join(skipped)}")
     raise SystemExit(1 if total_fail else 0)
+
+
+def positive_int(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"{value} is not a positive integer")
+    return number
 
 
 def main():
@@ -634,7 +675,9 @@ def main():
         help="also run journeys that call the embedding API",
     )
     p.add_argument(
-        "--jobs", type=int, default=4, help="journey runs to execute in parallel"
+        "--jobs",
+        type=positive_int,
+        help="journey runs to execute in parallel (default 4, or 1 with --include-env)",
     )
     p.set_defaults(func=journey)
 
