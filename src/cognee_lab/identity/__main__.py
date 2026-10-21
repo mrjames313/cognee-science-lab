@@ -7,7 +7,13 @@ import inspect
 from contextlib import ExitStack
 from pathlib import Path
 
-from .environment import MARKER, create_root, fixture_environment, read_embedding
+from .environment import (
+    CREATION_COMMANDS,
+    MARKER,
+    create_root,
+    fixture_environment,
+    read_embedding,
+)
 
 
 def _reopen_error(args, root: Path) -> str | None:
@@ -122,7 +128,7 @@ def main():
             and args.fault_stage.startswith(("withdraw_", "replace_"))
         ):
             parser.error("Fault stage does not match the selected operation")
-    creating = args.command in {"fixture", "multi-fixture", "chunked-fixture"}
+    creating = args.command in CREATION_COMMANDS
     if creating and root.exists():
         parser.error("Fixture root already exists; choose a new directory")
     if not creating and not (root / MARKER).exists():

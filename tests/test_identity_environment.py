@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cognee_lab.identity.environment import MARKER, MARKER_KIND
+from cognee_lab.identity.environment import MARKER, MARKER_KIND, reopen_problem
 from cognee_lab.identity.fixture_embeddings import FixtureEmbeddings
 
 REPO = Path(__file__).resolve().parents[1]
@@ -259,3 +259,55 @@ def test_reopen_refuses_a_different_embedding_profile(
     )
     assert result.returncode == 2
     assert message in result.stderr
+
+
+@pytest.mark.parametrize(
+    "embedding, operator, expected",
+    [
+        (ENV_RECORD, {}, None),
+        (LOOPBACK_RECORD, {"EMBEDDING_MODEL": None}, None),
+        (None, {"EMBEDDING_MODEL": None}, None),
+        (
+            ENV_RECORD,
+            {"EMBEDDING_MODEL": "other-model"},
+            "Root vectors use operator-model (2048 dims); "
+            "the env file now names other-model (2048 dims)",
+        ),
+        (
+            ENV_RECORD,
+            {"EMBEDDING_DIMENSIONS": "64"},
+            "Root vectors use operator-model (2048 dims); "
+            "the env file now names operator-model (64 dims)",
+        ),
+        (ENV_RECORD, {"EMBEDDING_MODEL": None}, "does not set EMBEDDING_MODEL"),
+        (ENV_RECORD, {"EMBEDDING_DIMENSIONS": "many"}, "is not an integer"),
+    ],
+)
+def test_reopen_problem_matches_what_the_cli_refuses(
+    tmp_path, monkeypatch, embedding, operator, expected
+):
+    root = fixture_root(tmp_path, embedding)
+    env_file = operator_env(tmp_path, **operator)
+    monkeypatch.setenv("COGNEE_ENV_FILE", str(env_file))
+    before = sorted(p.name for p in root.iterdir())
+    problem = reopen_problem(root)
+    assert sorted(p.name for p in root.iterdir()) == before
+    if expected is None:
+        assert problem is None
+        return
+    assert expected in problem
+    assert "operator-secret" not in problem
+    result = run(["-m", "cognee_lab.identity", "status", "--root", str(root)], env_file)
+    assert result.returncode == 2
+    assert problem in result.stderr
+
+
+def test_reopen_problem_reports_a_missing_operator_file_and_a_bad_marker(
+    tmp_path, monkeypatch
+):
+    absent = tmp_path / "absent.env"
+    monkeypatch.setenv("COGNEE_ENV_FILE", str(absent))
+    root = fixture_root(tmp_path, ENV_RECORD)
+    assert reopen_problem(root) == f"COGNEE_ENV_FILE={absent} does not name a file"
+    (root / MARKER).write_text("{not json")
+    assert reopen_problem(root) == "Root marker embedding record is malformed"

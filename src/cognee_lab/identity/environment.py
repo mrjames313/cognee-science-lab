@@ -17,6 +17,7 @@ from .fixture_embeddings import FixtureEmbeddings
 FIXTURE_ENV = Path(__file__).with_name("fixture.env")
 MARKER = "stage6-fixture.json"
 MARKER_KIND = "stage6-isolated-fixture"
+CREATION_COMMANDS = frozenset({"fixture", "multi-fixture", "chunked-fixture"})
 _MALFORMED = "Root marker embedding record is malformed"
 
 
@@ -111,6 +112,27 @@ def read_embedding(root: Path) -> dict | None:
     return {key: record[key] for key in ("profile", "model", "dimensions")}
 
 
+def reopen_problem(root: Path) -> str | None:
+    """Why fixture_environment would refuse this root, or None. Read-only.
+
+    Covers a malformed marker and, for an env root, an operator file that is
+    missing, incomplete, or names a different model or dimension count.
+    """
+    try:
+        recorded = read_embedding(root)
+        if recorded is not None and recorded["profile"] == "env":
+            current = _env_record(_operator_embedding())
+            if current != recorded:
+                return (
+                    f"Root vectors use {recorded['model']} "
+                    f"({recorded['dimensions']} dims); the env file now names "
+                    f"{current['model']} ({current['dimensions']} dims)"
+                )
+    except ValueError as exc:
+        return str(exc)
+    return None
+
+
 @contextmanager
 def fixture_environment(root: Path):
     """Point this process at the root's own stores and its recorded embedding profile.
@@ -121,6 +143,8 @@ def fixture_environment(root: Path):
     that wrote its vectors. The environment changes persist after exit; only the
     loopback embedding server stops.
     """
+    if problem := reopen_problem(root):
+        raise ValueError(problem)
     recorded = read_embedding(root)
     env = dict(
         SYSTEM_ROOT_DIRECTORY=str(root / "system"),
@@ -154,15 +178,7 @@ def fixture_environment(root: Path):
         # A pre-profile root keeps loading the repo .env, which wrote its vectors.
         if recorded is not None:
             if recorded["profile"] == "env":
-                settings = _operator_embedding()
-                current = _env_record(settings)
-                if current != recorded:
-                    raise ValueError(
-                        f"Root vectors use {recorded['model']} "
-                        f"({recorded['dimensions']} dims); the env file now names "
-                        f"{current['model']} ({current['dimensions']} dims)"
-                    )
-                env |= settings
+                env |= _operator_embedding()
             else:
                 loopback = _loopback_record()
                 env |= dict(
