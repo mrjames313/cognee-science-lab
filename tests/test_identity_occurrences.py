@@ -97,5 +97,5 @@ def test_new_positions_must_match_text_even_with_a_current_fingerprint(source_pa
     occurrence["start"] -= 1
     occurrence["end"] -= 1
     changed = IdentitySource.model_validate_json(json.dumps(payload))
-    with pytest.raises(IntentError, match="exact reviewed"):
+    with pytest.raises(IntentError, match="exact document slice"):
         admit_remap(old, changed, BEFORE, AFTER, RETENTION)

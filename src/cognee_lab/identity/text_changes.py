@@ -259,6 +259,63 @@ def check_fresh_group(old, source, key):
         )
 
 
+def check_new_slices(source, after):
+    for group in source.mention_groups.values():
+        if any(after[o.start : o.end] != o.text for o in group.occurrences):
+            raise IntentError(
+                "occurrence_changed",
+                "New occurrence does not match its exact document slice",
+            )
+
+
+def check_carryover(old, source, continuing, fresh):
+    """Continuing groups keep their decisions and recipes; the rest are replaced.
+
+    Retired groups drop theirs and each fresh group declares exactly one new
+    resolution and recipe. Variants and span scopes must be unchanged.
+    """
+    kept = {
+        k: r
+        for k, r in source.mention_resolutions.items()
+        if r.group_ref in continuing
+    }
+    declared = {
+        k: r for k, r in source.mention_resolutions.items() if r.group_ref in fresh
+    }
+    carried = {
+        k: r for k, r in old.mention_resolutions.items() if r.group_ref in continuing
+    }
+    retired = {
+        g.entity_id for k, g in old.mention_groups.items() if k not in continuing
+    }
+    recipes = {
+        eid: recipe
+        for eid, recipe in old.entity_constructions.items()
+        if eid not in retired
+    }
+    for key in fresh:
+        eid = source.mention_groups[key].entity_id
+        recipes[eid] = source.entity_constructions[eid]
+    if (
+        reviewed_decisions(kept) != reviewed_decisions(carried)
+        or len(kept) + len(declared) != len(source.mention_resolutions)
+        or reviewed_decisions(source.variant_assignments)
+        != reviewed_decisions(old.variant_assignments)
+        or set(declared) & (set(old.mention_resolutions) | set(old.variant_assignments))
+        or len(declared) != len(fresh)
+        or {r.group_ref for r in declared.values()} != fresh
+        or source.entity_constructions != recipes
+        or any(
+            v.applicability.kind == "text_spans"
+            for v in source.variant_assignments.values()
+        )
+    ):
+        raise IntentError(
+            "not_admitted",
+            "Preserve continuing decisions and recipes, retire only the old groups' own, and declare one resolution per fresh group",
+        )
+
+
 def check_next_revision(old, source):
     if source.revision != old.revision + 1:
         raise IntentError(
@@ -279,7 +336,6 @@ def admit_occurrence_removal(old, source, before, after, retention):
     if not isinstance(retention, dict) or set(retention) != set(old.mention_groups):
         raise IntentError("occurrence_changed", "Declare retention for every old group")
     kept = set()
-    retired_entities = set()
     for key, previous in old.mention_groups.items():
         indices = retention[key]
         if (
@@ -301,7 +357,6 @@ def admit_occurrence_removal(old, source, before, after, retention):
                     "occurrence_changed", "Previous occurrence does not match text"
                 )
         if not indices:
-            retired_entities.add(previous.entity_id)
             continue
         kept.add(key)
         current = source.mention_groups.get(key)
@@ -311,7 +366,6 @@ def admit_occurrence_removal(old, source, before, after, retention):
             or current.document_ref != previous.document_ref
             or [o.text for o in current.occurrences]
             != [previous.occurrences[i].text for i in indices]
-            or any(after[o.start : o.end] != o.text for o in current.occurrences)
         ):
             raise IntentError(
                 "occurrence_changed",
@@ -321,36 +375,14 @@ def admit_occurrence_removal(old, source, before, after, retention):
         raise IntentError(
             "occurrence_changed", "Only explicitly continuing groups may remain"
         )
+    check_new_slices(source, after)
     if not any(
         len(retention[k]) < len(g.occurrences) for k, g in old.mention_groups.items()
     ):
         raise IntentError(
             "not_admitted", "This reviewed slice removes at least one occurrence"
         )
-
-    expected_resolutions = {
-        k: r for k, r in old.mention_resolutions.items() if r.group_ref in kept
-    }
-    if (
-        reviewed_decisions(source.mention_resolutions)
-        != reviewed_decisions(expected_resolutions)
-        or reviewed_decisions(source.variant_assignments)
-        != reviewed_decisions(old.variant_assignments)
-        or source.entity_constructions
-        != {
-            k: v
-            for k, v in old.entity_constructions.items()
-            if k not in retired_entities
-        }
-        or any(
-            v.applicability.kind == "text_spans"
-            for v in source.variant_assignments.values()
-        )
-    ):
-        raise IntentError(
-            "not_admitted",
-            "Preserve continuing decisions and recipes; retire only empty-group declarations",
-        )
+    check_carryover(old, source, kept, frozenset())
     return None  # An arbitrary reviewed removal has no single global offset shift.
 
 
@@ -399,45 +431,11 @@ def admit_occurrence_addition(old, source, before, after, continuity):
                     "Continuing occurrence text differs from reviewed mapping",
                 )
         added |= len(current.occurrences) > len(previous.occurrences)
-    new_groups = set(source.mention_groups) - set(old.mention_groups)
+    new_groups = frozenset(source.mention_groups) - set(old.mention_groups)
     for key in new_groups:
         check_fresh_group(old, source, key)
-    for group in source.mention_groups.values():
-        if any(after[o.start : o.end] != o.text for o in group.occurrences):
-            raise IntentError(
-                "occurrence_changed",
-                "New occurrence does not match its exact document slice",
-            )
-
-    continuing = {
-        k: r
-        for k, r in source.mention_resolutions.items()
-        if r.group_ref not in new_groups
-    }
-    new_resolutions = {
-        k: r for k, r in source.mention_resolutions.items() if r.group_ref in new_groups
-    }
-    expected_recipes = dict(old.entity_constructions)
-    for key in new_groups:
-        eid = source.mention_groups[key].entity_id
-        expected_recipes[eid] = source.entity_constructions[eid]
-    if (
-        reviewed_decisions(continuing) != reviewed_decisions(old.mention_resolutions)
-        or reviewed_decisions(source.variant_assignments)
-        != reviewed_decisions(old.variant_assignments)
-        or set(new_resolutions)
-        & (set(old.mention_resolutions) | set(old.variant_assignments))
-        or {r.group_ref for r in new_resolutions.values()} != new_groups
-        or source.entity_constructions != expected_recipes
-        or any(
-            v.applicability.kind == "text_spans"
-            for v in source.variant_assignments.values()
-        )
-    ):
-        raise IntentError(
-            "not_admitted",
-            "Preserve existing decisions and recipes; declare each new group's resolution",
-        )
+    check_new_slices(source, after)
+    check_carryover(old, source, set(old.mention_groups), new_groups)
     if not added and not new_groups:
         raise IntentError(
             "not_admitted", "This reviewed slice adds at least one occurrence"
@@ -525,12 +523,7 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
                     "occurrence_changed",
                     "Regrouped occurrence text differs from reviewed mapping",
                 )
-    for group in source.mention_groups.values():
-        if any(after[o.start : o.end] != o.text for o in group.occurrences):
-            raise IntentError(
-                "occurrence_changed",
-                "New occurrence does not match its exact document slice",
-            )
+    check_new_slices(source, after)
     for key in plan.continuing:
         previous, current = old.mention_groups[key], source.mention_groups[key]
         if (current.entity_id, current.document_ref) != (
@@ -542,47 +535,7 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
             )
     for key in plan.fresh:
         check_fresh_group(old, source, key)
-    kept = {
-        k: r
-        for k, r in source.mention_resolutions.items()
-        if r.group_ref in plan.continuing
-    }
-    declared = {
-        k: r for k, r in source.mention_resolutions.items() if r.group_ref in plan.fresh
-    }
-    retired_entities = {old.mention_groups[k].entity_id for k in plan.retired}
-    expected_recipes = {
-        eid: recipe
-        for eid, recipe in old.entity_constructions.items()
-        if eid not in retired_entities
-    }
-    for key in plan.fresh:
-        eid = source.mention_groups[key].entity_id
-        expected_recipes[eid] = source.entity_constructions[eid]
-    if (
-        reviewed_decisions(kept)
-        != reviewed_decisions(
-            {
-                k: r
-                for k, r in old.mention_resolutions.items()
-                if r.group_ref in plan.continuing
-            }
-        )
-        or reviewed_decisions(source.variant_assignments)
-        != reviewed_decisions(old.variant_assignments)
-        or set(declared) & (set(old.mention_resolutions) | set(old.variant_assignments))
-        or len(declared) != len(plan.fresh)
-        or {r.group_ref for r in declared.values()} != plan.fresh
-        or source.entity_constructions != expected_recipes
-        or any(
-            v.applicability.kind == "text_spans"
-            for v in source.variant_assignments.values()
-        )
-    ):
-        raise IntentError(
-            "not_admitted",
-            "Retire the old groups' decisions and recipes; declare one resolution per fresh group",
-        )
+    check_carryover(old, source, plan.continuing, plan.fresh)
     return plan
 
 
