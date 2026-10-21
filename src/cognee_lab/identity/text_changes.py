@@ -272,9 +272,7 @@ def check_carryover(old, source, continuing, fresh):
     resolution and recipe. Variants and span scopes must be unchanged.
     """
     kept = {
-        k: r
-        for k, r in source.mention_resolutions.items()
-        if r.group_ref in continuing
+        k: r for k, r in source.mention_resolutions.items() if r.group_ref in continuing
     }
     declared = {
         k: r for k, r in source.mention_resolutions.items() if r.group_ref in fresh
