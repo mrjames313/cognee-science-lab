@@ -14,15 +14,8 @@ from .environment import (
     fixture_environment,
     read_embedding,
 )
+from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 
-
-OCCURRENCE_COMMANDS = {
-    "remove-occurrences",
-    "retire-resolved-group",
-    "add-occurrences",
-    "split-group",
-    "combine-groups",
-}
 TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
 
 
@@ -49,11 +42,7 @@ def main():
             "chunked-fixture",
             "revise",
             "edit-text",
-            "remove-occurrences",
-            "retire-resolved-group",
-            "add-occurrences",
-            "split-group",
-            "combine-groups",
+            *OCCURRENCE_COMMANDS,
             "withdraw",
             "retrieve",
             "status",

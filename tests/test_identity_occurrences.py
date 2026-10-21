@@ -9,11 +9,19 @@ from cognee_lab.identity.multisource import add_lifecycle_records
 from cognee_lab.identity.occurrence_fixture import (
     AFTER,
     BEFORE,
+    COMMANDS,
     RETENTION,
     describe_removal,
 )
-from cognee_lab.identity.text_changes import admit_remap
+from cognee_lab.identity.text_changes import TextChange, admit_remap
 from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
+
+
+def test_each_occurrence_command_selects_one_mode_and_its_own_result_file():
+    assert len({c.result_name for c in COMMANDS.values()}) == len(COMMANDS)
+    for command in COMMANDS.values():
+        kind, _ = TextChange("a", command.after, **command.mode).mode
+        assert kind != "prefix"
 
 
 def example(payload):

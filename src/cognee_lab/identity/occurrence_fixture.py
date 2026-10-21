@@ -1,10 +1,26 @@
 """Captured occurrence removal; explicit review, not a Describe matcher."""
 
 import json
+from dataclasses import dataclass
+from typing import Callable
 
 from .captured_chunks import bind_chunks
 from .captured_text import BEFORE
+from .group_regrouping import (
+    COMBINE_AFTER,
+    COMBINE_REGROUPING,
+    SPLIT_AFTER,
+    SPLIT_REGROUPING,
+    describe_combination,
+    describe_split,
+)
 from .models import IdentitySource
+from .occurrence_addition import AFTER as added_text, CONTINUITY, describe_addition
+from .resolved_retirement import (
+    AFTER as retired_text,
+    RETENTION as retired_indices,
+    describe_retirement,
+)
 from .validation import IntentError, text_digest
 
 AFTER = "Helios controller (HC) regulates heating, and it limits oscillations.\n"
@@ -49,6 +65,48 @@ def describe_removal(old, before, chunks):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
+@dataclass(frozen=True)
+class OccurrenceCommand:
+    after: str
+    describe: Callable
+    result_name: str
+    mode: dict
+
+
+COMMANDS = {
+    "remove-occurrences": OccurrenceCommand(
+        AFTER,
+        describe_removal,
+        "occurrence_revision_result.json",
+        dict(occurrence_retention=RETENTION),
+    ),
+    "retire-resolved-group": OccurrenceCommand(
+        retired_text,
+        describe_retirement,
+        "resolved_retirement_result.json",
+        dict(occurrence_retention=retired_indices),
+    ),
+    "add-occurrences": OccurrenceCommand(
+        added_text,
+        describe_addition,
+        "occurrence_addition_result.json",
+        dict(occurrence_continuity=CONTINUITY),
+    ),
+    "split-group": OccurrenceCommand(
+        SPLIT_AFTER,
+        describe_split,
+        "group_split_result.json",
+        dict(occurrence_regrouping=SPLIT_REGROUPING),
+    ),
+    "combine-groups": OccurrenceCommand(
+        COMBINE_AFTER,
+        describe_combination,
+        "group_combination_result.json",
+        dict(occurrence_regrouping=COMBINE_REGROUPING),
+    ),
+}
+
+
 async def run(args, root):
     from .captured_chunks import recorded_budget
     from .fixture import context_for
@@ -57,9 +115,10 @@ async def run(args, root):
     from .text_changes import TextChange, chunk_text, original_context, read_original
     from .text_fixture import maintain_one
 
+    command = COMMANDS[args.command]
     if args.source != "doc01" or not (root / "chunked-fixture-info.json").exists():
         raise IntentError(
-            "fixture_scope", "Occurrence removal requires doc01 of a chunked-fixture"
+            "fixture_scope", f"{args.command} requires doc01 of a chunked-fixture"
         )
     publisher = await Publisher.configured()
     args._fixture_publisher = publisher
@@ -77,60 +136,20 @@ async def run(args, root):
         )
     ctx = await context_for(old.identity_data_id)
     before = await read_original(old, ctx)
-    after, retention, describe = AFTER, RETENTION, describe_removal
-    result_name = "occurrence_revision_result.json"
-    continuity = regrouping = None
-    if args.command == "add-occurrences":
-        from .occurrence_addition import (
-            AFTER as added_text,
-            CONTINUITY,
-            describe_addition,
-        )
-
-        after, retention, describe = added_text, None, describe_addition
-        continuity = CONTINUITY
-        result_name = "occurrence_addition_result.json"
-    if args.command == "split-group":
-        from .group_regrouping import SPLIT_AFTER, SPLIT_REGROUPING, describe_split
-
-        after, retention, describe = SPLIT_AFTER, None, describe_split
-        regrouping = SPLIT_REGROUPING
-        result_name = "group_split_result.json"
-    if args.command == "combine-groups":
-        from .group_regrouping import (
-            COMBINE_AFTER,
-            COMBINE_REGROUPING,
-            describe_combination,
-        )
-
-        after, retention, describe = COMBINE_AFTER, None, describe_combination
-        regrouping = COMBINE_REGROUPING
-        result_name = "group_combination_result.json"
-    if args.command == "retire-resolved-group":
-        from .resolved_retirement import (
-            AFTER as retired_text,
-            RETENTION as retired_indices,
-            describe_retirement,
-        )
-
-        after, retention, describe = retired_text, retired_indices, describe_retirement
-        result_name = "resolved_retirement_result.json"
     change = TextChange(
         before,
-        after,
+        command.after,
         await recorded_budget(old, publisher.graph),
-        occurrence_retention=retention,
-        occurrence_continuity=continuity,
-        occurrence_regrouping=regrouping,
+        **command.mode,
     )
     chunks = await chunk_text(
-        after, await original_context(old, ctx), change.chunk_budget
+        command.after, await original_context(old, ctx), change.chunk_budget
     )
-    intended = describe(old, before, chunks)
+    intended = command.describe(old, before, chunks)
     (root / f"identity_doc01_occurrence_revision{intended.revision}.json").write_text(
         intended.model_dump_json(indent=2) + "\n"
     )
-    (root / f"source_doc01_revision{intended.revision}.txt").write_text(after)
+    (root / f"source_doc01_revision{intended.revision}.txt").write_text(command.after)
     await maintain_one(
         publisher,
         intended,
@@ -141,5 +160,5 @@ async def run(args, root):
     result = await snapshot(
         publisher, await current_sources(root, publisher), args.query
     )
-    (root / result_name).write_text(json.dumps(result, indent=2))
+    (root / command.result_name).write_text(json.dumps(result, indent=2))
     return result
