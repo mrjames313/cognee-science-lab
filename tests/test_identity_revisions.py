@@ -213,3 +213,29 @@ async def test_a_correction_may_not_move_an_occurrence_to_another_span_with_the_
     with pytest.raises(IntentError, match="keeps its start and end") as refused:
         await correct(old, moved)
     assert refused.value.code == "occurrence_moved"
+
+
+@pytest.mark.parametrize("listed", [True, False])
+async def test_a_corpus_input_exempts_an_entity_only_when_a_record_lists_it(
+    source_payload, listed
+):
+    old = IdentitySource.model_validate_json(json.dumps(source_payload))
+    payload = corrected(old).model_dump(mode="json")
+    existing = str(uuid4())
+    payload["entity_constructions"][existing] = dict(name="HC", description="known")
+    payload["inputs"]["existing_Z"] = dict(
+        source_payload["inputs"]["existing_A"], entity_id=existing
+    )
+    payload["variant_assignments"]["v02"] = dict(
+        payload["variant_assignments"]["v01"],
+        target_entity_id=existing,
+        input_refs=["doc01", "existing_Z"] if listed else ["doc01"],
+    )
+    new = IdentitySource.model_validate_json(json.dumps(payload))
+    if listed:
+        fate = await correct(old, new, present={existing})
+        assert fate.continuing == {"g01"}
+    else:
+        with pytest.raises(IntentError, match="derives from its source") as refused:
+            await correct(old, new)
+        assert refused.value.code == "entity_uuid_not_derived"
