@@ -31,6 +31,12 @@ MUTANTS = {
     "skip_old_slices": ("check_old_slices", skip),
     "skip_new_slices": ("check_new_slices", skip),
     "skip_revision_step": ("check_next_revision", skip),
-    "skip_carryover": ("check_carryover", skip),
+    "allow_unchanged_text": ("check_changed_text", skip),
+    "allow_changed_decisions": ("check_continuing_decisions", skip),
+    "allow_changed_variants": ("check_variants_unchanged", skip),
+    "allow_reused_resolution_ids": ("check_fresh_resolution_ids", skip),
+    "allow_unresolved_fresh_groups": ("check_one_resolution_per_fresh_group", skip),
+    "allow_changed_recipes": ("check_recipes", skip),
+    "allow_span_variants": ("check_no_span_variants", skip),
 }
 assert all(hasattr(admission, attribute) for attribute, _ in MUTANTS.values())

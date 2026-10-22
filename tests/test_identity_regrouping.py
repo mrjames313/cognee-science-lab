@@ -278,7 +278,7 @@ async def test_fresh_group_cannot_reuse_an_existing_graph_uuid(source_payload):
     change = TextChange(BEFORE, SPLIT_AFTER, SPLIT_MAP)
     with pytest.raises(IntentError, match="already exists") as refused:
         await change.preflight(publisher, old, intended, {}, {}, None, retry=False)
-    assert refused.value.code == "fresh_uuid_reused"
+    assert refused.value.code == "fresh_uuid_in_graph"
 
 
 def test_the_split_fixture_ids_follow_the_saved_source(source_payload):

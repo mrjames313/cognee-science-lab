@@ -13,12 +13,24 @@ from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.validation import IntentError, validate_inputs
 
 
-def test_only_an_unmoved_prefix_insertion_is_a_prefix_shift():
-    unmoved = {"g": [["g", 0], ["g", 1]]}
-    assert TextChange("a", "ba", unmoved).is_prefix_shift
-    assert not TextChange("a", "b", unmoved).is_prefix_shift
-    assert not TextChange("a", "ba", {"g": [None, ["g", 0]]}).is_prefix_shift
-    assert not TextChange("a", "ba", {"g": [["g", 1], ["g", 0]]}).is_prefix_shift
+def test_only_an_unmoved_prefix_insertion_reports_a_shift(source_payload):
+    old, before, after, _, intended = example(source_payload)
+    unmoved = TextChange(before, after, identity_map(old))
+    assert unmoved.prefix_shift(old, intended) == len(PREFIX)
+    assert (
+        TextChange(before, after + "x", identity_map(old)).prefix_shift(old, intended)
+        is None
+    )
+    swapped = {"g01": [["g01", 1], ["g01", 0]]}
+    assert TextChange(before, after, swapped).prefix_shift(old, intended) is None
+
+    def move_it(p):
+        p["mention_groups"]["g01"]["occurrences"][1]["start"] += 1
+
+    payload = intended.model_dump(mode="json")
+    move_it(payload)
+    shifted = intended.model_validate_json(json.dumps(payload))
+    assert unmoved.prefix_shift(old, shifted) is None
 
 
 def example(source_payload):

@@ -2,7 +2,13 @@
 
 from dataclasses import dataclass
 
-from .admission import OccurrenceMap, OccurrenceRef, admit, parse_occurrence_map
+from .admission import (
+    OccurrenceMap,
+    admit,
+    identity_map,
+    occurrence,
+    parse_occurrence_map,
+)
 from .models import ChunkInput, IdentitySource, SourceTextInput
 from .validation import IntentError, map_chunks
 
@@ -122,45 +128,70 @@ async def chunk_text(text, ctx, budget=512):
     ]
 
 
-# Plans saved before the general occurrence map hold at most one of these.
-LEGACY_FIELDS = (
-    "occurrence_retention",
-    "occurrence_continuity",
-    "occurrence_regrouping",
-)
+def indices(reviewed, groups, valid):
+    """A saved old-mode map: every old group, each with a list of valid ints."""
+    if (
+        not isinstance(reviewed, dict)
+        or set(reviewed) != set(groups)
+        or not all(
+            isinstance(v, list)
+            and all(type(i) is int for i in v)
+            and valid(v, groups[k])
+            for k, v in reviewed.items()
+        )
+    ):
+        raise IntentError("recovery_plan", "Saved occurrence map is malformed")
+    return reviewed
+
+
+def from_retention(reviewed, groups):
+    kept = indices(
+        reviewed,
+        groups,
+        lambda v, n: v == sorted(set(v)) and all(0 <= i < n for i in v),
+    )
+    return {
+        k: [[k, kept[k].index(i)] if i in kept[k] else None for i in range(n)]
+        for k, n in groups.items()
+    }
+
+
+def from_continuity(reviewed, groups):
+    moved = indices(
+        reviewed, groups, lambda v, n: len(v) == n and all(i >= 0 for i in v)
+    )
+    return {k: [[k, j] for j in moved[k]] for k in groups}
+
+
+def from_regrouping(reviewed, groups):
+    if not isinstance(reviewed, dict) or set(reviewed) != set(groups):
+        raise IntentError("recovery_plan", "Saved occurrence map is malformed")
+    return reviewed
+
+
+# Plans saved before 2026-10-21 hold at most one of these old-mode maps, or
+# none for a prefix shift. Delete this reader once no kept root holds a plan
+# without `occurrence_map`.
+LEGACY_READERS = {
+    "occurrence_retention": from_retention,
+    "occurrence_continuity": from_continuity,
+    "occurrence_regrouping": from_regrouping,
+}
 
 
 def legacy_occurrence_map(old, saved):
     """The general map that states the same edit as a saved old-mode map."""
-    chosen = [f for f in LEGACY_FIELDS if saved.get(f) is not None]
-    groups = {k: len(g.occurrences) for k, g in old.mention_groups.items()}
+    chosen = [f for f in LEGACY_READERS if saved.get(f) is not None]
     if len(chosen) > 1:
         raise IntentError("recovery_plan", "Saved plan selects more than one mode")
     if not chosen:
-        return {k: [[k, i] for i in range(n)] for k, n in groups.items()}
-    field, reviewed = chosen[0], saved[chosen[0]]
-    ints = lambda v: isinstance(v, list) and all(type(i) is int for i in v)
-    if (
-        not isinstance(reviewed, dict)
-        or set(reviewed) != set(groups)
-        or (field != "occurrence_regrouping" and not all(map(ints, reviewed.values())))
-    ):
+        return identity_map(old)
+    groups = {k: len(g.occurrences) for k, g in old.mention_groups.items()}
+    raw = LEGACY_READERS[chosen[0]](saved[chosen[0]], groups)
+    try:
+        return parse_occurrence_map(raw)
+    except IntentError:
         raise IntentError("recovery_plan", "Saved occurrence map is malformed")
-    if field == "occurrence_retention":
-        if any(
-            v != sorted(set(v)) or v and v[-1] >= groups[k] for k, v in reviewed.items()
-        ):
-            raise IntentError("recovery_plan", "Saved occurrence map is malformed")
-        return {
-            k: [
-                [k, reviewed[k].index(i)] if i in reviewed[k] else None
-                for i in range(n)
-            ]
-            for k, n in groups.items()
-        }
-    if field == "occurrence_continuity":
-        return {k: [[k, j] for j in reviewed[k]] for k in groups}
-    return reviewed
 
 
 @dataclass(frozen=True)
@@ -179,7 +210,7 @@ class TextChange:
         """Read the text change a plan saved, converting an old-mode map
         against the plan's previous description."""
         saved = dict(plan["text_change"])
-        legacy = {f: saved.pop(f) for f in LEGACY_FIELDS if f in saved}
+        legacy = {f: saved.pop(f) for f in LEGACY_READERS if f in saved}
         if "occurrence_map" not in saved:
             old = IdentitySource.model_validate_json(plan["previous_description"])
             saved["occurrence_map"] = legacy_occurrence_map(old, legacy)
@@ -187,14 +218,21 @@ class TextChange:
             raise IntentError("recovery_plan", "Saved plan mixes map formats")
         return cls(**saved)
 
-    @property
-    def is_prefix_shift(self):
-        """Every occurrence keeps its group and index and the text gains a prefix."""
-        return self.text.endswith(self.previous_text) and all(
-            ref == OccurrenceRef(k, i)
-            for k, refs in self.occurrence_map.items()
-            for i, ref in enumerate(refs)
-        )
+    def prefix_shift(self, old, source):
+        """The offset every occurrence moved by, when the text only gained a
+        prefix and every occurrence kept its group, index and relative place."""
+        delta = len(self.text) - len(self.previous_text)
+        if not self.text.endswith(self.previous_text) or self.occurrence_map != (
+            identity_map(source)
+        ):
+            return None
+        refs = [r for refs in self.occurrence_map.values() for r in refs]
+        if any(
+            occurrence(source, r).start != occurrence(old, r).start + delta
+            for r in refs
+        ):
+            return None
+        return delta
 
     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
         from cognee.infrastructure.databases.provenance.markers import (
@@ -219,7 +257,7 @@ class TextChange:
                     is not None
                 ):
                     raise IntentError(
-                        "fresh_uuid_reused",
+                        "fresh_uuid_in_graph",
                         "New mention Entity UUID already exists in the graph",
                     )
         if not 1 <= self.chunk_budget <= 4096:

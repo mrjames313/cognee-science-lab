@@ -50,15 +50,24 @@ def test_a_saved_key_only_addition_passes_every_check_a_retry_repeats(
     payload["mention_groups"]["g03"]["entity_id"] = legacy
     saved = IdentitySource.model_validate_json(json.dumps(payload))
     with pytest.raises(IntentError, match="derives from its source") as refused:
-        admit(old, saved, BEFORE, AFTER, ADDITION_MAP)
+        admit(old, saved, BEFORE, AFTER, parse_occurrence_map(ADDITION_MAP))
     assert refused.value.code == "fresh_uuid_not_derived"
-    retried = admit(old, saved, BEFORE, AFTER, ADDITION_MAP, first_attempt=False)
+    retried = admit(
+        old,
+        saved,
+        BEFORE,
+        AFTER,
+        parse_occurrence_map(ADDITION_MAP),
+        first_attempt=False,
+    )
     assert retried.fresh == {"g03"}
 
 
 async def test_reviewed_continuation_and_same_text_new_group(source_payload):
     old, chunk, intended = addition(source_payload)
-    assert admit(old, intended, BEFORE, AFTER, ADDITION_MAP).fresh == {"g03"}
+    assert admit(
+        old, intended, BEFORE, AFTER, parse_occurrence_map(ADDITION_MAP)
+    ).fresh == {"g03"}
     assert len(intended.mention_groups["g01"].occurrences) == 3
     assert (
         intended.mention_groups["g01"].entity_id == old.mention_groups["g01"].entity_id
@@ -88,7 +97,7 @@ async def test_reviewed_continuation_and_same_text_new_group(source_payload):
         "g03": ADDED_FACT_TEXT,
     }
     assert retired_mentions(intended) == {}
-    change = TextChange(BEFORE, AFTER, ADDITION_MAP)
+    change = TextChange(BEFORE, AFTER, parse_occurrence_map(ADDITION_MAP))
     saved = dict(text_change=json.loads(json.dumps(asdict(change))))
     assert TextChange.from_plan(saved) == change
 
@@ -165,7 +174,7 @@ def test_addition_rejects_hidden_semantic_and_representation_changes(
         p["mention_groups"]["g01"]["entity_id"] = mid
     changed = IdentitySource.model_validate_json(json.dumps(p))
     with pytest.raises(IntentError) as refused:
-        admit(old, changed, BEFORE, AFTER, ADDITION_MAP)
+        admit(old, changed, BEFORE, AFTER, parse_occurrence_map(ADDITION_MAP))
     assert refused.value.code == code
 
 
@@ -177,7 +186,7 @@ async def test_new_group_cannot_reuse_an_existing_graph_uuid(source_payload):
             return {"id": key, "type": "Entity"}
 
     publisher = SimpleNamespace(graph=Graph())
-    change = TextChange(BEFORE, AFTER, ADDITION_MAP)
+    change = TextChange(BEFORE, AFTER, parse_occurrence_map(ADDITION_MAP))
     with pytest.raises(IntentError, match="already exists") as refused:
         await change.preflight(publisher, old, intended, {}, {}, None, retry=False)
-    assert refused.value.code == "fresh_uuid_reused"
+    assert refused.value.code == "fresh_uuid_in_graph"

@@ -26,7 +26,7 @@ from contextlib import contextmanager
 
 from cognee_lab.identity import admission
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.validation import IntentError
+from cognee_lab.identity.validation import IntentError, text_digest
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import OLD_SHAPES, materialize, oracle, worlds
 
@@ -129,8 +129,34 @@ def map_corruptions(case, same_text):
 
 
 def payload_corruptions(case, fate):
-    """Descriptions that break a slice, revision or carryover rule."""
+    """Descriptions or texts that break a slice, revision or carryover rule."""
     old_payload, new_payload = case["old_payload"], case["new_payload"]
+    if not new_payload["mention_groups"]:
+        unchanged = text_digest(case["before"])
+        yield (
+            "unchanged text",
+            "requires changed text",
+            dict(
+                after=case["before"],
+                new=rebuilt(
+                    new_payload,
+                    lambda p: p["inputs"]["doc01"].update(text_sha256=unchanged),
+                ),
+            ),
+        )
+    spans = dict(kind="text_spans", document_ref="doc01", ranges=[dict(start=0, end=1)])
+
+    def span_variant(p):
+        p["variant_assignments"]["v01"]["applicability"] = spans
+
+    yield (
+        "span variant",
+        "Span-scoped variants",
+        dict(
+            old=rebuilt(old_payload, span_variant),
+            new=rebuilt(new_payload, span_variant),
+        ),
+    )
 
     def shift(occurrence):
         occurrence.update(start=occurrence["start"] + 1, end=occurrence["end"] + 1)
@@ -203,6 +229,18 @@ def payload_corruptions(case, fate):
                     new_payload, lambda p: p["mention_resolutions"].pop(f"s{key}")
                 )
             ),
+        )
+    for fresh, retired_key in list(zip(sorted(fate.fresh), sorted(fate.retired)))[:1]:
+
+        def reuse_id(p):
+            p["mention_resolutions"][f"r{retired_key}"] = p["mention_resolutions"].pop(
+                f"s{fresh}"
+            )
+
+        yield (
+            "fresh resolution reuses an old ID",
+            "no old resolution or assignment",
+            dict(new=rebuilt(new_payload, reuse_id)),
         )
     for key in sorted(fate.retired)[:1]:
         retired = str(case["old"].mention_groups[key].entity_id)

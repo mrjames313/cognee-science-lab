@@ -133,10 +133,14 @@ async def maintain_one(
 
 
 def decision_method(source):
-    """The captured review that stated this revision's groups and decisions."""
+    """The captured reviews that the revision's groups and decisions cite."""
     refs = {
         r.producer_ref
-        for r in [*source.mention_groups.values(), *source.mention_resolutions.values()]
+        for r in [
+            *source.mention_groups.values(),
+            *source.mention_resolutions.values(),
+            *source.variant_assignments.values(),
+        ]
     }
     return [
         dict(
@@ -181,11 +185,7 @@ async def transition_summary(publisher, row):
         identity_data_id=str(source.identity_data_id),
         original_data_id=str(source.inputs[key].data_id),
         position_unit="Unicode code points; document-relative [start, end)",
-        position_shift=(
-            len(change.text) - len(change.previous_text)
-            if change.is_prefix_shift
-            else None
-        ),
+        position_shift=change.prefix_shift(old, source),
         text_length_delta=len(change.text) - len(change.previous_text),
         previous_text_sha256=old.inputs[key].text_sha256,
         text_sha256=source.inputs[key].text_sha256,

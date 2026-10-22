@@ -177,10 +177,10 @@ def test_a_text_change_survives_the_saved_plan(source_payload, case):
     )
 
 
-def test_the_general_rules_are_stricter_than_the_old_prefix_mode(source_payload):
+def test_a_converted_prefix_plan_must_also_advance_one_revision(source_payload):
     old, new, before, after = prefix_case(source_payload)
     change = TextChange.from_plan(legacy_plan(old, before, after, None))
-    assert change.is_prefix_shift
+    assert change.prefix_shift(old, new) == len(after) - len(before)
     skipped = new.model_copy(update=dict(revision=old.revision + 2))
     with pytest.raises(IntentError, match="advances exactly one revision") as refused:
         admit(old, skipped, before, after, change.occurrence_map)

@@ -15,7 +15,7 @@ from cognee_lab.identity.resolved_retirement import (
     RETIREMENT_MAP,
     describe_retirement,
 )
-from cognee_lab.identity.admission import admit
+from cognee_lab.identity.admission import admit, parse_occurrence_map
 from cognee_lab.identity.validation import IntentError
 
 
@@ -32,7 +32,10 @@ def retired_example(payload):
 
 def test_last_resolved_group_retirement_keeps_unrelated_declarations(source_payload):
     old, chunk, intended = retired_example(source_payload)
-    assert admit(old, intended, BEFORE, AFTER, RETIREMENT_MAP).fresh == frozenset()
+    assert (
+        admit(old, intended, BEFORE, AFTER, parse_occurrence_map(RETIREMENT_MAP)).fresh
+        == frozenset()
+    )
     assert list(intended.mention_groups) == ["g02"]
     assert list(intended.mention_resolutions) == ["r02"]
     assert (

@@ -18,11 +18,8 @@ from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
 
 
-def test_each_occurrence_command_has_its_own_result_file_and_a_non_prefix_map():
+def test_each_occurrence_command_has_its_own_result_file():
     assert len({c.result_name for c in COMMANDS.values()}) == len(COMMANDS)
-    for command in COMMANDS.values():
-        change = TextChange("a", command.after, command.occurrence_map)
-        assert not change.is_prefix_shift
 
 
 def example(payload):
@@ -45,7 +42,10 @@ def example(payload):
 
 async def test_reviewed_partial_and_empty_group_removal(source_payload):
     old, chunk, intended = example(source_payload)
-    assert admit(old, intended, BEFORE, AFTER, REMOVAL_MAP).fresh == frozenset()
+    assert (
+        admit(old, intended, BEFORE, AFTER, parse_occurrence_map(REMOVAL_MAP)).fresh
+        == frozenset()
+    )
     assert list(intended.mention_groups) == ["g01"]
     assert (
         intended.mention_groups["g01"].entity_id == old.mention_groups["g01"].entity_id
@@ -99,7 +99,7 @@ def test_removal_does_not_silently_retarget_a_continuing_group(source_payload):
     ]["v01"]["source_entity_id"]
     changed = IdentitySource.model_validate_json(json.dumps(payload))
     with pytest.raises(IntentError, match="keeps its reviewed resolutions"):
-        admit(old, changed, BEFORE, AFTER, REMOVAL_MAP)
+        admit(old, changed, BEFORE, AFTER, parse_occurrence_map(REMOVAL_MAP))
 
 
 def test_new_positions_must_match_text_even_with_a_current_fingerprint(source_payload):
@@ -110,4 +110,4 @@ def test_new_positions_must_match_text_even_with_a_current_fingerprint(source_pa
     occurrence["end"] -= 1
     changed = IdentitySource.model_validate_json(json.dumps(payload))
     with pytest.raises(IntentError, match="exact document slice"):
-        admit(old, changed, BEFORE, AFTER, REMOVAL_MAP)
+        admit(old, changed, BEFORE, AFTER, parse_occurrence_map(REMOVAL_MAP))

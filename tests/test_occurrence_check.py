@@ -1,7 +1,7 @@
 import pytest
 
 import occurrence_check
-from cognee_lab.identity.admission import GroupFate, admit
+from cognee_lab.identity.admission import GroupFate, admit, parse_occurrence_map
 from cognee_lab.identity.validation import IntentError
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import DERIVED, Added, NewGroup, Old, World, materialize, oracle
@@ -33,7 +33,11 @@ def test_each_rule_is_needed_by_some_small_world(caught, name):
 def admitted(world):
     case = materialize(world)
     return admit(
-        case["old"], case["new"], case["before"], case["after"], case["general"]
+        case["old"],
+        case["new"],
+        case["before"],
+        case["after"],
+        parse_occurrence_map(case["general"]),
     )
 
 
@@ -77,6 +81,6 @@ def test_a_continuing_group_may_reorder_its_occurrences():
         (("g1", 2),), 0, (NewGroup("g1", "g1", (Old("g1", 0), Old("g1", 1))),)
     )
     case = materialize(world, same_text=True)
-    swapped = {"g1": [["g1", 1], ["g1", 0]]}
+    swapped = parse_occurrence_map({"g1": [["g1", 1], ["g1", 0]]})
     fate = admit(case["old"], case["new"], case["before"], case["after"], swapped)
     assert fate == GroupFate({"g1"}, frozenset(), frozenset())
