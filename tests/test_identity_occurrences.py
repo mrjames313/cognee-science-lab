@@ -13,7 +13,8 @@ from cognee_lab.identity.occurrence_fixture import (
     RETENTION,
     describe_removal,
 )
-from cognee_lab.identity.text_changes import TextChange, admit_remap
+from cognee_lab.identity.admission import admit_remap
+from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
 
 

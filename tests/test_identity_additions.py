@@ -21,11 +21,8 @@ from cognee_lab.identity.occurrence_addition import (
     CONTINUITY,
     describe_addition,
 )
-from cognee_lab.identity.text_changes import (
-    TextChange,
-    admit_remap,
-    check_revision_scoped_ids,
-)
+from cognee_lab.identity.admission import admit_remap, check_revision_scoped_ids
+from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import IntentError, validate_inputs
 
 

@@ -28,13 +28,13 @@ from cognee_lab.identity.captured_text import BEFORE
 from cognee_lab.identity.resolved_retirement import AFTER as RETIRED_AFTER
 from cognee_lab.identity.resolved_retirement import describe_retirement
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
-from cognee_lab.identity.text_changes import (
-    TextChange,
+from cognee_lab.identity.admission import (
     admit_occurrence_regrouping,
     admit_remap,
     check_revision_scoped_ids,
     classify_regrouping,
 )
+from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import (
     IntentError,
     fresh_mention_id,

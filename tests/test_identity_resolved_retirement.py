@@ -15,7 +15,7 @@ from cognee_lab.identity.resolved_retirement import (
     RETENTION,
     describe_retirement,
 )
-from cognee_lab.identity.text_changes import admit_remap
+from cognee_lab.identity.admission import admit_remap
 from cognee_lab.identity.validation import IntentError
 
 

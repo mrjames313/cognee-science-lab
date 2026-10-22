@@ -7,7 +7,8 @@ import pytest
 from pydantic import ValidationError
 
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.text_changes import TextChange, admit_remap
+from cognee_lab.identity.admission import admit_remap
+from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.validation import IntentError, validate_inputs
 
