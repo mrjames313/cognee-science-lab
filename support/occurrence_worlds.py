@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 from itertools import combinations, product
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import fresh_mention_id, text_digest
@@ -19,6 +19,7 @@ FIXTURE = (
     Path(__file__).parents[1]
     / "tests/fixtures/identity/cognee_identity_source_example.json"
 )
+OTHER = "other"
 HELIOS = "8b4bff50-907b-56b6-bc80-3b0a7018714a"
 OLD_SHAPES = ((1,), (2,), (3,), (1, 1), (2, 1), (1, 2), (1, 1, 1))
 OLD_KEYS = ("g1", "g2", "g3")
@@ -29,7 +30,8 @@ FRESH_KEYS = ("n1", "n2", "n3", "n4")
 class World:
     """`old` is the occurrence count per old key. Each new group is
     (key, id_owner, items): id_owner is the old key whose Entity UUID the group
-    carries, or None for the revision-scoped UUID derived from its own key.
+    carries, None for the revision-scoped UUID derived from its own key, or
+    OTHER for a UUID that is neither.
     Items are ("old", key, index) or ("add", n), in new text order."""
 
     old: tuple[tuple[str, int], ...]
@@ -75,22 +77,25 @@ def labelings(old, old_keys, additions, partition):
         if len(set(chosen)) != len(chosen):
             continue
         # Also try every adversarial UUID: each group may carry any old
-        # group's UUID or its own derived one, as long as UUIDs stay distinct.
-        for ids in product([None, *old_keys], repeat=len(groups)):
-            used = [i for i in ids if i is not None]
+        # group's UUID, its own derived one or an unrelated one, as long as
+        # UUIDs stay distinct.
+        for ids in product([None, OTHER, *old_keys], repeat=len(groups)):
+            used = [i for i in ids if i in old_keys]
             if len(set(used)) != len(used):
                 continue
             yield World(old, additions, tuple(zip(chosen, ids, groups)))
 
 
-def oracle(world):
+def oracle(world, first_attempt=True):
     """Decide a world from the group-fate rule alone.
 
     An old group continues only into the new group with its key and UUID that
     receives all of its surviving occurrences and none from another old group
     (strict: no peel-off, and nothing surviving means no continuation). Every
     other old group retires; every other new group is fresh and needs a key
-    and UUID that no old group used.
+    and UUID that no old group used. Only a first attempt also requires the
+    fresh UUID to be the one derived from the group's key; a retry completes a
+    saved plan.
     """
     old_keys = {k for k, _ in world.old}
     survivors = {
@@ -109,11 +114,16 @@ def oracle(world):
         ):
             continuing.add(key)
     fresh = {key for key, _, _ in world.new} - continuing
+    reasons = set()
     for key, owner, _ in world.new:
         if key in fresh and key in old_keys:
-            return ("refuse", "key")
-        if key in fresh and owner is not None:
-            return ("refuse", "uuid")
+            reasons.add("key")
+        if key in fresh and owner in old_keys:
+            reasons.add("unused")
+        if key in fresh and owner == OTHER and first_attempt:
+            reasons.add("derived")
+    if reasons:
+        return ("refuse", frozenset(reasons))
     return (
         "admit",
         frozenset(continuing),
@@ -202,7 +212,13 @@ def materialize(world):
     new = describe(payload, after, 2)
     place = {}
     for key, owner, items in world.new:
-        entity_id = old_id[owner] if owner else fresh_mention_id(identity, 2, key)
+        entity_id = (
+            fresh_mention_id(identity, 2, key)
+            if owner is None
+            else uuid5(identity, f"other:{key}")
+            if owner == OTHER
+            else old_id[owner]
+        )
         new["entity_constructions"][str(entity_id)] = dict(name=key, description=key)
         new["mention_groups"][key] = group(
             entity_id,

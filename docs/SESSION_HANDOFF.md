@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-21 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The captured group split and combination checkpoint is implemented and verified. **Next task:** pick the next step-4 item. The proposed default is mixed occurrence addition and removal, as a concrete case for the user to review before any code. This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-21 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. Checkpoint A of three (the general admitter and its proof, with no behavior change) is complete. **Next task:** Checkpoint B, switching every text change to the general map. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -198,23 +198,49 @@ The `occurrence_regrouping` mode maps each old occurrence to one `[new group, ne
 
 The review added the fresh-ID rule. A fresh group's UUID is `uuid5(identity_data_id, f"mention:r{revision}:{key}")` with the new revision, and both addition and regrouping admission enforce it. Both also require the source revision to be the old revision plus one. The record store keeps only the current revision, so a key-only derivation re-derived a retired UUID when a key returned. The guide explains why the rule is sound and lists the old and new UUIDs. Roots reviewed before this change keep their key-only IDs as history.
 
+### General occurrence map, approved 2026-10-21
+
+The assistant drafted a mixed addition and removal case. The user asked why one edit could not combine the existing operations, and whether every mix of removing and adding would need its own design. It would have, because each admission mode admitted only its own kind of change. On 2026-10-21 the user approved one general map with one set of rules, delivered in three checkpoints.
+
+**The map.** For each old occurrence, in order, the map gives its new place as `[group, index]`, or `null` if it was removed. A new occurrence that nothing maps to is an addition.
+
+**The rules.** They are stated over occurrences and groups, never over kinds of edit.
+
+- Every old group is in the map, and every old occurrence has one entry whose slice matches the old text.
+- Each target exists in the new description, has at most one origin and has the same text. Every new occurrence matches its slice of the new text. The revision advances by one.
+- An old group continues only into the new group with its key and Entity UUID that receives all of its surviving occurrences, at least one, and none from another old group. It may also gain additions.
+- Every other old group retires. Every other new group is fresh. A fresh group needs a key and an Entity UUID that no old group used, and on a first attempt its revision-scoped UUID.
+- `check_carryover` then applies the decision and recipe rules to the continuing, retired and fresh groups.
+
+**The user's policy decisions.**
+
+1. Strict peel-off. If a group keeps some occurrences and others move to another group, the group does not continue. The reviewer declares fresh groups for both parts.
+2. Fresh group when nothing survives. A group whose old occurrences are all removed does not continue, even if new occurrences take its key. The reviewer declares a fresh group with a new key.
+
+**Still refused.** A continuing group whose resolution or meaning changes, a change of representation kind, an occurrence that moves to another document, span-scoped variants and dependent sources.
+
+**Checkpoint A, completed 2026-10-21.** This checkpoint made no change to runtime behavior.
+
+- The admitters moved out of `text_changes.py` into `admission.py`.
+- `admit_general` and `admit_occurrence_map` in `admission.py` implement the rules beside the old modes. No command uses them yet. `to_occurrence_map` writes an old-mode map as the general map.
+- `support/occurrence_worlds.py` enumerates small worlds and has an independent oracle for the rules. A world has up to three old groups, three old occurrences and one addition, with every grouping, key and UUID choice, including an unrelated UUID. `support/occurrence_check.py` checks the admitters against the oracle, and `support/occurrence_mutants.py` holds seven breaks, one per group-fate or UUID rule.
+- The assistant ran `uv run python support/occurrence_check.py` on the user's Mac on 2026-10-21. The general admitter agreed with the oracle on all 540,045 worlds, on a first attempt and on a retry. It refused all 9,447 corrupted maps. Each old mode agreed with the oracle wherever it could express a world, except for 21 scope refusals of an unchanged grouping. The run took 92 s. `--mutants` caught all seven breaks in 5 s.
+- `tests/test_identity_general_map.py` shows that each of the six captured fixtures admits the same edit under its general map as under its old mode. `tests/test_occurrence_check.py` runs a small bound and the mutants in the unit suite.
+
 ### Next task
 
-Pick the next step-4 item. The assistant proposes **mixed occurrence addition and removal** as the default next case. This is a proposal, and the user decides. Do the task in this order:
+Finish the general occurrence map. Run `support/occurrence_check.py` for any change to `admission.py`.
 
-1. Draft the concrete case and give it to the user for approval before you write code. Name each old occurrence that continues, each one that is removed, each addition and each fresh group. Name the captured decisions, the retired groups, the replacement IDs and the facts and evidence to regenerate.
-2. After the user approves the case, implement the smallest captured example. Reuse the whole-document rebuild and the common publisher. Preserve independent doc02 support. Do not infer fact transfer from group continuity.
-3. Add verify journeys in `.claude/skills/verify/features/`, and update "Not yet supported" in `features/README.md`.
-4. Extend the identity-ledger checker if the plan sent to `RecordStore` changes. Follow "Add an operation" in `.claude/skills/identity-ledger/SKILL.md`.
-5. Add a fixture guide under `docs/`. Update this handoff, [ROADMAP.md](../ROADMAP.md) and the integration playbook.
-6. Land the branch through [the landing playbook](../.agents/playbooks/landing-on-main.md).
+1. **Checkpoint B, switch over.** Give `TextChange` one typed `occurrence_map` field and make preflight use the general admitter. Read saved plans with a versioned reader that converts the three old fields with `to_occurrence_map`. Run the ledger check. Then delete the old admitters, the three fields and `select_mode`, and pass general maps from every fixture. `verify.py journey all` must pass with its expectations unchanged.
+2. **Checkpoint C, the mixed case.** The case the user reviewed on 2026-10-21 goes from revision 1 to 2 of doc01. Before: `Helios controller (HC) regulates plasma heating, the controller adjusts coil current, and it limits oscillations.` After: `Helios controller (HC) regulates heating, and it limits oscillations. During startup, the controller remains active.` Both texts end with a newline. g01 keeps `it` ([90,92) to [46,48)), loses `the controller` at [49,63) and gains `the controller` at [86,100). g02 (`plasma`) retires. The map is `{"g01": [null, ["g01", 0]], "g02": [null]}`. Add a `revise-occurrences` command, verify journeys, a native integration test and a fixture guide. Admission code does not change.
+3. Land each checkpoint through [the landing playbook](../.agents/playbooks/landing-on-main.md).
 
 ### Tracked follow-ups
 
 These came out of the 2026-10-21 review. Neither blocks the next case.
 
-- Replace the three nullable map fields on `TextChange` with a tagged union. Parse saved plans with a versioned reader and use typed occurrence references. Merge the removal, addition and regrouping maps into one partial occurrence map. Mixed addition and removal may be the natural place to do this.
-- Move the admitters out of `text_changes.py` into their own module.
+- Replace the three nullable map fields on `TextChange` with one general map and a versioned plan reader. Checkpoint B of the general occurrence map does this.
+- The admitters moved out of `text_changes.py` into `admission.py` on 2026-10-21.
 
 ## Code map
 

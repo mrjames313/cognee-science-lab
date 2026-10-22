@@ -25,6 +25,16 @@ def admit_remap(
         occurrence_continuity=occurrence_continuity,
         occurrence_regrouping=occurrence_regrouping,
     )
+    check_source_identity(old, source, before, after)
+    return ADMITTERS[kind](old, source, before, after, reviewed)
+
+
+def admit_general(old, source, before, after, occurrence_map):
+    check_source_identity(old, source, before, after)
+    return admit_occurrence_map(old, source, before, after, occurrence_map)
+
+
+def check_source_identity(old, source, before, after):
     key = old.original_input_ref
     if (source.dataset_id, source.identity_data_id, source.original_input_ref) != (
         old.dataset_id,
@@ -56,7 +66,6 @@ def admit_remap(
         raise IntentError(
             "source_changed", "Saved text transition fingerprints disagree"
         )
-    return ADMITTERS[kind](old, source, before, after, reviewed)
 
 
 def admit_prefix_shift(old, source, before, after, _):
@@ -460,3 +469,115 @@ def select_mode(**fields):
     if len(chosen) > 1:
         raise IntentError("not_admitted", "Select one occurrence transition mode")
     return chosen[0] if chosen else ("prefix", None)
+
+
+def map_targets(old, source, before, occurrence_map):
+    """Check the map's shape; return each new occurrence's old origin."""
+    if not isinstance(occurrence_map, dict) or set(occurrence_map) != set(
+        old.mention_groups
+    ):
+        raise IntentError("occurrence_changed", "Map every old group")
+    origins = {}
+    for key, previous in old.mention_groups.items():
+        entries = occurrence_map[key]
+        if not isinstance(entries, list) or len(entries) != len(previous.occurrences):
+            raise IntentError(
+                "occurrence_changed", "Map each old occurrence, in order, once"
+            )
+        for index, (occurrence, entry) in enumerate(zip(previous.occurrences, entries)):
+            if before[occurrence.start : occurrence.end] != occurrence.text:
+                raise IntentError(
+                    "occurrence_changed", "Previous occurrence does not match text"
+                )
+            if entry is None:
+                continue
+            if (
+                not isinstance(entry, list)
+                or len(entry) != 2
+                or not isinstance(entry[0], str)
+                or type(entry[1]) is not int
+            ):
+                raise IntentError(
+                    "occurrence_changed",
+                    "Map an old occurrence to null or one [group, index] pair",
+                )
+            target = tuple(entry)
+            group = source.mention_groups.get(target[0])
+            if group is None or not 0 <= target[1] < len(group.occurrences):
+                raise IntentError(
+                    "occurrence_changed", "Mapped occurrence is not in the new source"
+                )
+            if target in origins:
+                raise IntentError(
+                    "occurrence_changed", "A new occurrence has at most one origin"
+                )
+            if group.occurrences[target[1]].text != occurrence.text:
+                raise IntentError(
+                    "occurrence_changed",
+                    "Mapped occurrence text differs from the old occurrence",
+                )
+            origins[target] = (key, index)
+    return origins
+
+
+def continues(old, source, key, origins):
+    """Strict continuation: the same key and UUID receive every surviving old
+    occurrence of the group, at least one, and none from another old group."""
+    current = source.mention_groups.get(key)
+    if current is None:
+        return False
+    previous = old.mention_groups[key]
+    sources = {o[0] for (k, _), o in origins.items() if k == key}
+    survivors = {k for k, o in origins.items() if o[0] == key}
+    return (
+        (current.entity_id, current.document_ref)
+        == (previous.entity_id, previous.document_ref)
+        and sources == {key}
+        and all(k == key for k, _ in survivors)
+    )
+
+
+def check_fresh_keys(old, fresh):
+    if fresh & set(old.mention_groups):
+        raise IntentError(
+            "incompatible_group", "A fresh group needs a key that no old group used"
+        )
+
+
+def admit_occurrence_map(old, source, before, after, occurrence_map):
+    """Admit any reviewed mix of kept, removed, added and regrouped occurrences.
+
+    Rules are stated over occurrences and groups, never over kinds of edit, so
+    removal, addition, split, combination and their mixtures are particular maps.
+    """
+    if not before or not after or before == after:
+        raise IntentError("not_admitted", "A text change requires changed text")
+    check_next_revision(old, source)
+    origins = map_targets(old, source, before, occurrence_map)
+    check_new_slices(source, after)
+    continuing = frozenset(
+        key for key in old.mention_groups if continues(old, source, key, origins)
+    )
+    fresh = frozenset(source.mention_groups) - continuing
+    check_fresh_keys(old, fresh)
+    check_unused_entity_ids(old, source, fresh)
+    check_carryover(old, source, continuing, fresh)
+    return Admission(fresh)
+
+
+def to_occurrence_map(old, kind, reviewed):
+    """Write an old-mode map as the general map that states the same edit."""
+    groups = {k: len(g.occurrences) for k, g in old.mention_groups.items()}
+    if kind == "prefix":
+        return {k: [[k, i] for i in range(n)] for k, n in groups.items()}
+    if kind == "retention":
+        return {
+            k: [
+                [k, reviewed[k].index(i)] if i in reviewed[k] else None
+                for i in range(n)
+            ]
+            for k, n in groups.items()
+        }
+    if kind == "continuity":
+        return {k: [[k, j] for j in reviewed[k]] for k in groups}
+    return {k: [list(pair) for pair in reviewed[k]] for k in groups}

@@ -5,7 +5,7 @@
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
 **Current work:** Stage 6 is in progress. Steps 1–2 have native fixtures. Step 3 demonstrates multi-source withdrawal. Step 4 demonstrates guarded unchanged-text identity corrections and captured prefix edits. Prefix edits use whole-document native rechunking, remapped positions and rebuilt fact evidence. The multi-chunk fixture covers split markers and fact continuations. See the [first-slice guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md).
 
-The [occurrence-removal guide](docs/stage6_identity_occurrence_removal.md) records partial-group retention and empty unresolved-group retirement. The [resolved-group retirement guide](docs/stage6_identity_resolved_retirement.md) records retirement of a local resolution, fact and evidence while independent shared support survives. The [occurrence-addition guide](docs/stage6_identity_occurrence_addition.md) records captured additions and publication of a new group. The [group split guide](docs/stage6_identity_group_split.md) records a captured group split and combination with fresh group IDs. General regrouping, mixed addition/removal, changed interpretations, dependent-source maintenance and complete original-document removal remain unfinished. **Next task:** pick the next step-4 item. The proposed default is a mixed addition/removal case for user review. Earlier investigation entries retain historical wording. [SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) governs the current implementation state.
+The [occurrence-removal guide](docs/stage6_identity_occurrence_removal.md) records partial-group retention and empty unresolved-group retirement. The [resolved-group retirement guide](docs/stage6_identity_resolved_retirement.md) records retirement of a local resolution, fact and evidence while independent shared support survives. The [occurrence-addition guide](docs/stage6_identity_occurrence_addition.md) records captured additions and publication of a new group. The [group split guide](docs/stage6_identity_group_split.md) records a captured group split and combination with fresh group IDs. On 2026-10-21 the user approved one general occurrence map to replace the separate removal, addition and regrouping modes. Its rules are proven against an exhaustive small-world oracle, but no command uses it yet. Changed interpretations, dependent-source maintenance and complete original-document removal remain unfinished. **Next task:** switch text changes to the general map, then add the mixed addition/removal case. Earlier investigation entries retain historical wording. [SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) governs the current implementation state.
 
 This revision reconciles the roadmap with later project decisions and `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores apply only to their recorded experimental snapshots. They do not describe the current live database. “Complete” means the exploration was sufficient to proceed. It does not mean the capability has a production implementation.
 
@@ -24,7 +24,7 @@ For continuation, start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).
 | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
 | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
 | 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
-| 6 | In progress | Guarded corrections, multi-chunk prefix edits, occurrence removal, resolved-group retirement, captured additions/new-group publication and a captured group split/combination are demonstrated in bounded fixtures. Next: pick the next step-4 item (proposed: mixed addition/removal). Changed meaning/general extraction, dependency propagation, original-source lifecycle and standard-entry-point wiring remain unfinished. |
+| 6 | In progress | Guarded corrections, multi-chunk prefix edits, occurrence removal, resolved-group retirement, captured additions/new-group publication and a captured group split/combination are demonstrated in bounded fixtures. A general occurrence map is approved and proven against a small-world oracle. Next: switch text changes to it, then add the mixed addition/removal case. Changed meaning/general extraction, dependency propagation, original-source lifecycle and standard-entry-point wiring remain unfinished. |
 | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
 
 
@@ -782,6 +782,12 @@ Step 5 owns standard B Task-transform Cognify/Remember/full Update/removal hooks
 ## Historical revision record
 
 Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
+
+## Revision record — 2026-10-21 (general occurrence map)
+
+- Recorded the user's approval of one general occurrence map with rules stated over occurrences and groups, and the two policy decisions: strict peel-off, and a fresh group when nothing survives.
+- Recorded Checkpoint A: the general admitter and its bounded exhaustive oracle check, with no runtime behavior change.
+- Set the next task to the switch-over checkpoint, followed by the mixed addition/removal case.
 
 ## Revision record — 2026-10-11
 
