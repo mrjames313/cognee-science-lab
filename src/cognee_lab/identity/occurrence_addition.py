@@ -9,7 +9,7 @@ from .captured_revision import (
     begin_revision,
     declare_group,
     occurrence,
-    require_fresh_doc01,
+    require_root,
     stamp_producer,
 )
 
@@ -22,7 +22,7 @@ ADDITION_MAP = {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}
 
 
 def describe_addition(old, before, chunks):
-    require_fresh_doc01(
+    require_root(
         old,
         before,
         set(ADDITION_MAP),
@@ -49,8 +49,9 @@ def describe_addition(old, before, chunks):
         "the controller",
         "Captured separate local reference group g03.",
         [occurrence(AFTER, "the controller", "the controller limits")],
-        old.mention_resolutions["r01"],
         "addition_review",
+        status="accepted",
+        target=old.mention_resolutions["r01"].target_entity_id,
     )
     stamp_producer(payload, "addition_review")
     bind_chunks(payload, AFTER, chunks)

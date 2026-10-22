@@ -5,7 +5,7 @@ import json
 from .captured_chunks import FACT_TEXT, bind_chunks
 from .captured_revision import (
     begin_revision,
-    require_fresh_doc01,
+    require_root,
     retire_group,
     stamp_producer,
 )
@@ -17,7 +17,7 @@ RETIREMENT_MAP = {"g01": [None, None], "g02": [["g02", 0]]}
 
 
 def describe_retirement(old, before, chunks):
-    require_fresh_doc01(
+    require_root(
         old,
         before,
         set(RETIREMENT_MAP),

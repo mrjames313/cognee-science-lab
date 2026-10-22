@@ -16,13 +16,13 @@ from .captured_revision import (
     begin_revision,
     declare_group,
     occurrence,
-    require_fresh_doc01,
+    require_root,
     retire_group,
     stamp_producer,
 )
 from .captured_text import BEFORE
 from .models import IdentitySource
-from .validation import IntentError, object_digest
+from .validation import object_digest
 
 TO_REUSABLE = "stage6-captured-kind-change-to-reusable"
 HC_ID = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
@@ -40,7 +40,7 @@ REUSABLE_REF = "to_reusable_review"
 def describe_to_mention(old, before, chunks):
     """doc01 drops v01 and the HC recipe; a fresh g09 holds `HC` and resolves to
     the Helios controller. doc02 still declares HC and its own HC variant."""
-    require_fresh_doc01(
+    require_root(
         old,
         before,
         set(TO_MENTION_MAP),
@@ -59,8 +59,9 @@ def describe_to_mention(old, before, chunks):
         "HC (local mention)",
         "Captured document-local mention group g09.",
         [occurrence(BEFORE, "HC")],
-        old.mention_resolutions["r01"],
         MENTION_REF,
+        status="accepted",
+        target=old.mention_resolutions["r01"].target_entity_id,
     )
     stamp_producer(payload, MENTION_REF)
     bind_chunks(payload, BEFORE, chunks)
@@ -70,17 +71,14 @@ def describe_to_mention(old, before, chunks):
 def describe_to_reusable(old, before, chunks):
     """g09 retires. doc01 declares the HC recipe again, reads doc02's HC Entity
     through a corpus input that the new variant v02 lists, and names it in v02."""
-    made = old.producers.get(MENTION_REF)
-    if (
-        old.revision != 2
-        or before != BEFORE
-        or set(old.mention_groups) != set(TO_REUSABLE_MAP)
-        or made is None
-        or made.implementation != TO_MENTION
-    ):
-        raise IntentError(
-            "fixture_scope", "Mention to reusable requires doc01 produced by to-mention"
-        )
+    require_root(
+        old,
+        before,
+        set(TO_REUSABLE_MAP),
+        "Mention to reusable requires doc01 produced by to-mention",
+        revision=2,
+        produced=(MENTION_REF, TO_MENTION),
+    )
     payload = begin_revision(
         old, BEFORE, REUSABLE_REF, TO_REUSABLE, "explicit-mention-to-reusable-v1"
     )

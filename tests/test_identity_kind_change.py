@@ -18,6 +18,7 @@ from cognee_lab.identity.captured_chunks import (
 from cognee_lab.identity.captured_text import BEFORE
 from cognee_lab.identity.kind_change import (
     HC_ID,
+    HC_RECIPE,
     TO_MENTION_MAP,
     TO_REUSABLE_MAP,
     describe_to_mention,
@@ -108,7 +109,7 @@ async def test_the_listed_corpus_input_matches_the_hc_entity_in_the_graph(
 ):
     _, _, reusable, chunk = revisions(source_payload)
     nodes = {
-        str(HC): dict(name="HC", description="Abbreviated reusable form in DOC01."),
+        str(HC): dict(HC_RECIPE),
         str(reusable.inputs["existing_A"].entity_id): dict(
             name="Helios controller", description="Reusable controller identity."
         ),
@@ -154,7 +155,7 @@ async def test_an_hc_entity_that_no_record_lists_must_be_derived(source_payload)
     assert refused.value.code == "entity_uuid_not_derived"
 
 
-async def test_a_listed_hc_entity_that_is_already_a_node_is_not_probed(
+async def test_a_listed_hc_entity_that_is_already_a_node_is_admitted(
     source_payload,
 ):
     _, mention, reusable, _ = revisions(source_payload)

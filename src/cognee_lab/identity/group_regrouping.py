@@ -6,7 +6,7 @@ from .captured_revision import (
     begin_revision,
     declare_group,
     occurrence,
-    require_fresh_doc01,
+    require_root,
     retire_group,
     stamp_producer,
 )
@@ -40,7 +40,7 @@ def place_plasma(payload, after):
 
 
 def describe_split(old, before, chunks):
-    require_fresh_doc01(
+    require_root(
         old,
         before,
         set(SPLIT_MAP),
@@ -54,7 +54,7 @@ def describe_split(old, before, chunks):
         SPLIT,
         "explicit-paragraph-regrouping-v1",
     )
-    resolution = old.mention_resolutions["r01"]
+    target = old.mention_resolutions["r01"].target_entity_id
     retire_group(payload, "g01")
     place_plasma(payload, SPLIT_AFTER)
     for key, rid, text, anchor in SPLIT_FRESH:
@@ -66,8 +66,9 @@ def describe_split(old, before, chunks):
             text,
             f"Captured separate local reference group {key}.",
             [occurrence(SPLIT_AFTER, text, anchor)],
-            resolution,
             ref,
+            status="accepted",
+            target=target,
         )
     stamp_producer(payload, ref)
     bind_chunks(payload, SPLIT_AFTER, chunks)
@@ -94,7 +95,7 @@ def describe_combination(old, before, chunks):
         COMBINATION,
         "explicit-paragraph-combination-v1",
     )
-    resolution = old.mention_resolutions["r04"]
+    target = old.mention_resolutions["r04"].target_entity_id
     retire_group(payload, "g04")
     retire_group(payload, "g05")
     place_plasma(payload, COMBINE_AFTER)
@@ -109,8 +110,9 @@ def describe_combination(old, before, chunks):
             occurrence(COMBINE_AFTER, "the controller"),
             occurrence(COMBINE_AFTER, "it", " it limits"),
         ],
-        resolution,
         ref,
+        status="accepted",
+        target=target,
     )
     stamp_producer(payload, ref)
     bind_chunks(payload, COMBINE_AFTER, chunks)

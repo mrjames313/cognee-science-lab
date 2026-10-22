@@ -8,9 +8,20 @@ from .captured_text import BEFORE
 from .validation import IntentError, fresh_mention_id, text_digest
 
 
-def require_fresh_doc01(old, before, groups, message):
-    """The captured edits apply only to doc01 of a fresh chunked-fixture."""
-    if old.revision != 1 or before != BEFORE or set(old.mention_groups) != groups:
+def require_root(old, before, groups, message, *, revision=1, produced=None):
+    """A captured edit applies only to doc01 of the root it was written for.
+
+    The default is a fresh chunked-fixture at revision 1. `produced` is the
+    (producer ref, implementation) of the edit that must have made `old`.
+    """
+    made = old.producers.get(produced[0]) if produced else None
+    wrong_edit = produced and (made is None or made.implementation != produced[1])
+    if (
+        old.revision != revision
+        or before != BEFORE
+        or set(old.mention_groups) != groups
+        or wrong_edit
+    ):
         raise IntentError("fixture_scope", message)
 
 
@@ -43,10 +54,20 @@ def occurrence(after, text, anchor=None):
 
 
 def declare_group(
-    payload, old, key, rid, name, description, occurrences, resolution, ref
+    payload,
+    old,
+    key,
+    rid,
+    name,
+    description,
+    occurrences,
+    ref,
+    *,
+    status,
+    target=None,
 ):
-    """Declare a fresh group. `resolution` is the reviewed decision it copies,
-    accepted or unresolved, from an old record or one the caller builds."""
+    """Declare a fresh group with its reviewed decision. A target that `old`
+    lists as an input is listed in the decision's `input_refs`."""
     entity_id = str(fresh_mention_id(old.identity_data_id, payload["revision"], key))
     payload["entity_constructions"][entity_id] = dict(
         name=name, description=description
@@ -59,12 +80,23 @@ def declare_group(
         input_refs=[old.original_input_ref],
         producer_ref=ref,
     )
-    payload["mention_resolutions"][rid] = dict(
-        resolution.model_dump(mode="json"),
+    decision = dict(
         group_ref=key,
+        status=status,
+        input_refs=[
+            old.original_input_ref,
+            *(
+                k
+                for k, item in old.inputs.items()
+                if target and getattr(item, "entity_id", None) == target
+            ),
+        ],
         producer_ref=ref,
         explanation=None,
     )
+    if target:
+        decision["target_entity_id"] = str(target)
+    payload["mention_resolutions"][rid] = decision
 
 
 def stamp_producer(payload, ref):

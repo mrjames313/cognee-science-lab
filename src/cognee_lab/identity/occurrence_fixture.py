@@ -25,7 +25,7 @@ from .resolved_retirement import (
 from .captured_revision import (
     begin_revision,
     occurrence,
-    require_fresh_doc01,
+    require_root,
     retire_group,
     stamp_producer,
 )
@@ -42,7 +42,7 @@ MIXED_MAP = REMOVAL_MAP
 
 def keep_g01_retire_g02(old, before, chunks, *, after, occurrences, producer):
     """g01 continues with the captured occurrences; g02 retires."""
-    require_fresh_doc01(
+    require_root(
         old,
         before,
         {"g01", "g02"},
