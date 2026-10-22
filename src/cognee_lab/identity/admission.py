@@ -29,9 +29,11 @@ def admit_remap(
     return ADMITTERS[kind](old, source, before, after, reviewed)
 
 
-def admit_general(old, source, before, after, occurrence_map):
+def admit_general(old, source, before, after, occurrence_map, *, first_attempt=True):
     check_source_identity(old, source, before, after)
-    return admit_occurrence_map(old, source, before, after, occurrence_map)
+    return admit_occurrence_map(
+        old, source, before, after, occurrence_map, first_attempt
+    )
 
 
 def check_source_identity(old, source, before, after):
@@ -471,24 +473,36 @@ def select_mode(**fields):
     return chosen[0] if chosen else ("prefix", None)
 
 
-def map_targets(old, source, before, occurrence_map):
-    """Check the map's shape; return each new occurrence's old origin."""
+@dataclass(frozen=True)
+class GroupFate:
+    continuing: frozenset[str]
+    retired: frozenset[str]
+    fresh: frozenset[str]
+
+
+@dataclass(frozen=True)
+class Origin:
+    """One mapped old occurrence: where it was and where it is now."""
+
+    old_key: str
+    old_index: int
+    new_key: str
+    new_index: int
+
+
+def parse_occurrence_map(old, occurrence_map):
     if not isinstance(occurrence_map, dict) or set(occurrence_map) != set(
         old.mention_groups
     ):
         raise IntentError("occurrence_changed", "Map every old group")
-    origins = {}
+    origins = []
     for key, previous in old.mention_groups.items():
         entries = occurrence_map[key]
         if not isinstance(entries, list) or len(entries) != len(previous.occurrences):
             raise IntentError(
                 "occurrence_changed", "Map each old occurrence, in order, once"
             )
-        for index, (occurrence, entry) in enumerate(zip(previous.occurrences, entries)):
-            if before[occurrence.start : occurrence.end] != occurrence.text:
-                raise IntentError(
-                    "occurrence_changed", "Previous occurrence does not match text"
-                )
+        for index, entry in enumerate(entries):
             if entry is None:
                 continue
             if (
@@ -501,39 +515,81 @@ def map_targets(old, source, before, occurrence_map):
                     "occurrence_changed",
                     "Map an old occurrence to null or one [group, index] pair",
                 )
-            target = tuple(entry)
-            group = source.mention_groups.get(target[0])
-            if group is None or not 0 <= target[1] < len(group.occurrences):
-                raise IntentError(
-                    "occurrence_changed", "Mapped occurrence is not in the new source"
-                )
-            if target in origins:
-                raise IntentError(
-                    "occurrence_changed", "A new occurrence has at most one origin"
-                )
-            if group.occurrences[target[1]].text != occurrence.text:
-                raise IntentError(
-                    "occurrence_changed",
-                    "Mapped occurrence text differs from the old occurrence",
-                )
-            origins[target] = (key, index)
+            origins.append(Origin(key, index, *entry))
     return origins
 
 
-def continues(old, source, key, origins):
-    """Strict continuation: the same key and UUID receive every surviving old
-    occurrence of the group, at least one, and none from another old group."""
-    current = source.mention_groups.get(key)
-    if current is None:
-        return False
-    previous = old.mention_groups[key]
-    sources = {o[0] for (k, _), o in origins.items() if k == key}
-    survivors = {k for k, o in origins.items() if o[0] == key}
-    return (
-        (current.entity_id, current.document_ref)
-        == (previous.entity_id, previous.document_ref)
-        and sources == {key}
-        and all(k == key for k, _ in survivors)
+def check_old_slices(old, before):
+    for group in old.mention_groups.values():
+        if any(before[o.start : o.end] != o.text for o in group.occurrences):
+            raise IntentError(
+                "occurrence_changed", "Previous occurrence does not match text"
+            )
+
+
+def check_targets_exist(source, origins):
+    for o in origins:
+        group = source.mention_groups.get(o.new_key)
+        if group is None or not 0 <= o.new_index < len(group.occurrences):
+            raise IntentError(
+                "occurrence_changed", "Mapped occurrence is not in the new source"
+            )
+
+
+def check_single_origin(origins):
+    targets = [(o.new_key, o.new_index) for o in origins]
+    if len(set(targets)) != len(targets):
+        raise IntentError(
+            "occurrence_changed", "A new occurrence has at most one origin"
+        )
+
+
+def check_same_text(old, source, origins):
+    for o in origins:
+        before = old.mention_groups[o.old_key].occurrences[o.old_index].text
+        if source.mention_groups[o.new_key].occurrences[o.new_index].text != before:
+            raise IntentError(
+                "occurrence_changed",
+                "Mapped occurrence text differs from the old occurrence",
+            )
+
+
+def same_identity(old, source, key):
+    previous, current = old.mention_groups[key], source.mention_groups[key]
+    return (current.entity_id, current.document_ref) == (
+        previous.entity_id,
+        previous.document_ref,
+    )
+
+
+def fed_only_by_itself(key, feeders):
+    return feeders.get(key) == {key}
+
+
+def lands_only_in_itself(key, landings):
+    return landings.get(key, set()) <= {key}
+
+
+def group_fate(old, source, origins):
+    """Strict continuation: an old group continues only into the new group with
+    its key and UUID that receives all of its surviving occurrences, at least
+    one, and none from another old group. Order within a group may change."""
+    feeders, landings = {}, {}
+    for o in origins:
+        feeders.setdefault(o.new_key, set()).add(o.old_key)
+        landings.setdefault(o.old_key, set()).add(o.new_key)
+    continuing = frozenset(
+        key
+        for key in old.mention_groups
+        if key in source.mention_groups
+        and same_identity(old, source, key)
+        and fed_only_by_itself(key, feeders)
+        and lands_only_in_itself(key, landings)
+    )
+    return GroupFate(
+        continuing=continuing,
+        retired=frozenset(old.mention_groups) - continuing,
+        fresh=frozenset(source.mention_groups) - continuing,
     )
 
 
@@ -544,25 +600,30 @@ def check_fresh_keys(old, fresh):
         )
 
 
-def admit_occurrence_map(old, source, before, after, occurrence_map):
+def admit_occurrence_map(old, source, before, after, occurrence_map, first_attempt):
     """Admit any reviewed mix of kept, removed, added and regrouped occurrences.
 
     Rules are stated over occurrences and groups, never over kinds of edit, so
-    removal, addition, split, combination and their mixtures are particular maps.
+    removal, addition, split, combination and their mixtures are particular
+    maps. Only a first attempt chooses fresh UUIDs; a retry completes a saved
+    plan, which may predate the revision-scoped rule.
     """
     if not before or not after or before == after:
         raise IntentError("not_admitted", "A text change requires changed text")
     check_next_revision(old, source)
-    origins = map_targets(old, source, before, occurrence_map)
+    origins = parse_occurrence_map(old, occurrence_map)
+    check_old_slices(old, before)
+    check_targets_exist(source, origins)
+    check_single_origin(origins)
+    check_same_text(old, source, origins)
     check_new_slices(source, after)
-    continuing = frozenset(
-        key for key in old.mention_groups if continues(old, source, key, origins)
-    )
-    fresh = frozenset(source.mention_groups) - continuing
-    check_fresh_keys(old, fresh)
-    check_unused_entity_ids(old, source, fresh)
-    check_carryover(old, source, continuing, fresh)
-    return Admission(fresh)
+    fate = group_fate(old, source, origins)
+    check_fresh_keys(old, fate.fresh)
+    check_unused_entity_ids(old, source, fate.fresh)
+    if first_attempt:
+        check_revision_scoped_ids(old, source, fate.fresh)
+    check_carryover(old, source, fate.continuing, fate.fresh)
+    return fate
 
 
 def to_occurrence_map(old, kind, reviewed):

@@ -8,8 +8,9 @@ and maps; `oracle` decides it from the abstract world alone.
 
 import json
 from dataclasses import dataclass
-from itertools import combinations, product
+from itertools import combinations, permutations, product
 from pathlib import Path
+from typing import NamedTuple
 from uuid import UUID, uuid5
 
 from cognee_lab.identity.models import IdentitySource
@@ -19,24 +20,39 @@ FIXTURE = (
     Path(__file__).parents[1]
     / "tests/fixtures/identity/cognee_identity_source_example.json"
 )
-OTHER = "other"
 HELIOS = "8b4bff50-907b-56b6-bc80-3b0a7018714a"
 OLD_SHAPES = ((1,), (2,), (3,), (1, 1), (2, 1), (1, 2), (1, 1, 1))
 OLD_KEYS = ("g1", "g2", "g3")
 FRESH_KEYS = ("n1", "n2", "n3", "n4")
+# A new group's UUID is the one derived from its own key, an unrelated one, or
+# an old group's UUID, named by that group's key.
+DERIVED = "derived"
+OTHER = "other"
+
+
+class Old(NamedTuple):
+    key: str
+    index: int
+
+
+class Added(NamedTuple):
+    n: int
+
+
+class NewGroup(NamedTuple):
+    key: str
+    uuid: str
+    items: tuple
 
 
 @dataclass(frozen=True)
 class World:
-    """`old` is the occurrence count per old key. Each new group is
-    (key, id_owner, items): id_owner is the old key whose Entity UUID the group
-    carries, None for the revision-scoped UUID derived from its own key, or
-    OTHER for a UUID that is neither.
-    Items are ("old", key, index) or ("add", n), in new text order."""
-
     old: tuple[tuple[str, int], ...]
     additions: int
-    new: tuple[tuple[str, str | None, tuple[tuple, ...]], ...]
+    new: tuple[NewGroup, ...]
+
+    def old_occurrences(self):
+        return [Old(k, i) for k, n in self.old for i in range(n)]
 
 
 def set_partitions(items):
@@ -53,37 +69,27 @@ def set_partitions(items):
 def worlds(shapes=OLD_SHAPES, max_additions=1):
     for shape in shapes:
         old = tuple(zip(OLD_KEYS, shape))
-        occurrences = [("old", k, i) for k, n in old for i in range(n)]
-        old_keys = [k for k, _ in old]
+        occurrences = World(old, 0, ()).old_occurrences()
         for size in range(len(occurrences) + 1):
             for survivors in combinations(occurrences, size):
                 for additions in range(max_additions + 1):
-                    items = [*survivors, *(("add", n) for n in range(additions))]
+                    items = [*survivors, *map(Added, range(additions))]
                     for partition in set_partitions(items):
-                        yield from labelings(old, old_keys, additions, partition)
+                        yield from labelings(old, additions, partition)
 
 
-def labelings(old, old_keys, additions, partition):
-    order = {
-        item: i
-        for i, item in enumerate(
-            [("old", k, i) for k, n in old for i in range(n)]
-            + [("add", n) for n in range(additions)]
-        )
-    }
-    groups = [tuple(sorted(g, key=order.get)) for g in partition]
-    keys = old_keys + list(FRESH_KEYS[: len(groups)])
-    for chosen in product(keys, repeat=len(groups)):
-        if len(set(chosen)) != len(chosen):
-            continue
-        # Also try every adversarial UUID: each group may carry any old
-        # group's UUID, its own derived one or an unrelated one, as long as
-        # UUIDs stay distinct.
-        for ids in product([None, OTHER, *old_keys], repeat=len(groups)):
-            used = [i for i in ids if i in old_keys]
-            if len(set(used)) != len(used):
-                continue
-            yield World(old, additions, tuple(zip(chosen, ids, groups)))
+def text_order(item):
+    return (isinstance(item, Added), item)
+
+
+def labelings(old, additions, partition):
+    old_keys = [k for k, _ in old]
+    groups = [tuple(sorted(g, key=text_order)) for g in partition]
+    for keys in permutations(old_keys + list(FRESH_KEYS[: len(groups)]), len(groups)):
+        for uuids in product([DERIVED, OTHER, *old_keys], repeat=len(groups)):
+            borrowed = [u for u in uuids if u in old_keys]
+            if len(set(borrowed)) == len(borrowed):
+                yield World(old, additions, tuple(map(NewGroup, keys, uuids, groups)))
 
 
 def oracle(world, first_attempt=True):
@@ -99,28 +105,32 @@ def oracle(world, first_attempt=True):
     """
     old_keys = {k for k, _ in world.old}
     survivors = {
-        k: {x[2] for _, _, items in world.new for x in items if x[:2] == ("old", k)}
+        k: {
+            o.index
+            for g in world.new
+            for o in g.items
+            if isinstance(o, Old) and o.key == k
+        }
         for k in old_keys
     }
     continuing = set()
-    for key, owner, items in world.new:
-        sources = {x[1] for x in items if x[0] == "old"}
-        own = {x[2] for x in items if x[0] == "old" and x[1] == key}
+    for group in world.new:
+        old_items = [o for o in group.items if isinstance(o, Old)]
         if (
-            key in old_keys
-            and owner == key
-            and sources == {key}
-            and own == survivors[key]
+            group.key in old_keys
+            and group.uuid == group.key
+            and {o.key for o in old_items} == {group.key}
+            and {o.index for o in old_items} == survivors[group.key]
         ):
-            continuing.add(key)
-    fresh = {key for key, _, _ in world.new} - continuing
+            continuing.add(group.key)
+    fresh = [g for g in world.new if g.key not in continuing]
     reasons = set()
-    for key, owner, _ in world.new:
-        if key in fresh and key in old_keys:
+    for group in fresh:
+        if group.key in old_keys:
             reasons.add("key")
-        if key in fresh and owner in old_keys:
+        if group.uuid in old_keys:
             reasons.add("unused")
-        if key in fresh and owner == OTHER and first_attempt:
+        if group.uuid == OTHER and first_attempt:
             reasons.add("derived")
     if reasons:
         return ("refuse", frozenset(reasons))
@@ -128,29 +138,31 @@ def oracle(world, first_attempt=True):
         "admit",
         frozenset(continuing),
         frozenset(old_keys - continuing),
-        frozenset(fresh),
+        frozenset(g.key for g in fresh),
     )
 
 
-def token(item):
-    return f"o{item[1]}{item[2]}" if item[0] == "old" else f"a{item[1]}"
+def token(item, same_text):
+    if same_text:
+        return "it"
+    return f"o{item.key}{item.index}" if isinstance(item, Old) else f"a{item.n}"
 
 
-def layout(items, prefix=""):
+def layout(items, same_text, prefix=""):
     text, spans = prefix, {}
     for item in items:
-        spans[item] = (len(text), len(text) + len(token(item)))
-        text += token(item) + " "
+        word = token(item, same_text)
+        spans[item] = dict(start=len(text), end=len(text) + len(word), text=word)
+        text += word + " "
     return text.rstrip() + "\n", spans
 
 
 def base_payload():
     payload = json.loads(FIXTURE.read_text())
     payload["mention_groups"], payload["mention_resolutions"] = {}, {}
+    reusable = (HELIOS, payload["variant_assignments"]["v01"]["source_entity_id"])
     payload["entity_constructions"] = {
-        k: v
-        for k, v in payload["entity_constructions"].items()
-        if k in (HELIOS, payload["variant_assignments"]["v01"]["source_entity_id"])
+        k: v for k, v in payload["entity_constructions"].items() if k in reusable
     }
     return payload
 
@@ -184,64 +196,45 @@ def describe(payload, text, revision):
     return payload
 
 
-def materialize(world):
-    """Real old and new descriptions, both texts, the general map and the
-    old-mode maps that can express the world (absent when none can)."""
+def materialize(world, same_text=False):
+    """Real old and new descriptions as JSON payloads and models, both texts,
+    the general map and the old-mode maps that can express the world. With
+    same_text, every occurrence has the same surface text."""
     payload = base_payload()
     identity = UUID(payload["identity_data_id"])
-    old_items = [("old", k, i) for k, n in world.old for i in range(n)]
-    before, old_spans = layout(old_items)
+    before, old_spans = layout(world.old_occurrences(), same_text)
     old_id = {k: fresh_mention_id(identity, 1, k) for k, _ in world.old}
     old = describe(payload, before, 1)
     for key, n in world.old:
         old["entity_constructions"][str(old_id[key])] = dict(name=key, description=key)
         old["mention_groups"][key] = group(
-            old_id[key],
-            [
-                dict(start=a, end=b, text=token(("old", key, i)))
-                for i in range(n)
-                for a, b in [old_spans[("old", key, i)]]
-            ],
+            old_id[key], [old_spans[Old(key, i)] for i in range(n)]
         )
         old["mention_resolutions"][f"r{key}"] = resolution(key)
-    new_items = sorted(
-        (x for _, _, items in world.new for x in items),
-        key=lambda x: (x[0] == "add", x[1:]),
-    )
-    after, new_spans = layout(new_items, prefix="new ")
+    new_items = sorted((o for g in world.new for o in g.items), key=text_order)
+    after, new_spans = layout(new_items, same_text, prefix="new ")
     new = describe(payload, after, 2)
     place = {}
-    for key, owner, items in world.new:
+    for key, uuid, items in world.new:
         entity_id = (
             fresh_mention_id(identity, 2, key)
-            if owner is None
+            if uuid == DERIVED
             else uuid5(identity, f"other:{key}")
-            if owner == OTHER
-            else old_id[owner]
+            if uuid == OTHER
+            else old_id[uuid]
         )
         new["entity_constructions"][str(entity_id)] = dict(name=key, description=key)
-        new["mention_groups"][key] = group(
-            entity_id,
-            [
-                dict(start=a, end=b, text=token(x))
-                for x in items
-                for a, b in [new_spans[x]]
-            ],
-        )
+        new["mention_groups"][key] = group(entity_id, [new_spans[o] for o in items])
         # A group that keeps its old key and UUID keeps its old resolution;
         # any other group declares one fresh resolution.
-        rid = f"r{key}" if owner == key else f"s{key}"
+        rid = f"r{key}" if uuid == key else f"s{key}"
         new["mention_resolutions"][rid] = resolution(key)
-        for index, x in enumerate(items):
-            place[x] = (key, index)
-    general = {
-        key: [
-            list(place[("old", key, i)]) if ("old", key, i) in place else None
-            for i in range(n)
-        ]
-        for key, n in world.old
-    }
+        for index, o in enumerate(items):
+            place[o] = [key, index]
+    general = {key: [place.get(Old(key, i)) for i in range(n)] for key, n in world.old}
     return dict(
+        old_payload=old,
+        new_payload=new,
         old=IdentitySource.model_validate_json(json.dumps(old)),
         new=IdentitySource.model_validate_json(json.dumps(new)),
         before=before,
@@ -252,49 +245,46 @@ def materialize(world):
 
 
 def old_mode_maps(world, place):
+    """Maps for the old admission modes, which checkpoint B deletes. They are
+    keyed by group, so they carry any UUID choice; the admitter judges it."""
     old_keys = {k for k, _ in world.old}
-    everyone = [("old", k, i) for k, n in world.old for i in range(n)]
-    survived = [x for x in everyone if x in place]
-    groups = {key: (owner, items) for key, owner, items in world.new}
-    # Old-mode maps are keyed by group, so they can carry any UUID choice;
-    # the admitter, not expressibility, judges the UUID.
+    everyone = world.old_occurrences()
+    survived = [o for o in everyone if o in place]
+    groups = {g.key: g for g in world.new}
     keeps_own = {
-        key: key in groups and all(place[x][0] == key for x in survived if x[1] == key)
-        for key in old_keys
+        k: k in groups and all(place[o][0] == k for o in survived if o.key == k)
+        for k in old_keys
     }
+    all_survive = len(survived) == len(everyone) and not world.additions
     modes = {}
-    if len(survived) == len(everyone) and not world.additions:
+    if all_survive:
         modes["regrouping"] = {
-            key: [list(place[("old", key, i)]) for i in range(n)]
-            for key, n in world.old
+            k: [place[Old(k, i)] for i in range(n)] for k, n in world.old
         }
-        if (
-            all(keeps_own[k] and len(groups[k][1]) == n for k, n in world.old)
-            and set(groups) == old_keys
+        if set(groups) == old_keys and all(
+            keeps_own[k] and len(groups[k].items) == n for k, n in world.old
         ):
             modes["prefix"] = None
-    if (
-        not world.additions
-        and all(
-            key in old_keys and all(x[0] == "old" and x[1] == key for x in items)
-            for key, _, items in world.new
-        )
-        and all(keeps_own[k] or not any(x[1] == k for x in survived) for k in old_keys)
-    ):
+    only_own = all(
+        g.key in old_keys
+        and all(isinstance(o, Old) and o.key == g.key for o in g.items)
+        for g in world.new
+    )
+    if not world.additions and only_own:
         modes["retention"] = {
-            key: [i for i in range(n) if ("old", key, i) in place]
-            for key, n in world.old
+            k: [i for i in range(n) if Old(k, i) in place] for k, n in world.old
         }
+    only_additions_in_new_keys = all(
+        all(isinstance(o, Added) for o in g.items)
+        for g in world.new
+        if g.key not in old_keys
+    )
     if (
         len(survived) == len(everyone)
-        and all(keeps_own[k] for k in old_keys)
-        and all(
-            all(x[0] == "add" for x in items)
-            for key, _, items in world.new
-            if key not in old_keys
-        )
+        and all(keeps_own.values())
+        and only_additions_in_new_keys
     ):
         modes["continuity"] = {
-            key: [place[("old", key, i)][1] for i in range(n)] for key, n in world.old
+            k: [place[Old(k, i)][1] for i in range(n)] for k, n in world.old
         }
     return modes

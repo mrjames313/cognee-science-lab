@@ -5,7 +5,12 @@ from test_identity_occurrences import example as removal
 from test_identity_regrouping import combine, split
 from test_identity_resolved_retirement import retired_example
 from test_identity_text_changes import example as prefix_edit
-from cognee_lab.identity.admission import admit_general, admit_remap, to_occurrence_map
+from cognee_lab.identity.admission import (
+    GroupFate,
+    admit_general,
+    admit_remap,
+    to_occurrence_map,
+)
 from cognee_lab.identity.captured_text import BEFORE
 from cognee_lab.identity.group_regrouping import (
     COMBINE_AFTER,
@@ -51,23 +56,39 @@ def combination_case(payload):
     return old, new, SPLIT_AFTER, COMBINE_AFTER, "regrouping", COMBINE_REGROUPING
 
 
-# Each captured fixture's edit, stated as the general map a reviewer writes.
+def fate(continuing, retired=(), fresh=()):
+    return GroupFate(frozenset(continuing), frozenset(retired), frozenset(fresh))
+
+
+# Each captured fixture's edit, stated as the general map a reviewer writes,
+# and the group fates it must produce.
 GENERAL_MAPS = {
-    prefix_case: {"g01": [["g01", 0], ["g01", 1]]},
-    removal_case: {"g01": [None, ["g01", 0]], "g02": [None]},
-    retirement_case: {"g01": [None, None], "g02": [["g02", 0]]},
-    addition_case: {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]},
-    split_case: {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]},
-    combination_case: {"g04": [["g06", 0]], "g05": [["g06", 1]], "g02": [["g02", 0]]},
+    prefix_case: ({"g01": [["g01", 0], ["g01", 1]]}, fate({"g01"})),
+    removal_case: ({"g01": [None, ["g01", 0]], "g02": [None]}, fate({"g01"}, {"g02"})),
+    retirement_case: (
+        {"g01": [None, None], "g02": [["g02", 0]]},
+        fate({"g02"}, {"g01"}),
+    ),
+    addition_case: (
+        {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]},
+        fate({"g01", "g02"}, (), {"g03"}),
+    ),
+    split_case: (
+        {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]},
+        fate({"g02"}, {"g01"}, {"g04", "g05"}),
+    ),
+    combination_case: (
+        {"g04": [["g06", 0]], "g05": [["g06", 1]], "g02": [["g02", 0]]},
+        fate({"g02"}, {"g04", "g05"}, {"g06"}),
+    ),
 }
 
 
 @pytest.mark.parametrize("case", GENERAL_MAPS, ids=lambda c: c.__name__)
 def test_each_fixture_admits_the_same_edit_as_a_general_map(source_payload, case):
     old, new, before, after, kind, reviewed = case(source_payload)
-    general = to_occurrence_map(old, kind, reviewed)
-    assert general == GENERAL_MAPS[case]
+    general, expected = GENERAL_MAPS[case]
+    assert to_occurrence_map(old, kind, reviewed) == general
+    assert admit_general(old, new, before, after, general) == expected
     maps = {} if kind == "prefix" else {f"occurrence_{kind}": reviewed}
-    assert admit_general(old, new, before, after, general) == admit_remap(
-        old, new, before, after, **maps
-    )
+    assert admit_remap(old, new, before, after, **maps).fresh == expected.fresh

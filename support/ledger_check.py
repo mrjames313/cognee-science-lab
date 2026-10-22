@@ -346,8 +346,7 @@ def p1_withheld_until_complete(step):
         row = step.obs_after.rows.get(s)
         if served(row) != (ghost.outcome == "current"):
             yield (
-                f"S{s + 1} served={served(row)} but its last attempt is "
-                f"{ghost.outcome}"
+                f"S{s + 1} served={served(row)} but its last attempt is {ghost.outcome}"
             )
         if ghost.outcome == "current" and (
             row["revision"] != ghost.revision

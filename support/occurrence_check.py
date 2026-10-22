@@ -4,24 +4,32 @@ Enumerates every small world in support/occurrence_worlds.py and materializes
 real old and new descriptions. Three checks run:
 
 - The general admitter agrees with the oracle on every world, on a first
-  attempt and on a retry, and refuses every corrupted map.
+  attempt and on a retry. Every admitted world is also checked with all
+  occurrences sharing one surface text, and each of its corruptions must be
+  refused by the rule it breaks.
 - Each old admission mode that can express a world agrees with the oracle
-  wherever it admits, and refuses an oracle-admitted world only with its own
-  "nothing of my kind changed" scope refusal.
-- With --mutants, switching off any one group-fate or UUID rule of the general
-  admitter makes some small world come out wrong.
+  wherever it admits, refuses an oracle-admitted world only with its own
+  "nothing of my kind changed" scope refusal, and converts to the world's
+  general map.
+- With --mutants, switching off any one rule of the general admitter makes
+  some small world come out wrong.
+
+The oracle covers group fate and fresh keys and UUIDs. The shape, slice,
+revision and carryover rules are covered by the corruptions.
 
     uv run python support/occurrence_check.py
     uv run python support/occurrence_check.py --mutants
 """
 
 import argparse
+import json
 import sys
 import time
 from collections import Counter
 from contextlib import contextmanager
 
 from cognee_lab.identity import admission
+from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import IntentError
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import OLD_SHAPES, materialize, oracle, worlds
@@ -42,32 +50,34 @@ REASONS = {
 }
 
 
-def outcome(case, admit, first_attempt=True):
+def outcome(case, admit):
     try:
-        admitted = admit()
-        if first_attempt:
-            admission.check_revision_scoped_ids(
-                case["old"], case["new"], admitted.fresh
-            )
+        fate = admit()
     except IntentError as error:
         reason = next((r for m, r in REASONS.items() if m in str(error)), str(error))
         return ("refuse", reason)
-    continuing = frozenset(case["new"].mention_groups) - admitted.fresh
+    except Exception as error:  # a broken rule can let a bad map reach a lookup
+        return ("crash", repr(error))
+    if isinstance(fate, admission.GroupFate):
+        return ("admit", fate.continuing, fate.retired, fate.fresh)
+    continuing = frozenset(case["new"].mention_groups) - fate.fresh
     return (
         "admit",
         continuing,
         frozenset(case["old"].mention_groups) - continuing,
-        frozenset(admitted.fresh),
+        frozenset(fate.fresh),
     )
 
 
-def general(case, mapping=None):
+def general(case, mapping=None, first_attempt=True, **parts):
+    parts = {**case, **parts}
     return lambda: admission.admit_general(
-        case["old"],
-        case["new"],
-        case["before"],
-        case["after"],
-        case["general"] if mapping is None else mapping,
+        parts["old"],
+        parts["new"],
+        parts["before"],
+        parts["after"],
+        parts["general"] if mapping is None else mapping,
+        first_attempt=first_attempt,
     )
 
 
@@ -80,73 +90,207 @@ def agrees(expected, got):
 def check_general(world, case):
     for first_attempt in (True, False):
         expected = oracle(world, first_attempt)
-        got = outcome(case, general(case), first_attempt)
+        got = outcome(case, general(case, first_attempt=first_attempt))
         setting = "first attempt" if first_attempt else "retry"
         yield f"general {setting}", agrees(expected, got), expected, got
 
 
-def corruptions(case):
-    """Maps that misstate the edit; each must be refused."""
+def rebuilt(payload, change):
+    payload = json.loads(json.dumps(payload))
+    change(payload)
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+def map_corruptions(case, same_text):
+    """Maps that misstate the edit, each with the refusal it must meet. A swap
+    of two same-text occurrences is a legal reorder, not a corruption."""
     mapping = case["general"]
-    targets = [e for entries in mapping.values() for e in entries if e is not None]
     first = next(iter(mapping))
-    yield "group missing", {k: v for k, v in mapping.items() if k != first}
-    yield "entry missing", {**mapping, first: mapping[first][:-1]}
-    yield "malformed entry", {**mapping, first: [[first]] + mapping[first][1:]}
-    if targets:
-        key, entries = next((k, v) for k, v in mapping.items() if any(v))
-        i = next(i for i, e in enumerate(entries) if e is not None)
-        moved = lambda e: {**mapping, key: entries[:i] + [e] + entries[i + 1 :]}
-        yield "index out of range", moved([entries[i][0], 99])
-        yield "unknown group", moved(["zz", 0])
-        others = [t for t in targets if t != entries[i]]
-        if others:
-            yield "two origins", moved(others[0])
-        new = case["new"].mention_groups
-        text = new[entries[i][0]].occurrences[entries[i][1]].text
-        wrong = [
-            [k, j]
-            for k, g in new.items()
-            for j, o in enumerate(g.occurrences)
-            if o.text != text and [k, j] not in targets
-        ]
-        if wrong:
-            yield "different text", moved(wrong[0])
+    yield (
+        "group missing",
+        "Map every old group",
+        {k: v for k, v in mapping.items() if k != first},
+    )
+    yield "entry missing", "in order, once", {**mapping, first: mapping[first][:-1]}
+    yield (
+        "malformed entry",
+        "null or one [group, index]",
+        {**mapping, first: [[first]] + mapping[first][1:]},
+    )
+    entries = [(k, i, e) for k, v in mapping.items() for i, e in enumerate(v)]
+    mapped = [x for x in entries if x[2] is not None]
+    if not mapped:
+        return
+
+    def remap(*changes):
+        result = {k: list(v) for k, v in mapping.items()}
+        for key, index, entry in changes:
+            result[key][index] = entry
+        return result
+
+    key, index, target = mapped[0]
+    yield (
+        "index out of range",
+        "not in the new source",
+        remap((key, index, [target[0], 99])),
+    )
+    yield "unknown group", "not in the new source", remap((key, index, ["zz", 0]))
+    other = next((x for x in entries if x[:2] != (key, index)), None)
+    if other is not None:
+        yield "two origins", "at most one origin", remap((other[0], other[1], target))
+    if len(mapped) > 1 and not same_text:
+        second = mapped[1]
+        yield (
+            "swapped texts",
+            "text differs",
+            remap((key, index, second[2]), (second[0], second[1], target)),
+        )
+
+
+def payload_corruptions(case, fate):
+    """Descriptions that break a slice, revision or carryover rule."""
+    old_payload, new_payload = case["old_payload"], case["new_payload"]
+
+    def shift(occurrence):
+        occurrence.update(start=occurrence["start"] + 1, end=occurrence["end"] + 1)
+
+    yield (
+        "old slice",
+        "Previous occurrence does not match",
+        dict(
+            old=rebuilt(
+                old_payload,
+                lambda p: shift(
+                    next(iter(p["mention_groups"].values()))["occurrences"][0]
+                ),
+            )
+        ),
+    )
+    if new_payload["mention_groups"]:
+        yield (
+            "new slice",
+            "exact document slice",
+            dict(
+                new=rebuilt(
+                    new_payload,
+                    lambda p: shift(
+                        next(iter(p["mention_groups"].values()))["occurrences"][-1]
+                    ),
+                )
+            ),
+        )
+    yield (
+        "revision skipped",
+        "advances exactly one revision",
+        dict(new=rebuilt(new_payload, lambda p: p.update(revision=3))),
+    )
+    yield (
+        "variant changed",
+        "Variant assignments stay unchanged",
+        dict(
+            new=rebuilt(
+                new_payload,
+                lambda p: p["variant_assignments"]["v01"].update(
+                    applicability=dict(kind="corpus")
+                ),
+            )
+        ),
+    )
+    for key in sorted(fate.continuing)[:1]:
+        unresolved = dict(
+            group_ref=key,
+            status="unresolved",
+            input_refs=["doc01"],
+            producer_ref="fixture",
+        )
+        yield (
+            "continuing decision changed",
+            "keeps its reviewed resolutions",
+            dict(
+                new=rebuilt(
+                    new_payload,
+                    lambda p: p["mention_resolutions"].update({f"r{key}": unresolved}),
+                )
+            ),
+        )
+    for key in sorted(fate.fresh)[:1]:
+        yield (
+            "fresh resolution missing",
+            "one resolution per fresh group",
+            dict(
+                new=rebuilt(
+                    new_payload, lambda p: p["mention_resolutions"].pop(f"s{key}")
+                )
+            ),
+        )
+    for key in sorted(fate.retired)[:1]:
+        retired = str(case["old"].mention_groups[key].entity_id)
+        recipe = {retired: dict(name=key, description=key)}
+        yield (
+            "retired recipe kept",
+            "Recipes are the old ones",
+            dict(
+                new=rebuilt(
+                    new_payload, lambda p: p["entity_constructions"].update(recipe)
+                )
+            ),
+        )
 
 
 def check_corruptions(world, case):
-    if oracle(world)[0] != "admit":
+    expected = oracle(world)
+    if expected[0] != "admit":
         return
-    for name, mapping in corruptions(case):
-        got = outcome(case, general(case, mapping))
-        yield f"corrupt: {name}", got[0] == "refuse", ("refuse",), got
+    fate = admission.GroupFate(*expected[1:])
+    same = materialize(world, same_text=True)
+    got = outcome(same, general(same))
+    yield "general same text", got == expected, expected, got
+    for variant, same_text in ((case, False), (same, True)):
+        for name, message, mapping in map_corruptions(variant, same_text):
+            got = outcome(variant, general(variant, mapping))
+            ok = got[0] == "refuse" and message in got[1]
+            yield f"corrupt map: {name}", ok, ("refuse", message), got
+    for name, message, parts in payload_corruptions(case, fate):
+        got = outcome(case, general(case, **parts))
+        ok = got[0] == "refuse" and message in got[1]
+        yield f"corrupt description: {name}", ok, ("refuse", message), got
 
 
 def check_old_modes(world, case):
     expected = oracle(world)
     for mode, mapping in case["modes"].items():
-        maps = {} if mode == "prefix" else {f"occurrence_{mode}": mapping}
-        admit = lambda: admission.admit_remap(
-            case["old"], case["new"], case["before"], case["after"], **maps
+        converted = admission.to_occurrence_map(case["old"], mode, mapping)
+        yield (
+            f"convert {mode}",
+            converted == case["general"],
+            case["general"],
+            converted,
         )
+        maps = {} if mode == "prefix" else {f"occurrence_{mode}": mapping}
+
+        def admit():
+            admitted = admission.admit_remap(
+                case["old"], case["new"], case["before"], case["after"], **maps
+            )
+            admission.check_revision_scoped_ids(
+                case["old"], case["new"], admitted.fresh
+            )
+            return admitted
+
         got = outcome(case, admit)
         if got[0] == "admit" or expected[0] == "refuse":
             ok = got[0] == expected[0] and (got[0] == "refuse" or got == expected)
             yield f"old {mode}", ok, expected, got
         else:
-            yield (
-                f"old {mode} scope refusal",
-                OLD_SCOPE_REFUSALS.get(mode, "\0") in got[1],
-                expected,
-                got,
-            )
+            scope = OLD_SCOPE_REFUSALS.get(mode)
+            ok = scope is not None and scope in got[1]
+            yield f"old {mode} scope refusal", ok, expected, got
 
 
-def run(
-    shapes=OLD_SHAPES,
-    max_additions=1,
-    checks=(check_general, check_corruptions, check_old_modes),
-):
+CHECKS = (check_general, check_corruptions, check_old_modes)
+
+
+def run(shapes=OLD_SHAPES, max_additions=1, checks=CHECKS):
     tally, failures = Counter(), []
     for world in worlds(shapes, max_additions):
         case = materialize(world)
@@ -174,7 +318,7 @@ def run_mutants():
     caught = {}
     for name in MUTANTS:
         with patched(name):
-            _, failures = run(SMALL, checks=(check_general,))
+            _, failures = run(SMALL, checks=(check_general, check_corruptions))
         # Prefer a world the broken admitter wrongly admits over one where only
         # the refusal reason changes.
         admitted = [f for f in failures if f[3][0] == "admit"]
@@ -199,13 +343,14 @@ def main():
         return 1 if missed else 0
     tally, failures = run(max_additions=args.max_additions)
     print(
-        f"worlds={tally['admit'] + tally['refuse']} admitted={tally['admit']} refused={tally['refuse']}"
+        f"worlds={tally['admit'] + tally['refuse']} "
+        f"admitted={tally['admit']} refused={tally['refuse']}"
     )
     for name in sorted(k for k in tally if k not in ("admit", "refuse")):
-        print(f"  {name:<36} {tally[name]}")
+        print(f"  {name:<44} {tally[name]}")
     print(f"seconds={time.monotonic() - started:.1f}")
     for world, name, expected, got in failures[:10]:
-        print(f"FAIL {name}: {world}\n  oracle={expected}\n  got={got}")
+        print(f"FAIL {name}: {world}\n  expected={expected}\n  got={got}")
     print("FAIL" if failures else "PASS")
     return 1 if failures else 0
 
