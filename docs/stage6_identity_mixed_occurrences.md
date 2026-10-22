@@ -46,7 +46,7 @@ It is the same map as the [occurrence removal](stage6_identity_occurrence_remova
 
 ## Facts and evidence
 
-At the `chunked-fixture` budget the native chunker splits the new text into four chunks, at 33, 56 and 90. g01's markers are on chunks 2, 3 and 4: `it` lies in chunk 2, and the added `the controller` at [86,100) crosses from chunk 3 into chunk 4. The whole-document rebuild generates the captured fact `it limits oscillations` again from g01's `it` occurrence at [46,68), with evidence in chunks 2 and 3 only. This is the first fixture where a continuing group's marker chunks and fact chunks differ. The fact edge ID stays the same, because it derives from g01's unchanged mention UUID and the same endpoints. Its evidence moves to the new chunks, and the old chunks and their vectors are retired. doc02's fact and evidence are untouched. Nothing is transferred.
+At the `chunked-fixture` budget the native chunker splits the new text into five chunks: [0,23), [23,46), [46,70), [70,101) and [101,117). g01's markers are on chunks 3 and 4: `it` lies in [46,70), and the added `the controller` at [86,100) lies in [70,101). The whole-document rebuild generates the captured fact `it limits oscillations` again from g01's `it` occurrence at [46,68), with evidence in chunk 3 only. This is the first fixture where a continuing group's marker chunks and fact chunks differ. The fact edge ID stays the same, because it derives from g01's unchanged mention UUID and the same endpoints. Its evidence moves to the new chunks, and the old chunks and their vectors are retired. doc02's fact and evidence are untouched. Nothing is transferred.
 
 ## Run
 
@@ -67,9 +67,9 @@ Expected: two retrieved facts. doc01 is current at saved, registered and verifie
 
 The assistant ran these on the user's Mac on 2026-10-21 and 2026-10-22 with loopback embeddings:
 
-- `tests/test_identity_mixed.py`: admission gives g01 continuing, g02 retired and no fresh group. With the four-chunk split, g01 marks three chunks and its fact uses two. Three wrong maps are refused: one where nothing of g01 survives (`fresh_key_reused`, the user's fresh-group policy), one that keeps g02, and one that maps `the controller` onto `it`.
+- `tests/test_identity_mixed.py`: admission gives g01 continuing, g02 retired and no fresh group. With the native five-chunk split, g01 marks two chunks and its fact uses one. Three wrong maps are refused: one where nothing of g01 survives (`fresh_key_reused`, the user's fresh-group policy), one that keeps g02, and one that maps `the controller` onto `it`.
 - `tests/test_identity_mixed_native.py`: 2 passed (healthy run with reopen and reconcile, and recovery after `replace_published`). It shares its checks with the removal test and adds the marker and fact-chunk counts.
-- Verify journeys O7 (18 checks) and O8 (12 checks for each of two fault stages): 0 FAIL. Each count includes three lab-store guard checks.
+- Verify journeys O7 (17 checks) and O8 (12 checks for each of two fault stages): 0 FAIL. Each count includes three lab-store guard checks.
 
 ## Scope
 

@@ -71,8 +71,9 @@ async def test_one_edit_removes_keeps_and_adds_occurrences(source_payload):
 
 def test_the_added_occurrence_marks_a_chunk_without_fact_evidence(source_payload):
     old, _, _ = mixed(source_payload)
-    # The native chunker splits the mixed text at 33, 56 and 90 at this budget.
-    bounds = [(0, 33), (33, 56), (56, 90), (90, len(MIXED_AFTER))]
+    # The native chunker splits the mixed text at 23, 46, 70 and 101 at the
+    # chunked-fixture budget, as verify journey O7 records.
+    bounds = [(0, 23), (23, 46), (46, 70), (70, 101), (101, len(MIXED_AFTER))]
     chunks = [
         SimpleNamespace(
             id=uuid4(),
@@ -83,12 +84,8 @@ def test_the_added_occurrence_marks_a_chunk_without_fact_evidence(source_payload
         for i, (a, b) in enumerate(bounds)
     ]
     intended = describe_mixed(old, BEFORE, chunks)
-    assert intended.mention_groups["g01"].chunk_refs == [
-        "chunk02",
-        "chunk03",
-        "chunk04",
-    ]
-    assert fact_chunks(intended, chunks) == chunks[1:3]
+    assert intended.mention_groups["g01"].chunk_refs == ["chunk03", "chunk04"]
+    assert fact_chunks(intended, chunks) == [chunks[2]]
 
 
 @pytest.mark.parametrize(

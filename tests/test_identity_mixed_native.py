@@ -11,13 +11,15 @@ from cognee_lab.identity.occurrence_fixture import MIXED_MAP
 STARTUP = dict(start=86, end=100, text="the controller")
 
 
-def check_mixed(before, after):
-    check_continuing_g01(before, after, (IT, STARTUP), MIXED_MAP)
-    # The added occurrence crosses into a chunk that holds no fact evidence, so
+def check_mixed(before, after, *, with_change=True):
+    check_continuing_g01(
+        before, after, (IT, STARTUP), MIXED_MAP, with_change=with_change
+    )
+    # The added occurrence lies in a chunk that holds no fact evidence, so
     # g01's marker chunks and fact chunks differ.
     doc01 = after["sources"]["doc01"]
     markers, facts = doc01["mention_marker_chunk_ids"], doc01["fact_evidence_chunk_ids"]
-    assert len(markers) == 3 and len(facts) == 2
+    assert len(markers) == 2 and len(facts) == 1
     assert set(facts) < set(markers)
 
 
@@ -36,7 +38,7 @@ def test_native_mixed_revision_reopen_and_reconcile(tmp_path):
     )
     command(root, "reconcile", "--source", "doc01")
     reconciled = json.loads((root / "multisource_result.json").read_text())
-    check_mixed(before, reconciled)
+    check_mixed(before, reconciled, with_change=False)
     assert reconciled["sources"] == after["sources"]
 
 

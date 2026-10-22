@@ -11,8 +11,13 @@ from cognee_lab.identity.occurrence_fixture import REMOVAL_MAP
 IT = dict(start=46, end=48, text="it")
 
 
-def check_continuing_g01(before, after, occurrences=(IT,), occurrence_map=REMOVAL_MAP):
-    """g01 continues with the given occurrences and its fact; g02 retires."""
+def check_continuing_g01(
+    before, after, occurrences=(IT,), occurrence_map=REMOVAL_MAP, *, with_change=True
+):
+    """g01 continues with the given occurrences and its fact; g02 retires.
+
+    A healthy reconcile's snapshot reports no text change, so pass
+    with_change=False for it."""
     a, b = after["sources"]["doc01"], after["sources"]["doc02"]
     assert (
         a["saved_revision"] == a["verified_revision"] == a["registered_revision"] == 2
@@ -45,6 +50,9 @@ def check_continuing_g01(before, after, occurrences=(IT,), occurrence_map=REMOVA
         )
         in after["shared_variant"]["contributions"]
     )
+    if not with_change:
+        assert "text_changes" not in after
+        return
     (change,) = after["text_changes"]
     assert change["position_shift"] is None
     assert change["occurrence_map"] == occurrence_map
@@ -75,7 +83,7 @@ def test_native_remove_partial_and_empty_group_reopen_reconcile_withdraw(tmp_pat
     )
     command(root, "reconcile", "--source", "doc01")
     reconciled = json.loads((root / "multisource_result.json").read_text())
-    check_continuing_g01(before, reconciled)
+    check_continuing_g01(before, reconciled, with_change=False)
     # A healthy reconcile must not resurrect the retired group from baseline files.
     assert reconciled["sources"] == after["sources"]
     command(root, "withdraw", "--source", "doc01")

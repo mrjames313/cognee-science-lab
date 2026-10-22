@@ -256,7 +256,7 @@ $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revisi
 $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
-**O7 remove, keep and add in one edit.** Proves `mix`. Guide: mixed occurrences, "Captured edit" and "Run". The occurrence map is `{"g01": [null, ["g01", 0]], "g02": [null]}`, the same map as removal. The guide says g01 keeps its Entity UUID, resolution target and fact ID, and its occurrences become `it` at `[46, 48)` and the added `the controller` at `[86, 100)`. g01 marks three chunks and its fact uses two of them, because the added occurrence reaches a chunk with no fact evidence. It says g02 retires with no Entity, index entry or marker, no group is added, and a healthy `reconcile` keeps all of this.
+**O7 remove, keep and add in one edit.** Proves `mix`. Guide: mixed occurrences, "Captured edit" and "Run". The occurrence map is `{"g01": [null, ["g01", 0]], "g02": [null]}`, the same map as removal. The guide says g01 keeps its Entity UUID, resolution target and fact ID, and its occurrences become `it` at `[46, 48)` and the added `the controller` at `[86, 100)`. g01 marks two chunks and its fact uses one of them, because the added occurrence lies in a chunk with no fact evidence. It says g02 retires with no Entity, index entry or marker, no group is added, and a healthy `reconcile` keeps all of this.
 
 ```bash journey O7
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -274,7 +274,7 @@ $V check "$RUN" mix '.sources.doc01.mention_entity_id == "'"$M01"'" and .sources
 $V check "$RUN" mix '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT01"'"]' 'the g01 fact ID continues'
 $V check "$RUN" mix '.text_changes[0] | .occurrence_map == {"g01": [null, ["g01", 0]], "g02": [null]} and .added_groups == {} and .position_shift == null' 'the occurrence map is the reviewed one, no group is added and the shift is null'
 $V check "$RUN" mix '.text_changes[0].retired_groups.g02 | .entity_present == false and .entity_indexed == false and .marker_present == false' 'g02 has no Entity, index entry or marker'
-$V check "$RUN" mix '.sources.doc01 | (.mention_marker_chunk_ids | length) == 3 and (.fact_evidence_chunk_ids | length) == 2 and (.fact_evidence_chunk_ids - .mention_marker_chunk_ids) == []' 'g01 marks three chunks and its fact uses two of them'
+$V check "$RUN" mix '.sources.doc01 | (.mention_marker_chunk_ids | length) == 2 and (.fact_evidence_chunk_ids | length) == 1 and (.fact_evidence_chunk_ids - .mention_marker_chunk_ids) == []' 'g01 marks two chunks and its fact uses one of them'
 $V check "$RUN" mix '.text_changes[0] | .retired_chunks_absent and .retired_chunk_vectors_absent and .evidence_uses_current_chunks and .mention_ids_preserved' 'retired chunks and vectors are absent and evidence uses current chunks'
 $V check "$RUN" mix '.sources.doc02.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT02"'"]' 'the doc02 fact is unchanged'
 $V check "$RUN" mix '.result.unavailable_sources == [] and .recovery_events == []' 'no unavailable source and no incident'
@@ -282,7 +282,6 @@ $V check "$RUN" mix '.result.unavailable_sources == [] and .recovery_events == [
 $V drive "$RUN" main reconcile -- reconcile --source doc01
 $V check "$RUN" reconcile '.sources.doc01 | .saved_revision == 2 and .verified_revision == 2 and .registered_revision == 2 and .unresolved_marker_present == false and .unresolved_entity_present == false' 'healthy reconcile keeps doc01 at 2/2/2 and does not bring g02 back'
 $V check "$RUN" reconcile '(.result.facts | length) == 2 and .recovery_events == []' 'healthy reconcile keeps two facts and records no incident'
-$V check "$RUN" reconcile '.text_changes[0].retired_groups.g02 | .entity_present == false and .entity_indexed == false and .marker_present == false' 'healthy reconcile keeps g02 retired'
 
 $V drive "$RUN" main reopen -- retrieve
 $V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01"'") | .identity.occurrences[] | [.start, .end, .text]] == [[46, 48, "it"], [86, 100, "the controller"]]' 'a new process returns both doc01 occurrences'
