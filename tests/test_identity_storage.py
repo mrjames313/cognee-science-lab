@@ -160,7 +160,7 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
     await store.complete(partial, attempt, state="withdrawn")
     with pytest.raises(IntentError, match="Withdrawn source"):
         await store.begin(partial, expected_revision=1, plan=plan, method="forget")
-    with pytest.raises(IntentError, match="Reconcile a saved publication"):
+    with pytest.raises(IntentError, match="advance it through replacement"):
         await store.begin(
             source.model_copy(update={"revision": 3}), expected_revision=2, plan={}
         )

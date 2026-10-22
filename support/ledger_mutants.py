@@ -139,10 +139,10 @@ MUTANTS = {
     "publish-restarts-saved-row": Mutant(
         '                if row.state != "forgotten":\n'
         "                    raise IntentError(\n"
-        '                        "recovery_choice", "Reconcile a saved publication explicitly"\n',
+        '                        "recovery_choice",\n',
         "                if False:\n"
         "                    raise IntentError(\n"
-        '                        "recovery_choice", "Reconcile a saved publication explicitly"\n',
+        '                        "recovery_choice",\n',
         "P5",
     ),
     "readd-at-forgotten-revision": Mutant(

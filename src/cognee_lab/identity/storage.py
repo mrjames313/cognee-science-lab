@@ -175,7 +175,8 @@ class RecordStore:
                 # A publication starts a lineage: from no row, or again after forget.
                 if row.state != "forgotten":
                     raise IntentError(
-                        "recovery_choice", "Reconcile a saved publication explicitly"
+                        "recovery_choice",
+                        "Reconcile a saved revision, or advance it through replacement",
                     )
                 if source.revision != actual_revision + 1:
                     raise IntentError(
