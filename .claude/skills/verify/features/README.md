@@ -21,7 +21,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - **Fence.** A journey is a fenced block with the info string `bash journey ID [stages=a,b,c] [env]`. The block holds only `drive`, `check` and shell lines. It never defines `V`, `RUN`, `val` or a cleanup.
 - **Stages.** `stages=` lists the fault stages. The runner sets `STAGE` for each one, in its own run. `--stage S` runs one.
 - **env.** The `env` token marks a journey that calls the embedding API.
-- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes and `G` is group regrouping. The `E` journeys live in the revision file.
+- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes, `G` is group regrouping, `I` is changed interpretation and `K` is kind change. The `E` journeys live in the revision file, and the `I` and `K` journeys live in the reinterpretation file.
 - **Fault journeys.** A fault journey lives with the feature that it breaks.
 - **Cited values.** Every expected value comes from a guide under `docs/` or from `docs/SESSION_HANDOFF.md`. An inference from a guide says so in the paragraph.
 - **Non-vacuous checks.** A check on a field requires the field to exist. Use `length > 0`, a type test or `!= null` where a missing field would otherwise pass.
@@ -53,6 +53,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - [Revision and text edits](./revision-and-text-edits.md) covers `revise` and `edit-text` on one chunk and on many chunks, with every documented fault stage and its recovery.
 - [Occurrence changes](./occurrence-changes.md) covers `remove-occurrences`, `retire-resolved-group`, `add-occurrences` and `revise-occurrences`, each with its recovery case.
 - [Group regrouping](./group-regrouping.md) covers `split-group` and `combine-groups`, each with its `replace_published` recovery case.
+- [Reinterpretation](./reinterpretation.md) covers `reinterpret` (both cases), `change-kind` (both directions), their recovery cases and their scope refusals.
 
 There is no separate failure-recovery file. Every fault journey lives with the feature that it breaks, so the recovery steps stay next to the happy path that they restore.
 
@@ -61,7 +62,7 @@ There is no separate failure-recovery file. Every fault journey lives with the f
 These are current refusals or gaps. They are not journeys. Do not write a journey that expects them to work.
 
 - Mixed removal and addition has one captured case, `revise-occurrences`. Commands do not locate arbitrary phrases or infer an occurrence map (`docs/stage6_identity_mixed_occurrences.md`).
-- Representation-kind changes, new reusable identities in an addition, and changed interpretations are not supported.
+- Changed interpretation and representation-kind changes work only as the four captured cases of `reinterpret` and `change-kind`. Other kind changes, other changed interpretations, a corpus-scoped variant change in a text edit and a retargeted continuing group in a text edit stay refused (`docs/stage6_identity_reinterpretation.md`).
 - An edit that would affect a dependent saved identity source is refused before it changes anything. Automatic reconsideration of that source does not exist (`docs/stage6_identity_text_changes.md`).
 - Arbitrary text edits are not supported. `edit-text` applies only the captured prefix insertion, and the removal, retirement, addition, split and combination commands apply only their captured edits (`docs/stage6_identity_group_split.md` for the last two).
 - Identity withdrawal is not a full source Forget. It keeps the original Data, its facts, markers and evidence.

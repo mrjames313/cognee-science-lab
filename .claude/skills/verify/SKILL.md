@@ -15,7 +15,7 @@ The product surface is a CLI that writes to real Cognee stores (Ladybug graph, L
 uv run python -m cognee_lab.identity <command> --root <dir> [--source doc01|doc02] [--expected-revision N] [--fault-stage STAGE] [--query TEXT]
 ```
 
-Commands: `fixture`, `multi-fixture`, `chunked-fixture` (create a root, with `--embedding env|loopback`), `revise`, `edit-text`, `remove-occurrences`, `retire-resolved-group`, `add-occurrences`, `split-group`, `combine-groups` (maintenance commands that need `--expected-revision`), `withdraw`, `retrieve`, `status`, `reconcile`. The fixtures use captured decisions and make no LLM call.
+Commands: `fixture`, `multi-fixture`, `chunked-fixture` (create a root, with `--embedding env|loopback`), `revise`, `edit-text`, `remove-occurrences`, `retire-resolved-group`, `add-occurrences`, `split-group`, `combine-groups`, `reinterpret --case new-entity|unresolved`, `change-kind --direction to-mention|to-reusable` (maintenance commands that need `--expected-revision`), `withdraw`, `retrieve`, `status`, `reconcile`. The fixtures use captured decisions and make no LLM call.
 
 Other surfaces, not covered here: `main.py` is a stub. `scripts/stage1_*` to `stage5_*` are historical lab experiments that need API keys and the shared lab store. Do not drive them for verification. `uv run pytest` is the test suite. It complements this skill and does not replace it.
 
