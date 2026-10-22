@@ -1,4 +1,4 @@
-"""Captured occurrence removal; explicit review, not a Describe matcher."""
+"""Captured occurrence edits on doc01; explicit review, not a Describe matcher."""
 
 import json
 from dataclasses import dataclass
@@ -25,29 +25,38 @@ from .validation import IntentError, text_digest
 
 AFTER = "Helios controller (HC) regulates heating, and it limits oscillations.\n"
 REMOVAL_MAP = {"g01": [None, ["g01", 0]], "g02": [None]}
+# The mixed edit drops `the controller` and `plasma`, keeps `it`, and adds a
+# startup reference to g01. Its map equals the removal map: the addition is the
+# new occurrence that no old occurrence maps to.
+MIXED_AFTER = AFTER.rstrip("\n") + " During startup, the controller remains active.\n"
+MIXED_MAP = {"g01": [None, ["g01", 0]], "g02": [None]}
 
 
-def describe_removal(old, before, chunks):
-    if before != BEFORE or set(old.mention_groups) != set(REMOVAL_MAP):
+def occurrence(text, phrase, anchor=None):
+    anchor = anchor or phrase
+    start = text.index(anchor) + anchor.index(phrase)
+    return dict(start=start, end=start + len(phrase), text=phrase)
+
+
+def revise_doc01(old, before, chunks, after, occurrences, implementation, policy):
+    """Keep g01 with the captured occurrences and retire g02."""
+    if before != BEFORE or set(old.mention_groups) != {"g01", "g02"}:
         raise IntentError(
             "fixture_scope",
-            "Use doc01 of a fresh chunked-fixture for captured occurrence removal",
+            "Use doc01 of a fresh chunked-fixture for this captured edit",
         )
     payload = old.model_dump(mode="json")
     payload["revision"] += 1
-    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(AFTER)
+    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(after)
     payload["producers"]["occurrence_review"] = dict(
         method="captured_fixture",
-        implementation="stage6-captured-occurrence-removal",
+        implementation=implementation,
         version="0.1",
-        configuration={"policy": "explicit-survivors-unchanged-binding-v1"},
+        configuration={"policy": policy},
         run_id=None,
     )
     # Positions and continuity are captured example input, never nearest-text matching.
-    start = len("Helios controller (HC) regulates heating, and ")
-    payload["mention_groups"]["g01"]["occurrences"] = [
-        dict(start=start, end=start + 2, text="it")
-    ]
+    payload["mention_groups"]["g01"]["occurrences"] = occurrences
     retired = payload["mention_groups"].pop("g02")["entity_id"]
     payload["entity_constructions"].pop(retired)
     payload["mention_resolutions"] = {
@@ -61,8 +70,35 @@ def describe_removal(old, before, chunks):
         *payload["variant_assignments"].values(),
     ]:
         item["producer_ref"] = "occurrence_review"
-    bind_chunks(payload, AFTER, chunks)
+    bind_chunks(payload, after, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+def describe_removal(old, before, chunks):
+    return revise_doc01(
+        old,
+        before,
+        chunks,
+        AFTER,
+        [occurrence(AFTER, "it", "it limits")],
+        "stage6-captured-occurrence-removal",
+        "explicit-survivors-unchanged-binding-v1",
+    )
+
+
+def describe_mixed(old, before, chunks):
+    return revise_doc01(
+        old,
+        before,
+        chunks,
+        MIXED_AFTER,
+        [
+            occurrence(MIXED_AFTER, "it", "it limits"),
+            occurrence(MIXED_AFTER, "the controller", "the controller remains"),
+        ],
+        "stage6-captured-occurrence-revision",
+        "explicit-occurrence-map-v1",
+    )
 
 
 @dataclass(frozen=True)
@@ -79,6 +115,12 @@ COMMANDS = {
         describe_removal,
         "occurrence_revision_result.json",
         REMOVAL_MAP,
+    ),
+    "revise-occurrences": OccurrenceCommand(
+        MIXED_AFTER,
+        describe_mixed,
+        "occurrence_mix_result.json",
+        MIXED_MAP,
     ),
     "retire-resolved-group": OccurrenceCommand(
         retired_text,

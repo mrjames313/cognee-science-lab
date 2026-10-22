@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-21 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. Checkpoints A (the general admitter and its proof) and B (every text change switched to the general map, old modes deleted) are complete. **Next task:** Checkpoint C, the captured mixed addition and removal case. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). **Next task:** pick the next step-4 item with the user. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -11,7 +11,7 @@ Read this document first, then:
 1. [ROADMAP.md](../ROADMAP.md): project stages and current scope.
 2. [Stage-6 architecture/contract](../results/cognee_identity_stage6_handoff.md): physical representation, ownership, continuity, recovery and original six-step build order. Its dated implementation subsections are checkpoint history.
 3. [R1–R6 requirements](../results/cognee_stage5_4_5_requirements_review.md): outcome constraints, not a claim of complete coverage.
-4. [Latest fixture guide](stage6_identity_group_split.md), followed by the earlier guides linked below for individual commands.
+4. [Latest fixture guide](stage6_identity_mixed_occurrences.md), followed by the earlier guides linked below for individual commands.
 5. [Integration playbook](../results/cognee_knowledge_integration_playbook.md): findings tagged with Describe/Publish/Maintain/Retrieve and transfer questions for other integrations.
 
 The [representation decision record](../results/cognee_stage5_4_5_identity_representation_proposal.md) and [pinned native extension reference](../results/cognee_extension_architecture_reference_v1.6.2.md) explain rationale and native behavior. Do not treat their early dated “next” or “not implemented at that checkpoint” statements as current implementation status. The roadmap and this handoff identify current work; later explicit approved scope changes supersede earlier proposals.
@@ -68,6 +68,7 @@ At session start, inspect `git status --short`, `git log -1 --oneline`, the file
 | Partial/empty unresolved groups | Explicit old-occurrence retention indices, stable continuing group, retirement of empty unresolved group/node/vector/markers, independent support preserved | [Occurrence removal](stage6_identity_occurrence_removal.md) |
 | Empty resolved fact-bearing group | Retire saved group/resolution/declaration, physical mention/node vector, resolution link, local fact/evidence/markers; preserve doc02's distinct fact and shared endpoint/index | [Resolved retirement](stage6_identity_resolved_retirement.md) |
 | Occurrence additions and new group | Explicit old-to-new continuity, stable continuing IDs/fresh same-text local group, accepted link and new original-owned local fact/evidence, reopen/reconcile and explicit recovery | [Occurrence addition](stage6_identity_occurrence_addition.md) |
+| Mixed occurrence revision | One edit keeps `it`, removes `the controller`, adds a startup `the controller` to continuing g01 and retires g02, through the general occurrence map with no admission change; reopen/reconcile and explicit recovery | [Mixed occurrences](stage6_identity_mixed_occurrences.md) |
 | Group split and combination | Explicit `occurrence_regrouping` map; g01 splits into fresh g04 and g05, then g04 and g05 combine into fresh g06; retired groups, links, facts, evidence and triplets physically removed; facts generated again from the fresh groups, never transferred; fresh IDs from source, new revision and key; reopen/reconcile and explicit recovery | [Group split](stage6_identity_group_split.md) |
 
 ### Tests run in the generation environment
@@ -181,7 +182,7 @@ This is **step 4 within Stage 6**, not project Stage 4.
 
 ### Remaining step-4 work
 
-1. **Occurrence/group changes:** mixed addition/removal, representation-kind changes using separate suitable Entities, and broader addition and regrouping cases. Captured continuing-group additions, new-group publication, unresolved/resolved removal and one captured split and combination are implemented. Their fixtures do not establish general regrouping or automatic matching.
+1. **Occurrence/group changes:** representation-kind changes using separate suitable Entities. One general occurrence map now admits every mix of kept, removed, added and regrouped occurrences (2026-10-21), with captured fixtures for removal, retirement, addition, split, combination and one mixed edit. Those fixtures do not establish automatic matching or Describe.
 2. **Changed interpretation and semantic refresh:** edits changing a referent/definition/scope, with coordinated saved decisions and regenerated facts/evidence. Existing unchanged-text retargeting and captured same-binding edits do not establish this generally.
 3. **Dependencies:** identify and reconsider affected sources that consumed another document, corpus fields or saved records; support admitted span/record remapping. Current code rejects known dependent-document text edits rather than silently propagating them. New-corpus opportunity selection is not solved by positive dependencies alone.
 4. **Full source lifecycle:** coordinate original removal with generated-source retirement, generated-source rebuild and authorized endpoint reconstruction; preserve remaining owners and distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal alone keeps Data/description and original facts; it is not full source Forget.
@@ -238,12 +239,15 @@ The assistant drafted a mixed addition and removal case. The user asked why one 
 - Result JSON reports `occurrence_map` instead of the three mode fields. `decision_method` is now a list of the producers that the revision's groups and decisions cite. `position_shift` is set only when every occurrence moved by the prefix length. Fixture maps are `REMOVAL_MAP`, `RETIREMENT_MAP`, `ADDITION_MAP`, `SPLIT_MAP` and `COMBINE_MAP`.
 - Evidence, run by the assistant on the user's Mac on 2026-10-21: 264 unit tests passed. `support/occurrence_check.py` agreed with the oracle on all 540,045 worlds, and 29,793 corruptions each met their rule's refusal (91.6 s). `--mutants` caught all 20 breaks. The ledger check passed with `PINNED` unchanged at 3828 nodes and 3717 sequences. `verify.py journey all` gave 695 PASS and 0 FAIL in 34 runs (285 s). Its only expectation changes were the seven checks that read the old map fields, which now read `occurrence_map`. The 23 native integration tests in the seven touched test files passed (465 s). Two thermo reviews found no high or medium bug; their fixes are in the branch.
 
+**Checkpoint C, completed 2026-10-22.** `revise-occurrences` publishes the case the user reviewed on 2026-10-21. g01 keeps `it` ([90,92) to [46,48)), loses `the controller` at [49,63) and gains `the controller` at [86,100); g02 retires. Its map, `{"g01": [null, ["g01", 0]], "g02": [null]}`, equals the removal map, because a map states only where old occurrences went. No admission code changed. `describe_mixed` and `describe_removal` share `revise_doc01` in `occurrence_fixture.py`. The [mixed occurrences guide](stage6_identity_mixed_occurrences.md) has the texts, decisions, run and evidence. Evidence, by the assistant on the user's Mac on 2026-10-21 and 2026-10-22: 266 unit tests passed; `tests/test_identity_mixed_native.py` 2 passed; verify journeys O7 and O8 gave 0 FAIL.
+
 ### Next task
 
-Finish the general occurrence map with the mixed case. Run `support/occurrence_check.py` for any change to `admission.py`.
+Pick the next step-4 item with the user, as a concrete case to review before any code. Run `support/occurrence_check.py` for any change to `admission.py`. The remaining step-4 items are listed above. The general map leaves these refused, and each is a separate semantic decision rather than another mix of adding and removing:
 
-1. **Checkpoint C, the mixed case.** The case the user reviewed on 2026-10-21 goes from revision 1 to 2 of doc01. Before: `Helios controller (HC) regulates plasma heating, the controller adjusts coil current, and it limits oscillations.` After: `Helios controller (HC) regulates heating, and it limits oscillations. During startup, the controller remains active.` Both texts end with a newline. g01 keeps `it` ([90,92) to [46,48)), loses `the controller` at [49,63) and gains `the controller` at [86,100). g02 (`plasma`) retires. The map is `{"g01": [null, ["g01", 0]], "g02": [null]}`. Add a `revise-occurrences` command, verify journeys, a native integration test and a fixture guide. Admission code does not change.
-2. Land it through [the landing playbook](../.agents/playbooks/landing-on-main.md).
+- A continuing group whose resolution or meaning changes (step-4 item 2, changed interpretation).
+- A change of representation kind, using separate suitable Entities.
+- An occurrence that moves to another document, span-scoped variants, and dependent sources (step-4 item 3).
 
 ### Tracked follow-ups
 

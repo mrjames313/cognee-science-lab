@@ -334,3 +334,12 @@ The assistant ran the evidence on the user's Mac on 2026-10-21. At Checkpoint A 
 | A rule that model validation guarantees is untestable. | M | Splitting carryover into one function per rule showed that "every resolution belongs to a continuing or fresh group" could never fail, because the model already requires every resolution to name a group. It was dropped. | When each rule must be shown necessary, a rule that no corruption can break is either redundant or tested in the wrong place. |
 
 The assistant ran the evidence on the user's Mac on 2026-10-21. `verify.py journey all` gave 695 PASS and 0 FAIL through the native stores with every text change on the general map. The rule check covered 540,045 worlds and 29,793 corruptions, and caught 20 of 20 rule breaks.
+
+## Mixed occurrence revision — 2026-10-22
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| A mixed edit needs no new rule once the rules are stated over records. | D, P, M | One doc01 edit keeps `it`, removes `the controller`, adds a startup `the controller` to the continuing group and retires g02. Only a new describer, command, tests and journeys were added; admission did not change. | When a general rule set exists, a new combination of changes should cost a fixture, not a code path. If it needs a code path, the rules are still stated over kinds of change. |
+| A map states provenance, not the final state. | D | The mixed edit's map equals the removal edit's map. The two differ only in the new description, where the addition is the occurrence nothing maps to. | Keep "where each old record went" separate from "what the new set contains"; the second is checked against the first, not inferred from it. |
+
+The assistant ran the evidence on the user's Mac on 2026-10-21 and 2026-10-22 with loopback embeddings: unit tests, two native integration tests and verify journeys O7 and O8 with 0 FAIL. The [mixed occurrences guide](../docs/stage6_identity_mixed_occurrences.md) records the commands.

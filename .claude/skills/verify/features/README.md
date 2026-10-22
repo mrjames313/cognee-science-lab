@@ -51,7 +51,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - [Publication and retrieval](./publication-and-retrieval.md) covers `fixture`, `multi-fixture`, `chunked-fixture`, reopened `retrieve`, healthy `reconcile`, `status`, and a failed first publication with its recovery. One journey uses `--embedding env`.
 - [Multi-source withdrawal](./multi-source-withdrawal.md) covers `withdraw` in both orders, repeated withdrawal, and a withdrawal fault with its retry.
 - [Revision and text edits](./revision-and-text-edits.md) covers `revise` and `edit-text` on one chunk and on many chunks, with every documented fault stage and its recovery.
-- [Occurrence changes](./occurrence-changes.md) covers `remove-occurrences`, `retire-resolved-group` and `add-occurrences`, each with its recovery case.
+- [Occurrence changes](./occurrence-changes.md) covers `remove-occurrences`, `retire-resolved-group`, `add-occurrences` and `revise-occurrences`, each with its recovery case.
 - [Group regrouping](./group-regrouping.md) covers `split-group` and `combine-groups`, each with its `replace_published` recovery case.
 
 There is no separate failure-recovery file. Every fault journey lives with the feature that it breaks, so the recovery steps stay next to the happy path that they restore.
@@ -60,7 +60,7 @@ There is no separate failure-recovery file. Every fault journey lives with the f
 
 These are current refusals or gaps. They are not journeys. Do not write a journey that expects them to work.
 
-- No command makes a mixed removal and addition yet. The general occurrence map admits one, and checkpoint C adds the captured case (`docs/SESSION_HANDOFF.md`).
+- Mixed removal and addition has one captured case, `revise-occurrences`. Commands do not locate arbitrary phrases or infer an occurrence map (`docs/stage6_identity_mixed_occurrences.md`).
 - Representation-kind changes, new reusable identities in an addition, and changed interpretations are not supported.
 - An edit that would affect a dependent saved identity source is refused before it changes anything. Automatic reconsideration of that source does not exist (`docs/stage6_identity_text_changes.md`).
 - Arbitrary text edits are not supported. `edit-text` applies only the captured prefix insertion, and the removal, retirement, addition, split and combination commands apply only their captured edits (`docs/stage6_identity_group_split.md` for the last two).

@@ -1,8 +1,8 @@
 # Occurrence changes
 
-A user changes which text spans belong to doc01's mention groups on a `chunked-fixture` root. `remove-occurrences` drops an occurrence and retires an empty unresolved group. `retire-resolved-group` retires a resolved group with its local fact. `add-occurrences` adds an occurrence to a continuing group and publishes a new local group. Each command guards on the saved revision, rebuilds doc01 from the captured replacement text, and leaves doc02 at revision 1. An interrupted run withholds doc01 until `reconcile` finishes it.
+A user changes which text spans belong to doc01's mention groups on a `chunked-fixture` root. `remove-occurrences` drops an occurrence and retires an empty unresolved group. `retire-resolved-group` retires a resolved group with its local fact. `add-occurrences` adds an occurrence to a continuing group and publishes a new local group. `revise-occurrences` removes, keeps and adds occurrences in one edit. Each command guards on the saved revision, rebuilds doc01 from the captured replacement text, and leaves doc02 at revision 1. An interrupted run withholds doc01 until `reconcile` finishes it.
 
-Guides: `docs/stage6_identity_occurrence_removal.md`, `docs/stage6_identity_resolved_retirement.md`, `docs/stage6_identity_occurrence_addition.md`. The state after a user's Mac run is in `docs/SESSION_HANDOFF.md`, "Results verified on the user's Mac".
+Guides: `docs/stage6_identity_occurrence_removal.md`, `docs/stage6_identity_resolved_retirement.md`, `docs/stage6_identity_occurrence_addition.md`, `docs/stage6_identity_mixed_occurrences.md`. The state after a user's Mac run is in `docs/SESSION_HANDOFF.md`, "Results verified on the user's Mac".
 
 ## Sub-features
 
@@ -13,11 +13,13 @@ Guides: `docs/stage6_identity_occurrence_removal.md`, `docs/stage6_identity_reso
 - `add-continuing` adds an occurrence to g01 and a new group g03 with its own local fact.
 - `add-follow-up` runs a later prefix edit and a withdrawal after an addition.
 - `add-fault` recovers from an injected failure during an addition.
+- `mix` removes, keeps and adds occurrences of g01 in one edit and retires g02.
+- `mix-fault` recovers from an injected failure during the mixed edit.
 
 ## How to get to it (user POV)
 
 - Run `uv run python -m cognee_lab.identity chunked-fixture --root <new dir>`.
-- Run `remove-occurrences`, `retire-resolved-group` or `add-occurrences` with `--root <dir> --source doc01 --expected-revision 1`.
+- Run `remove-occurrences`, `retire-resolved-group`, `add-occurrences` or `revise-occurrences` with `--root <dir> --source doc01 --expected-revision 1`.
 - Add `--fault-stage replace_published` or `--fault-stage text_chunks` to inject a failure.
 - Run `retrieve`, `status` and `reconcile --source doc01` against the same root.
 
@@ -254,11 +256,67 @@ $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revisi
 $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
+**O7 remove, keep and add in one edit.** Proves `mix`. Guide: mixed occurrences, "Captured edit" and "Run". The occurrence map is `{"g01": [null, ["g01", 0]], "g02": [null]}`, the same map as removal. The guide says g01 keeps its Entity UUID, resolution target and fact ID, and its occurrences become `it` at `[46, 48)` and the added `the controller` at `[86, 100)`. It says g02 retires with no Entity, index entry or marker, no group is added, and a healthy `reconcile` keeps all of this.
+
+```bash journey O7
+$V drive "$RUN" main fixture -- chunked-fixture
+D01=$(val fixture '.sources.doc01.identity_data_id')
+M01=$(val fixture '.sources.doc01.mention_entity_id')
+T01=$(val fixture '.sources.doc01.resolution_target_entity_id')
+FACT01=$(val fixture '.sources.doc01.identity_data_id as $d | .result.facts[] | select(.identity.identity_data_id == $d) | .edge_id')
+FACT02=$(val fixture '.sources.doc02.identity_data_id as $d | .result.facts[] | select(.identity.identity_data_id == $d) | .edge_id')
+
+$V drive "$RUN" main mix -- revise-occurrences --source doc01 --expected-revision 1
+$V check "$RUN" mix '(.result.facts | length) == 2' 'two facts are retrieved'
+$V check "$RUN" mix '[.sources.doc01, .sources.doc02] | map([.saved_revision, .verified_revision, .registered_revision]) == [[2, 2, 2], [1, 1, 1]]' 'doc01 is at 2/2/2 and doc02 stays at 1/1/1'
+$V check "$RUN" mix '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .identity.occurrences[] | [.start, .end, .text]] == [[46, 48, "it"], [86, 100, "the controller"]]' 'the doc01 annotation has the kept it and the added the controller'
+$V check "$RUN" mix '.sources.doc01.mention_entity_id == "'"$M01"'" and .sources.doc01.resolution_target_entity_id == "'"$T01"'"' 'g01 keeps its Entity UUID and resolution target'
+$V check "$RUN" mix '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT01"'"]' 'the g01 fact ID continues'
+$V check "$RUN" mix '.text_changes[0] | .occurrence_map == {"g01": [null, ["g01", 0]], "g02": [null]} and .added_groups == {} and .position_shift == null' 'the occurrence map is the reviewed one, no group is added and the shift is null'
+$V check "$RUN" mix '.text_changes[0].retired_groups.g02 | .entity_present == false and .entity_indexed == false and .marker_present == false' 'g02 has no Entity, index entry or marker'
+$V check "$RUN" mix '.text_changes[0] | .retired_chunks_absent and .retired_chunk_vectors_absent and .evidence_uses_current_chunks and .mention_ids_preserved' 'retired chunks and vectors are absent and evidence uses current chunks'
+$V check "$RUN" mix '.sources.doc02.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT02"'"]' 'the doc02 fact is unchanged'
+$V check "$RUN" mix '.result.unavailable_sources == [] and .recovery_events == []' 'no unavailable source and no incident'
+
+$V drive "$RUN" main reconcile -- reconcile --source doc01
+$V check "$RUN" reconcile '.sources.doc01 | .saved_revision == 2 and .verified_revision == 2 and .registered_revision == 2 and .unresolved_marker_present == false and .unresolved_entity_present == false' 'healthy reconcile keeps doc01 at 2/2/2 and does not bring g02 back'
+$V check "$RUN" reconcile '(.result.facts | length) == 2 and .recovery_events == []' 'healthy reconcile keeps two facts and records no incident'
+
+$V drive "$RUN" main reopen -- retrieve
+$V check "$RUN" reopen '[.facts[] | select(.identity.identity_data_id == "'"$D01"'") | .identity.occurrences[] | [.start, .end, .text]] == [[46, 48, "it"], [86, 100, "the controller"]]' 'a new process returns both doc01 occurrences'
+```
+
+**O8 mixed fault and recovery.** Proves `mix-fault`. Guide: mixed occurrences, "Interrupted edit". The fence lists the stages (`replace_published` and `text_chunks`). The runner runs each stage in its own run. The guide says doc01 is withheld and doc02's fact stays available, and the saved plan holds the reviewed map. It says `reconcile` completes revision 2 and resolves the same incident with one verified attempt.
+
+```bash journey O8 stages=replace_published,text_chunks
+$V drive "$RUN" main fixture -- chunked-fixture
+M02=$(val fixture '.sources.doc02.mention_entity_id')
+
+$V drive "$RUN" main fail -- revise-occurrences --expected-revision 1 --fault-stage "$STAGE"
+$V check "$RUN" fail '.error == "IntentError" and (.message | test("recovery_event_id=[0-9a-f-]{36}"))' 'the injected failure names a recovery event'
+EID=$(val fail '.message | capture("recovery_event_id=(?<id>[0-9a-f-]+)") | .id')
+
+$V drive "$RUN" main withheld -- retrieve
+$V check "$RUN" withheld '[.facts[].source_id] == ["'"$M02"'"]' 'only the doc02 fact is returned'
+$V check "$RUN" withheld '.unavailable_sources | length == 1 and (.[0] | .reason == "publication_failed" and .recovery_event_id == "'"$EID"'")' 'doc01 is unavailable with the incident id'
+$V drive "$RUN" main before -- status
+$V check "$RUN" before '[.publications[] | select(.state == "failed")][0].plan.text_change.occurrence_map == {"g01": [null, ["g01", 0]], "g02": [null]}' 'the saved plan holds the reviewed map'
+
+$V drive "$RUN" main reconcile -- reconcile --source doc01
+$V check "$RUN" reconcile '[.sources.doc01, .sources.doc02] | map([.state, .saved_revision, .verified_revision, .registered_revision]) == [["current", 2, 2, 2], ["current", 1, 1, 1]]' 'reconcile completes revision 2 for doc01 and leaves doc02 at revision 1'
+$V check "$RUN" reconcile '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .outcome == "restored" and .resolving_revision == 2 and .resolved_at != null and (.recovery_attempts | length) == 1 and .recovery_attempts[0].outcome == "verified")' 'the same incident is restored at revision 2 by one verified attempt'
+$V check "$RUN" reconcile '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .identity.occurrences[] | [.start, .end, .text]] == [[46, 48, "it"], [86, 100, "the controller"]]' 'the doc01 annotation has both occurrences'
+$V check "$RUN" reconcile '.text_changes[0].retired_groups.g02 | .entity_present == false and .entity_indexed == false and .marker_present == false' 'g02 is retired'
+
+$V drive "$RUN" main after -- status
+$V check "$RUN" after '(.publications | all(.state == "current")) and (.recovery_events | all(.resolved_at != null))' 'both publications are current and no incident stays open'
+```
+
 ## Gotchas
 
-- The three commands accept only their captured doc01 edit. They do not locate arbitrary phrases or infer which occurrences continue. See "Not yet supported" in the README.
+- The four commands accept only their captured doc01 edit. They do not locate arbitrary phrases or infer which occurrences continue. See "Not yet supported" in the README.
 - The occurrence maps are checked exactly. A map from a different guide version fails the check, and that is a real mismatch.
-- `position_shift` is null for removal, retirement and addition. A deletion has no single global shift.
+- `position_shift` is null for removal, retirement, addition and the mixed edit. A deletion has no single global shift.
 - After a successful retirement, the primary mention ID stays in `resolved_group_retirement` as a diagnostic constant. Its absence checks are the proof, not the ID.
 - `O5` runs `edit-text` at expected revision 2 on a root that already has an addition. The guide documents this sequence. If it is refused, report the refusal text.
 - Only doc02's fact survives a retirement. Do not expect doc01 facts from `retrieve` until a later addition publishes new ones.

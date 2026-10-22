@@ -1,11 +1,11 @@
 # Cognee Science Lab Roadmap
 
-**Last revised:** 2026-10-21
+**Last revised:** 2026-10-22
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
 **Current work:** Stage 6 is in progress. Steps 1–2 have native fixtures. Step 3 demonstrates multi-source withdrawal. Step 4 demonstrates guarded unchanged-text identity corrections and captured prefix edits. Prefix edits use whole-document native rechunking, remapped positions and rebuilt fact evidence. The multi-chunk fixture covers split markers and fact continuations. See the [first-slice guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md).
 
-The [occurrence-removal guide](docs/stage6_identity_occurrence_removal.md) records partial-group retention and empty unresolved-group retirement. The [resolved-group retirement guide](docs/stage6_identity_resolved_retirement.md) records retirement of a local resolution, fact and evidence while independent shared support survives. The [occurrence-addition guide](docs/stage6_identity_occurrence_addition.md) records captured additions and publication of a new group. The [group split guide](docs/stage6_identity_group_split.md) records a captured group split and combination with fresh group IDs. On 2026-10-21 the user approved one general occurrence map to replace the separate removal, addition and regrouping modes. Its rules are proven against an exhaustive small-world oracle, and every text change now goes through it. Changed interpretations, dependent-source maintenance and complete original-document removal remain unfinished. **Next task:** add the mixed addition/removal case. Earlier investigation entries retain historical wording. [SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) governs the current implementation state.
+The [occurrence-removal guide](docs/stage6_identity_occurrence_removal.md) records partial-group retention and empty unresolved-group retirement. The [resolved-group retirement guide](docs/stage6_identity_resolved_retirement.md) records retirement of a local resolution, fact and evidence while independent shared support survives. The [occurrence-addition guide](docs/stage6_identity_occurrence_addition.md) records captured additions and publication of a new group. The [group split guide](docs/stage6_identity_group_split.md) records a captured group split and combination with fresh group IDs. On 2026-10-21 the user approved one general occurrence map to replace the separate removal, addition and regrouping modes. Its rules are proven against an exhaustive small-world oracle, and every text change now goes through it. Changed interpretations, dependent-source maintenance and complete original-document removal remain unfinished. A captured mixed addition/removal edit now publishes through it with no admission change ([mixed occurrences guide](docs/stage6_identity_mixed_occurrences.md)). **Next task:** pick the next step-4 item with the user. Earlier investigation entries retain historical wording. [SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) governs the current implementation state.
 
 This revision reconciles the roadmap with later project decisions and `cognee_extension_architecture_reference_v1.6.2.md`. Historical graph counts and benchmark scores apply only to their recorded experimental snapshots. They do not describe the current live database. “Complete” means the exploration was sufficient to proceed. It does not mean the capability has a production implementation.
 
@@ -24,7 +24,7 @@ For continuation, start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).
 | 5.4.3 | Complete enough to proceed | Native retrieval semantics; custom identity-aware Retriever direction |
 | 5.4.4 | Complete enough for architecture selection | Prefer B: small Cognify task-transform extension; implementation pending |
 | 5.4.5 | Handoff review complete | Representation, lifecycle, retrieval, reduced recovery scope and interface-only implementation boundary reviewed |
-| 6 | In progress | Guarded corrections, multi-chunk prefix edits, occurrence removal, resolved-group retirement, captured additions/new-group publication and a captured group split/combination are demonstrated in bounded fixtures. Every text change goes through one general occurrence map, proven against a small-world oracle. Next: the captured mixed addition/removal case. Changed meaning/general extraction, dependency propagation, original-source lifecycle and standard-entry-point wiring remain unfinished. |
+| 6 | In progress | Guarded corrections, multi-chunk prefix edits, occurrence removal, resolved-group retirement, captured additions/new-group publication and a captured group split/combination are demonstrated in bounded fixtures. Every text change goes through one general occurrence map, proven against a small-world oracle, and a captured mixed addition/removal edit is demonstrated. Next: pick the next step-4 item (changed interpretation, representation-kind changes or dependencies). Changed meaning/general extraction, dependency propagation, original-source lifecycle and standard-entry-point wiring remain unfinished. |
 | 7–10 | Planned | Ontology grounding, scientific structures, evolution, final synthesis |
 
 
@@ -782,6 +782,11 @@ Step 5 owns standard B Task-transform Cognify/Remember/full Update/removal hooks
 ## Historical revision record
 
 Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
+
+## Revision record — 2026-10-22 (mixed occurrence revision)
+
+- Recorded Checkpoint C: `revise-occurrences` publishes one edit that removes, keeps and adds occurrences of a continuing group and retires another group, with no admission change.
+- Set the next task to choosing the next step-4 item with the user.
 
 ## Revision record — 2026-10-21 (general occurrence map)
 
