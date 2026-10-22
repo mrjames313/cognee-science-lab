@@ -343,3 +343,13 @@ The assistant ran the evidence on the user's Mac on 2026-10-21. `verify.py journ
 | A map states provenance, not the final state. | D | The mixed edit's map equals the removal edit's map. The two differ only in the new description, where the addition is the occurrence nothing maps to. | Keep "where each old record went" separate from "what the new set contains"; the second is checked against the first, not inferred from it. |
 
 The assistant ran the evidence on the user's Mac on 2026-10-21 and 2026-10-22 with loopback embeddings: unit tests, two native integration tests and verify journeys O7 and O8 with 0 FAIL. The [mixed occurrences guide](../docs/stage6_identity_mixed_occurrences.md) records the commands.
+
+## One admission for every replacement — 2026-10-22
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| A scope limit outlives the slice that needed it. | D, M | The rule "a text edit keeps every declared Entity" came from the first text-edit slice, which admitted moved text only. Three later slices and the general map inherited it, and it blocked a changed interpretation to a new Entity. Its history showed a scope limit, not an identity property, so the user relaxed it. | When a rule is inherited into a more general design, record why it exists. Ask again whether the reason still holds before the general design depends on it. |
+| A looser side path undoes a strict main path. | M | The unchanged-text correction had its own admission that checked only text and groups. Folded into the general rules, it gained position, variant-scope and Entity-derivation checks. A review then found that a same-text correction could move an occurrence to another span, and that an unreferenced corpus input could bypass Entity derivation. Both are now refused. | Admit every change to a record set through one rule set. A separate "small correction" path is where unreviewed changes slip in. |
+| An exemption must be checked by the code that grants it. | M | New Entities named by a corpus input skip derivation. The first version exempted any corpus input, but input validation checks only inputs that a record lists. The exemption now requires a listing record. | When a rule exempts records that another check validates, make the exemption depend on the same condition that triggers the validation. |
+
+The assistant and its subagents ran the evidence on the user's Mac with loopback embeddings. The [session handoff](../docs/SESSION_HANDOFF.md) records the rules and the evidence.

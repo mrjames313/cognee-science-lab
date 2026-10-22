@@ -4,6 +4,8 @@
 
 Implemented against pinned Cognee 1.6.2 on 2026-10-19. This guide covers unchanged-text correction, the first portion of accepted step 4. Later guides cover selected text edits, rechunking and group retirement; dependency maintenance and the full lifecycle remain incomplete.
 
+**Superseded admission, 2026-10-22.** The correction is now admitted by the general `admit`, through `admit_replacement` in `src/cognee_lab/identity/replace.py`, and `unchanged_occurrences` is deleted. The revised controller's UUID is now derived from doc01's identity, revision 2 and key r01 (`ce975bb8-61e4-57b1-af7c-fe9215402851` for the standard fixture identity). A correction may no longer change corpus- or span-scoped variants, continuing mention recipes or retained reusable recipes, and a new Entity must be derived or corpus-referenced. A failed `revise` on a root made before this change cannot be retried with `revise`. See "One admission for every replacement, 2026-10-22" in [the session handoff](SESSION_HANDOFF.md). The text below records this checkpoint as it was built.
+
 ## Run the captured correction
 
 Apply this incremental checkpoint after the initial Stage 6, seed-selection and multi-source withdrawal patches. Use a new root:

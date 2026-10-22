@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). **Next task:** proposed, waiting for the user's approval: a captured single-document changed-interpretation case. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules. **Next task:** Checkpoint E, four captured changed-interpretation and kind-change fixtures; show the user their exact spans and maps first. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -18,7 +18,7 @@ The [representation decision record](../results/cognee_stage5_4_5_identity_repre
 
 ## Code baseline and delivery status
 
-Runtime code is in `src/cognee_lab/identity/`. The implementation admits every text change through one **general occurrence map** (`admit` in `admission.py`), which covers the captured prefix edits, removals, additions, split, combination and one mixed edit. The map refuses a changed resolution or meaning, a change of representation kind, a move to another document, span-scoped variants and dependent sources. The implementation does not include automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The general-map update changed admission, the saved text-change plan, result JSON, the captured describers, a CLI command, the ledger model, verify journeys and tests. The saved-source schema and dependencies are unchanged.
+Runtime code is in `src/cognee_lab/identity/`. The implementation admits every text change through one **general occurrence map** (`admit` in `admission.py`), which covers the captured prefix edits, removals, additions, split, combination and one mixed edit. Since 2026-10-22 the unchanged-text correction goes through the same `admit`, by way of `admit_replacement` in `replace.py`. The map refuses a changed resolution or meaning, a change of representation kind, a move to another document, span-scoped variants and dependent sources. The implementation does not include automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The general-map update changed admission, the saved text-change plan, result JSON, the captured describers, a CLI command, the ledger model, verify journeys and tests. The saved-source schema and dependencies are unchanged.
 
 The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The user approved the split and combination case and the general occurrence map on 2026-10-21, and the mixed case on the same day. The assistant and its subagents verified their implementation on the user's Mac with loopback embeddings. This handoff records no user-reviewed fixture roots for them. [Next task](#next-task) gives the next task.
 
@@ -249,25 +249,77 @@ The user and the assistant reviewed the remaining step-4 items on 2026-10-22.
 
 **Decisions the user made.**
 
-1. A changed decision in a text edit means a fresh group. If a text edit changes what a group refers to (a different referent, resolved to unresolved or the reverse), the group does not continue. The group retires. The reviewer declares a fresh group. Facts are generated again from the fresh group. A retired ID is never served with a new meaning. This keeps the current admission rule (`check_continuing_decisions`). The existing correction that retargets a group without a text change is the one exception: it changes a continuing group's target in place and retires nothing. A variant applicability change is refused for the whole document today (`check_variants_unchanged`), and retire-and-fresh cannot express it. Decide how to treat it only when a concrete case needs it.
+1. A changed decision in a text edit means a fresh group. If a text edit changes what a group refers to (a different referent, resolved to unresolved or the reverse), the group does not continue. The group retires. The reviewer declares a fresh group. Facts are generated again from the fresh group. A retired ID is never served with a new meaning. This keeps the admission rule `check_continuing_decisions`. The existing correction that retargets a group without a text change is the one exception: it changes a continuing group's target in place and retires nothing. A variant applicability change cannot be expressed by retire-and-fresh; since Checkpoint D a corpus- or span-scoped variant may not change at all (`check_scoped_variants`). Decide how to treat a scope change only when a concrete case needs it.
 2. No successor record yet. Nothing records that an old group ID was replaced by a new one, beyond the revision's result file and the current revision's saved plan, which the next revision overwrites. Decide it with step-4 item 3 or the step-5 retrieval contract, where its callers are designed.
 
 **What follows for each item.**
 
 - Changed interpretation (item 2) needs no logic to correct references. References inside the document are rebuilt by the retire-and-fresh path. References from other sources are dependencies (item 3). Today a source that consumes the edited text is refused (`reject_dependents`). A source that consumes a mention UUID as a corpus object or saved record is not detected; that is an item-3 gap, and no fixture has one.
-- Under the existing rules, a fresh group may resolve only to an Entity whose recipe the old description already declared, or stay unresolved (`check_recipes`). So a captured case can move a group to unresolved, or to an already declared Entity, with no rule change. Retargeting to a new Entity needs a recipe-rule change. That overlaps item 1's open question of which source owns a new Entity.
-- Representation-kind changes (item 1): open decisions are which source owns the new reusable Entity, and what happens to other documents that use it. A single-document case can be specified now.
+- Before Checkpoint D, a fresh group could resolve only to an Entity whose recipe the old description already declared, or stay unresolved. Checkpoint D relaxed that rule; see the next section.
+- Representation-kind changes (item 1): the design already answers ownership (the document's generated identity source retains the endpoints it needs, and other sources add their own ownership). The later decisions are in the next section.
 - Dependencies (item 3), including span-scoped variants and moves to another document, cannot be fully specified yet. The dependency record and the propagation policy (block, mark unavailable, queue for review or reconsider) depend on real dependent sources in the user's intended use. The cross-document parts of items 1, 2 and 4 wait for this policy.
 - Full source lifecycle (item 4): removing a source that no other source consumed can be specified now. Removing a consumed source waits for item 3.
 - Verification and recovery (item 5) follows each operation. Open choice: whether new operations get a small-world oracle check like admission.
 
+### One admission for every replacement, 2026-10-22
+
+The user reviewed the open questions for a fuller changed-interpretation and representation-kind implementation on 2026-10-22.
+
+**Decisions the user made.**
+
+1. Relax the recipe rule. The rule that new descriptions keep the old reusable recipes came from the first text-edit slice on 2026-10-19, which admitted moved text only. It was a scope limit, not an identity property.
+2. A new reusable Entity that a source creates gets the UUID `uuid5(identity_data_id, f"entity:r{revision}:{key}")`, where `key` is a resolution or variant in the new description that names it. Two documents that introduce the same new Entity get different UUIDs; merging them is matching work for Describe (step 6).
+3. A source may drop a reusable Entity it no longer uses. Ownership is per source, so the Entity survives while another source owns it.
+4. Fold the unchanged-text correction into the general admission. It was a fourth admission path, and lesson G22 applies to it.
+5. A text edit may add, remove or retarget document-scoped variants. A document-scoped variant names its document, not positions, so a text edit cannot invalidate it. Corpus-scoped variant changes wait for dependencies (step-4 item 3), because they change what queries over other documents can follow. Span-scoped variants stay refused in text edits until scope ranges can be remapped.
+6. Fixtures: both directions of changed interpretation (to a new Entity, and to unresolved), and a chained kind-change pair (reusable to mention, then mention back to reusable referencing doc02's existing HC Entity).
+
+The assistant planned fold-in, rule relaxation and fixtures as three checkpoints, then landed fold-in and relaxation as one checkpoint, because a fold-in under the old correction rules would have been an intermediate rule set built only to be replaced.
+
+**Checkpoint D, completed 2026-10-22.** `admit_replacement` in `replace.py` admits every replacement, with or without a text change: it calls `admit`, probes the graph on a first attempt, and refuses a retired or fresh group, or an added occurrence, without a TextChange (`rebuild_required`), because nothing else rebuilds the document's markers and facts. `unchanged_occurrences` and the correction path's separate admission are deleted, and `TextChange.preflight` no longer admits. `admit` applies these rules, in order, with the gate in brackets:
+
+| Rule | Code |
+|---|---|
+| `check_text_present` | `empty_text` |
+| `check_source_identity`, `check_next_revision` | `not_admitted`, `source_changed` |
+| `map_origins`, `check_old_slices`, `check_targets_exist`, `check_single_origin`, `check_same_text` | `occurrence_changed` |
+| [unchanged text] `check_same_spans` | `occurrence_moved` |
+| `check_new_slices` | `occurrence_changed` |
+| `group_fate`, `check_fresh_keys`, `check_unused_entity_ids`, [first attempt] `check_revision_scoped_ids` | `fresh_key_reused`, `fresh_uuid_reused`, `fresh_uuid_not_derived` |
+| `check_continuing_resolutions` | `continuing_resolution_changed` |
+| `check_fresh_resolution_ids`, `check_one_resolution_per_fresh_group` | `not_admitted` |
+| `check_mention_recipes` | `mention_recipe_changed` |
+| `check_reusable_recipes` | `reusable_recipe_changed` |
+| [first attempt] `check_derived_entity_ids` | `entity_uuid_not_derived` |
+| `check_scoped_variants` | `variant_changed` |
+| `check_new_variant_keys` | `variant_key_reused` |
+| [changed text] `check_continuing_decisions` | `continuing_decision_changed` |
+| [changed text] `check_no_span_variants` | `span_variant_in_text_edit` |
+
+After `admit`, `check_absent_from_graph` refuses a fresh mention UUID (`fresh_uuid_in_graph`) or a new reusable UUID (`entity_uuid_in_graph`) that is already in the graph. A new reusable Entity is exempt from derivation and the probe only when a resolution or variant lists a corpus input that names it, so input validation proves it exists and matches its hash.
+
+Behavior changes:
+- With unchanged text, a continuing group may change its reviewed decision in place, and every carried-over occurrence keeps its exact span. With changed text, a continuing group keeps its decision.
+- A correction is now held to the full rule set. Before, only text inputs and mention groups had to stay identical. It may no longer change corpus- or span-scoped variants, a continuing mention recipe or a retained reusable recipe, or rename a resolution record, and a new Entity must be derived or corpus-referenced.
+- A text edit may add or drop reusable recipes and change document-scoped variants, and a fresh group may resolve to a new derived Entity.
+- The captured correction's revised controller is now the derived UUID for key r01 at revision 2 (`ce975bb8-61e4-57b1-af7c-fe9215402851` for the standard fixture identity). Roots made before keep the old fixture ID as history. A `revise` that failed on such a root cannot be retried with `revise`, because the retry would carry the new ID.
+- Unchanged text with a TextChange is admitted. Empty text is refused by its own rule.
+- Changing a document-scoped variant also changes which Entities retrieve that document's facts. The effect stays inside the document.
+
+The oracle covers the 540,045 fate worlds, the 18,842 stable worlds again with unchanged text, and a `DECISIONS` table in `support/occurrence_worlds.py`. Each row names a spec rule and states its expected outcome for a text edit, for unchanged text and, where it matters, on a retry. The table is written from the rules, not computed by an independent model like group fate. `support/occurrence_mutants.py` breaks each of 25 rules.
+
+Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: 282 unit tests passed. `support/occurrence_check.py` passed on all 540,045 fate worlds (about 100 s alone, 119 s under load), and `--mutants` caught all 25 rule breaks. The ledger check passed with `PINNED` unchanged at 3828 nodes and 3717 sequences. `verify.py journey all` gave 736 PASS and 0 FAIL in 37 runs on `f90652d`. The last commit only adds the added-occurrence refusal and two tests, and journey R1 gave 27 PASS on it. The 36 native integration tests in the nine files that drive the touched modules passed (722 s). Three thermo reviews found two medium holes and four low issues, all fixed with a test that failed first. A correction could move an occurrence to another span with the same text. An unreferenced corpus input let a new Entity skip derivation. A correction could add an occurrence without a rebuild. Empty text was no longer refused.
+
 ### Next task
 
-Proposed, waiting for the user's approval: a captured single-document case for changed interpretation (step-4 item 2), then one for a representation-kind change (item 1). Meanwhile the user sketches a real dependent-source scenario for dependencies (item 3). Review each case with the user before any code. Run `support/occurrence_check.py` for any change to `admission.py`. [Step-4 decisions, 2026-10-22](#step-4-decisions-2026-10-22) records the decisions and what can be specified now. The general map leaves these refused, and each is a separate semantic decision rather than another mix of adding and removing:
+Checkpoint E: four captured fixtures on doc01, which the user approved in outline on 2026-10-22. Before any fixture code, show the user their exact texts, spans and maps checked against the Checkpoint D rules.
 
-1. A continuing group whose resolution or meaning changes (item 2). Decided: the group retires and the reviewer declares a fresh group.
-2. A change of representation kind, using separate suitable Entities (item 1).
-3. An occurrence that moves to another document, span-scoped variants, and dependent sources (item 3).
+1. Changed interpretation to a new Entity: a text edit to `the backup controller`; g01 retires; fresh g03 holds `the backup controller` and `it` and resolves to a new derived Entity.
+2. Changed interpretation to unresolved: a text edit to `A controller`; g01 retires; fresh g03 holds `A controller` and `it` and is unresolved.
+3. Reusable to mention, unchanged text, revision 1 to 2: doc01 drops v01 and its HC recipe; fresh mention group `HC` resolves to the Helios controller. doc02's claim keeps the shared HC edge and Entity.
+4. Mention to reusable, unchanged text, revision 2 to 3: the HC mention group retires; doc01 references doc02's existing HC Entity through a corpus input and adds a doc01-scoped variant again.
+
+Meanwhile the user sketches a real dependent-source scenario for dependencies (item 3). Run `support/occurrence_check.py` for any change to `admission.py`.
 
 ### Tracked follow-ups
 
@@ -287,8 +339,8 @@ Paths below are relative to `src/cognee_lab/identity/`.
 | `storage.py` | Namespaced relational publication/event tables; portable expected-revision/attempt and project-writer guards |
 | `registered.py` | Real Data JSON/raw-text ingestion/readback and registered snapshot checks |
 | `publish.py` | Missing-node creation, safe existing-node retention, original markers, aggregated generated-source identity contributions and verification |
-| `replace.py`, `withdraw.py` | Guarded replacement/withdrawal, durable old/new intent, selective retirement and explicit forward recovery |
-| `admission.py` | What a reviewed text change may claim: `parse_occurrence_map`, `identity_map`, `admit` and its rules in the order it applies them, returning a `GroupFate` |
+| `replace.py`, `withdraw.py` | Guarded replacement/withdrawal, `admit_replacement` (the one admission call site), durable old/new intent, selective retirement and explicit forward recovery |
+| `admission.py` | What a reviewed replacement may claim: `parse_occurrence_map`, `identity_map`, `admit` and its rules in the order it applies them, returning a `GroupFate`, and the graph probe `check_absent_from_graph` |
 | `text_changes.py` | `TextChange` with its typed `occurrence_map`, `from_plan` and the legacy plan reader, and `prefix_shift`; `preflight` calls `admit` with `first_attempt=not retry`; dependency/cascade guards, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
 | `retrieve.py` | Bounded fixture retrieval, saved-source eligibility, scoped identity links/local mention facts and native current evidence; not a public corpus-wide retriever |
 | `native.py` | Normalizers over graph/provenance/neighborhood interfaces |
