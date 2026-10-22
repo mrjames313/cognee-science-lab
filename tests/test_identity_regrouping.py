@@ -186,11 +186,19 @@ def test_retirement_follows_the_source_lineage_not_its_revision(source_payload):
         ("fresh_uuid_not_derived", "fresh_uuid_not_derived", "derives from its source"),
         ("missing_resolution", "not_admitted", "one resolution per fresh group"),
         ("reused_assignment_id", "not_admitted", "no old resolution or assignment"),
-        ("retarget_continuing", "continuing_decision_changed", "keeps its resolution record"),
+        (
+            "retarget_continuing",
+            "continuing_decision_changed",
+            "keeps its reviewed decision",
+        ),
         ("continuing_recipe", "mention_recipe_changed", "keeps its mention recipe"),
         ("retired_recipe_kept", "mention_recipe_changed", "mention recipe is dropped"),
         ("bad_span", "occurrence_changed", "exact document slice"),
-        ("variant_changed", "variant_changed", "span-scoped variant assignments stay unchanged"),
+        (
+            "variant_changed",
+            "variant_changed",
+            "span-scoped variant assignments stay unchanged",
+        ),
     ],
 )
 def test_split_rejects_hidden_semantic_and_representation_changes(
@@ -435,9 +443,17 @@ def test_combination_refuses_a_group_that_takes_only_part_of_the_merge(source_pa
         ("reused_assignment_id", "not_admitted", "no old resolution or assignment"),
         ("retired_recipe_kept", "mention_recipe_changed", "mention recipe is dropped"),
         ("continuing_recipe", "mention_recipe_changed", "keeps its mention recipe"),
-        ("retarget_continuing", "continuing_decision_changed", "keeps its resolution record"),
+        (
+            "retarget_continuing",
+            "continuing_decision_changed",
+            "keeps its reviewed decision",
+        ),
         ("bad_span", "occurrence_changed", "exact document slice"),
-        ("variant_changed", "variant_changed", "span-scoped variant assignments stay unchanged"),
+        (
+            "variant_changed",
+            "variant_changed",
+            "span-scoped variant assignments stay unchanged",
+        ),
     ],
 )
 def test_combination_rejects_hidden_semantic_and_representation_changes(

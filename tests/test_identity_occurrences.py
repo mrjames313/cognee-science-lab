@@ -97,7 +97,7 @@ def test_removal_does_not_silently_retarget_a_continuing_group(source_payload):
         "variant_assignments"
     ]["v01"]["source_entity_id"]
     changed = IdentitySource.model_validate_json(json.dumps(payload))
-    with pytest.raises(IntentError, match="keeps its resolution record"):
+    with pytest.raises(IntentError, match="keeps its reviewed decision"):
         admit(old, changed, BEFORE, AFTER, parse_occurrence_map(REMOVAL_MAP))
 
 

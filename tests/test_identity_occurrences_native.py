@@ -7,7 +7,6 @@ import pytest
 from test_identity_native import command
 from cognee_lab.identity.occurrence_fixture import REMOVAL_MAP
 
-
 IT = dict(start=46, end=48, text="it")
 
 

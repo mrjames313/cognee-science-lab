@@ -477,8 +477,10 @@ def span_refused_in_text_edits(text_changed, first_attempt):
 
 
 def underived_unless_text_edit(text_changed, first_attempt):
+    # With changed text the derivation rule refuses first on a first attempt
+    # and the decision rule on a retry; either names a real fault.
     if text_changed:
-        return frozenset({"continuing_decision_changed"})
+        return frozenset({"continuing_decision_changed", "entity_uuid_not_derived"})
     return frozenset({"entity_uuid_not_derived"}) if first_attempt else ADMIT
 
 
@@ -514,7 +516,7 @@ DECISIONS = [
             "continuing resolution renamed",
             [CONTINUING],
             rename_continuing_resolution,
-            always("continuing_decision_changed"),
+            always("continuing_resolution_changed"),
         ),
         (
             "continuing mention recipe changed",

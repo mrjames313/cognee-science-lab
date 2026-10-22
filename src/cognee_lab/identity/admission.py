@@ -103,7 +103,7 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     check_unused_entity_ids(old, source, fate.fresh)
     if first_attempt:
         check_revision_scoped_ids(old, source, fate.fresh)
-    check_continuing_decisions(old, source, fate, text_changed)
+    check_continuing_resolutions(old, source, fate)
     check_fresh_resolution_ids(old, source, fate)
     check_one_resolution_per_fresh_group(source, fate)
     check_mention_recipes(old, source, fate)
@@ -113,6 +113,7 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     check_scoped_variants(old, source)
     check_new_variant_keys(old, source)
     if text_changed:
+        check_continuing_decisions(old, source, fate)
         check_no_span_variants(source)
     return fate
 
@@ -329,18 +330,30 @@ def resolutions_of(description, groups):
     }
 
 
-def check_continuing_decisions(old, source, fate, text_changed):
-    """A continuing group keeps its resolution record. With changed text it
-    also keeps the reviewed decision, because a changed meaning in a text edit
-    is a fresh group; with unchanged text the decision may change in place."""
+def check_continuing_resolutions(old, source, fate):
+    """A continuing group keeps its resolution record: the same key, for the
+    same group."""
     previous = resolutions_of(old, fate.continuing)
     current = resolutions_of(source, fate.continuing)
     if {k: r.group_ref for k, r in previous.items()} != {
         k: r.group_ref for k, r in current.items()
-    } or (text_changed and reviewed_decisions(current) != reviewed_decisions(previous)):
+    }:
+        raise IntentError(
+            "continuing_resolution_changed",
+            "A continuing group keeps its resolution record",
+        )
+
+
+def check_continuing_decisions(old, source, fate):
+    """With changed text a continuing group keeps its reviewed decision,
+    because a changed meaning in a text edit is a fresh group. With unchanged
+    text the decision may change in place, so `admit` skips this rule."""
+    previous = resolutions_of(old, fate.continuing)
+    current = resolutions_of(source, fate.continuing)
+    if reviewed_decisions(current) != reviewed_decisions(previous):
         raise IntentError(
             "continuing_decision_changed",
-            "A continuing group keeps its resolution record, and its reviewed decision when the text changes",
+            "A continuing group keeps its reviewed decision when the text changes",
         )
 
 

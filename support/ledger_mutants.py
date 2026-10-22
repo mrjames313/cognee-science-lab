@@ -235,9 +235,9 @@ DEEP_MUTANTS = {
         "P5",
     ),
 }
-assert not MUTANTS.keys() & DEEP_MUTANTS.keys(), (
-    "a break name is in both MUTANTS and DEEP_MUTANTS"
-)
+assert (
+    not MUTANTS.keys() & DEEP_MUTANTS.keys()
+), "a break name is in both MUTANTS and DEEP_MUTANTS"
 
 
 def load_storage(mutant):
