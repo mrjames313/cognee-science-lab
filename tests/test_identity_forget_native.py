@@ -174,6 +174,43 @@ def test_native_forget_refuses_a_dependent_until_it_is_withdrawn(tmp_path):
 
 
 @pytest.mark.integration
+def test_native_readd_of_a_consumer_waits_for_the_unfinished_forget(tmp_path):
+    """doc02 consumed doc01. With doc02 forgotten, doc01's forget fails at its
+    first stage. Re-adding doc02 would make it a dependent again and leave
+    doc01's forget refused, so the re-add is refused until doc01 is forgotten."""
+    root = tmp_path / "fence"
+    command(root, "multi-fixture", "--dependent")
+    command(root, "forget", "--source", "doc02", "--expected-revision", "1")
+    command(
+        root,
+        "forget",
+        "--source",
+        "doc01",
+        "--expected-revision",
+        "1",
+        "--fault-stage",
+        "forget_contributions",
+        expect=1,
+    )
+    refused = command(
+        root, "readd", "--source", "doc02", "--expected-revision", "1", expect=1
+    )
+    report = error_of(refused)
+    assert "forget is not finished" in report["message"]
+    assert sorted(d["input_ref"] for d in report["details"]["dependents"]) == [
+        "doc01_instrument",
+        "doc01_text",
+    ]
+    status = json.loads(command(root, "status").stdout)
+    assert sorted(p["state"] for p in status["publications"]) == ["failed", "forgotten"]
+
+    command(root, "reconcile", "--source", "doc01")
+    recovered = result_of(root)
+    assert recovered["sources"]["doc01"]["state"] == "forgotten"
+    assert recovered["sources"]["doc01"]["forget"] == ABSENT
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize("fault", FAULT_STAGES)
 def test_native_forget_failure_withholds_the_source_and_reconcile_finishes_it(
     tmp_path, fault

@@ -9,6 +9,7 @@ kept its refs and contributions.
 """
 
 from typing import TypedDict
+from uuid import UUID
 
 from .models import CorpusObjectInput, IdentitySource, SourceTextInput
 from .native import edge_metadata
@@ -84,6 +85,44 @@ def retired_sources(rows):
             retired.add((r["dataset"], r["source"]))
             retired.add((r["dataset"], r["plan"]["original_data_id"]))
     return retired
+
+
+def removed_entities(source, plan, rows):
+    """The Entities a forget with this plan removes: those whose every
+    recorded owner is this source or a retiring one, since a retiring owner's
+    refs leave too."""
+    gone = released(owned_by(source, document=True), retired_sources(rows))
+    return {
+        UUID(key)
+        for key, node in plan["entities"].items()
+        if node["type"] == "Entity" and all(gone(r) for r in node["refs"])
+    }
+
+
+def retiring_by_forget(row):
+    return row["state"] in {"failed", "pending"} and (
+        row["plan"].get("operation") == "identity_forget"
+    )
+
+
+def refuse_retiring_inputs(source, rows):
+    """Refuse a description that consumes a source whose forget is pending or
+    failed. Admitting it would leave that forget refused by its dependent and
+    the source half-forgotten."""
+    own = (str(source.dataset_id), str(source.identity_data_id))
+    for row in rows:
+        if (row["dataset"], row["source"]) == own or not retiring_by_forget(row):
+            continue
+        retiring = IdentitySource.model_validate_json(row["description"])
+        found = consumes(
+            source, retiring, removed_entities(retiring, row["plan"], rows)
+        )
+        if found:
+            raise IntentError(
+                "retiring_source",
+                "An input is a document or Entity whose forget is not finished; reconcile that forget first",
+                details=dict(dependents=found),
+            )
 
 
 def owned_by(source, *, document):

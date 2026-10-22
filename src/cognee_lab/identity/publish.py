@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
+from .retirement import refuse_retiring_inputs
 from .storage import FAILED_FORGET, FAILED_REPLACEMENT, RecordStore, encode
 from .validation import IntentError, validate_inputs, validate_uses
 
@@ -244,6 +245,7 @@ class Publisher:
             != (str(source.dataset_id), str(source.identity_data_id))
         ]
         validate_uses([*descriptions, source])
+        refuse_retiring_inputs(source, rows)
         previous = next(
             (
                 r

@@ -21,6 +21,7 @@ from .retirement import (
     owned_by,
     ownership_snapshot,
     released,
+    removed_entities,
     retired_sources,
     verify_survivors,
     withdraw_contributions,
@@ -157,15 +158,8 @@ async def forget_plan(publisher, source):
 
 def refuse_dependents(source, plan, rows):
     """Refuse while a saved source consumed this document or an Entity the
-    forget removes. Returns the removed Entities: those whose every recorded
-    owner is this source or a retiring one, since a retiring owner's refs
-    leave too."""
-    gone = released(owned_by(source, document=True), retired_sources(rows))
-    removed = {
-        UUID(key)
-        for key, node in plan["entities"].items()
-        if node["type"] == "Entity" and all(gone(r) for r in node["refs"])
-    }
+    forget removes. Returns the removed Entities."""
+    removed = removed_entities(source, plan, rows)
     found = dependents(source, rows, removed)
     if found:
         raise IntentError(
@@ -313,6 +307,9 @@ async def forget(
             raise IntentError("injected_failure", f"Injected failure at {name}")
 
     try:
+        # Repeat under the writer reservation: a consumer may have published
+        # between the check above and begin.
+        refuse_dependents(source, plan, await records.rows())
         await withdraw_contributions(graph, source, contribution_triples(plan))
         injected(stage)
         user = await get_default_user()

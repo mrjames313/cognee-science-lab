@@ -10,7 +10,7 @@ from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.forget import admit_readd, refuse_dependents
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import describe_readd
-from cognee_lab.identity.retirement import dependents
+from cognee_lab.identity.retirement import dependents, refuse_retiring_inputs
 from cognee_lab.identity.validation import IntentError, fresh_mention_id, object_digest
 
 
@@ -175,6 +175,31 @@ def test_an_entity_owned_through_the_document_chunks_alone_is_removed(
         refuse_dependents(source, plan, [row_of(source), row_of(reader)])
     assert found.value.code == "dependent_source"
     assert refuse_dependents(source, plan, [row_of(source)]) == {entity}
+
+
+@pytest.mark.parametrize("state", ["failed", "pending"])
+def test_a_new_consumer_of_a_source_whose_forget_is_unfinished_is_refused(
+    source_payload, state
+):
+    source = source_of(source_payload)
+    doc = source.inputs[source.original_input_ref]
+    entity = uuid4()
+    plan = dict(
+        owned_plan(source, entity, []),
+        original_data_id=str(doc.data_id),
+    )
+    for reader in (
+        reader_of(source_payload, text=True),
+        reader_of(source_payload, entity_id=entity),
+    ):
+        with pytest.raises(IntentError) as refused:
+            refuse_retiring_inputs(reader, [row_of(source, state, plan)])
+        assert refused.value.code == "retiring_source"
+        assert [d["identity_data_id"] for d in refused.value.details["dependents"]] == [
+            str(reader.identity_data_id)
+        ]
+        refuse_retiring_inputs(reader, [row_of(source, "current")])
+        refuse_retiring_inputs(reader_of(source_payload), [row_of(source, state, plan)])
 
 
 class AbsentGraph:
