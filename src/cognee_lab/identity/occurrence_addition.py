@@ -2,7 +2,7 @@
 
 import json
 
-from .captured_chunks import bind_chunks
+from .captured_chunks import ADDITION, bind_chunks
 from .captured_text import BEFORE
 from .models import IdentitySource
 from .validation import IntentError, fresh_mention_id, text_digest
@@ -29,7 +29,7 @@ def describe_addition(old, before, chunks):
     payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(AFTER)
     payload["producers"]["addition_review"] = dict(
         method="captured_fixture",
-        implementation="stage6-captured-occurrence-addition",
+        implementation=ADDITION,
         version="0.1",
         configuration={"policy": "explicit-continuity-and-new-group-v1"},
         run_id=None,

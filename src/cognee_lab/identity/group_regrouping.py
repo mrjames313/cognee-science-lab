@@ -1,6 +1,6 @@
 import json
 
-from .captured_chunks import bind_chunks
+from .captured_chunks import COMBINATION, SPLIT, bind_chunks
 from .captured_text import BEFORE
 from .models import IdentitySource
 from .validation import IntentError, fresh_mention_id, text_digest
@@ -108,7 +108,7 @@ def describe_split(old, before, chunks):
         old,
         SPLIT_AFTER,
         ref,
-        "stage6-captured-group-split",
+        SPLIT,
         "explicit-paragraph-regrouping-v1",
     )
     resolution = old.mention_resolutions["r01"]
@@ -138,7 +138,7 @@ def describe_combination(old, before, chunks):
         or before != SPLIT_AFTER
         or set(old.mention_groups) != set(COMBINE_REGROUPING)
         or split is None
-        or split.implementation != "stage6-captured-group-split"
+        or split.implementation != SPLIT
     ):
         raise IntentError(
             "fixture_scope", "Group combination requires doc01 produced by split-group"
@@ -148,7 +148,7 @@ def describe_combination(old, before, chunks):
         old,
         COMBINE_AFTER,
         ref,
-        "stage6-captured-group-combination",
+        COMBINATION,
         "explicit-paragraph-combination-v1",
     )
     resolution = old.mention_resolutions["r04"]

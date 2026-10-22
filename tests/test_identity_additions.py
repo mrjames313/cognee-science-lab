@@ -1,7 +1,7 @@
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import uuid4, uuid5
 
 import pytest
 
@@ -21,7 +21,11 @@ from cognee_lab.identity.occurrence_addition import (
     CONTINUITY,
     describe_addition,
 )
-from cognee_lab.identity.text_changes import TextChange, admit_remap
+from cognee_lab.identity.text_changes import (
+    TextChange,
+    admit_remap,
+    check_revision_scoped_ids,
+)
 from cognee_lab.identity.validation import IntentError, validate_inputs
 
 
@@ -37,7 +41,27 @@ def addition(payload):
 
 
 def admit(old, source, mapping=CONTINUITY):
-    return admit_remap(old, source, BEFORE, AFTER, occurrence_continuity=mapping)
+    admitted = admit_remap(old, source, BEFORE, AFTER, occurrence_continuity=mapping)
+    check_revision_scoped_ids(old, source, admitted.fresh)
+    return admitted
+
+
+def test_a_saved_key_only_addition_passes_every_check_a_retry_repeats(
+    source_payload,
+):
+    old, _, intended = addition(source_payload)
+    payload = intended.model_dump(mode="json")
+    legacy = str(uuid5(old.identity_data_id, "mention:g03"))
+    current = payload["mention_groups"]["g03"]["entity_id"]
+    payload["entity_constructions"][legacy] = payload["entity_constructions"].pop(
+        current
+    )
+    payload["mention_groups"]["g03"]["entity_id"] = legacy
+    saved = IdentitySource.model_validate_json(json.dumps(payload))
+    with pytest.raises(IntentError, match="derives from its source"):
+        admit(old, saved)
+    retried = admit_remap(old, saved, BEFORE, AFTER, occurrence_continuity=CONTINUITY)
+    assert retried.fresh == {"g03"}
 
 
 async def test_reviewed_continuation_and_same_text_new_group(source_payload):

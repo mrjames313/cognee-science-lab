@@ -73,7 +73,7 @@ The durable replacement plan stores the map, the exact intended description, the
 
 ### Fresh-ID rule
 
-A fresh group's Entity UUID is `uuid5(identity_data_id, f"mention:r{revision}:{key}")`, where `revision` is the new revision. `check_fresh_group` enforces it in both addition admission and regrouping admission. `check_next_revision` makes both admissions refuse a source revision other than the old revision plus one.
+A fresh group's Entity UUID is `uuid5(identity_data_id, f"mention:r{revision}:{key}")`, where `revision` is the new revision. `check_revision_scoped_ids` enforces it in `TextChange.preflight` on the first attempt of an addition or a regrouping, next to the check that the UUID is not already in the graph. `check_unused_entity_ids` refuses a fresh UUID that the old description still uses, in admission, on every attempt. A regrouping also refuses a fresh group that reuses an old group's key, so a reader can tell from the key that a group is new. `check_next_revision` makes both admissions refuse a source revision other than the old revision plus one.
 
 The rule includes the revision because the record store keeps only the current revision of each source. The first implementation derived the UUID from the source and the key only. During the 2026-10-21 review, a reviewer showed that a key that returns re-derives a retired UUID. A revision-4 source that reused key g04 was admitted and had to reuse g04's retired UUID. With the revision in the derivation, no (source, revision, key) repeats. `RecordStore.begin` refuses a changed description at a used revision, and each step advances one revision.
 
@@ -86,7 +86,11 @@ For the fixture's doc01 identity source `718efce2-4251-5f6f-8318-417bb4dd3525`, 
 | g05 | 2 | `e6307cfe-012a-53c4-abf7-30dc1d8d904d` | `2de73cc9-c7ff-5e83-b1e7-a189bedb1d37` |
 | g06 | 3 | `3bda245c-19be-5f6e-b722-3785f6bc9447` | `da6e1b3e-2e1e-570b-893d-9fe8996abe83` |
 
-The user reviewed the case with the key-only values. Roots made before this change keep their old IDs as history.
+The user reviewed the case with the key-only values. Roots made before this change keep their old IDs as history. Only the first attempt chooses a fresh UUID. A retry or reconcile completes the saved plan, so it skips the derivation check, and a failed addition or split saved under the key-only rule can still be completed. Unit tests show that such a saved addition and such a saved split pass every admission check a retry repeats. No such root was found to run it on. One limit applies to a root split before the change. If its combination fails and is then retried, the fixture's retirement checks look for revision-scoped g04 and g05 UUIDs that the root never had, so those checks pass without testing anything. The publisher still retires the right Entities, because it retires the recipes that the old description has and the new one does not.
+
+### Retired fixture groups
+
+The fixture decides that a captured group has retired from the source's lineage, not its revision. `CAPTURED_GROUPS` names the producer implementation of the fixture edit that creates each group. A group has retired only when that producer is in the source's `producers` map and the source no longer declares the group. Before this fix the table held a retiring revision. A root that retired g01 and then edited its text reached revision 3 without a split, and reported g04 and g05 as retired. Every absence check passed because the groups had never existed (GitHub issue #1).
 
 ## Run
 

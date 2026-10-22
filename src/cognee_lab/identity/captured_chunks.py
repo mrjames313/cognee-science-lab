@@ -7,25 +7,30 @@ from .models import ChunkInput
 from .validation import IntentError, fresh_mention_id, map_chunks
 
 FACT_TEXT = "it limits oscillations"
+ADDITION = "stage6-captured-occurrence-addition"
+SPLIT = "stage6-captured-group-split"
+COMBINATION = "stage6-captured-group-combination"
 ADDED_FACT_TEXT = "the controller limits oscillations"
 
 
 @dataclass(frozen=True)
 class CapturedGroup:
     created: int
-    retired: int | None
+    creator: str | None
     fact: str | None
 
 
-# `retired` is the revision at which a fixture edit drops the group. A source
-# that still declares the key is live whatever its revision: addition and
-# removal keep g01, the retirement and the split drop it.
+# `creator` is the producer implementation of the fixture edit that declares
+# the group; None marks an original group. A group has retired only when its
+# creating edit is in the source's lineage and the source no longer declares
+# it, because different edit sequences reach the same revision number. This
+# relies on describers only adding producers, never removing one.
 CAPTURED_GROUPS = {
-    "g01": CapturedGroup(1, 2, FACT_TEXT),
-    "g03": CapturedGroup(2, None, ADDED_FACT_TEXT),
-    "g04": CapturedGroup(2, 3, None),
-    "g05": CapturedGroup(2, 3, FACT_TEXT),
-    "g06": CapturedGroup(3, None, FACT_TEXT),
+    "g01": CapturedGroup(1, None, FACT_TEXT),
+    "g03": CapturedGroup(2, ADDITION, ADDED_FACT_TEXT),
+    "g04": CapturedGroup(2, SPLIT, None),
+    "g05": CapturedGroup(2, SPLIT, FACT_TEXT),
+    "g06": CapturedGroup(3, COMBINATION, FACT_TEXT),
 }
 
 
@@ -37,12 +42,12 @@ def captured_facts(source):
 
 
 def retired_keys(source):
+    lineage = {p.implementation for p in source.producers.values()}
     return [
         key
         for key, group in CAPTURED_GROUPS.items()
-        if group.retired is not None
-        and group.retired <= source.revision
-        and key not in source.mention_groups
+        if key not in source.mention_groups
+        and (group.creator is None or group.creator in lineage)
     ]
 
 

@@ -237,23 +237,28 @@ def reviewed_decisions(values):
     }
 
 
-def check_fresh_group(old, source, key):
+def check_unused_entity_ids(old, source, fresh):
+    for key in fresh:
+        if source.mention_groups[key].entity_id in old.entity_constructions:
+            raise IntentError(
+                "incompatible_group", "A fresh group requires a fresh Entity UUID"
+            )
+
+
+def check_revision_scoped_ids(old, source, fresh):
     """A fresh group's UUID is derived from its source, new revision and key.
 
     The record store advances one revision per step and refuses a changed
     description at a used revision, so no (source, revision, key) repeats and a
     retired key that returns gets a different UUID.
     """
-    entity_id = source.mention_groups[key].entity_id
-    if entity_id in old.entity_constructions:
-        raise IntentError(
-            "incompatible_group", "A fresh group requires a fresh Entity UUID"
-        )
-    if entity_id != fresh_mention_id(old.identity_data_id, source.revision, key):
-        raise IntentError(
-            "incompatible_group",
-            "A fresh group's Entity UUID derives from its source, revision and group key",
-        )
+    for key in fresh:
+        entity_id = source.mention_groups[key].entity_id
+        if entity_id != fresh_mention_id(old.identity_data_id, source.revision, key):
+            raise IntentError(
+                "incompatible_group",
+                "A fresh group's Entity UUID derives from its source, revision and group key",
+            )
 
 
 def check_new_slices(source, after):
@@ -286,23 +291,38 @@ def check_carryover(old, source, continuing, fresh):
     for key in fresh:
         eid = source.mention_groups[key].entity_id
         recipes[eid] = source.entity_constructions[eid]
-    if (
-        reviewed_decisions(kept) != reviewed_decisions(carried)
-        or len(kept) + len(declared) != len(source.mention_resolutions)
-        or reviewed_decisions(source.variant_assignments)
-        != reviewed_decisions(old.variant_assignments)
-        or set(declared) & (set(old.mention_resolutions) | set(old.variant_assignments))
-        or len(declared) != len(fresh)
-        or {r.group_ref for r in declared.values()} != fresh
-        or source.entity_constructions != recipes
-        or any(
-            v.applicability.kind == "text_spans"
-            for v in source.variant_assignments.values()
+    if reviewed_decisions(kept) != reviewed_decisions(carried):
+        raise IntentError(
+            "not_admitted", "A continuing group keeps its reviewed resolutions"
         )
+    if len(kept) + len(declared) != len(source.mention_resolutions):
+        raise IntentError(
+            "not_admitted", "Every resolution belongs to a continuing or fresh group"
+        )
+    if reviewed_decisions(source.variant_assignments) != reviewed_decisions(
+        old.variant_assignments
     ):
+        raise IntentError("not_admitted", "Variant assignments stay unchanged")
+    if set(declared) & (set(old.mention_resolutions) | set(old.variant_assignments)):
         raise IntentError(
             "not_admitted",
-            "Preserve continuing decisions and recipes, retire only the old groups' own, and declare one resolution per fresh group",
+            "A fresh resolution needs an ID no old resolution or assignment used",
+        )
+    if len(declared) != len(fresh) or {r.group_ref for r in declared.values()} != fresh:
+        raise IntentError(
+            "not_admitted", "Declare exactly one resolution per fresh group"
+        )
+    if source.entity_constructions != recipes:
+        raise IntentError(
+            "not_admitted",
+            "Recipes are the old ones, minus the retired groups', plus the fresh groups'",
+        )
+    if any(
+        v.applicability.kind == "text_spans"
+        for v in source.variant_assignments.values()
+    ):
+        raise IntentError(
+            "not_admitted", "Span-scoped variants require explicit scope remapping"
         )
 
 
@@ -422,8 +442,7 @@ def admit_occurrence_addition(old, source, before, after, continuity):
                 )
         added |= len(current.occurrences) > len(previous.occurrences)
     new_groups = frozenset(source.mention_groups) - set(old.mention_groups)
-    for key in new_groups:
-        check_fresh_group(old, source, key)
+    check_unused_entity_ids(old, source, new_groups)
     check_new_slices(source, after)
     check_carryover(old, source, set(old.mention_groups), new_groups)
     if not added and not new_groups:
@@ -483,11 +502,17 @@ def classify_regrouping(old, source, regrouping):
         and pairs == [(key, i) for i in range(len(pairs))]
         and len(source.mention_groups[key].occurrences) == len(pairs)
     )
+    fresh = frozenset(source.mention_groups) - continuing
+    if fresh & set(old.mention_groups):
+        raise IntentError(
+            "incompatible_group",
+            "A fresh group needs a key that no old group used",
+        )
     return Regrouping(
         images=images,
         continuing=continuing,
         retired=frozenset(old.mention_groups) - continuing,
-        fresh=frozenset(source.mention_groups) - continuing,
+        fresh=fresh,
     )
 
 
@@ -523,8 +548,7 @@ def admit_occurrence_regrouping(old, source, before, after, regrouping):
             raise IntentError(
                 "occurrence_changed", "A continuing group keeps its Entity UUID"
             )
-    for key in plan.fresh:
-        check_fresh_group(old, source, key)
+    check_unused_entity_ids(old, source, plan.fresh)
     check_carryover(old, source, plan.continuing, plan.fresh)
     return Admission(plan.fresh)
 
@@ -579,7 +603,10 @@ class TextChange:
             self.occurrence_continuity,
             self.occurrence_regrouping,
         )
+        # Only the first attempt chooses fresh UUIDs. A retry completes the
+        # saved plan, which may predate the revision-scoped rule.
         if not retry:
+            check_revision_scoped_ids(old, source, admitted.fresh)
             for key in admitted.fresh:
                 if (
                     await publisher.graph.get_node(

@@ -1,7 +1,7 @@
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 
 import pytest
 
@@ -25,10 +25,14 @@ from cognee_lab.identity.captured_chunks import bind_chunks
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import fixture_id
 from cognee_lab.identity.captured_text import BEFORE
+from cognee_lab.identity.resolved_retirement import AFTER as RETIRED_AFTER
+from cognee_lab.identity.resolved_retirement import describe_retirement
+from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.text_changes import (
     TextChange,
     admit_occurrence_regrouping,
     admit_remap,
+    check_revision_scoped_ids,
     classify_regrouping,
 )
 from cognee_lab.identity.validation import (
@@ -50,8 +54,14 @@ def split(payload):
     return old, chunk, describe_split(old, BEFORE, [chunk])
 
 
+def first_attempt(old, source, before, after, mapping):
+    admitted = admit_remap(old, source, before, after, occurrence_regrouping=mapping)
+    check_revision_scoped_ids(old, source, admitted.fresh)
+    return admitted
+
+
 def admit(old, source, mapping=SPLIT_REGROUPING):
-    return admit_remap(old, source, BEFORE, SPLIT_AFTER, occurrence_regrouping=mapping)
+    return first_attempt(old, source, BEFORE, SPLIT_AFTER, mapping)
 
 
 def rebuilt(intended, mutate):
@@ -149,37 +159,63 @@ def test_a_group_continues_only_when_it_alone_receives_its_occurrences(
     assert nothing.retired == nothing.fresh == frozenset()
     with pytest.raises(IntentError, match="regroups at least one"):
         admit_occurrence_regrouping(old, old, BEFORE, SPLIT_AFTER, identity)
+
+
+def test_regrouping_refuses_a_fresh_group_that_reuses_an_old_key(source_payload):
+    old, _, intended = split(source_payload)
     kept_key = {"g01": [["g01", 0], ["g05", 0]], "g02": [["g02", 0]]}
 
     def reshape(p):
         p["mention_groups"]["g01"] = p["mention_groups"].pop("g04")
         p["mention_resolutions"]["r04"]["group_ref"] = "g01"
 
-    plan = classify_regrouping(old, rebuilt(intended, reshape), kept_key)
-    assert (plan.continuing, plan.retired, plan.fresh) == (
-        {"g02"},
-        {"g01"},
-        {"g01", "g05"},
+    with pytest.raises(IntentError, match="key that no old group used") as refusal:
+        classify_regrouping(old, rebuilt(intended, reshape), kept_key)
+    assert refusal.value.code == "incompatible_group"
+
+
+def chunk_of(old, text):
+    return SimpleNamespace(
+        id=uuid4(),
+        chunk_index=0,
+        text=text,
+        is_part_of=SimpleNamespace(id=old.inputs["doc01"].data_id),
     )
 
 
+def test_retirement_follows_the_source_lineage_not_its_revision(source_payload):
+    old, _, _ = example(source_payload)
+    retired = describe_retirement(old, BEFORE, [chunk_of(old, RETIRED_AFTER)])
+    edited = PREFIX + RETIRED_AFTER
+    never_split = describe_prefix_edit(retired, edited, [chunk_of(old, edited)])
+    assert never_split.revision == 3
+    assert set(retired_mentions(never_split)) == {"g01"}
+    assert dict(retired_facts(never_split)) == {"g01": FACT_TEXT}
+    once = describe_prefix_edit(old, PREFIX + BEFORE, [chunk_of(old, PREFIX + BEFORE)])
+    twice_text = PREFIX + PREFIX + BEFORE
+    twice = describe_prefix_edit(once, twice_text, [chunk_of(old, twice_text)])
+    assert twice.revision == 3
+    assert retired_mentions(twice) == {}
+    assert dict(retired_facts(twice)) == {}
+
+
 @pytest.mark.parametrize(
-    "mutation, code",
+    "mutation, code, message",
     [
-        ("continuing_uuid", "occurrence_changed"),
-        ("fresh_reuses_old_uuid", "incompatible_group"),
-        ("fresh_uuid_not_derived", "incompatible_group"),
-        ("missing_resolution", "not_admitted"),
-        ("reused_assignment_id", "not_admitted"),
-        ("retarget_continuing", "not_admitted"),
-        ("continuing_recipe", "not_admitted"),
-        ("retired_recipe_kept", "not_admitted"),
-        ("bad_span", "occurrence_changed"),
-        ("variant_changed", "not_admitted"),
+        ("continuing_uuid", "occurrence_changed", "keeps its Entity UUID"),
+        ("fresh_reuses_old_uuid", "incompatible_group", "requires a fresh Entity"),
+        ("fresh_uuid_not_derived", "incompatible_group", "derives from its source"),
+        ("missing_resolution", "not_admitted", "one resolution per fresh group"),
+        ("reused_assignment_id", "not_admitted", "no old resolution or assignment"),
+        ("retarget_continuing", "not_admitted", "keeps its reviewed resolutions"),
+        ("continuing_recipe", "not_admitted", "Recipes are the old ones"),
+        ("retired_recipe_kept", "not_admitted", "Recipes are the old ones"),
+        ("bad_span", "occurrence_changed", "exact document slice"),
+        ("variant_changed", "not_admitted", "Variant assignments stay unchanged"),
     ],
 )
 def test_split_rejects_hidden_semantic_and_representation_changes(
-    source_payload, mutation, code
+    source_payload, mutation, code, message
 ):
     old, _, intended = split(source_payload)
     retired = str(old.mention_groups["g01"].entity_id)
@@ -220,9 +256,30 @@ def test_split_rejects_hidden_semantic_and_representation_changes(
     else:
         p["variant_assignments"]["v01"]["applicability"] = dict(kind="corpus")
     changed = IdentitySource.model_validate_json(json.dumps(p))
-    with pytest.raises(IntentError) as refusal:
+    with pytest.raises(IntentError, match=message) as refusal:
         admit(old, changed)
     assert refusal.value.code == code
+
+
+def test_a_saved_key_only_fresh_uuid_passes_every_check_a_retry_repeats(
+    source_payload,
+):
+    old, _, intended = split(source_payload)
+
+    def key_only_ids(p):
+        for key in ("g04", "g05"):
+            legacy = str(uuid5(old.identity_data_id, f"mention:{key}"))
+            current = p["mention_groups"][key]["entity_id"]
+            p["entity_constructions"][legacy] = p["entity_constructions"].pop(current)
+            p["mention_groups"][key]["entity_id"] = legacy
+
+    saved = rebuilt(intended, key_only_ids)
+    with pytest.raises(IntentError, match="derives from its source"):
+        admit(old, saved)
+    retried = admit_remap(
+        old, saved, BEFORE, SPLIT_AFTER, occurrence_regrouping=SPLIT_REGROUPING
+    )
+    assert retried.fresh == {"g04", "g05"}
 
 
 def test_regrouping_is_separate_from_the_other_modes(source_payload):
@@ -286,9 +343,7 @@ def combine(payload):
 
 
 def admit_combination(old, source, mapping=COMBINE_REGROUPING):
-    return admit_remap(
-        old, source, SPLIT_AFTER, COMBINE_AFTER, occurrence_regrouping=mapping
-    )
+    return first_attempt(old, source, SPLIT_AFTER, COMBINE_AFTER, mapping)
 
 
 async def test_reviewed_combination_into_one_fresh_group(source_payload):
@@ -412,23 +467,23 @@ def test_combination_refuses_a_group_that_takes_only_part_of_the_merge(source_pa
 
 
 @pytest.mark.parametrize(
-    "mutation, code",
+    "mutation, code, message",
     [
-        ("reuses_g04_uuid", "incompatible_group"),
-        ("reuses_g05_uuid", "incompatible_group"),
-        ("reuses_g01_uuid", "incompatible_group"),
-        ("not_derived_uuid", "incompatible_group"),
-        ("missing_resolution", "not_admitted"),
-        ("reused_assignment_id", "not_admitted"),
-        ("retired_recipe_kept", "not_admitted"),
-        ("continuing_recipe", "not_admitted"),
-        ("retarget_continuing", "not_admitted"),
-        ("bad_span", "occurrence_changed"),
-        ("variant_changed", "not_admitted"),
+        ("reuses_g04_uuid", "incompatible_group", "requires a fresh Entity"),
+        ("reuses_g05_uuid", "incompatible_group", "requires a fresh Entity"),
+        ("reuses_g01_uuid", "incompatible_group", "derives from its source"),
+        ("not_derived_uuid", "incompatible_group", "derives from its source"),
+        ("missing_resolution", "not_admitted", "one resolution per fresh group"),
+        ("reused_assignment_id", "not_admitted", "no old resolution or assignment"),
+        ("retired_recipe_kept", "not_admitted", "Recipes are the old ones"),
+        ("continuing_recipe", "not_admitted", "Recipes are the old ones"),
+        ("retarget_continuing", "not_admitted", "keeps its reviewed resolutions"),
+        ("bad_span", "occurrence_changed", "exact document slice"),
+        ("variant_changed", "not_admitted", "Variant assignments stay unchanged"),
     ],
 )
 def test_combination_rejects_hidden_semantic_and_representation_changes(
-    source_payload, mutation, code
+    source_payload, mutation, code, message
 ):
     old, _, intended = combine(source_payload)
     g01 = "233cb019-3986-5864-88bc-91f334a64372"
@@ -468,7 +523,7 @@ def test_combination_rejects_hidden_semantic_and_representation_changes(
     else:
         p["variant_assignments"]["v01"]["applicability"] = dict(kind="corpus")
     changed = IdentitySource.model_validate_json(json.dumps(p))
-    with pytest.raises(IntentError) as refusal:
+    with pytest.raises(IntentError, match=message) as refusal:
         admit_combination(old, changed)
     assert refusal.value.code == code
 
@@ -517,9 +572,7 @@ def test_a_returning_group_key_cannot_reuse_a_retired_uuid(source_payload):
     again = {"g06": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}
 
     def admit_again(source):
-        return admit_remap(
-            combined, source, COMBINE_AFTER, SPLIT_AFTER, occurrence_regrouping=again
-        )
+        return first_attempt(combined, source, COMBINE_AFTER, SPLIT_AFTER, again)
 
     with pytest.raises(IntentError) as refusal:
         admit_again(resplit(combined, chunk, rev2))

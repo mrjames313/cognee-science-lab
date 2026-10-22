@@ -94,7 +94,7 @@ def test_removal_does_not_silently_retarget_a_continuing_group(source_payload):
         "variant_assignments"
     ]["v01"]["source_entity_id"]
     changed = IdentitySource.model_validate_json(json.dumps(payload))
-    with pytest.raises(IntentError, match="continuing decisions"):
+    with pytest.raises(IntentError, match="keeps its reviewed resolutions"):
         admit_remap(old, changed, BEFORE, AFTER, RETENTION)
 
 
