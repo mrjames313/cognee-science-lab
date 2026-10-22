@@ -26,7 +26,7 @@ from .retirement import (
     verify_survivors,
     withdraw_contributions,
 )
-from .storage import FORGET_STATE, FORGOTTEN_SOURCE
+from .storage import FORGET_STATE, FORGOTTEN_SOURCE, STALE_REVISION
 from .validation import IntentError
 
 STAGES = (
@@ -277,7 +277,7 @@ async def forget(
     if IdentitySource.model_validate_json(row["description"]) != source:
         raise IntentError("revision_reuse", "Forget the exact saved description")
     if row["revision"] != expected_revision:
-        raise IntentError("stale_revision", "Saved revision changed")
+        raise IntentError("stale_revision", STALE_REVISION)
     retry = (
         row["state"] == "failed" and row["plan"].get("operation") == "identity_forget"
     )

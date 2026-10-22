@@ -7,7 +7,13 @@ from dataclasses import dataclass
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
 from .retirement import refuse_retiring_inputs
-from .storage import FAILED_FORGET, FAILED_REPLACEMENT, RecordStore, encode
+from .storage import (
+    FAILED_FORGET,
+    FAILED_REPLACEMENT,
+    STALE_REVISION,
+    RecordStore,
+    encode,
+)
 from .validation import IntentError, validate_inputs, validate_uses
 
 
@@ -321,7 +327,7 @@ class Publisher:
         """Publish a forgotten source again at the next revision."""
         row = await self.admit_readd(source, texts, chunks)
         if row["revision"] != expected_revision:
-            raise IntentError("stale_revision", "Saved revision changed")
+            raise IntentError("stale_revision", STALE_REVISION)
         return await self._publish(
             source,
             texts,

@@ -78,7 +78,7 @@ async def replace(
         execute_source_ref_removal,
     )
     from .publish import contributions, identity_edges
-    from .storage import encode
+    from .storage import STALE_REVISION, encode
 
     graph, vector, records = publisher.graph, publisher.vector, publisher.records
     require_graph_methods(
@@ -96,7 +96,7 @@ async def replace(
     if row is None:
         raise IntentError("source_missing", "Replacement requires a saved publication")
     if row["revision"] != expected_revision:
-        raise IntentError("stale_revision", "Saved revision changed")
+        raise IntentError("stale_revision", STALE_REVISION)
     saved = IdentitySource.model_validate_json(row["description"])
     retry = (
         row["state"] == "failed" and row["plan"].get("operation") == "identity_replace"

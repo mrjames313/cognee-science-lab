@@ -62,7 +62,7 @@ MUTANTS = {
     ),
     "no-stale-revision-guard": Mutant(
         "            if actual_revision != expected_revision:\n"
-        '                raise IntentError("stale_revision", "Saved revision changed")\n',
+        '                raise IntentError("stale_revision", STALE_REVISION)\n',
         "",
         "P3",
     ),

@@ -318,7 +318,9 @@ async def run(args, root):
     old = sources["doc01"]
     row = await publisher.records.row(old)
     if row["revision"] != args.expected_revision:
-        raise IntentError("stale_revision", "Saved revision changed")
+        from .storage import STALE_REVISION
+
+        raise IntentError("stale_revision", STALE_REVISION)
     if row["state"] != "current":
         raise IntentError(
             "recovery_choice", "Reconcile the exact saved text replacement explicitly"

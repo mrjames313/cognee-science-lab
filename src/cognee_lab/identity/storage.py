@@ -50,6 +50,7 @@ FAILED_FORGET = "Retry the failed forget explicitly"
 FAILED_REPLACEMENT = "Reconcile the saved replacement plan explicitly"
 FORGET_STATE = "Forget a current source, or retry its failed forget"
 READD_REVISION = "Re-add a forgotten source at exactly the next revision"
+STALE_REVISION = "Saved revision changed"
 
 
 def now() -> str:
@@ -160,7 +161,7 @@ class RecordStore:
             row = await session.get(Publication, (dataset, sid))
             actual_revision = row.revision if row else 0
             if actual_revision != expected_revision:
-                raise IntentError("stale_revision", "Saved revision changed")
+                raise IntentError("stale_revision", STALE_REVISION)
             if row and row.state == "pending":
                 raise IntentError(
                     "pending_attempt",
