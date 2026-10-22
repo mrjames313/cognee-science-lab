@@ -345,37 +345,3 @@ async def forget(
         raise IntentError(
             "recovery_required", f"{exc}; recovery_event_id={event}"
         ) from exc
-
-
-async def admit_readd(graph, forgotten, source):
-    """A re-add after forget publishes the same identity source and document
-    at the next revision. Every group is fresh: its UUID derives from the new
-    revision, repeats nothing the forgotten revision used, and is not in the
-    graph. A new reusable Entity derives the same way."""
-    from .admission import (
-        GroupFate,
-        check_absent_from_graph,
-        check_derived_entity_ids,
-        check_revision_scoped_ids,
-        check_unused_entity_ids,
-    )
-    from .storage import READD_REVISION
-
-    old_doc = forgotten.inputs[forgotten.original_input_ref]
-    doc = source.inputs[source.original_input_ref]
-    if (source.dataset_id, source.identity_data_id, doc.data_id) != (
-        forgotten.dataset_id,
-        forgotten.identity_data_id,
-        old_doc.data_id,
-    ):
-        raise IntentError(
-            "source_changed", "Re-add the forgotten identity source and its document"
-        )
-    if source.revision != forgotten.revision + 1:
-        raise IntentError("revision_sequence", READD_REVISION)
-    fresh = frozenset(source.mention_groups)
-    check_unused_entity_ids(forgotten, source, fresh)
-    check_revision_scoped_ids(forgotten, source, fresh)
-    check_derived_entity_ids(forgotten, source)
-    fate = GroupFate(frozenset(), frozenset(forgotten.mention_groups), fresh)
-    await check_absent_from_graph(graph, forgotten, source, fate)

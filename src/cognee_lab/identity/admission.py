@@ -532,3 +532,84 @@ async def check_absent_from_graph(graph, old, source, fate):
     for entity_id, code, message in probes:
         if await graph.get_node(str(entity_id)) is not None:
             raise IntentError(code, message)
+
+
+def entity_ids_named(source):
+    """Every Entity UUID a description names: its recipes, its accepted
+    targets, its variant endpoints and its corpus inputs."""
+    named = set(source.entity_constructions)
+    named.update(
+        r.target_entity_id
+        for r in source.mention_resolutions.values()
+        if isinstance(r, Accepted)
+    )
+    for v in source.variant_assignments.values():
+        named.update((v.source_entity_id, v.target_entity_id))
+    named.update(
+        i.entity_id for i in source.inputs.values() if isinstance(i, CorpusObjectInput)
+    )
+    return named
+
+
+def check_removed_entity_ids(source, removed):
+    """A re-add does not bring back an Entity the forget removed. An old
+    recipe does not authorize recreating a retired object under its UUID."""
+    if removed & entity_ids_named(source):
+        raise IntentError(
+            "forgotten_uuid_reused",
+            "A re-add does not recreate an Entity UUID the forget removed",
+        )
+
+
+def replacement_entity_id(identity_data_id, revision, removed_id):
+    """The UUID a re-add gives the Entity that replaces a removed one."""
+    return fresh_entity_id(identity_data_id, revision, f"replaces:{removed_id}")
+
+
+def check_readd_entity_ids(forgotten, source, removed):
+    """A new reusable Entity in a re-add derives from the key of a resolution
+    or variant that names it, as in any revision, or replaces a removed
+    Entity by that Entity's UUID."""
+    replacements = {
+        replacement_entity_id(forgotten.identity_data_id, source.revision, r)
+        for r in removed
+    }
+    for eid in new_reusable_ids(forgotten, source):
+        derived = {
+            fresh_entity_id(forgotten.identity_data_id, source.revision, k)
+            for k in naming_keys(source, eid)
+        }
+        if eid not in derived | replacements:
+            raise IntentError(
+                "entity_uuid_not_derived",
+                "A re-added reusable Entity's UUID derives from a key that names it or from the removed Entity it replaces",
+            )
+
+
+async def admit_readd(graph, forgotten, source, removed):
+    """A re-add after forget publishes the same identity source and document
+    at the next revision. Every group is fresh: its UUID derives from the new
+    revision, repeats nothing the forgotten revision used, and is not in the
+    graph. No Entity in `removed`, the ones the forget took away, returns; a
+    reusable one is replaced by a derived UUID."""
+    from .storage import READD_REVISION
+
+    old_doc = forgotten.inputs[forgotten.original_input_ref]
+    doc = source.inputs[source.original_input_ref]
+    if (source.dataset_id, source.identity_data_id, doc.data_id) != (
+        forgotten.dataset_id,
+        forgotten.identity_data_id,
+        old_doc.data_id,
+    ):
+        raise IntentError(
+            "source_changed", "Re-add the forgotten identity source and its document"
+        )
+    if source.revision != forgotten.revision + 1:
+        raise IntentError("revision_sequence", READD_REVISION)
+    fresh = frozenset(source.mention_groups)
+    check_unused_entity_ids(forgotten, source, fresh)
+    check_revision_scoped_ids(forgotten, source, fresh)
+    check_removed_entity_ids(source, removed)
+    check_readd_entity_ids(forgotten, source, removed)
+    fate = GroupFate(frozenset(), frozenset(forgotten.mention_groups), fresh)
+    await check_absent_from_graph(graph, forgotten, source, fate)

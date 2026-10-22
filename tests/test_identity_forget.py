@@ -6,10 +6,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from cognee_lab.identity.admission import admit_readd, replacement_entity_id
 from cognee_lab.identity.fixture import FIXTURES
-from cognee_lab.identity.forget import admit_readd, refuse_dependents
+from cognee_lab.identity.forget import refuse_dependents
+from cognee_lab.identity.forget_fixture import describe_readd
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.multisource import describe_readd
 from cognee_lab.identity.retirement import dependents, refuse_retiring_inputs
 from cognee_lab.identity.validation import IntentError, fresh_mention_id, object_digest
 
@@ -231,11 +232,14 @@ def chunks_of(source, text):
 TEXT = (FIXTURES / "source.txt").read_text()
 
 
+HC = UUID("9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88")
+
+
 @pytest.mark.asyncio
 async def test_a_readd_derives_every_group_from_the_next_revision(source_payload):
     forgotten = source_of(source_payload)
     text = TEXT
-    readded = describe_readd(forgotten, text, chunks_of(forgotten, text))
+    readded = describe_readd(forgotten, set(), text, chunks_of(forgotten, text))
     assert readded.revision == forgotten.revision + 1
     for key, group in readded.mention_groups.items():
         assert group.entity_id == fresh_mention_id(
@@ -249,7 +253,44 @@ async def test_a_readd_derives_every_group_from_the_next_revision(source_payload
     } | {g.entity_id for g in forgotten.mention_groups.values()}
     assert readded.mention_resolutions == forgotten.mention_resolutions
     assert readded.variant_assignments == forgotten.variant_assignments
-    await admit_readd(AbsentGraph(), forgotten, readded)
+    await admit_readd(AbsentGraph(), forgotten, readded, set())
+
+
+@pytest.mark.asyncio
+async def test_a_readd_replaces_a_reusable_entity_the_forget_removed(source_payload):
+    """HC was owned by this source alone, so the forget removed it. The re-add
+    does not recreate it under its old UUID: the recipe returns under a UUID
+    derived from the removed one, and the variant that named HC follows."""
+    forgotten = source_of(source_payload)
+    text = TEXT
+    readded = describe_readd(forgotten, {HC}, text, chunks_of(forgotten, text))
+    new_hc = replacement_entity_id(forgotten.identity_data_id, 2, HC)
+    assert HC not in readded.entity_constructions
+    assert readded.entity_constructions[new_hc] == forgotten.entity_constructions[HC]
+    assert readded.variant_assignments["v01"].source_entity_id == new_hc
+    await admit_readd(AbsentGraph(), forgotten, readded, {HC})
+
+    kept = describe_readd(forgotten, set(), text, chunks_of(forgotten, text))
+    assert HC in kept.entity_constructions
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(AbsentGraph(), forgotten, kept, {HC})
+    assert refused.value.code == "forgotten_uuid_reused"
+
+    underived = readded.model_copy(
+        update={
+            "entity_constructions": {
+                (uuid4() if eid == new_hc else eid): recipe
+                for eid, recipe in readded.entity_constructions.items()
+            }
+        }
+    )
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(AbsentGraph(), forgotten, underived, {HC})
+    assert refused.value.code == "entity_uuid_not_derived"
+
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(OccupiedGraph([new_hc]), forgotten, readded, {HC})
+    assert refused.value.code == "entity_uuid_in_graph"
 
 
 @pytest.mark.asyncio
@@ -258,31 +299,34 @@ async def test_a_readd_with_the_forgotten_uuids_or_revision_is_refused(
 ):
     forgotten = source_of(source_payload)
     text = TEXT
-    readded = describe_readd(forgotten, text, chunks_of(forgotten, text))
+    readded = describe_readd(forgotten, set(), text, chunks_of(forgotten, text))
 
     same_ids = forgotten.model_copy(update={"revision": 2})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, same_ids)
+        await admit_readd(AbsentGraph(), forgotten, same_ids, set())
     assert refused.value.code == "fresh_uuid_reused"
 
     skipped = readded.model_copy(update={"revision": 3})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, skipped)
+        await admit_readd(AbsentGraph(), forgotten, skipped, set())
     assert refused.value.code == "revision_sequence"
 
     wrong_derivation = describe_readd(
-        forgotten.model_copy(update={"revision": 5}), text, chunks_of(forgotten, text)
+        forgotten.model_copy(update={"revision": 5}),
+        set(),
+        text,
+        chunks_of(forgotten, text),
     ).model_copy(update={"revision": 2})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, wrong_derivation)
+        await admit_readd(AbsentGraph(), forgotten, wrong_derivation, set())
     assert refused.value.code == "fresh_uuid_not_derived"
 
     other = readded.model_copy(update={"identity_data_id": uuid4()})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, other)
+        await admit_readd(AbsentGraph(), forgotten, other, set())
     assert refused.value.code == "source_changed"
 
     occupied = OccupiedGraph([readded.mention_groups["g01"].entity_id])
     with pytest.raises(IntentError) as refused:
-        await admit_readd(occupied, forgotten, readded)
+        await admit_readd(occupied, forgotten, readded, set())
     assert refused.value.code == "fresh_uuid_in_graph"

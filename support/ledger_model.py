@@ -75,7 +75,7 @@ def variant_of(s, saved):
 class Plan:
     """A plan a caller saves, reduced to the fields storage.py reads.
 
-    Publisher.publish, replace() in replace.py, withdraw() in withdraw.py and
+    Publisher._publish, replace() in replace.py, withdraw() in withdraw.py and
     forget() in forget.py.
     """
 
@@ -226,7 +226,7 @@ def publish_intents(w, s, view):
             Begin(w, s, "publish", 0, 1, Plan("publish", 1)),
             Begin(w, s, "publish", 0, 2, Plan("publish", 2)),
         ]
-    # A re-add after forget: Publisher.publish with the saved revision as the
+    # A re-add after forget: Publisher.readd with the saved revision as the
     # guard and the next revision as the description. Refused on other rows.
     r, v = view.revision, view.variant
     return [
@@ -353,7 +353,7 @@ class Method:
 METHODS = {
     m.name: m
     for m in (
-        Method(  # Publisher.publish: a first publication, or a re-add after forget
+        Method(  # Publisher.publish (a first publication) and Publisher.readd
             name="publish",
             intents=publish_intents,
             done_state="current",
@@ -370,7 +370,7 @@ METHODS = {
             preserved_on_retry=(),
             recovers=None,
         ),
-        Method(  # Publisher.publish with a saved revision; the reconcile CLI
+        Method(  # Publisher.reconcile; the reconcile CLI
             name="reconcile",
             intents=reconcile_intents,
             done_state="current",

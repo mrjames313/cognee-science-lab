@@ -1,4 +1,5 @@
-"""Initial publisher: new source or same-revision reconciliation, through Cognee APIs."""
+"""Publication through Cognee APIs: a first publish, a reconcile of the saved
+revision, and the re-add of a forgotten source."""
 
 import json
 from dataclasses import dataclass
@@ -164,6 +165,32 @@ class Publisher:
             ),
         )
 
+    async def admit_inputs(self, source, texts, chunks, *, saved_revision=None):
+        """The checks that need no registered Data: the inputs against the
+        supplied texts and chunks, the UUID uses across saved descriptions,
+        the fence on retiring sources, the saved revision and the Entity
+        types. A re-add runs them before it writes anything."""
+        await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
+        rows = await self.records.rows()
+        descriptions = [
+            IdentitySource.model_validate_json(r["description"])
+            for r in rows
+            if (r["dataset"], r["source"])
+            != (str(source.dataset_id), str(source.identity_data_id))
+        ]
+        validate_uses([*descriptions, source])
+        refuse_retiring_inputs(source, rows)
+        previous = await self.records.row(source)
+        if previous and previous["revision"] != (saved_revision or source.revision):
+            raise IntentError(
+                "not_admitted",
+                "Use the guarded replacement operation to advance a revision",
+            )
+        for entity_id in source.entity_constructions:
+            node = await self.graph.get_node(str(entity_id))
+            if node is not None and node.get("type") != "Entity":
+                raise IntentError("incompatible_type", f"{entity_id} is not an Entity")
+
     async def preflight(
         self,
         source,
@@ -236,76 +263,92 @@ class Publisher:
                 raise IntentError(
                     "chunk_mapping", "Original chunk is absent or differs in the graph"
                 )
-        await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
-        rows = await self.records.rows()
-        descriptions = [
-            IdentitySource.model_validate_json(r["description"])
-            for r in rows
-            if (r["dataset"], r["source"])
-            != (str(source.dataset_id), str(source.identity_data_id))
-        ]
-        validate_uses([*descriptions, source])
-        refuse_retiring_inputs(source, rows)
-        previous = next(
-            (
-                r
-                for r in rows
-                if (r["dataset"], r["source"])
-                == (str(source.dataset_id), str(source.identity_data_id))
-            ),
-            None,
-        )
-        if previous and previous["revision"] != (saved_revision or source.revision):
-            raise IntentError(
-                "not_admitted",
-                "Use the guarded replacement operation to advance a revision",
-            )
-        for entity_id in source.entity_constructions:
-            node = await self.graph.get_node(str(entity_id))
-            if node is not None and node.get("type") != "Entity":
-                raise IntentError("incompatible_type", f"{entity_id} is not an Entity")
+        await self.admit_inputs(source, texts, chunks, saved_revision=saved_revision)
 
-    async def publish(
+    async def publish(self, source: IdentitySource, *, texts, chunks, ctx, **run):
+        """A first publication: the source has no row yet."""
+        row = await self.records.row(source)
+        if row and row["state"] == "failed":
+            if row["plan"].get("operation") == "identity_replace":
+                raise IntentError("recovery_choice", FAILED_REPLACEMENT)
+            if row["plan"].get("operation") == "identity_forget":
+                raise IntentError("recovery_choice", FAILED_FORGET)
+        return await self._publish(
+            source, texts, chunks, ctx, expected_revision=0, method="publish", **run
+        )
+
+    async def reconcile(self, source: IdentitySource, *, texts, chunks, ctx, **run):
+        """Complete the saved revision again: a healthy row is verified, a
+        failed publication is finished."""
+        row = await self.records.row(source)
+        if row and row["state"] == "failed":
+            if row["plan"].get("operation") == "identity_replace":
+                raise IntentError("recovery_choice", FAILED_REPLACEMENT)
+            if row["plan"].get("operation") == "identity_forget":
+                raise IntentError("recovery_choice", FAILED_FORGET)
+        return await self._publish(
+            source,
+            texts,
+            chunks,
+            ctx,
+            expected_revision=source.revision,
+            method="reconcile",
+            **run,
+        )
+
+    async def forgotten_row(self, source):
+        row = await self.records.row(source)
+        if row is None or row["state"] != "forgotten":
+            raise IntentError("forget_state", "Re-add needs a forgotten source")
+        return row
+
+    async def admit_readd(self, source, texts, chunks):
+        """Admit a re-add before anything is written: the description against
+        the forgotten one and its forget plan, then the input checks."""
+        from .admission import admit_readd
+        from .retirement import removed_entities
+
+        row = await self.forgotten_row(source)
+        forgotten = IdentitySource.model_validate_json(row["description"])
+        removed = removed_entities(forgotten, row["plan"], await self.records.rows())
+        await admit_readd(self.graph, forgotten, source, removed)
+        await self.admit_inputs(source, texts, chunks, saved_revision=row["revision"])
+        return row
+
+    async def readd(
+        self, source: IdentitySource, *, texts, chunks, ctx, expected_revision, **run
+    ):
+        """Publish a forgotten source again at the next revision."""
+        row = await self.admit_readd(source, texts, chunks)
+        if row["revision"] != expected_revision:
+            raise IntentError("stale_revision", "Saved revision changed")
+        return await self._publish(
+            source,
+            texts,
+            chunks,
+            ctx,
+            expected_revision=expected_revision,
+            method="publish",
+            saved_revision=row["revision"],
+            **run,
+        )
+
+    async def _publish(
         self,
-        source: IdentitySource,
-        *,
+        source,
         texts,
         chunks,
         ctx,
-        expected_revision=0,
+        *,
+        expected_revision,
+        method,
+        saved_revision=None,
         origin="runtime",
         fault_stage=None,
         semantic_writer=None,
         verify_semantics=None,
     ):
-        row = await self.records.row(source)
-        if (
-            row
-            and row["state"] == "failed"
-            and row["plan"].get("operation") == "identity_replace"
-        ):
-            raise IntentError("recovery_choice", FAILED_REPLACEMENT)
-        if (
-            row
-            and row["state"] == "failed"
-            and row["plan"].get("operation") == "identity_forget"
-        ):
-            raise IntentError("recovery_choice", FAILED_FORGET)
-        if row and row["state"] == "forgotten":
-            from .forget import admit_readd
-
-            await admit_readd(
-                self.graph,
-                IdentitySource.model_validate_json(row["description"]),
-                source,
-            )
-        await self.preflight(
-            source,
-            texts,
-            chunks,
-            ctx,
-            saved_revision=row["revision"] if row else None,
-        )
+        await self.preflight(source, texts, chunks, ctx, saved_revision=saved_revision)
         wanted = identity_edges(source)
         markers = [
             (str(source.inputs[key].chunk_id), str(group.entity_id), key)
@@ -321,16 +364,12 @@ class Publisher:
             withdraw=[],
             runtime_profile=self.runtime_profile,
         )
-        # A publication introduces a revision: the first one, or the next one
-        # after forget. A reconcile completes the saved revision again.
         attempt = await self.records.begin(
             source,
             expected_revision=expected_revision,
             plan=plan,
             origin=origin,
-            method=(
-                "publish" if source.revision == expected_revision + 1 else "reconcile"
-            ),
+            method=method,
         )
         return await self._apply_pending(
             source,

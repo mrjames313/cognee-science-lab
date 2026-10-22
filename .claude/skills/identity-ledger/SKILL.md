@@ -24,7 +24,7 @@ Run the check when your diff touches any of these.
 | --- | --- | --- |
 | `storage.py` | `RecordStore.begin`, `fail`, `complete`, `assert_pending`, `rows`, `events`, and the three tables | All of it. The checker calls these and nothing else. |
 | `retrieve.py` | `valid_sources` | The eligibility condition, copied as `served()`. Also the `fail()` call on a row that fails validation (the `reject` step). |
-| `publish.py` | `Publisher.publish`, `Publisher._apply_pending` | The publish, re-add and reconcile arguments and how the method is chosen, `assert_pending()` before the `try` block, and the `complete()` or `fail()` that ends the attempt. |
+| `publish.py` | `Publisher.publish`, `Publisher.reconcile`, `Publisher.readd`, `Publisher._publish`, `Publisher._apply_pending` | The three entry points and the method and expected revision each passes to `begin()`, `assert_pending()` before the `try` block, and the `complete()` or `fail()` that ends the attempt. |
 | `replace.py` | `replace` | The replacement arguments, the retry with the saved plan, `plan["text_change"]`, and the failure stages. |
 | `withdraw.py` | `withdraw` | The withdrawal arguments, the reuse of a saved withdrawal plan, and `complete(state="withdrawn")`. |
 | `forget.py` | `forget` | The forget arguments, the reuse of a saved forget plan, and `complete(state="forgotten")`. |

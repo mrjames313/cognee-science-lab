@@ -304,19 +304,20 @@ async def run(args, root):
 
     ctx = await context_for(source.identity_data_id)
 
+    creating = args.command == "fixture"
+
     async def publish_fixture(items, ctx=None):
         for item in items:
-            await publisher.publish(
+            await (publisher.publish if creating else publisher.reconcile)(
                 item,
                 texts={"doc01": (root / "source.txt").read_text()},
                 chunks={str(c.id): c for c in chunks},
                 ctx=ctx,
-                expected_revision=0 if args.command == "fixture" else source.revision,
                 origin="test/fault_injection" if args.fault_stage else "test",
                 fault_stage=args.fault_stage,
                 semantic_writer=(
                     (lambda: write_semantics(publisher, item, chunks, original_ctx))
-                    if args.command == "fixture"
+                    if creating
                     else None
                 ),
                 verify_semantics=lambda: verify_semantics(

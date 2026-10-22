@@ -20,8 +20,8 @@ Each step is one call sequence that the named caller makes. The checker treats e
 | Step label | Caller | RecordStore calls |
 | --- | --- | --- |
 | `Wn publish Sk rev=1 expect=0 plan=publish` | `Publisher.publish`, first publication | `begin(method="publish")` |
-| `Wn publish Sk rev=r+1 expect=r plan=publish` | `Publisher.publish` on a forgotten row, the re-add (`readd` CLI) | `begin(method="publish")` |
-| `Wn reconcile Sk rev=r expect=r plan=publish` | `Publisher.publish` with a saved revision, the `reconcile` CLI | `begin(method="reconcile")` |
+| `Wn publish Sk rev=r+1 expect=r plan=publish` | `Publisher.readd` on a forgotten row (`readd` CLI) | `begin(method="publish")` |
+| `Wn reconcile Sk rev=r expect=r plan=publish` | `Publisher.reconcile`, the `reconcile` CLI | `begin(method="reconcile")` |
 | `Wn replace Sk rev=r+1 expect=r plan=replace<rR` | `replace`, a new replacement plan from revision R | `begin(method="replace")` |
 | `Wn replace Sk rev=r+1 expect=r plan=text<rR` | `replace` with a `text_change` (`maintain_one`) | `begin(method="replace")` |
 | `Wn replace Sk rev=r+1 expect=r plan=regroup<rR` | `replace` with a regrouping `text_change` (`split-group`, `combine-groups`, `maintain_one`) | `begin(method="replace")` |
@@ -52,7 +52,7 @@ From every row version, the intents functions also send arguments that `begin()`
 ## Modeling choices
 
 - **Stale reads.** A caller reads the row without the reservation and calls `begin()` later. So a writer may call `begin()` with arguments built from any row version that the source had earlier on the path.
-- **Caller pre-checks.** The checker skips the pre-checks in `Publisher.publish`, `replace` and `withdraw`, because `begin()` must hold on its own. The one exception is a missing row (the next item).
+- **Caller pre-checks.** The checker skips the pre-checks in `Publisher.publish`, `Publisher.reconcile`, `Publisher.readd`, `replace`, `withdraw` and `forget`, because `begin()` must hold on its own. The one exception is a missing row (the next item).
 - **Missing rows.** The intents functions send no reconcile, replace or withdraw step for a source that has no row. The callers never make that call:
   - `withdraw`, `forget` and `replace` read the row first and raise `source_missing` when it is missing. The forget step is sent anyway, because `begin()` has a `source_missing` guard for it and the break `forget-without-a-row` shows what its removal admits: a `forgotten` row at revision 1 for a source that never published.
   - `Publisher.publish` uses method `reconcile` only with an expected revision of 1 or more. `begin()` refuses that on a missing row as `stale_revision`.

@@ -11,7 +11,8 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-refuses-dependents` refuses a forget while another current source consumed the document or an Entity only it owns, and lists them.
 - `forget-after-withdrawal` forgets a source once its dependent is withdrawn.
 - `forget-fault` fails a forget at an injected stage, withholds the source, then finishes it with `reconcile`.
-- `readd` publishes a forgotten source again at the next revision with new mention UUIDs.
+- `readd` publishes a forgotten source again at the next revision with new UUIDs for its mentions and for every Entity the forget removed.
+- `readd-fence` refuses a re-add that would consume a source whose forget is unfinished (native test `test_native_readd_of_a_consumer_waits_for_the_unfinished_forget`).
 
 ## How to get to it (user POV)
 
@@ -29,7 +30,7 @@ Preconditions:
 - Each journey uses a new run and a new `multi-fixture` root. Forget changes the root for good.
 - The fixture's two sources are current at revision 1 before the forget.
 
-**F1 forget doc01, then add it again.** Proves `forget-healthy`, `forget-status` and `readd`. Guide: "Forget doc01" and "Re-add" give every value. After the forget, doc01's `forget` report is all absent, doc02's entry is unchanged, the shared variant edge keeps one contribution and one owner from doc02, the HC Entity keeps one owner, the shared singleton and the borrowed controller survive, and only doc02's fact returns. `status` shows doc01 `forgotten` at revision 1 with a forget plan, and `retrieve` lists no unavailable source. A second forget and a reconcile are refused. The re-add publishes doc01 at revision 2 with a mention UUID that differs from revision 1, restores both facts, both contributions and both HC owners, and a second re-add is refused.
+**F1 forget doc01, then add it again.** Proves `forget-healthy`, `forget-status` and `readd`. Guide: "Forget doc01" and "Re-add" give every value. After the forget, doc01's `forget` report is all absent, doc02's entry is unchanged, the shared variant edge keeps one contribution and one owner from doc02, the HC Entity keeps one owner, the shared singleton and the borrowed controller survive, and only doc02's fact returns. `status` shows doc01 `forgotten` at revision 1 with a forget plan, and `retrieve` lists no unavailable source. A second forget and a reconcile are refused. The re-add publishes doc01 at revision 2 with a mention UUID and a private singleton UUID that differ from revision 1 (the forget removed both, and no removed UUID returns), restores both facts, both contributions and both HC owners, and a second re-add is refused.
 
 ```bash journey F1
 $V drive "$RUN" main fixture -- multi-fixture
@@ -37,6 +38,7 @@ $V check "$RUN" fixture '.shared_variant | (.contributions | length) == 2 and (.
 $V check "$RUN" fixture '(.result.facts | length) == 2' 'both facts are retrievable before the forget'
 $V check "$RUN" fixture '.hc_entity.present and (.hc_entity.owners | length) == 2' 'the HC Entity has two owners'
 M01=$(val fixture '.sources.doc01.mention_entity_id')
+PS01=$(val fixture '.sources.doc01.private_singleton_entity_id')
 BU=$(val fixture '.borrowed_entity.updated_at')
 BD=$(val fixture '.borrowed_entity.description')
 
@@ -71,6 +73,7 @@ $V check "$RUN" rec-blocked '.error == "IntentError" and (.message | contains("F
 $V drive "$RUN" main readd -- readd --source doc01 --expected-revision 1
 $V check "$RUN" readd '.sources.doc01 | .state == "current" and .saved_revision == 2 and .verified_revision == 2 and .registered_revision == 2 and .registered_matches_saved' 'doc01 is current again at revision 2'
 $V check "$RUN" readd '.sources.doc01.mention_entity_id != "'"$M01"'" and (.sources.doc01.mention_entity_id | length) == 36' 'the re-added mention has a new UUID'
+$V check "$RUN" readd '.sources.doc01.private_singleton_entity_id != "'"$PS01"'" and (.sources.doc01.private_singleton_entity_id | length) == 36' 'the private singleton the forget removed returns under a new UUID'
 $V check "$RUN" readd '.sources.doc01 | .original_marker_present and .original_fact_present and .original_fact_owned_by_chunk and .original_evidence_present and .unresolved_marker_present and .unresolved_entity_present and .private_singleton_present and .private_singleton_indexed' 'doc01 has its marker, fact, evidence, unresolved mention and singleton again'
 $V check "$RUN" readd '(.result.facts | length) == 2 and ([.result.facts[].source_id] | sort) == ([.sources.doc01.mention_entity_id, .sources.doc02.mention_entity_id] | sort)' 'both facts return, one per current mention'
 $V check "$RUN" readd '.shared_variant | (.contributions | length) == 2 and (.owners | length) == 2' 'both sources contribute to the shared variant edge again'

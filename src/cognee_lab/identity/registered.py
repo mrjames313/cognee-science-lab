@@ -32,17 +32,18 @@ async def read_registered(source):
     return result
 
 
-async def read_texts(source):
-    """The registered text of every source_text input, keyed by input ref."""
+async def read_texts(source, known=None):
+    """The registered text of every source_text input, keyed by input ref.
+    `known` supplies the text of inputs that are not registered yet."""
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.modules.data.models import Data
     from .models import SourceTextInput
 
-    texts = {}
+    texts = dict(known or {})
     async with get_relational_engine().get_async_session() as session:
         for key, item in source.inputs.items():
-            if not isinstance(item, SourceTextInput):
+            if not isinstance(item, SourceTextInput) or key in texts:
                 continue
             data = await session.get(Data, item.data_id)
             if data is None or data.dataset_id != item.dataset_id:

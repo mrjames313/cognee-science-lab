@@ -98,6 +98,13 @@ def test_native_forget_removes_one_source_and_a_readd_continues_the_revision(
     assert (back["saved_revision"], back["verified_revision"]) == (2, 2)
     assert back["registered_revision"] == 2 and back["registered_matches_saved"]
     assert back["mention_entity_id"] != initial["sources"][first]["mention_entity_id"]
+    # The forget removed the private singleton, so the re-add does not bring
+    # back its UUID; the shared HC Entity survived and is referenced again.
+    assert (
+        back["private_singleton_entity_id"]
+        != initial["sources"][first]["private_singleton_entity_id"]
+    )
+    assert two["hc_entity"]["present"]
     for key in (
         "original_marker_present",
         "original_fact_present",
@@ -208,6 +215,9 @@ def test_native_readd_of_a_consumer_waits_for_the_unfinished_forget(tmp_path):
     recovered = result_of(root)
     assert recovered["sources"]["doc01"]["state"] == "forgotten"
     assert recovered["sources"]["doc01"]["forget"] == ABSENT
+    # The refused re-add came before any write: nothing of doc02 came back.
+    assert recovered["sources"]["doc02"]["state"] == "forgotten"
+    assert recovered["sources"]["doc02"]["forget"] == ABSENT
 
 
 @pytest.mark.integration
