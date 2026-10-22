@@ -316,7 +316,7 @@ Expected: two retrieved facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1,
 
 The user agreed this routine on 2026-10-21:
 
-1. **Unit tests on every commit.** Run `uv run pytest -q -m 'not integration'`. The suite uses loopback embeddings and includes the identity-ledger check at its default depth. GitHub Actions runs the same command on every push (`.github/workflows/unit-tests.yml`).
+1. **Unit tests on every commit.** Run `uv run pytest -q -m 'not integration'`. The suite uses loopback embeddings and includes the identity-ledger check at its default depth. It also runs the occurrence check on small worlds, with every mutant. GitHub Actions runs the same command on every push, then `support/occurrence_check.py` at its full bound (`.github/workflows/unit-tests.yml`, added 2026-10-22).
 2. **Identity-ledger check when `RecordStore` or its callers change.** Run `uv run python support/ledger_check.py`.
 3. **The changed feature's verify journeys on every feature change.** Run `.claude/skills/verify/scripts/verify.py journey <ID>` for each journey in the changed feature's file under `.claude/skills/verify/features/`. For example, a regrouping change runs G1 to G4.
 4. **`verify.py journey all` once per checkpoint, before the merge to `main`.**
