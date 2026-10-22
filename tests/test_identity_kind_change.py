@@ -63,13 +63,13 @@ async def test_reusable_to_mention_keeps_g01_and_adds_a_fresh_hc_group(
 ):
     old, mention, _, chunk = revisions(source_payload)
     fate = await admit_equal(old, mention, TO_MENTION_MAP)
-    assert fate == GroupFate(frozenset({"g01", "g02"}), frozenset(), frozenset({"g03"}))
-    g03 = mention.mention_groups["g03"]
-    assert [o.model_dump() for o in g03.occurrences] == [
+    assert fate == GroupFate(frozenset({"g01", "g02"}), frozenset(), frozenset({"g09"}))
+    g09 = mention.mention_groups["g09"]
+    assert [o.model_dump() for o in g09.occurrences] == [
         dict(start=19, end=21, text="HC")
     ]
-    assert g03.entity_id == fresh_mention_id(old.identity_data_id, 2, "g03")
-    decision = mention.mention_resolutions["r03"]
+    assert g09.entity_id == fresh_mention_id(old.identity_data_id, 2, "g09")
+    decision = mention.mention_resolutions["r09"]
     assert decision.status == "accepted"
     assert decision.target_entity_id == old.inputs["existing_A"].entity_id
     assert mention.variant_assignments == {} and HC not in mention.entity_constructions
@@ -82,14 +82,14 @@ async def test_reusable_to_mention_keeps_g01_and_adds_a_fresh_hc_group(
     assert dict(retired_facts(mention)) == {} and retired_mentions(mention) == {}
 
 
-async def test_mention_to_reusable_retires_g03_and_names_the_listed_hc_entity(
+async def test_mention_to_reusable_retires_g09_and_names_the_listed_hc_entity(
     source_payload,
 ):
     _, mention, reusable, chunk = revisions(source_payload)
     graph = Graph()
     fate = await admit_equal(mention, reusable, TO_REUSABLE_MAP, graph)
-    assert fate == GroupFate(frozenset({"g01", "g02"}), frozenset({"g03"}), frozenset())
-    assert "g03" not in reusable.mention_groups and "r03" not in (
+    assert fate == GroupFate(frozenset({"g01", "g02"}), frozenset({"g09"}), frozenset())
+    assert "g09" not in reusable.mention_groups and "r09" not in (
         reusable.mention_resolutions
     )
     assert reusable.entity_constructions[HC].name == "HC"
@@ -100,8 +100,8 @@ async def test_mention_to_reusable_retires_g03_and_names_the_listed_hc_entity(
     )
     assert "existing_HC" in v02.input_refs
     assert reusable.inputs["existing_HC"].entity_id == HC
-    assert set(retired_mentions(reusable)) == {"g03"}
-    assert retired_mentions(reusable)["g03"] == mention.mention_groups["g03"].entity_id
+    assert set(retired_mentions(reusable)) == {"g09"}
+    assert retired_mentions(reusable)["g09"] == mention.mention_groups["g09"].entity_id
     assert dict(retired_facts(reusable)) == {}
     assert fixture_mention_id(reusable) == mention.mention_groups["g01"].entity_id
 
@@ -163,7 +163,7 @@ async def test_a_listed_hc_entity_that_is_already_a_node_is_not_probed(
     _, mention, reusable, _ = revisions(source_payload)
     graph = Graph({str(HC)})
     assert (await admit_equal(mention, reusable, TO_REUSABLE_MAP, graph)).retired == {
-        "g03"
+        "g09"
     }
 
 

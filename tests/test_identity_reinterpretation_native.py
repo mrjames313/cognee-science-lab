@@ -6,9 +6,11 @@ from uuid import UUID
 import pytest
 
 from test_identity_native import command
-from cognee_lab.identity.reinterpretation import REINTERPRETATION_MAP
+from cognee_lab.identity.reinterpretation import ENTITY_MAP, UNRESOLVED_MAP
 from cognee_lab.identity.validation import fresh_entity_id, fresh_mention_id
 
+KEYS = {"new-entity": ("g07", "r07"), "unresolved": ("g08", "r08")}
+MAPS = {"new-entity": ENTITY_MAP, "unresolved": UNRESOLVED_MAP}
 RESULTS = {
     "new-entity": "reinterpretation_new_entity_result.json",
     "unresolved": "reinterpretation_unresolved_result.json",
@@ -41,8 +43,9 @@ def check_reinterpreted(case, before, after):
     assert b == before["sources"]["doc02"]
     assert after["borrowed_entity"] == before["borrowed_entity"]
     identity = UUID(a["identity_data_id"])
-    g03 = after["g03"]
-    assert g03["mention_entity_id"] == str(fresh_mention_id(identity, 2, "g03"))
+    key, rid = KEYS[case]
+    g03 = after["fresh"]
+    assert g03["mention_entity_id"] == str(fresh_mention_id(identity, 2, key))
     assert g03["fact_present"] and g03["fact_text"] == "it limits oscillations"
     assert (
         g03["evidence_chunk_ids"] and a["mention_entity_id"] != g03["mention_entity_id"]
@@ -67,13 +70,13 @@ def check_reinterpreted(case, before, after):
     assert after["queries"]["helios_controller"]["facts"] == expected
     assert after["recovery_events"] == []
     if case == "new-entity":
-        backup = str(fresh_entity_id(identity, 2, "r03"))
+        backup = str(fresh_entity_id(identity, 2, "r07"))
         assert g03["resolution_status"] == "accepted"
         assert g03["target_entity_id"] == backup
         assert g03["target_present"] and g03["target_indexed"]
         (fact,) = after["queries"]["backup_controller"]["facts"]
         assert fact["source_id"] == g03["mention_entity_id"]
-        assert fact["identity"]["assignment_id"] == "r03"
+        assert fact["identity"]["assignment_id"] == "r07"
         assert fact["identity"]["target_entity_id"] == backup
         assert fact["identity"]["occurrences"] == OCCURRENCES[case]
         assert "it limits oscillations" in "".join(e["text"] for e in fact["evidence"])
@@ -88,10 +91,10 @@ def check_reinterpreted(case, before, after):
             for f in q["facts"]
         )
     (change,) = after["text_changes"]
-    assert change["occurrence_map"] == REINTERPRETATION_MAP
+    assert change["occurrence_map"] == MAPS[case]
     assert change["position_shift"] is None
-    assert change["groups"]["g03"]["occurrences"] == OCCURRENCES[case]
-    added = change["added_groups"]["g03"]
+    assert change["groups"][key]["occurrences"] == OCCURRENCES[case]
+    added = change["added_groups"][key]
     assert added["entity_present"] and added["entity_indexed"]
     assert added["marker_chunk_ids"]
     retired = change["retired_groups"]["g01"]
@@ -102,7 +105,7 @@ def check_reinterpreted(case, before, after):
     )
     assert change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
     assert change["evidence_uses_current_chunks"]
-    assert set(change["groups"]) == {"g02", "g03"}
+    assert set(change["groups"]) == {"g02", key}
 
 
 @pytest.mark.integration
@@ -150,7 +153,7 @@ def test_native_reinterpretation_recovers_after_an_injected_failure(tmp_path, st
         for r in json.loads(command(root, "status").stdout)["publications"]
         if r["state"] == "failed"
     )
-    assert failed["plan"]["text_change"]["occurrence_map"] == REINTERPRETATION_MAP
+    assert failed["plan"]["text_change"]["occurrence_map"] == ENTITY_MAP
     command(root, "reconcile", "--source", "doc01")
     reconciled = json.loads((root / "multisource_result.json").read_text())
     (event,) = reconciled["recovery_events"]
@@ -160,7 +163,7 @@ def test_native_reinterpretation_recovers_after_an_injected_failure(tmp_path, st
     assert reconciled["sources"]["doc02"] == before["sources"]["doc02"]
     # The regenerated fact is reachable through the new Entity after recovery.
     identity = UUID(reconciled["sources"]["doc01"]["identity_data_id"])
-    backup = str(fresh_entity_id(identity, 2, "r03"))
+    backup = str(fresh_entity_id(identity, 2, "r07"))
     answer = json.loads(
         command(
             root, "retrieve", "--query", "What does Backup controller limit?"

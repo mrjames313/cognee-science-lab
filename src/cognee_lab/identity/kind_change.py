@@ -2,7 +2,7 @@
 
 HC is first a reusable Entity that doc01 declares and names in the document-
 scoped variant v01. The first edit makes HC a document-local mention group,
-g03, that resolves to the Helios controller. The second edit makes it
+g09, that resolves to the Helios controller. The second edit makes it
 reusable again, by referencing the HC Entity that doc02 still owns. Neither
 edit changes the text, so each is a TextChange whose before and after texts
 are equal: only a rebuild writes a fresh group's markers or drops a retired
@@ -11,7 +11,7 @@ group's.
 
 import json
 
-from .captured_chunks import TO_MENTION, TO_REUSABLE, bind_chunks
+from .captured_chunks import TO_MENTION, bind_chunks
 from .captured_revision import (
     begin_revision,
     declare_group,
@@ -24,16 +24,17 @@ from .captured_text import BEFORE
 from .models import IdentitySource
 from .validation import IntentError, object_digest
 
+TO_REUSABLE = "stage6-captured-kind-change-to-reusable"
 HC_ID = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
 HC_RECIPE = dict(name="HC", description="Abbreviated reusable form in DOC01.")
 TO_MENTION_MAP = {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}
-TO_REUSABLE_MAP = {**TO_MENTION_MAP, "g03": [None]}
+TO_REUSABLE_MAP = {**TO_MENTION_MAP, "g09": [None]}
 MENTION_REF = "to_mention_review"
 REUSABLE_REF = "to_reusable_review"
 
 
 def describe_to_mention(old, before, chunks):
-    """doc01 drops v01 and the HC recipe; a fresh g03 holds `HC` and resolves to
+    """doc01 drops v01 and the HC recipe; a fresh g09 holds `HC` and resolves to
     the Helios controller. doc02 still declares HC and its own HC variant."""
     require_fresh_doc01(
         old,
@@ -49,10 +50,10 @@ def describe_to_mention(old, before, chunks):
     declare_group(
         payload,
         old,
-        "g03",
-        "r03",
+        "g09",
+        "r09",
         "HC (local mention)",
-        "Captured document-local mention group g03.",
+        "Captured document-local mention group g09.",
         [occurrence(BEFORE, "HC")],
         old.mention_resolutions["r01"],
         MENTION_REF,
@@ -63,7 +64,7 @@ def describe_to_mention(old, before, chunks):
 
 
 def describe_to_reusable(old, before, chunks):
-    """g03 retires. doc01 declares the HC recipe again, reads doc02's HC Entity
+    """g09 retires. doc01 declares the HC recipe again, reads doc02's HC Entity
     through a corpus input that the new variant v02 lists, and names it in v02."""
     made = old.producers.get(MENTION_REF)
     if (
@@ -80,7 +81,7 @@ def describe_to_reusable(old, before, chunks):
         old, BEFORE, REUSABLE_REF, TO_REUSABLE, "explicit-mention-to-reusable-v1"
     )
     helios = old.inputs["existing_A"].entity_id
-    retire_group(payload, "g03")
+    retire_group(payload, "g09")
     payload["entity_constructions"][HC_ID] = HC_RECIPE
     payload["inputs"]["existing_HC"] = dict(
         kind="corpus_object",

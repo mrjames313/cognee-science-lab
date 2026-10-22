@@ -1,9 +1,10 @@
 """Captured changed interpretation on doc01: a text edit changes what g01 refers to.
 
 A changed meaning in a text edit is a fresh group, never a continuing group
-with a new decision. g01 retires, a fresh g03 holds the new mention and the
-carried-over `it`, and the fact is generated again from g03. The reviewer
-wrote both texts and both maps; the process infers nothing.
+with a new decision. g01 retires, a fresh group (g07 or g08) holds the new
+mention and the carried-over `it`, and the fact is generated again from it.
+Each case has its own key, so a group key names one captured group. The
+reviewer wrote both texts and both maps; the process infers nothing.
 """
 
 import json
@@ -34,19 +35,20 @@ UNRESOLVED_AFTER = (
     "Helios controller (HC) regulates plasma heating. A controller adjusts "
     "coil current, and it limits oscillations.\n"
 )
-# g01's `the controller` is removed and g01's `it` moves to g03, which also
-# gains the new mention as an addition. g02 continues in place.
-REINTERPRETATION_MAP = {"g01": [None, ["g03", 1]], "g02": [["g02", 0]]}
+# g01's `the controller` is removed and g01's `it` moves to the fresh group,
+# which also gains the new mention as an addition. g02 continues in place.
+ENTITY_MAP = {"g01": [None, ["g07", 1]], "g02": [["g02", 0]]}
+UNRESOLVED_MAP = {"g01": [None, ["g08", 1]], "g02": [["g02", 0]]}
 SCOPE = "Changed interpretation requires doc01 of a fresh chunked-fixture"
 POLICY = "explicit-changed-interpretation-v1"
 REF = "interpretation_review"
 
 
 def describe_new_entity(old, before, chunks):
-    """g03 resolves to a new reusable Backup controller, derived from r03."""
-    require_fresh_doc01(old, before, set(REINTERPRETATION_MAP), SCOPE)
+    """g07 resolves to a new reusable Backup controller, derived from r07."""
+    require_fresh_doc01(old, before, {"g01", "g02"}, SCOPE)
     payload = begin_revision(old, NEW_ENTITY_AFTER, REF, REINTERPRET_ENTITY, POLICY)
-    backup = fresh_entity_id(old.identity_data_id, payload["revision"], "r03")
+    backup = fresh_entity_id(old.identity_data_id, payload["revision"], "r07")
     payload["entity_constructions"][str(backup)] = dict(
         name="Backup controller",
         description="Captured reusable backup controller identity.",
@@ -55,17 +57,17 @@ def describe_new_entity(old, before, chunks):
     declare_group(
         payload,
         old,
-        "g03",
-        "r03",
+        "g07",
+        "r07",
         "the backup controller; it",
-        "Captured replacement local reference group g03.",
+        "Captured replacement local reference group g07.",
         [
             occurrence(NEW_ENTITY_AFTER, "the backup controller"),
             occurrence(NEW_ENTITY_AFTER, "it", " it limits"),
         ],
         Accepted(
             status="accepted",
-            group_ref="g03",
+            group_ref="g07",
             input_refs=[old.original_input_ref],
             producer_ref=REF,
             target_entity_id=backup,
@@ -78,24 +80,24 @@ def describe_new_entity(old, before, chunks):
 
 
 def describe_unresolved(old, before, chunks):
-    """g03 is unresolved: the reviewer does not say what `A controller` is."""
-    require_fresh_doc01(old, before, set(REINTERPRETATION_MAP), SCOPE)
+    """g08 is unresolved: the reviewer does not say what `A controller` is."""
+    require_fresh_doc01(old, before, {"g01", "g02"}, SCOPE)
     payload = begin_revision(old, UNRESOLVED_AFTER, REF, REINTERPRET_UNRESOLVED, POLICY)
     retire_group(payload, "g01")
     declare_group(
         payload,
         old,
-        "g03",
-        "r03",
+        "g08",
+        "r08",
         "A controller; it",
-        "Captured replacement local reference group g03.",
+        "Captured replacement local reference group g08.",
         [
             occurrence(UNRESOLVED_AFTER, "A controller"),
             occurrence(UNRESOLVED_AFTER, "it", " it limits"),
         ],
         Unresolved(
             status="unresolved",
-            group_ref="g03",
+            group_ref="g08",
             input_refs=[old.original_input_ref],
             producer_ref=REF,
         ),
@@ -137,8 +139,8 @@ async def local_fact(publisher, source, key):
     )
 
 
-def inspector(queries):
-    """Retrieval under the given named queries, and the regenerated g03 fact."""
+def inspector(queries, key, rid):
+    """Retrieval under the given named queries, and the regenerated fresh fact."""
 
     async def inspect(publisher, sources):
         from .retrieve import retrieve
@@ -151,12 +153,12 @@ def inspector(queries):
                 )
                 for name, text in queries.items()
             },
-            g03=await local_fact(publisher, source, "g03"),
+            fresh=await local_fact(publisher, source, key),
         )
-        decision = source.mention_resolutions["r03"]
+        decision = source.mention_resolutions[rid]
         if isinstance(decision, Accepted):
             target = str(decision.target_entity_id)
-            result["g03"].update(
+            result["fresh"].update(
                 target_entity_id=target,
                 target_present=await publisher.graph.get_node(target) is not None,
                 target_indexed=bool(
@@ -173,6 +175,8 @@ inspect_new_entity = inspector(
     {
         "helios_controller": HELIOS,
         "backup_controller": "What does Backup controller limit?",
-    }
+    },
+    "g07",
+    "r07",
 )
-inspect_unresolved = inspector({"helios_controller": HELIOS})
+inspect_unresolved = inspector({"helios_controller": HELIOS}, "g08", "r08")
