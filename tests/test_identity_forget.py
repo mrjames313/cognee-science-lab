@@ -396,6 +396,53 @@ async def test_a_readd_replaces_an_entity_a_later_forget_of_a_co_owner_removed(
     assert await readd_removed(OccupiedGraph([entity]), source, plan, rows) == set()
 
 
+FORGET_GRAPH_METHODS = (
+    "find_node_source_refs_by_dataset",
+    "find_edge_source_refs_by_dataset",
+    "get_node_delete_data",
+    "get_edge_delete_data",
+    "remove_node_source_refs",
+    "remove_edge_source_refs",
+    "delete_edge_triples",
+    "delete_nodes",
+    "add_edges",
+)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_forget_whose_plan_predates_stored_files_is_refused(
+    source_payload,
+):
+    """A failed forget saved before plans recorded `stored_files` cannot be
+    finished by this code. Its retry is refused before begin."""
+    from types import SimpleNamespace
+
+    from cognee_lab.identity.forget import forget
+
+    source = source_of(source_payload)
+    doc = source.inputs[source.original_input_ref]
+    plan = dict(owned_plan(source, uuid4(), []), original_data_id=str(doc.data_id))
+    row = row_of(source, "failed", plan)
+
+    class Records:
+        async def row(self, _):
+            return row
+
+        async def rows(self):
+            return [row]
+
+        async def begin(self, *_, **__):
+            raise AssertionError("begin must not run")
+
+    graph = type(
+        "Graph", (), {name: lambda *_: None for name in FORGET_GRAPH_METHODS}
+    )()
+    publisher = SimpleNamespace(graph=graph, records=Records())
+    with pytest.raises(IntentError) as refused:
+        await forget(publisher, source, expected_revision=source.revision)
+    assert refused.value.code == "recovery_plan"
+
+
 @pytest.mark.asyncio
 async def test_a_readd_with_the_forgotten_uuids_or_revision_is_refused(
     source_payload,

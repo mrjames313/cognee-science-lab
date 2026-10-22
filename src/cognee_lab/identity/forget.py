@@ -285,6 +285,11 @@ async def forget(
         # The saved plan keeps the ownership the first attempt found, which
         # native deletion has since detached or removed.
         plan = dict(row["plan"])
+        if "stored_files" not in plan:
+            raise IntentError(
+                "recovery_plan",
+                "Failed forget plan predates stored_files; its sweep cannot be finished",
+            )
     else:
         if row["state"] == "forgotten":
             raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
