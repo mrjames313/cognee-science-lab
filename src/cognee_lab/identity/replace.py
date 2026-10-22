@@ -92,14 +92,7 @@ async def replace(
             "delete_edge_triples",
         ],
     )
-    row = next(
-        (
-            r
-            for r in await records.rows(source.dataset_id)
-            if r["source"] == str(source.identity_data_id)
-        ),
-        None,
-    )
+    row = await records.row(source)
     if row is None:
         raise IntentError("source_missing", "Replacement requires a saved publication")
     if row["revision"] != expected_revision:

@@ -257,11 +257,7 @@ async def readd(publisher, root, label, forgotten, *, expected_revision, fault_s
     from .fixture import context_for, load_chunks
     from .validation import text_digest
 
-    row = next(
-        r
-        for r in await publisher.records.rows(forgotten.dataset_id)
-        if r["source"] == str(forgotten.identity_data_id)
-    )
+    row = await publisher.records.row(forgotten)
     if row["state"] != "forgotten":
         raise IntentError("forget_state", "Re-add needs a forgotten source")
     doc = forgotten.inputs[forgotten.original_input_ref]
@@ -303,41 +299,21 @@ async def readd(publisher, root, label, forgotten, *, expected_revision, fault_s
 
 
 async def forget_checks(publisher, source, plan, label):
-    """What remains of a source whose forget began: the booleans a journey
-    reads after a failure and after completion."""
+    """What remains of a source whose forget began, plus the fixture's own
+    objects: the values a journey reads after a failure and after completion."""
     from pathlib import Path
     from urllib.parse import unquote, urlparse
     from .captured_chunks import fixture_mention_id
-    from .forget import data_present, evidence_rows, owned_objects
+    from .forget import remains
     from .native import mention_fact
-    from .withdraw import contribution_triples, is_own
 
     graph, vector = publisher.graph, publisher.vector
-    doc = source.inputs[source.original_input_ref]
     location = plan.get("raw_data_location") or ""
     raw_file = Path(unquote(urlparse(location).path)) if location else None
-    nodes, edges = await owned_objects(graph, source)
     mention_ids = [str(g.entity_id) for g in source.mention_groups.values()]
-    contribution_present = False
-    for a, b, relation in contribution_triples(plan):
-        edge = await edge_metadata(graph, a, b, relation)
-        if edge and any(is_own(source, c) for c in contributions(edge.edge_properties)):
-            contribution_present = True
     return dict(
-        original_data_present=await data_present(doc.data_id, source.dataset_id),
-        identity_data_present=await data_present(
-            source.identity_data_id, source.dataset_id
-        ),
+        **await remains(publisher, source, plan),
         raw_file_present=raw_file is not None and raw_file.exists(),
-        document_node_present=await graph.get_node(str(doc.data_id)) is not None,
-        chunks_present=[
-            c for c in plan["chunk_ids"] if await graph.get_node(c) is not None
-        ],
-        chunk_vectors_present=[
-            c
-            for c in plan["chunk_ids"]
-            if await vector.retrieve("DocumentChunk_text", [c])
-        ],
         mention_nodes_present=[
             m for m in mention_ids if await graph.get_node(m) is not None
         ],
@@ -348,15 +324,11 @@ async def forget_checks(publisher, source, plan, label):
             await mention_fact(publisher, source, fixture_mention_id(source))
         ).edge
         is not None,
-        evidence_rows=await evidence_rows(source.dataset_id, doc.data_id),
         private_singleton_present=await graph.get_node(fixture_id(label + ":singleton"))
         is not None,
         private_singleton_indexed=bool(
             await vector.retrieve("Entity_name", [fixture_id(label + ":singleton")])
         ),
-        identity_contribution_present=contribution_present,
-        owned_nodes=len(nodes),
-        owned_edges=len(edges),
     )
 
 
@@ -632,11 +604,7 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
             )
         elif args.command == "reconcile":
-            row = next(
-                r
-                for r in await publisher.records.rows(selected.dataset_id)
-                if r["source"] == str(selected.identity_data_id)
-            )
+            row = await publisher.records.row(selected)
             if row["state"] == "forgotten":
                 from .storage import FORGOTTEN_SOURCE
 

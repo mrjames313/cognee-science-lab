@@ -185,11 +185,7 @@ async def run(args, root):
     publisher = await Publisher.configured()
     args._fixture_publisher = publisher
     old = (await current_sources(root, publisher))["doc01"]
-    row = next(
-        r
-        for r in await publisher.records.rows(old.dataset_id)
-        if r["source"] == str(old.identity_data_id)
-    )
+    row = await publisher.records.row(old)
     if row["revision"] != args.expected_revision:
         raise IntentError("stale_revision", "Saved revision changed")
     if row["state"] != "current":

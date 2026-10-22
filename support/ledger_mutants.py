@@ -147,13 +147,9 @@ MUTANTS = {
     ),
     "readd-at-forgotten-revision": Mutant(
         "                if source.revision != actual_revision + 1:\n"
-        "                    raise IntentError(\n"
-        '                        "revision_sequence",\n'
-        '                        "Re-add a forgotten source at exactly the next revision",\n',
+        '                    raise IntentError("revision_sequence", READD_REVISION)\n',
         "                if False:\n"
-        "                    raise IntentError(\n"
-        '                        "revision_sequence",\n'
-        '                        "Re-add a forgotten source at exactly the next revision",\n',
+        '                    raise IntentError("revision_sequence", READD_REVISION)\n',
         "P5",
     ),
     "no-forget-recovery-choice": Mutant(

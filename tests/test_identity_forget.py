@@ -10,13 +10,8 @@ from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.forget import admit_readd, sole_owned
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import describe_readd
-from cognee_lab.identity.validation import (
-    IntentError,
-    dependents,
-    fresh_mention_id,
-    object_digest,
-)
-from cognee_lab.identity.withdraw import retired_sources
+from cognee_lab.identity.retirement import dependents, retired_sources
+from cognee_lab.identity.validation import IntentError, fresh_mention_id, object_digest
 
 
 def source_of(payload):

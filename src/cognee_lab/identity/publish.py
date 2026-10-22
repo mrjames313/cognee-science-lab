@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
-from .storage import RecordStore, encode
+from .storage import FAILED_FORGET, FAILED_REPLACEMENT, RecordStore, encode
 from .validation import IntentError, validate_inputs, validate_uses
 
 
@@ -276,28 +276,19 @@ class Publisher:
         semantic_writer=None,
         verify_semantics=None,
     ):
-        row = next(
-            (
-                r
-                for r in await self.records.rows(source.dataset_id)
-                if r["source"] == str(source.identity_data_id)
-            ),
-            None,
-        )
+        row = await self.records.row(source)
         if (
             row
             and row["state"] == "failed"
             and row["plan"].get("operation") == "identity_replace"
         ):
-            raise IntentError(
-                "recovery_choice", "Reconcile the saved replacement plan explicitly"
-            )
+            raise IntentError("recovery_choice", FAILED_REPLACEMENT)
         if (
             row
             and row["state"] == "failed"
             and row["plan"].get("operation") == "identity_forget"
         ):
-            raise IntentError("recovery_choice", "Retry the failed forget explicitly")
+            raise IntentError("recovery_choice", FAILED_FORGET)
         if row and row["state"] == "forgotten":
             from .forget import admit_readd
 

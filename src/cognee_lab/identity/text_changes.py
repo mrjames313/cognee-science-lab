@@ -4,7 +4,8 @@ from dataclasses import dataclass, fields
 
 from .admission import OccurrenceMap, identity_map, occurrence, parse_occurrence_map
 from .models import ChunkInput
-from .validation import IntentError, dependents, map_chunks
+from .retirement import dependents
+from .validation import IntentError, map_chunks
 
 
 def reject_dependents(old, rows):

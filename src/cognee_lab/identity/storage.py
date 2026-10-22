@@ -46,6 +46,10 @@ class RecoveryEvent(Base):
 FORGOTTEN_SOURCE = (
     "Forgotten source accepts only a new publication at the next revision"
 )
+FAILED_FORGET = "Retry the failed forget explicitly"
+FAILED_REPLACEMENT = "Reconcile the saved replacement plan explicitly"
+FORGET_STATE = "Forget a current source, or retry its failed forget"
+READD_REVISION = "Re-add a forgotten source at exactly the next revision"
 
 
 def now() -> str:
@@ -90,6 +94,11 @@ class RecordStore:
                 for r in rows
             ]
 
+    async def row(self, source):
+        """The publication row of one identity source, or None."""
+        dataset, sid = str(source.dataset_id), str(source.identity_data_id)
+        return next((r for r in await self.rows(dataset) if r["source"] == sid), None)
+
     async def events(self, dataset):
         async with self.session_factory() as session:
             rows = (
@@ -106,14 +115,7 @@ class RecordStore:
             return [json.loads(r.details) for r in rows]
 
     async def assert_pending(self, source, attempt):
-        row = next(
-            (
-                r
-                for r in await self.rows(source.dataset_id)
-                if r["source"] == str(source.identity_data_id)
-            ),
-            None,
-        )
+        row = await self.row(source)
         if (
             row is None
             or row["state"] != "pending"
@@ -179,10 +181,7 @@ class RecordStore:
                         "Reconcile a saved revision, or advance it through replacement",
                     )
                 if source.revision != actual_revision + 1:
-                    raise IntentError(
-                        "revision_sequence",
-                        "Re-add a forgotten source at exactly the next revision",
-                    )
+                    raise IntentError("revision_sequence", READD_REVISION)
             if (
                 row
                 and row.state == "failed"
@@ -198,18 +197,14 @@ class RecordStore:
                 and json.loads(row.plan).get("operation") == "identity_forget"
                 and method != "forget"
             ):
-                raise IntentError(
-                    "recovery_choice", "Retry the failed forget explicitly"
-                )
+                raise IntentError("recovery_choice", FAILED_FORGET)
             if (
                 row
                 and row.state == "failed"
                 and json.loads(row.plan).get("operation") == "identity_replace"
                 and method != "replace"
             ):
-                raise IntentError(
-                    "recovery_choice", "Reconcile the saved replacement plan explicitly"
-                )
+                raise IntentError("recovery_choice", FAILED_REPLACEMENT)
             if row and source.revision != actual_revision:
                 if not (
                     (method == "replace" and row.state == "current")
@@ -236,10 +231,7 @@ class RecordStore:
                     row.state == "current"
                     or json.loads(row.plan).get("operation") == "identity_forget"
                 ):
-                    raise IntentError(
-                        "forget_state",
-                        "Forget a current source, or retry its failed forget",
-                    )
+                    raise IntentError("forget_state", FORGET_STATE)
             if method == "replace" and row is not None:
                 prior_plan = json.loads(row.plan)
                 if plan.get("operation") != "identity_replace":

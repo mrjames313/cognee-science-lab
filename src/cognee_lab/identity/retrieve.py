@@ -7,6 +7,7 @@ from uuid import UUID
 from .models import Accepted, ChunkInput, IdentitySource
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
+from .retirement import RETIRED_STATES
 from .validation import IntentError, validate_inputs
 
 
@@ -18,7 +19,7 @@ async def valid_sources(publisher, dataset_id, rows):
     for row in rows:
         if row["state"] != "current" or row["revision"] != row["verified_revision"]:
             # A deliberate retirement is not unavailable: nothing is withheld.
-            if row["state"] not in {"withdrawn", "forgotten"}:
+            if row["state"] not in RETIRED_STATES:
                 incident = next(
                     (
                         e

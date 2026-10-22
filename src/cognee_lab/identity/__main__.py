@@ -14,6 +14,7 @@ from .environment import (
     fixture_environment,
     read_embedding,
 )
+from .forget import STAGES as FORGET_STAGES
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 
 TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
@@ -73,10 +74,7 @@ def main():
             "withdraw_contributions",
             "withdraw_owners",
             "withdraw_verification",
-            "forget_contributions",
-            "forget_identity",
-            "forget_document",
-            "forget_verification",
+            *FORGET_STAGES,
             "replace_saved",
             "replace_registered",
             "replace_published",
