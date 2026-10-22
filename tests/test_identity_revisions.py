@@ -5,7 +5,12 @@ from uuid import uuid4
 
 import pytest
 
-from cognee_lab.identity.admission import GroupFate, check_absent_from_graph
+from cognee_lab.identity.admission import (
+    GroupFate,
+    admit,
+    check_absent_from_graph,
+    identity_map,
+)
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.replace import admit_correction, retained_contributions
 from cognee_lab.identity.revisions import corrected
@@ -189,3 +194,19 @@ async def test_saved_replacement_is_guarded_and_retried_without_new_intent(
     )
     incidents = await store.events(old.dataset_id)
     assert incidents[0]["recovery_event_id"] == event and incidents[0]["resolved_at"]
+
+
+def test_a_correction_may_not_move_an_occurrence_to_another_span_with_the_same_text(
+    source_payload,
+):
+    old = IdentitySource.model_validate_json(json.dumps(source_payload))
+    payload = corrected(old).model_dump(mode="json")
+    inside_limits = TEXT.index("limits") + 3
+    assert TEXT[inside_limits : inside_limits + 2] == "it"
+    payload["mention_groups"]["g01"]["occurrences"][1].update(
+        start=inside_limits, end=inside_limits + 2
+    )
+    moved = IdentitySource.model_validate_json(json.dumps(payload))
+    with pytest.raises(IntentError, match="keeps its start and end") as refused:
+        admit(old, moved, TEXT, TEXT, identity_map(old))
+    assert refused.value.code == "occurrence_moved"

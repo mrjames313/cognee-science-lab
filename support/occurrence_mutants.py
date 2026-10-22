@@ -35,6 +35,7 @@ MUTANTS = {
     "allow_two_origins": ("check_single_origin", skip),
     "allow_missing_targets": ("check_targets_exist", skip),
     "allow_changed_text": ("check_same_text", skip),
+    "allow_moved_occurrences": ("check_same_spans", skip),
     "skip_old_slices": ("check_old_slices", skip),
     "skip_new_slices": ("check_new_slices", skip),
     "skip_revision_step": ("check_next_revision", skip),

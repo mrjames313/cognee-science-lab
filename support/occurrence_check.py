@@ -152,6 +152,19 @@ def map_corruptions(case, same_text):
         )
 
 
+def moved_occurrences(case):
+    """With unchanged text, a swap of two same-text occurrences moves each to
+    the other's span, which no rebuild re-marks."""
+    mapping = case["general"]
+    mapped = [(k, i) for k, v in mapping.items() for i, e in enumerate(v) if e]
+    if len(mapped) < 2:
+        return
+    (k1, i1), (k2, i2) = mapped[:2]
+    swapped = {k: list(v) for k, v in mapping.items()}
+    swapped[k1][i1], swapped[k2][i2] = mapping[k2][i2], mapping[k1][i1]
+    yield "moved occurrence", "keeps its start and end", swapped
+
+
 def payload_corruptions(case, fate):
     """Descriptions that break a slice, revision or fresh-resolution rule."""
     old_payload, new_payload = case["old_payload"], case["new_payload"]
@@ -246,6 +259,12 @@ def check_corruptions(world, case):
         got = outcome(general(case, **parts))
         ok = refused_with(got, message=message)
         yield f"corrupt description: {name}", ok, ("refuse", message), got
+    if stable(world):
+        unchanged = materialize(world, same_text=True, text_changed=False)
+        for name, message, mapping in moved_occurrences(unchanged):
+            got = outcome(general(unchanged, mapping))
+            ok = refused_with(got, message=message)
+            yield f"corrupt map: {name}", ok, ("refuse", message), got
 
 
 def decided(case, decision, ctx, first_attempt):

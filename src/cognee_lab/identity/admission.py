@@ -86,6 +86,7 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     Only a first attempt chooses new UUIDs; a retry completes a saved plan,
     which may predate the derivation rules.
     """
+    text_changed = before != after
     check_text_present(before, after)
     check_source_identity(old, source, before, after)
     check_next_revision(old, source)
@@ -94,13 +95,14 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     check_targets_exist(source, origins)
     check_single_origin(origins)
     check_same_text(old, source, origins)
+    if not text_changed:
+        check_same_spans(old, source, origins)
     check_new_slices(source, after)
     fate = group_fate(old, source, origins)
     check_fresh_keys(old, fate.fresh)
     check_unused_entity_ids(old, source, fate.fresh)
     if first_attempt:
         check_revision_scoped_ids(old, source, fate.fresh)
-    text_changed = before != after
     check_continuing_decisions(old, source, fate, text_changed)
     check_fresh_resolution_ids(old, source, fate)
     check_one_resolution_per_fresh_group(source, fate)
@@ -211,6 +213,18 @@ def check_same_text(old, source, origins):
             raise IntentError(
                 "occurrence_changed",
                 "Mapped occurrence text differs from the old occurrence",
+            )
+
+
+def check_same_spans(old, source, origins):
+    """With unchanged text nothing re-marks the document, so a mapped
+    occurrence stays at its span even when another has the same text."""
+    for o in origins:
+        previous, current = occurrence(old, o.old), occurrence(source, o.new)
+        if (current.start, current.end) != (previous.start, previous.end):
+            raise IntentError(
+                "occurrence_moved",
+                "With unchanged text a mapped occurrence keeps its start and end",
             )
 
 
