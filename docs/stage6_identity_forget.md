@@ -185,6 +185,19 @@ Forget removes what the source owned from the graph, the vector index, the relat
 
 ## Evidence
 
+### Verification review fix round (2026-10-22)
+
+The assistant (a subagent) ran these on the user's Mac on 2026-10-22 with loopback embeddings, on branch `stage6-forget` at `50c9e74`. The one commit after it changes this file only. The round answers a verification review: the re-add removed set, the shared stored file, the narrowed replacement rule, two Scope notes and the old-plan refusal.
+
+- `uv run pytest -q -m 'not integration'`: 315 passed, 59 deselected, in 70 s.
+- `uv run python support/ledger_check.py`: `PASS verified within bound` at depth 5 with 5889 nodes and 5770 sequences in 10 s. `--mutants` caught all 40 breaks by the property each names (exit 0). The round passes no new argument to `RecordStore`; the old-plan refusal runs before `begin`.
+- `uv run python support/occurrence_check.py`: `PASS` in 101 s; `--mutants`: `PASS` in 28 s. `admission.py` changed `check_readd_entity_ids`.
+- `uv run pytest -q -m integration`: 59 passed in 1232 s. The two new native tests failed before their fixes: `test_native_readd_replaces_what_a_later_forget_of_a_co_owner_removed` found doc02's re-add naming HC `9b2b4cb5-...` again, and `test_native_forget_finishes_when_another_item_keeps_the_stored_file` failed with `Forgotten source leaves stored_files_present`.
+- `tests/test_identity_forget.py` (17 tests) adds the named replacement with the `replaces:` form refused for it, the unnamed replacement, two removed Entities one key names, the re-add removed set after a co-owner's later forget, and the old-plan refusal. The first, the fourth and the fifth failed before their fixes.
+- Verify journeys, each with 0 FAIL rows: F1 (40 PASS, one more than before: the private singleton's `replaces:` UUID), F2 (19), F3 (20 for each of the six stages), F4 (15), W1 (32), W2 (21), W3 (19 for each of three stages), K1 (23), K2 (21), K3 (18 for each of two stages), K4 (18 for each of two stages), K5 (10), P1 (18), P2 (18), P3 (18) and P4 (12). `journey all` was not run.
+
+### Review fix round
+
 The assistant (a subagent) ran these on the user's Mac on 2026-10-22 with loopback embeddings, on branch `stage6-forget`. The first forget checkpoint's evidence (at `f5e581b` and `1f10476`) is in the git history of this file; the runs below are from the review fix round, on the head recorded in the handoff.
 
 All runs below are on `835ee90`, the head of the review fix round; the one commit after it changes this file only.
