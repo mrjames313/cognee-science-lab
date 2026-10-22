@@ -25,6 +25,7 @@ FIXTURE = (
     / "tests/fixtures/identity/cognee_identity_source_example.json"
 )
 HELIOS = "8b4bff50-907b-56b6-bc80-3b0a7018714a"
+HC = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
 OLD_SHAPES = ((1,), (2,), (3,), (1, 1), (2, 1), (1, 2), (1, 1, 1))
 OLD_KEYS = ("g1", "g2", "g3")
 FRESH_KEYS = ("n1", "n2", "n3", "n4")
@@ -164,9 +165,8 @@ def layout(items, same_text, prefix=""):
 def base_payload():
     payload = json.loads(FIXTURE.read_text())
     payload["mention_groups"], payload["mention_resolutions"] = {}, {}
-    reusable = (HELIOS, payload["variant_assignments"]["v01"]["source_entity_id"])
     payload["entity_constructions"] = {
-        k: v for k, v in payload["entity_constructions"].items() if k in reusable
+        k: v for k, v in payload["entity_constructions"].items() if k in (HELIOS, HC)
     }
     return payload
 
@@ -258,46 +258,52 @@ def materialize(world, same_text=False, text_changed=True):
 
 
 # Decision choices layered on an admitted world. Each names the groups it
-# needs, edits the old and new payloads, and states the outcome the rules
-# give it from whether the text changed and whether this is a first attempt.
+# needs, edits the old and new payloads, and states as data what the rules
+# say on a first attempt and on a retry, with changed and with unchanged text.
 ADMIT = "admit"
-HC = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
 CORPUS = dict(kind="corpus")
 DOCUMENT = dict(kind="document", document_ref="doc01")
 SPANS = dict(kind="text_spans", document_ref="doc01", ranges=[dict(start=0, end=1)])
 
 
+class Outcomes(NamedTuple):
+    """ADMIT, or the refusal codes any of which may name the fault, with
+    changed text and with unchanged text."""
+
+    text_edit: object
+    same_text: object
+
+
 class Decision(NamedTuple):
     name: str
+    rule: str
     needs: frozenset
     change: object
-    expected: object
+    first: Outcomes
+    retry: Outcomes
+
+    def expected(self, text_changed, first_attempt):
+        outcomes = self.first if first_attempt else self.retry
+        return outcomes.text_edit if text_changed else outcomes.same_text
 
     def attempt_sensitive(self):
-        return any(
-            self.expected(text_changed, True) != self.expected(text_changed, False)
-            for text_changed in (True, False)
-        )
+        return self.retry != self.first
 
 
-def admit_always(text_changed, first_attempt):
-    return ADMIT
+def refuse(*codes):
+    return frozenset(codes)
 
 
-def always(*codes):
-    return lambda text_changed, first_attempt: frozenset(codes)
-
-
-def unless_unchanged_text(*codes):
-    return lambda text_changed, first_attempt: (
-        frozenset(codes) if text_changed else ADMIT
+def decision(name, rule, needs, change, *, text_edit, same_text, retry=None):
+    """`retry` overrides the outcomes that differ on a retry, which completes
+    a saved plan without the UUID derivation rules."""
+    first = Outcomes(text_edit, same_text)
+    return Decision(
+        name, rule, frozenset(needs), change, first, first._replace(**(retry or {}))
     )
 
 
-def first_attempt_only(*codes):
-    return lambda text_changed, first_attempt: (
-        frozenset(codes) if first_attempt else ADMIT
-    )
+ADMITTED_ON_RETRY = dict(text_edit=ADMIT, same_text=ADMIT)
 
 
 def derived(ctx, key):
@@ -472,137 +478,216 @@ def retarget_span_variant(old, new, ctx):
     retarget_document_variant(old, new, ctx)
 
 
-def underived_unless_text_edit(text_changed, first_attempt):
-    # With changed text the derivation rule refuses first on a first attempt
-    # and the decision rule on a retry; either names a real fault.
-    if text_changed:
-        return frozenset({"continuing_decision_changed", "entity_uuid_not_derived"})
-    return frozenset({"entity_uuid_not_derived"}) if first_attempt else ADMIT
-
-
 CONTINUING, RETIRED, FRESH = "continuing", "retired", "fresh"
+NO_SPAN_VARIANT = refuse("span_variant_in_text_edit")
+UNDERIVED = refuse("entity_uuid_not_derived")
+# `rule` numbers the unified admission rules: 1 continuing decisions,
+# 2 mention recipes, 3 reusable recipes, 4 variants. A row that lists two
+# codes for one outcome is refused by whichever rule `admit` applies first.
 DECISIONS = [
-    Decision(name, frozenset(needs), change, expected)
-    for name, needs, change, expected in [
-        (
-            "continuing group unresolved",
-            [CONTINUING],
-            unresolve,
-            unless_unchanged_text("continuing_decision_changed"),
-        ),
-        (
-            "continuing group retargeted to a derived new Entity",
-            [CONTINUING],
-            retarget_continuing_to_derived,
-            unless_unchanged_text("continuing_decision_changed"),
-        ),
-        (
-            "continuing group retargeted to an underived new Entity",
-            [CONTINUING],
-            retarget_continuing_to_underived,
-            underived_unless_text_edit,
-        ),
-        (
-            "continuing group retargeted to a declared Entity",
-            [CONTINUING],
-            retarget_continuing_to_hc,
-            unless_unchanged_text("continuing_decision_changed"),
-        ),
-        (
-            "continuing resolution renamed",
-            [CONTINUING],
-            rename_continuing_resolution,
-            always("continuing_resolution_changed"),
-        ),
-        (
-            "continuing mention recipe changed",
-            [CONTINUING],
-            change_continuing_recipe,
-            always("mention_recipe_changed"),
-        ),
-        (
-            "retired mention recipe kept",
-            [RETIRED],
-            keep_retired_recipe,
-            always("mention_recipe_changed"),
-        ),
-        ("unused reusable recipe dropped", [], drop_unused_reusable, admit_always),
-        (
-            "retained reusable recipe changed",
-            [],
-            change_retained_reusable,
-            always("reusable_recipe_changed"),
-        ),
-        (
-            "new recipe that nothing names",
-            [],
-            add_unreferenced_recipe,
-            first_attempt_only("entity_uuid_not_derived"),
-        ),
-        (
-            "new Entity named by a corpus input",
-            [],
-            add_corpus_referenced_entity,
-            admit_always,
-        ),
-        (
-            "new Entity named by a corpus input that nothing lists",
-            [],
-            add_corpus_decoy_entity,
-            first_attempt_only("entity_uuid_not_derived"),
-        ),
-        (
-            "fresh group resolved to a derived new Entity",
-            [FRESH],
-            resolve_fresh_to_derived,
-            admit_always,
-        ),
-        (
-            "fresh group resolved to an underived new Entity",
-            [FRESH],
-            resolve_fresh_to_underived,
-            first_attempt_only("entity_uuid_not_derived"),
-        ),
-        (
-            "new Entity derived from a key that does not name it",
-            [],
-            derive_from_a_key_that_does_not_name_it,
-            first_attempt_only("entity_uuid_not_derived"),
-        ),
-        ("document variant retargeted", [], retarget_document_variant, admit_always),
-        ("document variant dropped", [], drop_document_variant, admit_always),
-        ("document variant added", [], add_document_variant, admit_always),
-        (
-            "document variant added under an old resolution key",
-            [RETIRED],
-            add_variant_under_old_resolution_key,
-            always("variant_key_reused"),
-        ),
-        (
-            "corpus variant retargeted",
-            [],
-            retarget_corpus_variant,
-            always("variant_changed"),
-        ),
-        ("corpus variant dropped", [], drop_corpus_variant, always("variant_changed")),
-        ("corpus variant added", [], add_corpus_variant, always("variant_changed")),
-        (
-            "variant rescoped to the corpus",
-            [],
-            rescope_variant_to_corpus,
-            always("variant_changed"),
-        ),
-        (
-            "span variant unchanged",
-            [],
-            scope_both(SPANS),
-            unless_unchanged_text("span_variant_in_text_edit"),
-        ),
-        (
-            "span variant retargeted",
-            [],
-            retarget_span_variant,
-            always("variant_changed", "span_variant_in_text_edit"),
-        ),
-    ]
+    decision(
+        "continuing group unresolved",
+        "rule 1",
+        [CONTINUING],
+        unresolve,
+        text_edit=refuse("continuing_decision_changed"),
+        same_text=ADMIT,
+    ),
+    decision(
+        "continuing group retargeted to a derived new Entity",
+        "rules 1 and 3",
+        [CONTINUING],
+        retarget_continuing_to_derived,
+        text_edit=refuse("continuing_decision_changed"),
+        same_text=ADMIT,
+    ),
+    decision(
+        "continuing group retargeted to an underived new Entity",
+        "rules 1 and 3",
+        [CONTINUING],
+        retarget_continuing_to_underived,
+        text_edit=refuse("continuing_decision_changed", "entity_uuid_not_derived"),
+        same_text=UNDERIVED,
+        retry=dict(same_text=ADMIT),
+    ),
+    decision(
+        "continuing group retargeted to a declared Entity",
+        "rule 1",
+        [CONTINUING],
+        retarget_continuing_to_hc,
+        text_edit=refuse("continuing_decision_changed"),
+        same_text=ADMIT,
+    ),
+    decision(
+        "continuing resolution renamed",
+        "rule 1",
+        [CONTINUING],
+        rename_continuing_resolution,
+        text_edit=refuse("continuing_resolution_changed"),
+        same_text=refuse("continuing_resolution_changed"),
+    ),
+    decision(
+        "continuing mention recipe changed",
+        "rule 2",
+        [CONTINUING],
+        change_continuing_recipe,
+        text_edit=refuse("mention_recipe_changed"),
+        same_text=refuse("mention_recipe_changed"),
+    ),
+    decision(
+        "retired mention recipe kept",
+        "rule 2",
+        [RETIRED],
+        keep_retired_recipe,
+        text_edit=refuse("mention_recipe_changed"),
+        same_text=refuse("mention_recipe_changed"),
+    ),
+    decision(
+        "unused reusable recipe dropped",
+        "rule 3",
+        [],
+        drop_unused_reusable,
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "retained reusable recipe changed",
+        "rule 3",
+        [],
+        change_retained_reusable,
+        text_edit=refuse("reusable_recipe_changed"),
+        same_text=refuse("reusable_recipe_changed"),
+    ),
+    decision(
+        "new recipe that nothing names",
+        "rule 3",
+        [],
+        add_unreferenced_recipe,
+        text_edit=UNDERIVED,
+        same_text=UNDERIVED,
+        retry=ADMITTED_ON_RETRY,
+    ),
+    decision(
+        "new Entity named by a corpus input",
+        "rule 3",
+        [],
+        add_corpus_referenced_entity,
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "new Entity named by a corpus input that nothing lists",
+        "rule 3",
+        [],
+        add_corpus_decoy_entity,
+        text_edit=UNDERIVED,
+        same_text=UNDERIVED,
+        retry=ADMITTED_ON_RETRY,
+    ),
+    decision(
+        "fresh group resolved to a derived new Entity",
+        "rule 3",
+        [FRESH],
+        resolve_fresh_to_derived,
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "fresh group resolved to an underived new Entity",
+        "rule 3",
+        [FRESH],
+        resolve_fresh_to_underived,
+        text_edit=UNDERIVED,
+        same_text=UNDERIVED,
+        retry=ADMITTED_ON_RETRY,
+    ),
+    decision(
+        "new Entity derived from a key that does not name it",
+        "rule 3",
+        [],
+        derive_from_a_key_that_does_not_name_it,
+        text_edit=UNDERIVED,
+        same_text=UNDERIVED,
+        retry=ADMITTED_ON_RETRY,
+    ),
+    decision(
+        "document variant retargeted",
+        "rule 4",
+        [],
+        retarget_document_variant,
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "document variant dropped",
+        "rule 4",
+        [],
+        drop_document_variant,
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "document variant added",
+        "rule 4",
+        [],
+        add_document_variant,
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "document variant added under an old resolution key",
+        "rule 4",
+        [RETIRED],
+        add_variant_under_old_resolution_key,
+        text_edit=refuse("variant_key_reused"),
+        same_text=refuse("variant_key_reused"),
+    ),
+    decision(
+        "corpus variant retargeted",
+        "rule 4",
+        [],
+        retarget_corpus_variant,
+        text_edit=refuse("variant_changed"),
+        same_text=refuse("variant_changed"),
+    ),
+    decision(
+        "corpus variant dropped",
+        "rule 4",
+        [],
+        drop_corpus_variant,
+        text_edit=refuse("variant_changed"),
+        same_text=refuse("variant_changed"),
+    ),
+    decision(
+        "corpus variant added",
+        "rule 4",
+        [],
+        add_corpus_variant,
+        text_edit=refuse("variant_changed"),
+        same_text=refuse("variant_changed"),
+    ),
+    decision(
+        "variant rescoped to the corpus",
+        "rule 4",
+        [],
+        rescope_variant_to_corpus,
+        text_edit=refuse("variant_changed"),
+        same_text=refuse("variant_changed"),
+    ),
+    decision(
+        "span variant unchanged",
+        "rule 4",
+        [],
+        scope_both(SPANS),
+        text_edit=NO_SPAN_VARIANT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "span variant retargeted",
+        "rule 4",
+        [],
+        retarget_span_variant,
+        text_edit=refuse("variant_changed", "span_variant_in_text_edit"),
+        same_text=refuse("variant_changed"),
+    ),
 ]

@@ -279,6 +279,14 @@ def decided(case, decision, ctx, first_attempt):
     )
 
 
+def meets(expected, got, admitted):
+    """Whether an outcome is the expected admission, or a refusal by one of
+    the expected codes; and what was wanted."""
+    if expected == ADMIT:
+        return got == admitted, admitted
+    return got[0] == "refuse" and got[1] in expected, ("refuse", expected)
+
+
 def check_decisions(world, case):
     fate = admitted_fate(world)
     if fate is None:
@@ -302,13 +310,7 @@ def check_decisions(world, case):
             for first_attempt in attempts:
                 expected = decision.expected(text_changed, first_attempt)
                 got = outcome(decided(variant, decision, ctx, first_attempt))
-                if expected == ADMIT:
-                    ok, want = got == admitted, admitted
-                else:
-                    ok, want = got[0] == "refuse" and got[1] in expected, (
-                        "refuse",
-                        expected,
-                    )
+                ok, want = meets(expected, got, admitted)
                 yield f"decision: {decision.name}", ok, want, got
 
 
