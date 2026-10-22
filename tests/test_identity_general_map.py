@@ -78,23 +78,6 @@ GENERAL_MAPS = {
     combination_case: (COMBINE_MAP, fate({"g02"}, {"g04", "g05"}, {"g06"})),
 }
 
-# The text-change field each fixture saved before the general map, if any.
-LEGACY_FIELDS = {
-    prefix_case: None,
-    removal_case: ("occurrence_retention", {"g01": [1], "g02": []}),
-    retirement_case: ("occurrence_retention", {"g01": [], "g02": [0]}),
-    addition_case: ("occurrence_continuity", {"g01": [0, 1], "g02": [0]}),
-    split_case: ("occurrence_regrouping", SPLIT_MAP),
-    combination_case: ("occurrence_regrouping", COMBINE_MAP),
-}
-
-
-def legacy_plan(old, before, after, field):
-    text_change = dict(previous_text=before, text=after, chunk_budget=512)
-    if field:
-        text_change[field[0]] = field[1]
-    return dict(text_change=text_change, previous_description=old.model_dump_json())
-
 
 @pytest.mark.parametrize("case", GENERAL_MAPS, ids=lambda c: c.__name__)
 def test_each_fixture_admits_its_general_map_with_the_pinned_group_fate(
@@ -105,62 +88,29 @@ def test_each_fixture_admits_its_general_map_with_the_pinned_group_fate(
     assert admit(old, new, before, after, parse_occurrence_map(general)) == expected
 
 
-@pytest.mark.parametrize("case", GENERAL_MAPS, ids=lambda c: c.__name__)
-def test_a_plan_saved_with_the_old_fields_reads_as_the_fixture_general_map(
-    source_payload, case
-):
-    old, new, before, after = case(source_payload)
-    general, expected = GENERAL_MAPS[case]
-    change = TextChange.from_plan(legacy_plan(old, before, after, LEGACY_FIELDS[case]))
-    assert change.occurrence_map == parse_occurrence_map(general)
-    assert admit(old, new, before, after, change.occurrence_map) == expected
-
-
 @pytest.mark.parametrize(
-    "field",
+    "old_field",
     [
-        ("occurrence_retention", {"g01": [1, 1], "g02": []}),
-        ("occurrence_retention", {"g01": [1, 0], "g02": []}),
-        ("occurrence_retention", {"g01": [2], "g02": []}),
-        ("occurrence_retention", {"g01": [True], "g02": []}),
-        ("occurrence_retention", {"g01": [1]}),
-        ("occurrence_retention", {"g01": [1], "g02": [], "g03": []}),
-        ("occurrence_retention", [1]),
-        ("occurrence_continuity", {"g01": [0, 1]}),
-        ("occurrence_regrouping", {"g01": [["g04", 0], ["g05", 0]]}),
+        None,
+        ("occurrence_retention", {"g01": [1], "g02": []}),
+        ("occurrence_continuity", {"g01": [0, 1], "g02": [0]}),
+        ("occurrence_regrouping", SPLIT_MAP),
     ],
+    ids=["prefix", "retention", "continuity", "regrouping"],
 )
-def test_a_malformed_old_map_is_refused_when_the_plan_is_read(source_payload, field):
+def test_a_plan_without_the_general_map_is_refused_as_history(
+    source_payload, old_field
+):
     old, _, before, after = removal_case(source_payload)
-    with pytest.raises(IntentError) as refused:
-        TextChange.from_plan(legacy_plan(old, before, after, field))
-    assert refused.value.code == "recovery_plan"
-
-
-def test_a_plan_cannot_select_two_old_maps(source_payload):
-    old, _, before, after = removal_case(source_payload)
-    plan = legacy_plan(
-        old, before, after, ("occurrence_retention", {"g01": [1], "g02": []})
-    )
-    plan["text_change"]["occurrence_continuity"] = {"g01": [0, 1], "g02": [0]}
-    with pytest.raises(IntentError) as refused:
+    text_change = dict(previous_text=before, text=after, chunk_budget=512)
+    if old_field:
+        text_change[old_field[0]] = old_field[1]
+    plan = dict(text_change=text_change, previous_description=old.model_dump_json())
+    with pytest.raises(
+        IntentError, match="predates the general occurrence map"
+    ) as refused:
         TextChange.from_plan(plan)
     assert refused.value.code == "recovery_plan"
-
-
-def test_a_plan_cannot_hold_the_general_map_and_an_old_map(source_payload):
-    old, _, before, after = removal_case(source_payload)
-    plan = legacy_plan(
-        old, before, after, ("occurrence_retention", {"g01": [1], "g02": []})
-    )
-    plan["text_change"]["occurrence_map"] = REMOVAL_MAP
-    with pytest.raises(IntentError) as refused:
-        TextChange.from_plan(plan)
-    assert refused.value.code == "recovery_plan"
-    plan["text_change"]["occurrence_retention"] = None
-    assert TextChange.from_plan(plan).occurrence_map == parse_occurrence_map(
-        REMOVAL_MAP
-    )
 
 
 @pytest.mark.parametrize("case", GENERAL_MAPS, ids=lambda c: c.__name__)
@@ -177,9 +127,9 @@ def test_a_text_change_survives_the_saved_plan(source_payload, case):
     )
 
 
-def test_a_converted_prefix_plan_must_also_advance_one_revision(source_payload):
+def test_a_prefix_plan_must_also_advance_one_revision(source_payload):
     old, new, before, after = prefix_case(source_payload)
-    change = TextChange.from_plan(legacy_plan(old, before, after, None))
+    change = TextChange(before, after, PREFIX_MAP)
     assert change.prefix_shift(old, new) == len(after) - len(before)
     skipped = new.model_copy(update=dict(revision=old.revision + 2))
     with pytest.raises(IntentError, match="advances exactly one revision") as refused:

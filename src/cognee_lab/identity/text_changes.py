@@ -8,8 +8,6 @@ from .validation import IntentError, map_chunks
 
 
 def reject_dependents(old, rows):
-    from .models import IdentitySource
-
     doc = old.inputs[old.original_input_ref]
     for row in rows:
         if (row["source"], row["dataset"]) == (
@@ -122,72 +120,6 @@ async def chunk_text(text, ctx, budget=512):
     ]
 
 
-def indices(reviewed, groups, valid):
-    """A saved old-mode map: every old group, each with a list of valid ints."""
-    if (
-        not isinstance(reviewed, dict)
-        or set(reviewed) != set(groups)
-        or not all(
-            isinstance(v, list)
-            and all(type(i) is int for i in v)
-            and valid(v, groups[k])
-            for k, v in reviewed.items()
-        )
-    ):
-        raise IntentError("recovery_plan", "Saved occurrence map is malformed")
-    return reviewed
-
-
-def from_retention(reviewed, groups):
-    kept = indices(
-        reviewed,
-        groups,
-        lambda v, n: v == sorted(set(v)) and all(0 <= i < n for i in v),
-    )
-    return {
-        k: [[k, kept[k].index(i)] if i in kept[k] else None for i in range(n)]
-        for k, n in groups.items()
-    }
-
-
-def from_continuity(reviewed, groups):
-    moved = indices(
-        reviewed, groups, lambda v, n: len(v) == n and all(i >= 0 for i in v)
-    )
-    return {k: [[k, j] for j in moved[k]] for k in groups}
-
-
-def from_regrouping(reviewed, groups):
-    if not isinstance(reviewed, dict) or set(reviewed) != set(groups):
-        raise IntentError("recovery_plan", "Saved occurrence map is malformed")
-    return reviewed
-
-
-# Plans saved before 2026-10-21 hold at most one of these old-mode maps, or
-# none for a prefix shift. Delete this reader once no kept root holds a plan
-# without `occurrence_map`.
-LEGACY_READERS = {
-    "occurrence_retention": from_retention,
-    "occurrence_continuity": from_continuity,
-    "occurrence_regrouping": from_regrouping,
-}
-
-
-def legacy_occurrence_map(old, saved):
-    """The general map that states the same edit as a saved old-mode map."""
-    chosen = [f for f in LEGACY_READERS if saved.get(f) is not None]
-    if len(chosen) > 1:
-        raise IntentError("recovery_plan", "Saved plan selects more than one mode")
-    if not chosen:
-        return identity_map(old)
-    groups = {k: len(g.occurrences) for k, g in old.mention_groups.items()}
-    raw = LEGACY_READERS[chosen[0]](saved[chosen[0]], groups)
-    try:
-        return parse_occurrence_map(raw)
-    except IntentError:
-        raise IntentError("recovery_plan", "Saved occurrence map is malformed")
-
-
 @dataclass(frozen=True)
 class TextChange:
     previous_text: str
@@ -201,15 +133,14 @@ class TextChange:
 
     @classmethod
     def from_plan(cls, plan):
-        """Read the text change a plan saved, converting an old-mode map
-        against the plan's previous description."""
-        saved = dict(plan["text_change"])
-        legacy = {f: saved.pop(f) for f in LEGACY_READERS if f in saved}
+        """Read the text change a plan saved. Only plans with the general
+        `occurrence_map` are read; the roots that hold older plans are history."""
+        saved = plan["text_change"]
         if "occurrence_map" not in saved:
-            old = IdentitySource.model_validate_json(plan["previous_description"])
-            saved["occurrence_map"] = legacy_occurrence_map(old, legacy)
-        elif any(v is not None for v in legacy.values()):
-            raise IntentError("recovery_plan", "Saved plan mixes map formats")
+            raise IntentError(
+                "recovery_plan",
+                "Saved text change predates the general occurrence map; this root is history and its plan cannot be resumed",
+            )
         return cls(**saved)
 
     def prefix_shift(self, old, source):
