@@ -5,10 +5,12 @@ occurrence it became, or None if it was removed; a new occurrence that nothing
 maps to is an addition. The rules are stated over occurrences and groups, never
 over kinds of edit, so removal, addition, split, combination, a prefix shift,
 a correction with unchanged text and their mixtures are particular maps.
-Whether the text changed decides only two rules: a continuing group may change
-its decision in place when the text is unchanged, and span-scoped variants are
-refused when it changed. Functions below follow the order in which `admit`
-applies them.
+Whether the text changed decides three rules: with unchanged text every mapped
+occurrence keeps its span and a continuing group may change its decision in
+place; with changed text span-scoped variants are refused. Functions below
+follow the order in which `admit` applies them. `check_absent_from_graph` is
+the one rule that reads the graph: on a first attempt no UUID the revision
+introduces may be a node yet, so the caller runs it after `admit`.
 """
 
 from dataclasses import dataclass
@@ -505,7 +507,8 @@ def check_no_span_variants(source):
         for v in source.variant_assignments.values()
     ):
         raise IntentError(
-            "not_admitted", "Span-scoped variants require explicit scope remapping"
+            "span_variant_in_text_edit",
+            "Span-scoped variants require explicit scope remapping",
         )
 
 

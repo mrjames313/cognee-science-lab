@@ -472,10 +472,6 @@ def retarget_span_variant(old, new, ctx):
     retarget_document_variant(old, new, ctx)
 
 
-def span_refused_in_text_edits(text_changed, first_attempt):
-    return frozenset({"not_admitted"}) if text_changed else ADMIT
-
-
 def underived_unless_text_edit(text_changed, first_attempt):
     # With changed text the derivation rule refuses first on a first attempt
     # and the decision rule on a retry; either names a real fault.
@@ -596,12 +592,17 @@ DECISIONS = [
             rescope_variant_to_corpus,
             always("variant_changed"),
         ),
-        ("span variant unchanged", [], scope_both(SPANS), span_refused_in_text_edits),
+        (
+            "span variant unchanged",
+            [],
+            scope_both(SPANS),
+            unless_unchanged_text("span_variant_in_text_edit"),
+        ),
         (
             "span variant retargeted",
             [],
             retarget_span_variant,
-            always("variant_changed"),
+            always("variant_changed", "span_variant_in_text_edit"),
         ),
     ]
 ]

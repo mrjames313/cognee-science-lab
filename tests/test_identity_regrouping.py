@@ -195,9 +195,9 @@ def test_retirement_follows_the_source_lineage_not_its_revision(source_payload):
         ("retired_recipe_kept", "mention_recipe_changed", "mention recipe is dropped"),
         ("bad_span", "occurrence_changed", "exact document slice"),
         (
+            "corpus_variant_changed",
             "variant_changed",
-            "variant_changed",
-            "span-scoped variant assignments stay unchanged",
+            "Corpus- and span-scoped variant assignments stay unchanged",
         ),
     ],
 )
@@ -450,9 +450,9 @@ def test_combination_refuses_a_group_that_takes_only_part_of_the_merge(source_pa
         ),
         ("bad_span", "occurrence_changed", "exact document slice"),
         (
+            "corpus_variant_changed",
             "variant_changed",
-            "variant_changed",
-            "span-scoped variant assignments stay unchanged",
+            "Corpus- and span-scoped variant assignments stay unchanged",
         ),
     ],
 )
