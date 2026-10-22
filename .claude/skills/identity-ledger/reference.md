@@ -10,7 +10,7 @@ All functions are in `src/cognee_lab/identity/storage.py` unless the entry names
 - **P2. Independent sources.** Harm: a failure or recovery on one source withholds, resolves or corrupts another source. Code: every row and event query in `begin`, `fail` and `complete` filters on dataset and source.
 - **P3. Stale calls are refused.** Harm: a writer that works from an old read overwrites newer intent. Or a late acknowledgement marks the wrong attempt or description as verified. Code: the `stale_revision` guard in `begin`, the attempt check in `fail`, the attempt and `pending` filter in `complete`, and the description check in `assert_pending`. A guard raises before the commit, so the session rolls back.
 - **P4. One writer at a time.** Harm: two writers interleave graph writes for overlapping intents. Code: `begin` takes the `Writer` row only when it has no owner. `fail` and `complete` release it only for their own attempt.
-- **P5. Recovery is explicit and forward.** Harm: an operator loses track of an incident, sees two incidents for one failure, or sees the record of a resolved incident change. Or a method that does not own the saved intent rolls it back, replaces it or drops its retirement plan. Code: the guards in `begin` (`recovery_choice`, `withdrawn_source`, `revision_reuse`, `revision_sequence`, `recovery_plan`). Also `begin` links a recovery attempt to the open event, `fail` reuses the open event, and `complete` resolves it. No call removes an event row. `begin` and `complete` change only unresolved events. `fail` looks an event up by id without checking `resolved_at`, but its attempt guard means it reaches only the event of the row's current attempt, which is unresolved.
+- **P5. Recovery is explicit and forward.** Harm: an operator loses track of an incident, sees two incidents for one failure, or sees the record of a resolved incident change. Or a method that does not own the saved intent rolls it back, replaces it or drops its retirement plan. Code: the guards in `begin` (`recovery_choice`, `withdrawn_source`, `revision_reuse`, `revision_sequence`, `recovery_plan`). Also `begin` links a recovery attempt to the open event, `fail` reuses the open event, and `complete` resolves it with `outcome` set to the completion state (`restored` for current) and the last recovery attempt marked `verified`; `retrieve` and the fixtures report that outcome. No call removes an event row. `begin` and `complete` change only unresolved events. `fail` looks an event up by id without checking `resolved_at`, but its attempt guard means it reaches only the event of the row's current attempt, which is unresolved.
 - **P6. Failed rows can recover.** Harm: a failure that no explicit recovery can clear withholds the source forever. Code: `begin` accepts the owning method on a failed row with the saved revision, description and plan. `assert_pending` and `complete` then accept that attempt.
 
 ## Steps
@@ -28,6 +28,7 @@ Each step is one call sequence that the named caller makes. The checker treats e
 | `Wn replace Sk rev=r expect=r plan=<saved>` | the retry branch of `replace` | `begin(method="replace")` with the saved plan |
 | `Wn withdraw Sk rev=r expect=r plan=withdraw` | `withdraw`, with the saved plan on retry | `begin(method="withdraw")` |
 | `Wn forget Sk rev=r expect=r plan=forget` | `forget`, with the saved plan on retry | `begin(method="forget")` |
+| `Wn forget Sk rev=1 expect=0 plan=forget` | none (refusal input): `forget` raises `source_missing` before `begin` on a missing row | `begin(method="forget")` |
 | `Wn complete` | `Publisher._apply_pending`, `withdraw`, `forget` | `assert_pending()` (not for withdraw or forget), then `complete()`. If a call refuses, the caller's `fail()` runs. A publish whose `assert_pending()` refuses stops with the reservation held. |
 | `Wn complete desc=alt` | none (refusal input) | the same calls with a description other than the one begun |
 | `Wn fail@stage` | the `except` blocks of the callers | `fail()` with `nodes`, `replace_saved`, `withdraw_contributions` or `forget_contributions` |
@@ -45,6 +46,7 @@ From every row version, the intents functions also send arguments that `begin()`
 - Reconcile, withdraw and forget at the saved revision plus one.
 - Publish from no row at revision 2, publish at the saved revision on any row, and replace at the saved revision plus two.
 - A replacement whose plan is a publish plan, and a forget whose plan is a publish plan.
+- A forget on a source that has no row.
 - A replace retry whose plan changes `previous_description` or adds, drops or swaps `text_change` (a `text` plan for a `regroup` plan).
 
 ## Modeling choices
@@ -52,11 +54,11 @@ From every row version, the intents functions also send arguments that `begin()`
 - **Stale reads.** A caller reads the row without the reservation and calls `begin()` later. So a writer may call `begin()` with arguments built from any row version that the source had earlier on the path.
 - **Caller pre-checks.** The checker skips the pre-checks in `Publisher.publish`, `replace` and `withdraw`, because `begin()` must hold on its own. The one exception is a missing row (the next item).
 - **Missing rows.** The intents functions send no reconcile, replace or withdraw step for a source that has no row. The callers never make that call:
-  - `withdraw` and `replace` read the row first and raise `source_missing` when it is missing.
+  - `withdraw`, `forget` and `replace` read the row first and raise `source_missing` when it is missing. The forget step is sent anyway, because `begin()` has a `source_missing` guard for it and the break `forget-without-a-row` shows what its removal admits: a `forgotten` row at revision 1 for a source that never published.
   - `Publisher.publish` uses method `reconcile` only with an expected revision of 1 or more. `begin()` refuses that on a missing row as `stale_revision`.
   - No code removes a `Publication` row. So a row that a caller read once is never missing later, and a stale read cannot send these calls.
 
-  `begin()` itself accepts reconcile and withdraw on a missing row at expected revision 0 and revision 1. Only replace has a `source_missing` guard in `begin()`. Because the checker does not send these calls, a break that removes that guard is not caught.
+  `begin()` itself accepts reconcile and withdraw on a missing row at expected revision 0 and revision 1. Replace and forget have `source_missing` guards in `begin()`. Because the checker does not send replace for a missing row, a break that removes the replace guard is not caught.
 - **Stage names.** storage.py only copies `stage` into the event. So the checker uses one fault stage per method. If storage.py begins to branch on `stage`, add each stage as a separate `Finish` step.
 - **Descriptions.** A description is a function of source, revision and variant. It is the fixture `tests/fixtures/identity/cognee_identity_source_example.json` with a new `identity_data_id` and `revision`. Variant 1 changes the original text digest.
 - **Plans.** A plan holds only the fields that storage.py reads: `operation`, `revision`, `previous_description`, `text_change` and `runtime_profile`. `text_change` is a name, `text` or `regroup`, for the one dict that the checker sends for it (`TEXT_CHANGES` in `support/ledger_model.py`). The plan tag is part of the step label, so dedupe and `--replay` tell plans apart.
@@ -81,7 +83,7 @@ Measured on 2026-10-21 on the development Mac (10 cores). P = 0, 2 sources, 2 wr
 | 7 | PASS | 87700 / 85448 / 163.85 |
 | 8 | PASS | 482109 / 470249 / 893.41 |
 
-After the regrouping plan joined the step list on 2026-10-21, depth 5 gave 3828 nodes and 3717 sequences in about 6.7 s. After the forget method and the re-add joined it on 2026-10-22, depth 5 gives 5548 nodes and 5429 sequences in about 9 s, and `--mutants` runs its 37 breaks in about 15 s. The depths 6 to 8 rows above predate both changes.
+After the regrouping plan joined the step list on 2026-10-21, depth 5 gave 3828 nodes and 3717 sequences in about 6.7 s. After the forget method and the re-add joined it on 2026-10-22, depth 5 gave 5548 nodes and 5429 sequences in about 9 s. Later that day the forget on a missing row joined the step list, and depth 5 gives 5889 nodes and 5770 sequences in about 10 s; `--mutants` runs its 40 breaks in about 15 s. The depths 6 to 8 rows above predate these changes.
 
 P5 later gained two checks: no step removes a recovery event, and no step changes a resolved one. After that change, depths 6, 7 and 8 passed again with the same counts. Those runs ran in parallel, so their times are not in the table.
 
@@ -129,6 +131,9 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `publish-restarts-saved-row` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 publish S1 rev=2 expect=1` |
 | `readd-at-forgotten-revision` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete`, `W1 publish S1 rev=1 expect=1` |
 | `complete-forgotten-as-withdrawn` | P1 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete` |
+| `advance-guard-refuses-readd` | INCONCLUSIVE | none: no publish on a forgotten row is accepted, so `accepted readd` is never reached |
+| `forget-without-a-row` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S2 rev=1 expect=0 plan=forget` |
+| `complete-misnames-outcome` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1`, `W1 withdraw S1 rev=1`, `W1 complete` |
 | `no-advance-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=2` |
 | `advance-guard-ignores-method` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=2` |
 | `no-revision-reuse` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1 desc=alt` |
@@ -168,7 +173,7 @@ These breaks are not caught. They are not in `ledger_mutants.py`.
 
 For these three, no reachable sequence separates the break from the real code. Each one gives the same node count as the real code at depth 6 (15763 nodes).
 
-- `begin` without its `source_missing` guard. The checker does not send replace for a missing row (see "Missing rows" in the modeling choices).
+- `begin` without the `source_missing` guard of replace. The checker does not send replace for a missing row (see "Missing rows" in the modeling choices). The forget guard is covered by `forget-without-a-row`.
 
 ## Proof that this skill works
 

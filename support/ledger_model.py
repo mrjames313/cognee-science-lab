@@ -297,7 +297,8 @@ def withdraw_intents(w, s, view):
 
 def forget_intents(w, s, view):
     if view is None:
-        return []
+        # forget() refuses a missing row itself; begin() must refuse it too.
+        return [Begin(w, s, "forget", 0, 1, Plan("forget", 1))]
     r, v = view.revision, view.variant
     reuse = view.state == "failed" and view.plan.operation == "forget"
     plan = view.plan if reuse else Plan("forget", r)  # as forget() chooses

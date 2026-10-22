@@ -449,15 +449,21 @@ def p5_explicit_forward_recovery(step):
                 yield f"S{s + 1} recovery event resolved by {op.label!r}"
     if completing:
         attempt = step.model_before.writers[op.writer].holds
+        done = METHODS[attempt.method].done_state
         was_open = {
             e["recovery_event_id"] for e in unresolved(before.events[attempt.source])
         }
         for e in after.events[attempt.source]:
-            if (
-                e["recovery_event_id"] in was_open
-                and e.get("resolving_attempt") != attempt.id
-            ):
+            if e["recovery_event_id"] not in was_open:
+                continue
+            if e.get("resolving_attempt") != attempt.id:
                 yield "a completion did not resolve the open event"
+            elif e.get("outcome") != ("restored" if done == "current" else done):
+                yield f"a completion as {done} recorded outcome {e.get('outcome')!r}"
+            elif e.get("recovery_attempts") and (
+                e["recovery_attempts"][-1].get("outcome") != "verified"
+            ):
+                yield "a completion did not mark its recovery attempt verified"
     if isinstance(op, Begin) and step.accepted:
         yield from begin_rules(op, before.rows.get(op.source))
 
@@ -528,8 +534,9 @@ def first_violation(step):
 
 
 # A pass that never reaches one of these says nothing about it, so the run is
-# INCONCLUSIVE: row states, accepted calls of each step kind, and a failed row
-# that completed as current again.
+# INCONCLUSIVE: row states, accepted calls of each step kind, a publish
+# accepted on a forgotten row (the re-add), and a failed row that completed as
+# current again.
 REACHABLE = (
     "row current",
     "row failed",
@@ -537,6 +544,7 @@ REACHABLE = (
     "row forgotten",
     "row pending",
     *(f"accepted {m}" for m in METHODS),
+    "accepted readd",
     "accepted complete",
     "accepted fail",
     "accepted crash",
@@ -552,6 +560,10 @@ def tally(reached, step):
     if not step.accepted:
         return
     reached[f"accepted {step_kind(step.op)}"] += 1
+    if isinstance(step.op, Begin) and step.op.method == "publish":
+        prior = step.obs_before.rows.get(step.op.source)
+        if prior and prior["state"] == "forgotten":
+            reached["accepted readd"] += 1
     if isinstance(step.op, Finish) and step.op.stage is None:
         attempt = step.model_before.writers[step.op.writer].holds
         if attempt.from_failed and METHODS[attempt.method].done_state == "current":

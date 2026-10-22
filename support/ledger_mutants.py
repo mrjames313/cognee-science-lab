@@ -265,6 +265,37 @@ MUTANTS = {
         '            if row and row.state in ("pending", "failed"):',
         "P6",
     ),
+    "advance-guard-refuses-readd": Mutant(
+        '                    or method == "publish"\n',
+        "                    or False\n",
+        "INCONCLUSIVE",
+    ),
+    # The guard removed, with the state check below it guarded against the
+    # missing row instead of crashing on it.
+    "forget-without-a-row": Mutant(
+        "                if row is None:\n"
+        "                    raise IntentError(\n"
+        '                        "source_missing", "Forget requires an existing publication"\n'
+        "                    )\n"
+        '                if plan.get("operation") != "identity_forget":\n'
+        "                    raise IntentError(\n"
+        '                        "recovery_plan", "Forget requires a durable forget plan"\n'
+        "                    )\n"
+        "                if not (\n"
+        '                    row.state == "current"\n',
+        '                if plan.get("operation") != "identity_forget":\n'
+        "                    raise IntentError(\n"
+        '                        "recovery_plan", "Forget requires a durable forget plan"\n'
+        "                    )\n"
+        "                if row is not None and not (\n"
+        '                    row.state == "current"\n',
+        "P5",
+    ),
+    "complete-misnames-outcome": Mutant(
+        '                        outcome="restored" if state == "current" else state,\n',
+        '                        outcome="restored",\n',
+        "P5",
+    ),
     "begin-always-busy": Mutant(
         "            if locked.rowcount != 1:",
         "            if True:",
