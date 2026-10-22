@@ -133,58 +133,35 @@ COMMANDS = {
         "group_combination_result.json",
         COMBINE_MAP,
     ),
-}
-
-
-# Commands that take one option choosing the captured case.
-VARIANT_COMMANDS = {
-    "reinterpret": (
-        "case",
-        {
-            "new-entity": OccurrenceCommand(
-                reinterpretation.NEW_ENTITY_AFTER,
-                reinterpretation.describe_new_entity,
-                "reinterpretation_new_entity_result.json",
-                reinterpretation.ENTITY_MAP,
-                reinterpretation.inspect_new_entity,
-            ),
-            "unresolved": OccurrenceCommand(
-                reinterpretation.UNRESOLVED_AFTER,
-                reinterpretation.describe_unresolved,
-                "reinterpretation_unresolved_result.json",
-                reinterpretation.UNRESOLVED_MAP,
-                reinterpretation.inspect_unresolved,
-            ),
-        },
+    "reinterpret-new-entity": OccurrenceCommand(
+        reinterpretation.NEW_ENTITY_AFTER,
+        reinterpretation.describe_new_entity,
+        "reinterpretation_new_entity_result.json",
+        reinterpretation.ENTITY_MAP,
+        reinterpretation.inspect_new_entity,
     ),
-    "change-kind": (
-        "direction",
-        {
-            "to-mention": OccurrenceCommand(
-                BEFORE,
-                kind_change.describe_to_mention,
-                "kind_change_to_mention_result.json",
-                kind_change.TO_MENTION_MAP,
-                kind_change.inspect,
-            ),
-            "to-reusable": OccurrenceCommand(
-                BEFORE,
-                kind_change.describe_to_reusable,
-                "kind_change_to_reusable_result.json",
-                kind_change.TO_REUSABLE_MAP,
-                kind_change.inspect,
-            ),
-        },
+    "reinterpret-unresolved": OccurrenceCommand(
+        reinterpretation.UNRESOLVED_AFTER,
+        reinterpretation.describe_unresolved,
+        "reinterpretation_unresolved_result.json",
+        reinterpretation.UNRESOLVED_MAP,
+        reinterpretation.inspect_unresolved,
+    ),
+    "change-kind-to-mention": OccurrenceCommand(
+        BEFORE,
+        kind_change.describe_to_mention,
+        "kind_change_to_mention_result.json",
+        kind_change.TO_MENTION_MAP,
+        kind_change.inspect,
+    ),
+    "change-kind-to-reusable": OccurrenceCommand(
+        BEFORE,
+        kind_change.describe_to_reusable,
+        "kind_change_to_reusable_result.json",
+        kind_change.TO_REUSABLE_MAP,
+        kind_change.inspect,
     ),
 }
-
-
-def selected_command(args):
-    """The command a CLI line selects, with its option when it takes one."""
-    if args.command in VARIANT_COMMANDS:
-        option, choices = VARIANT_COMMANDS[args.command]
-        return choices[getattr(args, option)]
-    return COMMANDS[args.command]
 
 
 async def run(args, root):
@@ -195,7 +172,7 @@ async def run(args, root):
     from .text_changes import TextChange, chunk_text, original_context, read_original
     from .text_fixture import maintain_one
 
-    command = selected_command(args)
+    command = COMMANDS[args.command]
     if args.source != "doc01" or not (root / "chunked-fixture-info.json").exists():
         raise IntentError(
             "fixture_scope", f"{args.command} requires doc01 of a chunked-fixture"

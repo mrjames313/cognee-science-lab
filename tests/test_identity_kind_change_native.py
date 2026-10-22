@@ -92,9 +92,7 @@ def test_native_kind_change_there_and_back_with_reopen_and_reconcile(tmp_path):
     root = tmp_path / "kind_change"
     command(root, "chunked-fixture")
     baseline = json.loads((root / "multisource_result.json").read_text())
-    command(
-        root, "change-kind", "--direction", "to-mention", "--expected-revision", "1"
-    )
+    command(root, "change-kind-to-mention", "--expected-revision", "1")
     mention = json.loads((root / TO_MENTION).read_text())
     check_mention(baseline, mention)
     assert (
@@ -106,9 +104,7 @@ def test_native_kind_change_there_and_back_with_reopen_and_reconcile(tmp_path):
     assert reconciled["sources"] == mention["sources"]
     assert reconciled["result"]["facts"] == mention["result"]["facts"]
 
-    command(
-        root, "change-kind", "--direction", "to-reusable", "--expected-revision", "2"
-    )
+    command(root, "change-kind-to-reusable", "--expected-revision", "2")
     reusable = json.loads((root / TO_REUSABLE).read_text())
     check_reusable(baseline, reusable)
     assert (
@@ -127,23 +123,17 @@ def test_native_kind_change_refuses_the_wrong_root_or_revision(tmp_path):
     command(root, "chunked-fixture")
     refused = command(
         root,
-        "change-kind",
-        "--direction",
-        "to-reusable",
+        "change-kind-to-reusable",
         "--expected-revision",
         "1",
         expect=1,
     )
     assert "requires doc01 produced by to-mention" in refused.stdout
-    command(
-        root, "change-kind", "--direction", "to-mention", "--expected-revision", "1"
-    )
+    command(root, "change-kind-to-mention", "--expected-revision", "1")
     for direction, revision in [("to-mention", "2"), ("to-reusable", "1")]:
         command(
             root,
-            "change-kind",
-            "--direction",
-            direction,
+            f"change-kind-{direction}",
             "--expected-revision",
             revision,
             expect=1,
@@ -160,9 +150,7 @@ def test_native_kind_change_recovers_after_an_injected_failure(tmp_path, stage):
     baseline = json.loads((root / "multisource_result.json").read_text())
     command(
         root,
-        "change-kind",
-        "--direction",
-        "to-mention",
+        "change-kind-to-mention",
         "--expected-revision",
         "1",
         "--fault-stage",
@@ -201,14 +189,10 @@ def test_native_mention_to_reusable_recovers_after_an_injected_failure(tmp_path)
     root = tmp_path / "kind_change_back_failure"
     command(root, "chunked-fixture")
     baseline = json.loads((root / "multisource_result.json").read_text())
-    command(
-        root, "change-kind", "--direction", "to-mention", "--expected-revision", "1"
-    )
+    command(root, "change-kind-to-mention", "--expected-revision", "1")
     command(
         root,
-        "change-kind",
-        "--direction",
-        "to-reusable",
+        "change-kind-to-reusable",
         "--expected-revision",
         "2",
         "--fault-stage",

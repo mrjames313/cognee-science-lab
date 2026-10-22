@@ -1,14 +1,11 @@
 """Representation-kind changes with unchanged text: a TextChange with equal texts."""
 
 import json
-import subprocess
-import sys
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 
-from test_identity_native import REPO
 from test_identity_occurrences import example
 from test_identity_revisions import Graph
 from cognee_lab.identity.admission import GroupFate
@@ -190,40 +187,3 @@ def test_the_describers_refuse_any_root_but_their_own_revision(source_payload):
         with pytest.raises(IntentError) as refused:
             describe(source, BEFORE, [chunk])
         assert refused.value.code == "fixture_scope"
-
-
-@pytest.mark.parametrize(
-    "arguments, message",
-    [
-        (["change-kind"], "change-kind requires --direction"),
-        (["reinterpret"], "reinterpret requires --case"),
-        (
-            ["remove-occurrences", "--case", "unresolved"],
-            "--case applies only to reinterpret",
-        ),
-        (
-            ["reinterpret", "--case", "unresolved", "--direction", "to-mention"],
-            "--direction applies only to change-kind",
-        ),
-    ],
-)
-def test_the_cli_refuses_a_missing_or_misplaced_case_option(
-    tmp_path, arguments, message
-):
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "cognee_lab.identity",
-            *arguments,
-            "--root",
-            str(tmp_path / "none"),
-            "--expected-revision",
-            "1",
-        ],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    assert result.returncode == 2 and message in result.stderr

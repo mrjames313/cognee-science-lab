@@ -114,7 +114,7 @@ def test_native_reinterpretation_reopen_and_reconcile(tmp_path, case):
     root = tmp_path / "reinterpretation"
     command(root, "chunked-fixture")
     before = json.loads((root / "multisource_result.json").read_text())
-    command(root, "reinterpret", "--case", case, "--expected-revision", "1")
+    command(root, f"reinterpret-{case}", "--expected-revision", "1")
     after = json.loads((root / RESULTS[case]).read_text())
     check_reinterpreted(case, before, after)
     assert (
@@ -136,9 +136,7 @@ def test_native_reinterpretation_recovers_after_an_injected_failure(tmp_path, st
     before = json.loads((root / "multisource_result.json").read_text())
     command(
         root,
-        "reinterpret",
-        "--case",
-        "new-entity",
+        "reinterpret-new-entity",
         "--expected-revision",
         "1",
         "--fault-stage",
