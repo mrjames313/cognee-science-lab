@@ -783,6 +783,12 @@ Step 5 owns standard B Task-transform Cognify/Remember/full Update/removal hooks
 
 Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
 
+## Revision record — 2026-10-22 (step-4 decisions)
+
+- Recorded the user's decisions that a changed group decision means a fresh group, and that a successor record for retired group IDs waits for dependencies or the step-5 retrieval contract.
+- Recorded which remaining step-4 items can be specified now and which wait for a dependency policy. Proposed order: changed interpretation, then representation-kind changes, while the user sketches a real dependent-source scenario.
+- Updated the Stage-6 design handoff's step-4 list to the general occurrence map.
+
 ## Revision record — 2026-10-22 (mixed occurrence revision)
 
 - Recorded Checkpoint C: `revise-occurrences` publishes one edit that removes, keeps and adds occurrences of a continuing group and retires another group, with no admission change.

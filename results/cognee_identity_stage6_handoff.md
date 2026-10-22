@@ -568,15 +568,13 @@ Develop sequence tests with each step. [SESSION_HANDOFF.md](../docs/SESSION_HAND
 
 The remaining areas are:
 
-1. **Occurrence/group changes.** Implement explicit splits/combinations with fresh resulting IDs, mixed addition/removal, representation-kind changes and broader additions. Current captured additions and removals do not establish general regrouping or automatic matching.
+1. **Occurrence/group changes.** Representation-kind changes remain. Since 2026-10-21 one general occurrence map admits any mix of kept, removed, added and regrouped occurrences under the approved rules, with captured fixtures for removal, retirement, addition, split, combination and one mixed edit. These fixtures do not establish automatic matching.
 2. **Changed interpretation and semantic refresh.** Handle changed referents, definitions or applicability with coordinated saved decisions and regenerated facts/evidence. Unchanged-text retargeting and captured same-binding edits do not establish general semantic refresh.
 3. **Dependencies.** Identify and reconsider sources that consumed changed documents, corpus fields or saved records. Support admitted span/record remapping. Current text edits reject known dependent sources. Positive dependencies alone do not identify new corpus opportunities.
 4. **Full source lifecycle.** Coordinate original removal, generated-source retirement/rebuild and authorized endpoint reconstruction. Preserve remaining owners. Distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal retains Data/descriptions and original facts, so it does not implement full source Forget.
 5. **Verification and recovery.** Extend revision/attempt, eligibility, ownership, index, evidence and retirement checks across these operations. Include incomplete/missing-plan diagnostics. General crash recovery is not a new prerequisite.
 
-The next task is a concrete group split/combination review. Specify retiring predecessor groups, fresh resulting IDs, replacement decisions and regenerated semantic output. Group continuity alone does not authorize fact transfer.
-
-Current `occurrence_retention` handles removals. Separate `occurrence_continuity` maps every old occurrence to a reviewed new index and admits additions. Neither mode admits splits/combinations or mixed removal/addition. Reuse the whole-document rebuild and common publisher while preserving independent doc02 output. A generic Describe algorithm is unnecessary for this captured slice.
+Update, 2026-10-22: the separate `occurrence_retention`, `occurrence_continuity` and `occurrence_regrouping` admissions were replaced by one general occurrence map on 2026-10-21. A changed group decision means a fresh group, decided by the user on 2026-10-22. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the rules, the decisions, the proposed order and the next task. Group continuity alone still does not authorize fact transfer.
 
 ### Step 5 / M4: integration and retrieval
 

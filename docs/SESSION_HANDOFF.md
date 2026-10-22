@@ -251,6 +251,25 @@ Pick the next step-4 item with the user, as a concrete case to review before any
 - A change of representation kind, using separate suitable Entities.
 - An occurrence that moves to another document, span-scoped variants, and dependent sources (step-4 item 3).
 
+### Step-4 decisions, 2026-10-22
+
+The user and the assistant reviewed the remaining step-4 items on 2026-10-22.
+
+**Decisions the user made.**
+
+1. A changed decision means a fresh group. If an edit changes what a group refers to (a different referent, resolved to unresolved or the reverse), the group does not continue. The reviewer retires it and declares a fresh group, and its facts are generated again. A retired ID is never served with a new meaning. This keeps the current admission rule (`check_continuing_decisions`). A scope-only change to the same Entity might later be treated like the unchanged-text retarget correction; decide that only when a concrete case needs it.
+2. No successor record yet. Nothing records that an old group ID was replaced by a new one, beyond the revision's result file. Decide it with step-4 item 3 or the step-5 retrieval contract, where its callers are designed.
+
+**What follows for each item.**
+
+- Changed interpretation (item 2) needs only a captured single-document fixture under the existing rules: retire, declare fresh, regenerate facts. It needs no logic to correct references. References inside the document are rebuilt by the retire-and-fresh path. References from other sources are dependencies (item 3), and a known dependent source is refused today.
+- Representation-kind changes (item 1): open decisions are which source owns the new reusable Entity, and what happens to other documents that use it. A single-document case can be specified now.
+- Dependencies (item 3) cannot be fully specified yet. The dependency record and the propagation policy (block, mark unavailable, queue for review or reconsider) depend on real dependent sources in the user's intended use. The cross-document parts of items 1, 2 and 4 wait for this policy.
+- Full source lifecycle (item 4): removing a source that no other source consumed can be specified now. Removing a consumed source waits for item 3.
+- Verification and recovery (item 5) follows each operation. Open choice: whether new operations get a small-world oracle check like admission.
+
+Proposed order: item 2's single-document case, then item 1's, while the user sketches a real dependent-source scenario for item 3.
+
 ### Tracked follow-ups
 
 Neither blocks the next case.
