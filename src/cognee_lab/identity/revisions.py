@@ -6,17 +6,22 @@ from .models import IdentitySource
 from .multisource import current_sources, fixture_id, snapshot
 from .publish import Publisher
 from .retrieve import retrieve
-from .validation import IntentError
+from .validation import IntentError, fresh_entity_id
 
-CORRECTED_ID = fixture_id("doc01:corrected-controller")
+
+def corrected_id(source):
+    """The revised controller is a new reusable Entity, so its UUID derives from
+    the source, revision 2 and the resolution that names it."""
+    return str(fresh_entity_id(source.identity_data_id, 2, "r01"))
 
 
 def corrected(source):
     payload = source.model_dump(mode="json")
     payload["revision"] = 2
+    revised = corrected_id(source)
     old_target = payload["mention_resolutions"]["r01"]["target_entity_id"]
-    payload["mention_resolutions"]["r01"]["target_entity_id"] = CORRECTED_ID
-    payload["variant_assignments"]["v01"]["target_entity_id"] = CORRECTED_ID
+    payload["mention_resolutions"]["r01"]["target_entity_id"] = revised
+    payload["variant_assignments"]["v01"]["target_entity_id"] = revised
     payload["producers"]["correction"] = dict(
         method="captured_fixture",
         implementation="stage6-captured-revision-correction",
@@ -31,10 +36,10 @@ def corrected(source):
         item["input_refs"] = ["doc01"]
         item["producer_ref"] = "correction"
     payload["inputs"].pop("existing_A", None)
-    if old_target != CORRECTED_ID:
+    if old_target != revised:
         payload["entity_constructions"].pop(old_target, None)
     payload["entity_constructions"].pop(fixture_id("doc01:singleton"), None)
-    payload["entity_constructions"][CORRECTED_ID] = dict(
+    payload["entity_constructions"][revised] = dict(
         name="Revised controller",
         description="Creation seed for the captured doc01 correction.",
     )

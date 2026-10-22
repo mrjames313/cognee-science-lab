@@ -1,32 +1,27 @@
 """Identity revision replacement with explicit, durable forward recovery."""
 
-from .models import ChunkInput, IdentitySource, SourceTextInput
+from .admission import admit, check_absent_from_graph, identity_map
+from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
 from .validation import IntentError
 
 
-def unchanged_occurrences(old, intended):
-    """This milestone admits decision/retention changes, not occurrence remapping."""
-
-    def text_inputs(source):
-        return {
-            k: v
-            for k, v in source.inputs.items()
-            if isinstance(v, (SourceTextInput, ChunkInput))
-        }
-
-    if (
-        old.dataset_id != intended.dataset_id
-        or old.identity_data_id != intended.identity_data_id
-        or old.original_input_ref != intended.original_input_ref
-        or text_inputs(old) != text_inputs(intended)
-        or old.mention_groups != intended.mention_groups
-    ):
+def admit_correction(old, source, text, *, first_attempt):
+    """Admit a replacement without a text change: the same text, every
+    occurrence in place. A retired or fresh group needs the rebuild that only a
+    text change runs, so it is refused here."""
+    if text is None:
+        raise IntentError("source_changed", "Replacement text is missing")
+    fate = admit(
+        old, source, text, text, identity_map(old), first_attempt=first_attempt
+    )
+    if fate.retired or fate.fresh:
         raise IntentError(
-            "not_admitted",
-            "Text, chunk mapping and occurrence groups must remain unchanged in this replacement slice",
+            "rebuild_required",
+            "Retiring or adding a group requires a text change and its rebuild",
         )
+    return fate
 
 
 def retained_contributions(source, previous, wanted, source_refs):
@@ -138,11 +133,15 @@ async def replace(
             raise IntentError("recovery_plan", "Use the exact saved text change")
         text_change = saved_change
     if text_change is None:
-        unchanged_occurrences(old, source)
         if semantic_writer is not None:
             raise IntentError(
                 "not_admitted", "Semantic rebuilding requires a text change"
             )
+        fate = admit_correction(
+            old, source, texts.get(source.original_input_ref), first_attempt=not retry
+        )
+        if not retry:
+            await check_absent_from_graph(graph, old, source, fate)
     else:
         if semantic_writer is None or verify_semantics is None:
             raise IntentError(
