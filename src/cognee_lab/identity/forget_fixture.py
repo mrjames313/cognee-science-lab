@@ -108,7 +108,7 @@ async def readd(publisher, root, label, forgotten, *, expected_revision, fault_s
     from .fixture import context_for, load_chunks
     from .multisource import publish_one
     from .registered import read_texts
-    from .retirement import removed_entities
+    from .retirement import readd_removed
     from .text_changes import chunk_text
 
     row = await publisher.forgotten_row(forgotten)
@@ -117,7 +117,9 @@ async def readd(publisher, root, label, forgotten, *, expected_revision, fault_s
     text = text_file.read_text()
     if text_digest(text) != doc.text_sha256:
         raise IntentError("source_changed", "Re-add the forgotten document's text")
-    removed = removed_entities(forgotten, row["plan"], await publisher.records.rows())
+    removed = await readd_removed(
+        publisher.graph, forgotten, row["plan"], await publisher.records.rows()
+    )
     budget = chunk_budget(root)
     document = SimpleNamespace(
         data_item=SimpleNamespace(

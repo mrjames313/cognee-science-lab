@@ -312,11 +312,13 @@ class Publisher:
         """Admit a re-add before anything is written: the description against
         the forgotten one and its forget plan, then the input checks."""
         from .admission import admit_readd
-        from .retirement import removed_entities
+        from .retirement import readd_removed
 
         row = await self.forgotten_row(source)
         forgotten = IdentitySource.model_validate_json(row["description"])
-        removed = removed_entities(forgotten, row["plan"], await self.records.rows())
+        removed = await readd_removed(
+            self.graph, forgotten, row["plan"], await self.records.rows()
+        )
         await admit_readd(self.graph, forgotten, source, removed)
         await self.admit_inputs(source, texts, chunks, saved_revision=row["revision"])
         return row

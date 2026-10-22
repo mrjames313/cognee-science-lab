@@ -133,6 +133,65 @@ def test_native_forget_removes_one_source_and_a_readd_continues_the_revision(
     assert "Re-add needs a forgotten source" in error_of(refused)["message"]
 
 
+def readded_description(root, label):
+    from cognee_lab.identity.models import IdentitySource
+
+    path = root / f"identity_{label}_revision2.json"
+    return IdentitySource.model_validate_json(path.read_text())
+
+
+@pytest.mark.integration
+def test_native_readd_replaces_what_a_later_forget_of_a_co_owner_removed(tmp_path):
+    """doc02 is forgotten while doc01 still owns HC and the shared singleton,
+    so they survive. doc01's forget then removes them. Neither re-add brings
+    them back under their old UUIDs: HC, which variant v01 names, returns
+    under the v01-derived UUID of each source's revision 2, and the shared
+    singleton, which nothing names, under the UUID derived from the removed
+    one. The two sources get separate replacements."""
+    from cognee_lab.identity.admission import replacement_entity_id
+    from cognee_lab.identity.multisource import fixture_id
+    from cognee_lab.identity.validation import fresh_entity_id
+
+    root = tmp_path / "interleaved"
+    command(root, "multi-fixture")
+    old_hc = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
+    shared = fixture_id("shared_singleton")
+
+    command(root, "forget", "--source", "doc02", "--expected-revision", "1")
+    survived = result_of(root)
+    assert survived["hc_entity"]["present"] and survived["shared_singleton_present"]
+    command(root, "forget", "--source", "doc01", "--expected-revision", "1")
+    removed = result_of(root)
+    assert not removed["hc_entity"]["present"]
+    assert not removed["shared_singleton_present"]
+
+    for label in ("doc01", "doc02"):
+        command(root, "readd", "--source", label, "--expected-revision", "1")
+        source = readded_description(root, label)
+        identity = source.identity_data_id
+        new_hc = fresh_entity_id(identity, 2, "v01")
+        new_shared = replacement_entity_id(identity, 2, shared)
+        assert source.variant_assignments["v01"].source_entity_id == new_hc
+        assert {str(e) for e in source.entity_constructions} >= {
+            str(new_hc),
+            str(new_shared),
+        }
+        assert not {old_hc, shared} & {str(e) for e in source.entity_constructions}
+
+    final = result_of(root)
+    assert [final["sources"][d]["state"] for d in ("doc01", "doc02")] == [
+        "current",
+        "current",
+    ]
+    doc02 = final["sources"]["doc02"]["identity_data_id"]
+    # The snapshot follows doc02's v01 variant: its new HC, owned by doc02 alone.
+    assert final["hc_entity"]["present"]
+    assert [o.rsplit(":", 1)[-1] for o in final["hc_entity"]["owners"]] == [doc02]
+    assert not final["shared_singleton_present"]
+    assert len(final["result"]["facts"]) == 2
+    assert final["recovery_events"] == []
+
+
 @pytest.mark.integration
 def test_native_forget_refuses_a_dependent_until_it_is_withdrawn(tmp_path):
     root = tmp_path / "dependent"

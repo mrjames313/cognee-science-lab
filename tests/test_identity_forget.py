@@ -370,6 +370,33 @@ def renamed_entity(source, old, new):
 
 
 @pytest.mark.asyncio
+async def test_a_readd_replaces_an_entity_a_later_forget_of_a_co_owner_removed(
+    source_payload,
+):
+    """This source was forgotten while a co-owner kept the Entity. The
+    co-owner's forget then removed it, and the co-owner was re-added, so the
+    ledger shows a live owner again. The re-add still replaces the Entity,
+    because the graph no longer holds it."""
+    from cognee_lab.identity.retirement import readd_removed
+
+    source = source_of(source_payload)
+    other = reader_of(source_payload)
+    entity = uuid4()
+    doc = source.inputs[source.original_input_ref]
+    plan = dict(
+        owned_plan(
+            source,
+            entity,
+            [f"source_ref:v1:{other.dataset_id}:{other.identity_data_id}"],
+        ),
+        original_data_id=str(doc.data_id),
+    )
+    rows = [row_of(source, "forgotten", plan), row_of(other, "current")]
+    assert await readd_removed(AbsentGraph(), source, plan, rows) == {entity}
+    assert await readd_removed(OccupiedGraph([entity]), source, plan, rows) == set()
+
+
+@pytest.mark.asyncio
 async def test_a_readd_with_the_forgotten_uuids_or_revision_is_refused(
     source_payload,
 ):

@@ -99,6 +99,20 @@ def removed_entities(source, plan, rows):
     }
 
 
+async def readd_removed(graph, source, plan, rows):
+    """The Entities a re-add of this forgotten source must replace: those its
+    forget removed, and every Entity its plan recorded that the graph no
+    longer holds. A co-owner's later forget can remove an Entity this forget
+    left, and that co-owner's re-add makes the ledger show a live owner
+    again, so the rows alone cannot tell what is gone."""
+    absent = {
+        UUID(key)
+        for key, node in plan["entities"].items()
+        if node["type"] == "Entity" and await graph.get_node(key) is None
+    }
+    return removed_entities(source, plan, rows) | absent
+
+
 def retiring_by_forget(row):
     return row["state"] in {"failed", "pending"} and (
         row["plan"].get("operation") == "identity_forget"
