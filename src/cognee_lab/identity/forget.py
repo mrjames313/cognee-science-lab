@@ -81,24 +81,25 @@ async def forget_plan(publisher, source):
     )
 
 
-def sole_owned(source, plan):
-    """The Entities whose every recorded owner is this source."""
-    own_ref = owned_by(source, document=True)
-    return {
+def refuse_dependents(source, plan, rows):
+    """Refuse while a saved source consumed this document or an Entity the
+    forget removes. Returns the removed Entities: those whose every recorded
+    owner is this source or a retiring one, since a retiring owner's refs
+    leave too."""
+    gone = released(owned_by(source, document=True), retired_sources(rows))
+    removed = {
         UUID(key)
         for key, node in plan["entities"].items()
-        if node["type"] == "Entity" and all(own_ref(r) for r in node["refs"])
+        if node["type"] == "Entity" and all(gone(r) for r in node["refs"])
     }
-
-
-def refuse_dependents(source, plan, rows):
-    found = dependents(source, rows, sole_owned(source, plan))
+    found = dependents(source, rows, removed)
     if found:
         raise IntentError(
             "dependent_source",
             "Another saved identity source consumed this document or an Entity only it owns; reconsider the dependents first",
             details=dict(dependents=found),
         )
+    return removed
 
 
 async def data_present(data_id, dataset_id):

@@ -7,10 +7,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from cognee_lab.identity.fixture import FIXTURES
-from cognee_lab.identity.forget import admit_readd, sole_owned
+from cognee_lab.identity.forget import admit_readd, refuse_dependents
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import describe_readd
-from cognee_lab.identity.retirement import dependents, retired_sources
+from cognee_lab.identity.retirement import dependents
 from cognee_lab.identity.validation import IntentError, fresh_mention_id, object_digest
 
 
@@ -90,62 +90,91 @@ def test_an_entity_is_a_dependency_only_while_this_source_alone_owns_it(
     ]
 
 
-def test_sole_ownership_reads_the_plan_refs(source_payload):
+def owned_plan(source, entity, other_refs):
+    """A forget plan whose one Entity is owned by this source and by
+    `other_refs`."""
+    own = f"source_ref:v1:{source.dataset_id}:{source.identity_data_id}"
+    return dict(
+        operation="identity_forget",
+        entities={
+            str(entity): dict(
+                refs=[own, *other_refs], type="Entity", indexed_fields=["name"]
+            )
+        },
+    )
+
+
+def other_row(other, state):
+    doc = other.inputs[other.original_input_ref]
+    plan = {
+        "current": {"operation": "identity_publish"},
+        "failed_withdraw": {"operation": "identity_withdraw"},
+        "withdrawn": {"operation": "identity_withdraw"},
+        "failed_forget": {
+            "operation": "identity_forget",
+            "original_data_id": str(doc.data_id),
+        },
+        "forgotten": {
+            "operation": "identity_forget",
+            "original_data_id": str(doc.data_id),
+        },
+    }[state]
+    return row_of(
+        other,
+        state.removeprefix("failed_") if "failed" not in state else "failed",
+        plan,
+    )
+
+
+@pytest.mark.parametrize(
+    "state, refused",
+    [
+        ("current", False),
+        ("failed_withdraw", True),
+        ("withdrawn", True),
+        ("failed_forget", True),
+        ("forgotten", True),
+    ],
+)
+def test_an_entity_shared_only_with_a_retiring_owner_counts_as_removed(
+    source_payload, state, refused
+):
+    """A reader of an Entity this source shares with another owner refuses
+    the forget only when that other owner is retired or retiring, because
+    then the forget removes the Entity."""
+    source = source_of(source_payload)
+    other = reader_of(source_payload)
+    entity = uuid4()
+    reader = reader_of(source_payload, entity_id=entity)
+    plan = owned_plan(
+        source, entity, [f"source_ref:v1:{other.dataset_id}:{other.identity_data_id}"]
+    )
+    rows = [row_of(source), other_row(other, state), row_of(reader)]
+    if refused:
+        with pytest.raises(IntentError) as found:
+            refuse_dependents(source, plan, rows)
+        assert found.value.code == "dependent_source"
+        assert [d["consumed"] for d in found.value.details["dependents"]] == [
+            str(entity)
+        ]
+    else:
+        assert refuse_dependents(source, plan, rows) == set()
+
+
+def test_an_entity_owned_through_the_document_chunks_alone_is_removed(
+    source_payload,
+):
     source = source_of(source_payload)
     doc = source.inputs[source.original_input_ref]
-    dataset = source.dataset_id
-    own = f"source_ref:v1:{dataset}:{source.identity_data_id}"
-    chunk = f"source_ref:v2:{dataset}:{doc.data_id}:{uuid4()}"
-    other = f"source_ref:v1:{dataset}:{uuid4()}"
-    plan = dict(
-        entities={
-            "11111111-1111-5111-8111-111111111111": dict(
-                refs=[own], type="Entity", indexed_fields=["name"]
-            ),
-            "22222222-2222-5222-8222-222222222222": dict(
-                refs=[own, chunk], type="Entity", indexed_fields=["name"]
-            ),
-            "33333333-3333-5333-8333-333333333333": dict(
-                refs=[own, other], type="Entity", indexed_fields=["name"]
-            ),
-            "44444444-4444-5444-8444-444444444444": dict(
-                refs=[chunk], type="DocumentChunk", indexed_fields=["text"]
-            ),
-        }
+    entity = uuid4()
+    reader = reader_of(source_payload, entity_id=entity)
+    plan = owned_plan(
+        source, entity, [f"source_ref:v2:{doc.dataset_id}:{doc.data_id}:{uuid4()}"]
     )
-    assert sole_owned(source, plan) == {
-        UUID("11111111-1111-5111-8111-111111111111"),
-        UUID("22222222-2222-5222-8222-222222222222"),
-    }
-
-
-def test_retired_sources_release_the_identity_and_the_forgotten_document():
-    withdrawn = dict(
-        dataset="d",
-        source="w",
-        state="withdrawn",
-        plan={"operation": "identity_withdraw"},
-    )
-    forgotten = dict(
-        dataset="d",
-        source="f",
-        state="forgotten",
-        plan={"operation": "identity_forget", "original_data_id": "f-doc"},
-    )
-    failing = dict(
-        dataset="d",
-        source="g",
-        state="failed",
-        plan={"operation": "identity_forget", "original_data_id": "g-doc"},
-    )
-    current = dict(dataset="d", source="c", state="current", plan={})
-    assert retired_sources([withdrawn, forgotten, failing, current]) == {
-        ("d", "w"),
-        ("d", "f"),
-        ("d", "f-doc"),
-        ("d", "g"),
-        ("d", "g-doc"),
-    }
+    with pytest.raises(IntentError) as found:
+        refuse_dependents(source, plan, [row_of(source), row_of(reader)])
+    assert found.value.code == "dependent_source"
+    assert refuse_dependents(source, plan, [row_of(source)]) == {entity}
 
 
 class AbsentGraph:
