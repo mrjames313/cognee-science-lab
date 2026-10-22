@@ -16,11 +16,16 @@ def fixture_id(label):
 
 def private_singleton_id(source, label):
     """The UUID this description gives the label's private singleton: the
-    fixture's at first publication, a derived replacement after a re-add."""
+    fixture's at first publication, a derived replacement after a re-add. A
+    revision that dropped the recipe is checked against the fixture's UUID,
+    which its replacement retired."""
     return next(
-        str(eid)
-        for eid, recipe in source.entity_constructions.items()
-        if recipe.name == label + " instrument"
+        (
+            str(eid)
+            for eid, recipe in source.entity_constructions.items()
+            if recipe.name == label + " instrument"
+        ),
+        fixture_id(label + ":singleton"),
     )
 
 

@@ -6,7 +6,6 @@ from cognee.modules.chunking.models import DocumentChunk
 from cognee.modules.engine.models.Entity import Entity as CogneeEntity
 from cognee.shared.data_models import KnowledgeGraph
 
-
 ENTITY_ROLES = (
     "canonical",
     "variant",
@@ -63,17 +62,14 @@ IDENTITY_RESOLUTION_KINDS = (
     # Short form explicitly expands to the canonical name.
     # Example: AFRL -> Aurora Fusion Research Laboratory
     "abbreviation",
-
     # Alternate name for the same semantic object.
     # Example: H-1 -> Helios-1
     "alias",
-
     # Semantically equivalent naming variant that is not simply an alias.
     # Example:
     #   electron cyclotron heating system
     #       -> electron cyclotron heating
     "semantic_variant",
-
     # Context-dependent reference to an entity.
     # Normally used for Mention rather than IdentityResolution, but retained
     # here because future identity representations may need it.
@@ -86,51 +82,38 @@ IDENTITY_EVIDENCE_KEYWORDS = (
     # The source explicitly defines an abbreviation.
     # Example: "Vertical Control System (VCS)"
     "explicit_abbreviation",
-
     # The source explicitly indicates two names refer to the same object.
     "explicit_alias",
-
     # A Stage 4 typed/source-grounded observation supports the mapping.
     "typed_observation",
-
     # Simple lexical normalization supports equivalence:
     # case, punctuation, hyphenation, etc.
     "lexical_normalization",
-
     # The names are semantically related variants rather than simple
     # orthographic variants.
     # Example: "neutral beam injection system" vs
     #          "neutral beam injection"
     "lexical_semantic_variant",
-
     # is_a/type information is compatible between the representations.
     "compatible_type",
-
     # Their graph neighborhoods contain compatible/shared entities.
     "shared_neighbors",
-
     # They participate in compatible/shared semantic relationships.
     "shared_relations",
-
     # Nearby source text supports the identity relationship.
     "source_context",
-
     # Earlier/later material within the same document supports the identity.
     # This is stronger than merely saying that both entities occur somewhere
     # in the same document.
     "document_context",
-
     # A DefinitionSummary or equivalent document vocabulary supports it.
     "definition_summary",
-
     # The existing generic Cognee graph already consolidated the variants
     # into one semantic entity.
     "generic_graph_consolidation",
-
     # Embedding similarity supports equivalence.
     # Reserved for later experiments.
     "embedding_similarity",
-
     # An LLM semantic-resolution step supports equivalence.
     # Reserved for later experiments.
     "llm_semantic_judgment",
@@ -140,14 +123,11 @@ IDENTITY_EVIDENCE_KEYWORDS = (
 MENTION_RESOLUTION_STATUSES = (
     # The pipeline provides enough observable evidence to assign a target.
     "resolved",
-
     # The pipeline provides evidence that the mention is currently unresolved.
     "unresolved",
-
     # We cannot determine from persisted pipeline output whether resolution
     # succeeded or failed.
     "indeterminate",
-
     # More than one plausible referent remains.
     "ambiguous",
 )
@@ -156,34 +136,25 @@ MENTION_RESOLUTION_STATUSES = (
 MENTION_RESOLUTION_BASIS_KEYWORDS = (
     # The surrounding source text itself makes the referent clear.
     "source_context",
-
     # An explicit abbreviation/alias definition resolves the mention.
     "explicit_definition",
-
     # A typed Stage 4 observation resolves the surface form.
     "typed_observation",
-
     # A DefinitionSummary provides the relevant document-scoped mapping.
     "definition_summary",
-
     # A semantic relation in the generic graph demonstrates the resolved
     # referent.
     "semantic_edge",
-
     # Natural-language edge_text demonstrates the resolved referent.
     "edge_text",
-
     # Provenance connects the resolved semantic assertion back to the
     # source chunk containing this mention.
     "chunk_provenance",
-
     # Existing generic-graph consolidation provides the target identity.
     "generic_graph_consolidation",
-
     # The source occurrence exists, but no resolved semantic assertion
     # corresponding to it was materialized.
     "specific_assertion_not_materialized",
-
     # Reserved for future resolution mechanisms.
     "embedding_similarity",
     "llm_semantic_judgment",
@@ -344,7 +315,7 @@ class DefinitionSummary(DataPoint):
         ],
     }
 
-    
+
 class Abbreviation(DataPoint):
     short_form: str = Field(
         description="Abberviation or acronym exactly as used in the text, e.g. VCS."
@@ -357,6 +328,7 @@ class Abbreviation(DataPoint):
         "index_fields": ["short_form", "full_form"],
         "identity_fields": ["short_form"],
     }
+
 
 class AbbreviationGraph(DataPoint):
     name: Literal["abbreviation_graph"] = "abbreviation_graph"
@@ -374,7 +346,7 @@ class AbbreviationGraph(DataPoint):
         "identity_fields": ["name"],
     }
 
-    
+
 class AbbreviationExtraction(BaseModel):
     short_form: str = Field(
         description=(
@@ -391,6 +363,7 @@ class AbbreviationExtraction(BaseModel):
             "established from this chunk, leave this empty."
         )
     )
+
 
 # This corresponds to an extracted abbreviation
 class AbbreviationObservation(DataPoint):
@@ -415,6 +388,7 @@ class AbbreviationObservation(DataPoint):
         ],
     }
 
+
 class MixedKnowledgeGraph(KnowledgeGraph):
     abbreviations: list[AbbreviationExtraction] = Field(
         default_factory=list,
@@ -423,6 +397,7 @@ class MixedKnowledgeGraph(KnowledgeGraph):
             "chunk.  Include unresolved cases with an empty full_form."
         ),
     )
+
 
 #    captured_abbreviations: ClassVar[
 #        list[AbbreviationExtraction]
@@ -440,230 +415,229 @@ class MixedKnowledgeGraph(KnowledgeGraph):
 #        cls.captured_abbreviations.clear()
 
 
-
 # In-depth analysis of extraction
-    # @model_validator(mode="after")
-    # def capture_abbreviations(self):
-    #     print("\n[MIXED EXTRACTION]")
-    #     print(f"  generic nodes: {len(self.nodes)}")
-    #     print(f"  generic edges: {len(self.edges)}")
-        
-    #     print(
-    #         "  abbreviations:",
-    #         [
-    #             (a.short_form, a.full_form)
-    #             for a in self.abbreviations
-    #         ],
-    #     )
+# @model_validator(mode="after")
+# def capture_abbreviations(self):
+#     print("\n[MIXED EXTRACTION]")
+#     print(f"  generic nodes: {len(self.nodes)}")
+#     print(f"  generic edges: {len(self.edges)}")
 
-    #     node_names = {
-    #         node.id: node.name
-    #         for node in self.nodes
-    #     }
+#     print(
+#         "  abbreviations:",
+#         [
+#             (a.short_form, a.full_form)
+#             for a in self.abbreviations
+#         ],
+#     )
 
-    #     abbreviation_terms = {
-    #         term.casefold()
-    #         for a in self.abbreviations
-    #         for term in (a.short_form, a.full_form)
-    #     }
+#     node_names = {
+#         node.id: node.name
+#         for node in self.nodes
+#     }
 
-    #     print("  generic edges involving abbreviation-like nodes:")
+#     abbreviation_terms = {
+#         term.casefold()
+#         for a in self.abbreviations
+#         for term in (a.short_form, a.full_form)
+#     }
 
-    #     found = False
+#     print("  generic edges involving abbreviation-like nodes:")
 
-    #     for edge in self.edges:
-    #         source_name = node_names.get(edge.source_node_id, "")
-    #         target_name = node_names.get(edge.target_node_id, "")
-            
-    #         if (
-    #                 source_name.casefold() in abbreviation_terms
-    #                 or target_name.casefold() in abbreviation_terms
-    #         ):
-    #             found = True
-    #             print(
-    #                 f"    {source_name!r}"
-    #                 f" --{edge.relationship_name}--> "
-    #             f"{target_name!r}"
-    #         )
+#     found = False
 
-    #     if not found:
-    #         print("    none")
+#     for edge in self.edges:
+#         source_name = node_names.get(edge.source_node_id, "")
+#         target_name = node_names.get(edge.target_node_id, "")
 
-    #     type(self).captured_abbreviations.extend(
-    #         self.abbreviations
-    #     )
+#         if (
+#                 source_name.casefold() in abbreviation_terms
+#                 or target_name.casefold() in abbreviation_terms
+#         ):
+#             found = True
+#             print(
+#                 f"    {source_name!r}"
+#                 f" --{edge.relationship_name}--> "
+#             f"{target_name!r}"
+#         )
 
-    #     return self
+#     if not found:
+#         print("    none")
 
-# In depth analysis of extraction and edges    
-    # @model_validator(mode="after")
-    # def debug_mixed_extraction(self):
-    #     print("\n[MIXED EXTRACTION]")
+#     type(self).captured_abbreviations.extend(
+#         self.abbreviations
+#     )
 
-    #     nodes_by_id = {
-    #         node.id: node
-    #         for node in self.nodes
-    #     }
+#     return self
 
-    #     print(f"  generic nodes: {len(self.nodes)}")
-    #     print(f"  generic edges: {len(self.edges)}")
+# In depth analysis of extraction and edges
+# @model_validator(mode="after")
+# def debug_mixed_extraction(self):
+#     print("\n[MIXED EXTRACTION]")
 
-    #     print(
-    #         "  abbreviations:",
-    #         [
-    #             (a.short_form, a.full_form)
-    #             for a in self.abbreviations
-    #         ],
-    #     )
+#     nodes_by_id = {
+#         node.id: node
+#         for node in self.nodes
+#     }
 
-    #     def norm(s: str) -> str:
-    #         return " ".join(
-    #             s.casefold()
-    #             .replace("-", " ")
-    #             .split()
-    #         )
+#     print(f"  generic nodes: {len(self.nodes)}")
+#     print(f"  generic edges: {len(self.edges)}")
 
-    #     # --------------------------------------------------
-    #     # Structural sanity: do all edges resolve to nodes?
-    #     # --------------------------------------------------
+#     print(
+#         "  abbreviations:",
+#         [
+#             (a.short_form, a.full_form)
+#             for a in self.abbreviations
+#         ],
+#     )
 
-    #     dangling = []
-        
-    #     for edge in self.edges:
-    #         missing = []
+#     def norm(s: str) -> str:
+#         return " ".join(
+#             s.casefold()
+#             .replace("-", " ")
+#             .split()
+#         )
 
-    #         if edge.source_node_id not in nodes_by_id:
-    #             missing.append("source")
+#     # --------------------------------------------------
+#     # Structural sanity: do all edges resolve to nodes?
+#     # --------------------------------------------------
 
-    #         if edge.target_node_id not in nodes_by_id:
-    #             missing.append("target")
+#     dangling = []
 
-    #         if missing:
-    #             dangling.append((edge, missing))
+#     for edge in self.edges:
+#         missing = []
 
-    #     print(f"  dangling generic edges: {len(dangling)}")
+#         if edge.source_node_id not in nodes_by_id:
+#             missing.append("source")
 
-    #     for edge, missing in dangling:
-    #         print(
-    #             "    ",
-    #             missing,
-    #             edge.source_node_id,
-    #             f"--{edge.relationship_name}-->",
-    #             edge.target_node_id,
-    #         )
+#         if edge.target_node_id not in nodes_by_id:
+#             missing.append("target")
 
-    #     # --------------------------------------------------
-    #     # For each typed abbreviation, locate matching
-    #     # generic nodes and show their generic relationships.
-    #     # --------------------------------------------------
+#         if missing:
+#             dangling.append((edge, missing))
 
-    #     for abbreviation in self.abbreviations:
-    #         terms = {
-    #             norm(abbreviation.short_form),
-    #             norm(abbreviation.full_form),
-    #         }
+#     print(f"  dangling generic edges: {len(dangling)}")
 
-    #         matching_ids = {
-    #             node.id
-    #             for node in self.nodes
-    #             if norm(node.name) in terms
-    #         }
+#     for edge, missing in dangling:
+#         print(
+#             "    ",
+#             missing,
+#             edge.source_node_id,
+#             f"--{edge.relationship_name}-->",
+#             edge.target_node_id,
+#         )
 
-    #         print(
-    #             f"\n  ABBREVIATION "
-    #             f"{abbreviation.short_form!r}"
-    #             f" -> {abbreviation.full_form!r}"
-    #         )
+#     # --------------------------------------------------
+#     # For each typed abbreviation, locate matching
+#     # generic nodes and show their generic relationships.
+#     # --------------------------------------------------
 
-    #         if not matching_ids:
-    #             print("    generic node: NONE")
-    #             continue
+#     for abbreviation in self.abbreviations:
+#         terms = {
+#             norm(abbreviation.short_form),
+#             norm(abbreviation.full_form),
+#         }
 
-    #         for node_id in matching_ids:
-    #             node = nodes_by_id[node_id]
+#         matching_ids = {
+#             node.id
+#             for node in self.nodes
+#             if norm(node.name) in terms
+#         }
 
-    #             print(
-    #                 f"    generic node: "
-    #                 f"{node.name!r} "
-    #                 f"(id={node.id}, type={node.type!r})"
-    #             )
+#         print(
+#             f"\n  ABBREVIATION "
+#             f"{abbreviation.short_form!r}"
+#             f" -> {abbreviation.full_form!r}"
+#         )
 
-    #         incident_edges = [
-    #             edge
-    #             for edge in self.edges
-    #             if (
-    #                     edge.source_node_id in matching_ids
-    #                     or edge.target_node_id in matching_ids
-    #             )
-    #         ]
+#         if not matching_ids:
+#             print("    generic node: NONE")
+#             continue
 
-    #         if not incident_edges:
-    #             print("    incident generic edges: NONE")
-    #             continue
+#         for node_id in matching_ids:
+#             node = nodes_by_id[node_id]
 
-    #         print("    incident generic edges:")
+#             print(
+#                 f"    generic node: "
+#                 f"{node.name!r} "
+#                 f"(id={node.id}, type={node.type!r})"
+#             )
 
-    #         for edge in incident_edges:
-    #             source = nodes_by_id.get(edge.source_node_id)
-    #             target = nodes_by_id.get(edge.target_node_id)
+#         incident_edges = [
+#             edge
+#             for edge in self.edges
+#             if (
+#                     edge.source_node_id in matching_ids
+#                     or edge.target_node_id in matching_ids
+#             )
+#         ]
 
-    #             source_name = (
-    #                 source.name
-    #                 if source is not None
-    #                 else f"<missing:{edge.source_node_id}>"
-    #             )
+#         if not incident_edges:
+#             print("    incident generic edges: NONE")
+#             continue
 
-    #             target_name = (
-    #                 target.name
-    #                 if target is not None
-    #                 else f"<missing:{edge.target_node_id}>"
-    #             )
+#         print("    incident generic edges:")
 
-    #             print(
-    #                 f"      {source_name!r}"
-    #                 f" --{edge.relationship_name}--> "
-    #                 f"{target_name!r}"
-    #             )
+#         for edge in incident_edges:
+#             source = nodes_by_id.get(edge.source_node_id)
+#             target = nodes_by_id.get(edge.target_node_id)
 
-    #     type(self).captured_abbreviations.extend(
-    #         self.abbreviations
-    #     )
+#             source_name = (
+#                 source.name
+#                 if source is not None
+#                 else f"<missing:{edge.source_node_id}>"
+#             )
 
-    #     # TEMP
-    #     print("\n  VCS / vertical-motion related generic edges:")
+#             target_name = (
+#                 target.name
+#                 if target is not None
+#                 else f"<missing:{edge.target_node_id}>"
+#             )
 
-    #     for edge in self.edges:
-    #         source = nodes_by_id.get(edge.source_node_id)
-    #         target = nodes_by_id.get(edge.target_node_id)
+#             print(
+#                 f"      {source_name!r}"
+#                 f" --{edge.relationship_name}--> "
+#                 f"{target_name!r}"
+#             )
 
-    #         source_name = source.name if source else ""
-    #         target_name = target.name if target else ""
+#     type(self).captured_abbreviations.extend(
+#         self.abbreviations
+#     )
 
-    #         haystack = " ".join([
-    #             source_name,
-    #             target_name,
-    #             edge.relationship_name,
-    #             edge.description or "",
-    #         ]).casefold()
+#     # TEMP
+#     print("\n  VCS / vertical-motion related generic edges:")
 
-    #         if any(
-    #                 term in haystack
-    #                 for term in (
-    #                         "vcs",
-    #                         "vertical control",
-    #                         "vertical-control",
-    #                         "vertical motion",
-    #                 )
-    #         ):
-    #             print(
-    #                 f"    {source_name!r}"
-    #                 f" --{edge.relationship_name}--> "
-    #                 f"{target_name!r}"
-    #             )
-    #     # END TEMP
-    #     return self
+#     for edge in self.edges:
+#         source = nodes_by_id.get(edge.source_node_id)
+#         target = nodes_by_id.get(edge.target_node_id)
 
-## Simple analysis of extraction       
+#         source_name = source.name if source else ""
+#         target_name = target.name if target else ""
+
+#         haystack = " ".join([
+#             source_name,
+#             target_name,
+#             edge.relationship_name,
+#             edge.description or "",
+#         ]).casefold()
+
+#         if any(
+#                 term in haystack
+#                 for term in (
+#                         "vcs",
+#                         "vertical control",
+#                         "vertical-control",
+#                         "vertical motion",
+#                 )
+#         ):
+#             print(
+#                 f"    {source_name!r}"
+#                 f" --{edge.relationship_name}--> "
+#                 f"{target_name!r}"
+#             )
+#     # END TEMP
+#     return self
+
+## Simple analysis of extraction
 #    @model_validator(mode="after")
 #    def debug_mixed_extraction(self):
 #        print("\n[MIXED EXTRACTION]")
@@ -677,6 +651,7 @@ class MixedKnowledgeGraph(KnowledgeGraph):
 #            ],
 #        )
 #        return self
+
 
 # Old experiments from phase 1
 class HeatingSystem(DataPoint):
@@ -697,13 +672,13 @@ class Organization(DataPoint):
         "identity_fields": ["name"],
     }
 
-    
+
 class Facility(DataPoint):
     name: str
     description: str | None = None
     operator: Organization
     heating_systems: list[HeatingSystem]
-    
+
     metadata: dict = {
         "index_fields": ["name"],
         "identity_fields": ["name"],
