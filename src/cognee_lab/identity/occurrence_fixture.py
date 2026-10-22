@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .captured_chunks import bind_chunks
-from .captured_text import BEFORE
 from .group_regrouping import (
     COMBINE_AFTER,
     COMBINE_MAP,
@@ -21,7 +20,14 @@ from .resolved_retirement import (
     RETIREMENT_MAP,
     describe_retirement,
 )
-from .validation import IntentError, text_digest
+from .captured_revision import (
+    begin_revision,
+    occurrence,
+    require_fresh_doc01,
+    retire_group,
+    stamp_producer,
+)
+from .validation import IntentError
 
 AFTER = "Helios controller (HC) regulates heating, and it limits oscillations.\n"
 REMOVAL_MAP = {"g01": [None, ["g01", 0]], "g02": [None]}
@@ -29,75 +35,51 @@ REMOVAL_MAP = {"g01": [None, ["g01", 0]], "g02": [None]}
 # startup reference to g01. Its map equals the removal map: the addition is the
 # new occurrence that no old occurrence maps to.
 MIXED_AFTER = AFTER.rstrip("\n") + " During startup, the controller remains active.\n"
-MIXED_MAP = {"g01": [None, ["g01", 0]], "g02": [None]}
+MIXED_MAP = REMOVAL_MAP
 
 
-def occurrence(text, phrase, anchor=None):
-    anchor = anchor or phrase
-    start = text.index(anchor) + anchor.index(phrase)
-    return dict(start=start, end=start + len(phrase), text=phrase)
-
-
-def revise_doc01(old, before, chunks, after, occurrences, implementation, policy):
-    """Keep g01 with the captured occurrences and retire g02."""
-    if before != BEFORE or set(old.mention_groups) != {"g01", "g02"}:
-        raise IntentError(
-            "fixture_scope",
-            "Use doc01 of a fresh chunked-fixture for this captured edit",
-        )
-    payload = old.model_dump(mode="json")
-    payload["revision"] += 1
-    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(after)
-    payload["producers"]["occurrence_review"] = dict(
-        method="captured_fixture",
-        implementation=implementation,
-        version="0.1",
-        configuration={"policy": policy},
-        run_id=None,
+def keep_g01_retire_g02(old, before, chunks, *, after, occurrences, producer):
+    """g01 continues with the captured occurrences; g02 retires."""
+    require_fresh_doc01(
+        old,
+        before,
+        {"g01", "g02"},
+        "Use doc01 of a fresh chunked-fixture for this captured edit",
     )
+    payload = begin_revision(old, after, "occurrence_review", *producer)
     # Positions and continuity are captured example input, never nearest-text matching.
     payload["mention_groups"]["g01"]["occurrences"] = occurrences
-    retired = payload["mention_groups"].pop("g02")["entity_id"]
-    payload["entity_constructions"].pop(retired)
-    payload["mention_resolutions"] = {
-        k: v
-        for k, v in payload["mention_resolutions"].items()
-        if v["group_ref"] != "g02"
-    }
-    for item in [
-        *payload["mention_groups"].values(),
-        *payload["mention_resolutions"].values(),
-        *payload["variant_assignments"].values(),
-    ]:
-        item["producer_ref"] = "occurrence_review"
+    retire_group(payload, "g02")
+    stamp_producer(payload, "occurrence_review")
     bind_chunks(payload, after, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
 def describe_removal(old, before, chunks):
-    return revise_doc01(
+    return keep_g01_retire_g02(
         old,
         before,
         chunks,
-        AFTER,
-        [occurrence(AFTER, "it", "it limits")],
-        "stage6-captured-occurrence-removal",
-        "explicit-survivors-unchanged-binding-v1",
+        after=AFTER,
+        occurrences=[occurrence(AFTER, "it", "it limits")],
+        producer=(
+            "stage6-captured-occurrence-removal",
+            "explicit-survivors-unchanged-binding-v1",
+        ),
     )
 
 
 def describe_mixed(old, before, chunks):
-    return revise_doc01(
+    return keep_g01_retire_g02(
         old,
         before,
         chunks,
-        MIXED_AFTER,
-        [
+        after=MIXED_AFTER,
+        occurrences=[
             occurrence(MIXED_AFTER, "it", "it limits"),
             occurrence(MIXED_AFTER, "the controller", "the controller remains"),
         ],
-        "stage6-captured-occurrence-revision",
-        "explicit-occurrence-map-v1",
+        producer=("stage6-captured-occurrence-revision", "explicit-occurrence-map-v1"),
     )
 
 

@@ -4,47 +4,35 @@ import json
 from uuid import UUID
 
 from .captured_chunks import FACT_TEXT, bind_chunks
-from .captured_text import BEFORE
+from .captured_revision import (
+    begin_revision,
+    require_fresh_doc01,
+    retire_group,
+    stamp_producer,
+)
 from .models import IdentitySource
-from .validation import IntentError, text_digest
+from .validation import IntentError
 
 AFTER = "Helios controller (HC) regulates plasma heating.\n"
 RETIREMENT_MAP = {"g01": [None, None], "g02": [["g02", 0]]}
 
 
 def describe_retirement(old, before, chunks):
-    if (
-        old.revision != 1
-        or before != BEFORE
-        or set(old.mention_groups) != set(RETIREMENT_MAP)
-    ):
-        raise IntentError(
-            "fixture_scope",
-            "Resolved retirement requires doc01 of a fresh chunked-fixture",
-        )
-    payload = old.model_dump(mode="json")
-    payload["revision"] += 1
-    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(AFTER)
-    payload["producers"]["retirement_review"] = dict(
-        method="captured_fixture",
-        implementation="stage6-captured-resolved-retirement",
-        version="0.1",
-        configuration={"policy": "explicit-group-and-local-fact-retirement-v1"},
-        run_id=None,
+    require_fresh_doc01(
+        old,
+        before,
+        set(RETIREMENT_MAP),
+        "Resolved retirement requires doc01 of a fresh chunked-fixture",
     )
-    mid = payload["mention_groups"].pop("g01")["entity_id"]
-    payload["entity_constructions"].pop(mid)
-    payload["mention_resolutions"] = {
-        k: r
-        for k, r in payload["mention_resolutions"].items()
-        if r["group_ref"] != "g01"
-    }
-    for record in [
-        *payload["mention_groups"].values(),
-        *payload["mention_resolutions"].values(),
-        *payload["variant_assignments"].values(),
-    ]:
-        record["producer_ref"] = "retirement_review"
+    payload = begin_revision(
+        old,
+        AFTER,
+        "retirement_review",
+        "stage6-captured-resolved-retirement",
+        "explicit-group-and-local-fact-retirement-v1",
+    )
+    retire_group(payload, "g01")
+    stamp_producer(payload, "retirement_review")
     bind_chunks(payload, AFTER, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))
 

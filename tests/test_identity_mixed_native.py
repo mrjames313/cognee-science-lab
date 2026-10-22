@@ -5,52 +5,20 @@ import json
 import pytest
 
 from test_identity_native import command
+from test_identity_occurrences_native import IT, check_continuing_g01
 from cognee_lab.identity.occurrence_fixture import MIXED_MAP
+
+STARTUP = dict(start=86, end=100, text="the controller")
 
 
 def check_mixed(before, after):
-    a, b = after["sources"]["doc01"], after["sources"]["doc02"]
-    assert (
-        a["saved_revision"] == a["verified_revision"] == a["registered_revision"] == 2
-    )
-    assert a["registered_matches_saved"] and a["state"] == "current"
-    assert b == before["sources"]["doc02"]
-    assert after["borrowed_entity"] == before["borrowed_entity"]
-    assert len(after["result"]["facts"]) == 2
-    oldfacts = {f["source_id"]: f for f in before["result"]["facts"]}
-    for f in after["result"]["facts"]:
-        old = oldfacts[f["source_id"]]
-        if f["source_id"] == a["mention_entity_id"]:
-            assert f["edge_id"] == old["edge_id"]
-            assert f["identity"]["occurrences"] == [
-                dict(start=46, end=48, text="it"),
-                dict(start=86, end=100, text="the controller"),
-            ]
-            assert "it limits oscillations" in "".join(e["text"] for e in f["evidence"])
-        else:
-            assert f == old
-    assert not a["unresolved_entity_present"] and not a["unresolved_marker_present"]
-    if "text_changes" in after:
-        (change,) = after["text_changes"]
-        assert change["position_shift"] is None
-        assert change["occurrence_map"] == MIXED_MAP
-        assert change["added_groups"] == {}
-        assert change["groups"]["g01"]["occurrences"] == [
-            dict(start=46, end=48, text="it"),
-            dict(start=86, end=100, text="the controller"),
-        ]
-        assert (
-            change["retired_chunks_absent"]
-            and change["retired_chunk_vectors_absent"]
-            and change["mention_ids_preserved"]
-            and change["evidence_uses_current_chunks"]
-        )
-        retired = change["retired_groups"]["g02"]
-        assert not (
-            retired["entity_present"]
-            or retired["entity_indexed"]
-            or retired["marker_present"]
-        )
+    check_continuing_g01(before, after, (IT, STARTUP), MIXED_MAP)
+    # The added occurrence crosses into a chunk that holds no fact evidence, so
+    # g01's marker chunks and fact chunks differ.
+    doc01 = after["sources"]["doc01"]
+    markers, facts = doc01["mention_marker_chunk_ids"], doc01["fact_evidence_chunk_ids"]
+    assert len(markers) == 3 and len(facts) == 2
+    assert set(facts) < set(markers)
 
 
 @pytest.mark.integration

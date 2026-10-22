@@ -69,15 +69,53 @@ async def test_one_edit_removes_keeps_and_adds_occurrences(source_payload):
     assert retired_mentions(intended) == {}
 
 
-def test_the_mixed_map_needs_its_one_survivor(source_payload):
+def test_the_added_occurrence_marks_a_chunk_without_fact_evidence(source_payload):
+    old, _, _ = mixed(source_payload)
+    # The native chunker splits the mixed text at 33, 56 and 90 at this budget.
+    bounds = [(0, 33), (33, 56), (56, 90), (90, len(MIXED_AFTER))]
+    chunks = [
+        SimpleNamespace(
+            id=uuid4(),
+            chunk_index=i,
+            text=MIXED_AFTER[a:b],
+            is_part_of=SimpleNamespace(id=old.inputs["doc01"].data_id),
+        )
+        for i, (a, b) in enumerate(bounds)
+    ]
+    intended = describe_mixed(old, BEFORE, chunks)
+    assert intended.mention_groups["g01"].chunk_refs == [
+        "chunk02",
+        "chunk03",
+        "chunk04",
+    ]
+    assert fact_chunks(intended, chunks) == chunks[1:3]
+
+
+@pytest.mark.parametrize(
+    "mapping, code, message",
+    [
+        (
+            {"g01": [None, None], "g02": [None]},
+            "fresh_key_reused",
+            "key that no old group used",
+        ),
+        (
+            {"g01": [None, ["g01", 0]], "g02": [["g02", 0]]},
+            "occurrence_changed",
+            "not in the new source",
+        ),
+        (
+            {"g01": [["g01", 0], None], "g02": [None]},
+            "occurrence_changed",
+            "text differs",
+        ),
+    ],
+    ids=["nothing_of_g01_survives", "keeps_plasma", "the_controller_as_it"],
+)
+def test_wrong_maps_of_the_mixed_edit_are_refused(
+    source_payload, mapping, code, message
+):
     old, _, intended = mixed(source_payload)
-    nothing_survives = {"g01": [None, None], "g02": [None]}
-    with pytest.raises(IntentError, match="key that no old group used") as refused:
-        admit_mixed(old, intended, nothing_survives)
-    assert refused.value.code == "fresh_key_reused"
-    keeps_plasma = {"g01": [None, ["g01", 0]], "g02": [["g02", 0]]}
-    with pytest.raises(IntentError, match="not in the new source"):
-        admit_mixed(old, intended, keeps_plasma)
-    the_controller_as_it = {"g01": [["g01", 0], None], "g02": [None]}
-    with pytest.raises(IntentError, match="text differs"):
-        admit_mixed(old, intended, the_controller_as_it)
+    with pytest.raises(IntentError, match=message) as refused:
+        admit_mixed(old, intended, mapping)
+    assert refused.value.code == code

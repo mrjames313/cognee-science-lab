@@ -8,7 +8,11 @@ from test_identity_native import command
 from cognee_lab.identity.occurrence_fixture import REMOVAL_MAP
 
 
-def check_removal(before, after):
+IT = dict(start=46, end=48, text="it")
+
+
+def check_continuing_g01(before, after, occurrences=(IT,), occurrence_map=REMOVAL_MAP):
+    """g01 continues with the given occurrences and its fact; g02 retires."""
     a, b = after["sources"]["doc01"], after["sources"]["doc02"]
     assert (
         a["saved_revision"] == a["verified_revision"] == a["registered_revision"] == 2
@@ -22,7 +26,7 @@ def check_removal(before, after):
         old = oldfacts[f["source_id"]]
         if f["source_id"] == a["mention_entity_id"]:
             assert f["edge_id"] == old["edge_id"]
-            assert f["identity"]["occurrences"] == [dict(start=46, end=48, text="it")]
+            assert f["identity"]["occurrences"] == list(occurrences)
             assert "it limits oscillations" in "".join(e["text"] for e in f["evidence"])
         else:
             assert f == old
@@ -41,22 +45,19 @@ def check_removal(before, after):
         )
         in after["shared_variant"]["contributions"]
     )
-    if "text_changes" in after:
-        (change,) = after["text_changes"]
-        assert change["position_shift"] is None
-        assert change["occurrence_map"] == REMOVAL_MAP
-        assert (
-            change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
-        )
-        assert (
-            change["mention_ids_preserved"] and change["evidence_uses_current_chunks"]
-        )
-        retired = change["retired_groups"]["g02"]
-        assert (
-            not retired["entity_present"]
-            and not retired["entity_indexed"]
-            and not retired["marker_present"]
-        )
+    (change,) = after["text_changes"]
+    assert change["position_shift"] is None
+    assert change["occurrence_map"] == occurrence_map
+    assert change["added_groups"] == {}
+    assert change["groups"]["g01"]["occurrences"] == list(occurrences)
+    assert change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
+    assert change["mention_ids_preserved"] and change["evidence_uses_current_chunks"]
+    retired = change["retired_groups"]["g02"]
+    assert not (
+        retired["entity_present"]
+        or retired["entity_indexed"]
+        or retired["marker_present"]
+    )
 
 
 @pytest.mark.integration
@@ -66,7 +67,7 @@ def test_native_remove_partial_and_empty_group_reopen_reconcile_withdraw(tmp_pat
     before = json.loads((root / "multisource_result.json").read_text())
     command(root, "remove-occurrences", "--expected-revision", "1")
     after = json.loads((root / "occurrence_revision_result.json").read_text())
-    check_removal(before, after)
+    check_continuing_g01(before, after)
     assert after["recovery_events"] == []
     assert (
         json.loads(command(root, "retrieve").stdout)["facts"]
@@ -74,7 +75,7 @@ def test_native_remove_partial_and_empty_group_reopen_reconcile_withdraw(tmp_pat
     )
     command(root, "reconcile", "--source", "doc01")
     reconciled = json.loads((root / "multisource_result.json").read_text())
-    check_removal(before, reconciled)
+    check_continuing_g01(before, reconciled)
     # A healthy reconcile must not resurrect the retired group from baseline files.
     assert reconciled["sources"] == after["sources"]
     command(root, "withdraw", "--source", "doc01")
@@ -117,7 +118,7 @@ def test_native_occurrence_removal_recovers_exact_continuity_and_retirement(
     assert failed["plan"]["text_change"]["occurrence_map"] == REMOVAL_MAP
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())
-    check_removal(before, after)
+    check_continuing_g01(before, after)
     (event,) = after["recovery_events"]
     assert event["outcome"] == "restored" and event["resolving_revision"] == 2
     assert event["resolved_at"] and len(event["recovery_attempts"]) == 1

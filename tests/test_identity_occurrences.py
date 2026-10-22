@@ -6,15 +6,14 @@ import pytest
 
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.multisource import add_lifecycle_records
+from cognee_lab.identity.captured_text import BEFORE
 from cognee_lab.identity.occurrence_fixture import (
     AFTER,
-    BEFORE,
     COMMANDS,
     REMOVAL_MAP,
     describe_removal,
 )
 from cognee_lab.identity.admission import admit, identity_map, parse_occurrence_map
-from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
 
 

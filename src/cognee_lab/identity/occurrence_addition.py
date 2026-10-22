@@ -5,7 +5,13 @@ import json
 from .captured_chunks import ADDITION, bind_chunks
 from .captured_text import BEFORE
 from .models import IdentitySource
-from .validation import IntentError, fresh_mention_id, text_digest
+from .captured_revision import (
+    begin_revision,
+    declare_group,
+    occurrence,
+    require_fresh_doc01,
+    stamp_producer,
+)
 
 FIRST = " During startup, the controller remains active.\n\n"
 SECOND = "After calibration, the controller limits oscillations.\n"
@@ -16,61 +22,36 @@ ADDITION_MAP = {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}
 
 
 def describe_addition(old, before, chunks):
-    if (
-        old.revision != 1
-        or before != BEFORE
-        or set(old.mention_groups) != set(ADDITION_MAP)
-    ):
-        raise IntentError(
-            "fixture_scope",
-            "Occurrence addition requires doc01 of a fresh chunked-fixture",
-        )
-    payload = old.model_dump(mode="json")
-    payload["revision"] += 1
-    payload["inputs"][old.original_input_ref]["text_sha256"] = text_digest(AFTER)
-    payload["producers"]["addition_review"] = dict(
-        method="captured_fixture",
-        implementation=ADDITION,
-        version="0.1",
-        configuration={"policy": "explicit-continuity-and-new-group-v1"},
-        run_id=None,
+    require_fresh_doc01(
+        old,
+        before,
+        set(ADDITION_MAP),
+        "Occurrence addition requires doc01 of a fresh chunked-fixture",
     )
-    start = len(BASE) + len(" During startup, ")
+    payload = begin_revision(
+        old,
+        AFTER,
+        "addition_review",
+        ADDITION,
+        "explicit-continuity-and-new-group-v1",
+    )
     payload["mention_groups"]["g01"]["occurrences"].append(
-        dict(start=start, end=start + len("the controller"), text="the controller")
+        occurrence(AFTER, "the controller", "the controller remains")
     )
     # A separate local group deliberately has the same surface text. Its UUID
     # comes from a saved source, revision and group key, never the surface
     # name or offsets.
-    mid = str(fresh_mention_id(old.identity_data_id, payload["revision"], "g03"))
-    start = len(BASE) + len(FIRST) + len("After calibration, ")
-    payload["entity_constructions"][mid] = dict(
-        name="the controller",
-        description="Captured separate local reference group g03.",
+    declare_group(
+        payload,
+        old,
+        "g03",
+        "r03",
+        "the controller",
+        "Captured separate local reference group g03.",
+        [occurrence(AFTER, "the controller", "the controller limits")],
+        old.mention_resolutions["r01"],
+        "addition_review",
     )
-    payload["mention_groups"]["g03"] = dict(
-        entity_id=mid,
-        document_ref=old.original_input_ref,
-        occurrences=[
-            dict(start=start, end=start + len("the controller"), text="the controller")
-        ],
-        chunk_refs=["chunk01"],
-        input_refs=[old.original_input_ref],
-        producer_ref="addition_review",
-    )
-    payload["mention_resolutions"]["r03"] = dict(
-        group_ref="g03",
-        status="accepted",
-        target_entity_id=str(old.mention_resolutions["r01"].target_entity_id),
-        input_refs=list(old.mention_resolutions["r01"].input_refs),
-        producer_ref="addition_review",
-        explanation=None,
-    )
-    for record in [
-        *payload["mention_groups"].values(),
-        *payload["mention_resolutions"].values(),
-        *payload["variant_assignments"].values(),
-    ]:
-        record["producer_ref"] = "addition_review"
+    stamp_producer(payload, "addition_review")
     bind_chunks(payload, AFTER, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))
