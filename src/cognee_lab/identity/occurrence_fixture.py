@@ -4,7 +4,9 @@ import json
 from dataclasses import dataclass
 from typing import Callable
 
+from . import kind_change, reinterpretation
 from .captured_chunks import bind_chunks
+from .captured_text import BEFORE
 from .group_regrouping import (
     COMBINE_AFTER,
     COMBINE_MAP,
@@ -89,6 +91,9 @@ class OccurrenceCommand:
     describe: Callable
     result_name: str
     occurrence_map: dict
+    # An async (publisher, sources) callable that adds what the shared snapshot
+    # does not report, under the keys it returns.
+    inspect: Callable | None = None
 
 
 COMMANDS = {
@@ -131,6 +136,57 @@ COMMANDS = {
 }
 
 
+# Commands that take one option choosing the captured case.
+VARIANT_COMMANDS = {
+    "reinterpret": (
+        "case",
+        {
+            "new-entity": OccurrenceCommand(
+                reinterpretation.NEW_ENTITY_AFTER,
+                reinterpretation.describe_new_entity,
+                "reinterpretation_new_entity_result.json",
+                reinterpretation.REINTERPRETATION_MAP,
+                reinterpretation.inspect_new_entity,
+            ),
+            "unresolved": OccurrenceCommand(
+                reinterpretation.UNRESOLVED_AFTER,
+                reinterpretation.describe_unresolved,
+                "reinterpretation_unresolved_result.json",
+                reinterpretation.REINTERPRETATION_MAP,
+                reinterpretation.inspect_unresolved,
+            ),
+        },
+    ),
+    "change-kind": (
+        "direction",
+        {
+            "to-mention": OccurrenceCommand(
+                BEFORE,
+                kind_change.describe_to_mention,
+                "kind_change_to_mention_result.json",
+                kind_change.TO_MENTION_MAP,
+                kind_change.inspect,
+            ),
+            "to-reusable": OccurrenceCommand(
+                BEFORE,
+                kind_change.describe_to_reusable,
+                "kind_change_to_reusable_result.json",
+                kind_change.TO_REUSABLE_MAP,
+                kind_change.inspect,
+            ),
+        },
+    ),
+}
+
+
+def selected_command(args):
+    """The command a CLI line selects, with its option when it takes one."""
+    if args.command in VARIANT_COMMANDS:
+        option, choices = VARIANT_COMMANDS[args.command]
+        return choices[getattr(args, option)]
+    return COMMANDS[args.command]
+
+
 async def run(args, root):
     from .captured_chunks import recorded_budget
     from .fixture import context_for
@@ -139,7 +195,7 @@ async def run(args, root):
     from .text_changes import TextChange, chunk_text, original_context, read_original
     from .text_fixture import maintain_one
 
-    command = COMMANDS[args.command]
+    command = selected_command(args)
     if args.source != "doc01" or not (root / "chunked-fixture-info.json").exists():
         raise IntentError(
             "fixture_scope", f"{args.command} requires doc01 of a chunked-fixture"
@@ -181,8 +237,9 @@ async def run(args, root):
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,
     )
-    result = await snapshot(
-        publisher, await current_sources(root, publisher), args.query
-    )
+    sources = await current_sources(root, publisher)
+    result = await snapshot(publisher, sources, args.query)
+    if command.inspect is not None:
+        result.update(await command.inspect(publisher, sources))
     (root / command.result_name).write_text(json.dumps(result, indent=2))
     return result

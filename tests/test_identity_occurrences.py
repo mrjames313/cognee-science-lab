@@ -11,6 +11,7 @@ from cognee_lab.identity.occurrence_fixture import (
     AFTER,
     COMMANDS,
     REMOVAL_MAP,
+    VARIANT_COMMANDS,
     describe_removal,
 )
 from cognee_lab.identity.admission import admit, identity_map, parse_occurrence_map
@@ -18,7 +19,11 @@ from cognee_lab.identity.validation import IntentError, text_digest, validate_in
 
 
 def test_each_occurrence_command_has_its_own_result_file():
-    assert len({c.result_name for c in COMMANDS.values()}) == len(COMMANDS)
+    commands = [
+        *COMMANDS.values(),
+        *(c for _, cases in VARIANT_COMMANDS.values() for c in cases.values()),
+    ]
+    assert len({c.result_name for c in commands}) == len(commands)
 
 
 def example(payload):

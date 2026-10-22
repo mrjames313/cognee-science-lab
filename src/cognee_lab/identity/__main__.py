@@ -14,8 +14,9 @@ from .environment import (
     fixture_environment,
     read_embedding,
 )
-from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
+from .occurrence_fixture import COMMANDS, VARIANT_COMMANDS
 
+OCCURRENCE_COMMANDS = (*COMMANDS, *VARIANT_COMMANDS)
 TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
 
 
@@ -81,6 +82,12 @@ def main():
             "text_chunks",
         ],
     )
+    for command, (option, choices) in VARIANT_COMMANDS.items():
+        parser.add_argument(
+            f"--{option}",
+            choices=list(choices),
+            help=f"Captured case that {command} applies",
+        )
     parser.add_argument(
         "--embedding",
         choices=["env", "loopback"],
@@ -111,6 +118,12 @@ def main():
             and args.fault_stage.startswith(("withdraw_", "replace_"))
         ):
             parser.error("Fault stage does not match the selected operation")
+    for command, (option, _) in VARIANT_COMMANDS.items():
+        chosen = getattr(args, option)
+        if args.command == command and chosen is None:
+            parser.error(f"{command} requires --{option}")
+        if args.command != command and chosen is not None:
+            parser.error(f"--{option} applies only to {command}")
     creating = args.command in CREATION_COMMANDS
     if creating and root.exists():
         parser.error("Fixture root already exists; choose a new directory")
