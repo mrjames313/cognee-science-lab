@@ -386,13 +386,31 @@ def check_reusable_recipes(old, source):
         )
 
 
-def new_reusable_ids(old, source):
-    """Reusable Entities this revision creates: added recipes that no corpus
-    input names as an existing Entity."""
-    existing = {
-        i.entity_id for i in source.inputs.values() if isinstance(i, CorpusObjectInput)
+def referenced_corpus_ids(source):
+    """Existing Entities that a resolution or variant reads through a corpus
+    input. Only an input listed in some input_refs reaches validate_inputs,
+    which proves the Entity exists in the graph with the recorded hash."""
+    listed = set()
+    for record in [
+        *source.mention_resolutions.values(),
+        *source.variant_assignments.values(),
+    ]:
+        listed.update(record.input_refs)
+    return {
+        i.entity_id
+        for key, i in source.inputs.items()
+        if key in listed and isinstance(i, CorpusObjectInput)
     }
-    return set(reusable_recipes(source)) - set(old.entity_constructions) - existing
+
+
+def new_reusable_ids(old, source):
+    """Reusable Entities this revision creates: added recipes that no listed
+    corpus input names as an existing Entity."""
+    return (
+        set(reusable_recipes(source))
+        - set(old.entity_constructions)
+        - referenced_corpus_ids(source)
+    )
 
 
 def naming_keys(source, entity_id):

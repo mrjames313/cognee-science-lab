@@ -386,11 +386,24 @@ def add_unreferenced_recipe(old, new, ctx):
     add_recipe(new, other_entity(ctx))
 
 
-def add_corpus_referenced_entity(old, new, ctx):
+def add_corpus_entity(old, new, ctx, *, referenced):
+    """A corpus input names a new reusable Entity. Only an input that the
+    variant lists in its input_refs reaches validate_inputs, which proves the
+    Entity exists in the graph with the recorded hash."""
     entity_id = str(uuid5(ctx["identity"], "corpus:entity"))
     add_recipe(new, entity_id)
     new["inputs"]["existing_Z"] = dict(new["inputs"]["existing_A"], entity_id=entity_id)
     new["variant_assignments"]["v02"] = variant(HC, entity_id, DOCUMENT)
+    if referenced:
+        new["variant_assignments"]["v02"]["input_refs"].append("existing_Z")
+
+
+def add_corpus_referenced_entity(old, new, ctx):
+    add_corpus_entity(old, new, ctx, referenced=True)
+
+
+def add_corpus_decoy_entity(old, new, ctx):
+    add_corpus_entity(old, new, ctx, referenced=False)
 
 
 def resolve_fresh_to_derived(old, new, ctx):
@@ -533,6 +546,12 @@ DECISIONS = [
             [],
             add_corpus_referenced_entity,
             admit_always,
+        ),
+        (
+            "new Entity named by a corpus input that nothing lists",
+            [],
+            add_corpus_decoy_entity,
+            first_attempt_only("entity_uuid_not_derived"),
         ),
         (
             "fresh group resolved to a derived new Entity",
