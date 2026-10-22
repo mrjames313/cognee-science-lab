@@ -164,6 +164,22 @@ class RecordStore:
                     "withdrawn_source",
                     "Withdrawn source requires explicit new publication intent",
                 )
+            if row and row.state == "forgotten" and method != "publish":
+                raise IntentError(
+                    "forgotten_source",
+                    "Forgotten source accepts only a new publication at the next revision",
+                )
+            if method == "publish" and row:
+                # A publication starts a lineage: from no row, or again after forget.
+                if row.state != "forgotten":
+                    raise IntentError(
+                        "recovery_choice", "Reconcile a saved publication explicitly"
+                    )
+                if source.revision != actual_revision + 1:
+                    raise IntentError(
+                        "revision_sequence",
+                        "Re-add a forgotten source at exactly the next revision",
+                    )
             if (
                 row
                 and row.state == "failed"
@@ -176,6 +192,15 @@ class RecordStore:
             if (
                 row
                 and row.state == "failed"
+                and json.loads(row.plan).get("operation") == "identity_forget"
+                and method != "forget"
+            ):
+                raise IntentError(
+                    "recovery_choice", "Retry the failed forget explicitly"
+                )
+            if (
+                row
+                and row.state == "failed"
                 and json.loads(row.plan).get("operation") == "identity_replace"
                 and method != "replace"
             ):
@@ -183,7 +208,10 @@ class RecordStore:
                     "recovery_choice", "Reconcile the saved replacement plan explicitly"
                 )
             if row and source.revision != actual_revision:
-                if method != "replace" or row.state != "current":
+                if not (
+                    (method == "replace" and row.state == "current")
+                    or method == "publish"
+                ):
                     raise IntentError(
                         "recovery_choice",
                         "Advance a current revision through replacement",
@@ -192,6 +220,23 @@ class RecordStore:
                 raise IntentError(
                     "source_missing", "Replacement requires an existing publication"
                 )
+            if method == "forget":
+                if row is None:
+                    raise IntentError(
+                        "source_missing", "Forget requires an existing publication"
+                    )
+                if plan.get("operation") != "identity_forget":
+                    raise IntentError(
+                        "recovery_plan", "Forget requires a durable forget plan"
+                    )
+                if not (
+                    row.state == "current"
+                    or json.loads(row.plan).get("operation") == "identity_forget"
+                ):
+                    raise IntentError(
+                        "forget_state",
+                        "Forget a current source, or retry its failed forget",
+                    )
             if method == "replace" and row is not None:
                 prior_plan = json.loads(row.plan)
                 if plan.get("operation") != "identity_replace":
@@ -342,7 +387,7 @@ class RecordStore:
         return event_id
 
     async def complete(self, source, attempt, *, state="current"):
-        if state not in {"current", "withdrawn"}:
+        if state not in {"current", "withdrawn", "forgotten"}:
             raise ValueError("Unsupported completion state")
         dataset, sid = str(source.dataset_id), str(source.identity_data_id)
         values = {"state": state}
@@ -385,7 +430,7 @@ class RecordStore:
                         resolved_at=now(),
                         resolving_attempt=attempt,
                         resolving_revision=source.revision,
-                        outcome="withdrawn" if state == "withdrawn" else "restored",
+                        outcome="restored" if state == "current" else state,
                     )
                     if info.get("recovery_attempts"):
                         info["recovery_attempts"][-1]["outcome"] = "verified"

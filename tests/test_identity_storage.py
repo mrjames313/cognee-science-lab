@@ -103,3 +103,64 @@ async def test_withdrawal_guard_and_completion(source_payload):
         if r["source"] == str(partial.identity_data_id)
     )
     assert row["state"] == "withdrawn" and row["verified_revision"] == 0
+
+
+@pytest.mark.asyncio
+async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_payload):
+    source_payload["dataset_id"] = str(uuid4())
+    for item in source_payload["inputs"].values():
+        if "dataset_id" in item:
+            item["dataset_id"] = source_payload["dataset_id"]
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    store = RecordStore()
+    await store.initialize()
+    attempt = await store.begin(source, expected_revision=0, plan={})
+    await store.complete(source, attempt)
+    plan = {"operation": "identity_forget"}
+    with pytest.raises(IntentError, match="durable forget plan"):
+        await store.begin(source, expected_revision=1, plan={}, method="forget")
+    attempt = await store.begin(source, expected_revision=1, plan=plan, method="forget")
+    await store.fail(source, attempt, "forget_document", IntentError("injected", "x"))
+    with pytest.raises(IntentError, match="Retry the failed forget"):
+        await store.begin(source, expected_revision=1, plan={}, method="reconcile")
+    with pytest.raises(IntentError, match="Retry the failed forget"):
+        await store.begin(source, expected_revision=1, plan=plan, method="withdraw")
+    attempt = await store.begin(source, expected_revision=1, plan=plan, method="forget")
+    await store.complete(source, attempt, state="forgotten")
+    row = (await store.rows(source.dataset_id))[0]
+    assert row["state"] == "forgotten"
+    assert row["revision"] == 1 and row["verified_revision"] == 1
+    assert IdentitySource.model_validate_json(row["description"]) == source
+    assert (await store.events(source.dataset_id))[0]["outcome"] == "forgotten"
+    for method in ("reconcile", "withdraw", "forget", "replace"):
+        with pytest.raises(IntentError, match="Forgotten source"):
+            await store.begin(source, expected_revision=1, plan=plan, method=method)
+    with pytest.raises(IntentError, match="next revision"):
+        await store.begin(source, expected_revision=1, plan={}, method="publish")
+    readded = source.model_copy(update={"revision": 2})
+    attempt = await store.begin(readded, expected_revision=1, plan={})
+    await store.complete(readded, attempt)
+    row = (await store.rows(source.dataset_id))[0]
+    assert row["state"] == "current"
+    assert row["revision"] == 2 and row["verified_revision"] == 2
+
+    # Forget takes a current source only: a failed first publication must be
+    # reconciled or withdrawn, and a withdrawn source stays withdrawn.
+    partial = source.model_copy(update={"identity_data_id": uuid4()})
+    attempt = await store.begin(partial, expected_revision=0, plan={})
+    await store.fail(partial, attempt, "nodes", IntentError("injected", "partial"))
+    with pytest.raises(IntentError, match="Forget a current source"):
+        await store.begin(partial, expected_revision=1, plan=plan, method="forget")
+    attempt = await store.begin(
+        partial,
+        expected_revision=1,
+        plan={"operation": "identity_withdraw"},
+        method="withdraw",
+    )
+    await store.complete(partial, attempt, state="withdrawn")
+    with pytest.raises(IntentError, match="Withdrawn source"):
+        await store.begin(partial, expected_revision=1, plan=plan, method="forget")
+    with pytest.raises(IntentError, match="Reconcile a saved publication"):
+        await store.begin(
+            source.model_copy(update={"revision": 3}), expected_revision=2, plan={}
+        )

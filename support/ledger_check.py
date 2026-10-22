@@ -341,7 +341,8 @@ def unresolved(events):
 
 def p1_withheld_until_complete(step):
     """A source is served exactly when its last accepted attempt completed as
-    current, and then at that attempt's revision and description."""
+    current, and then at that attempt's revision and description. A completed
+    withdrawal or forget leaves the row in that state."""
     for s, ghost in enumerate(step.model_after.sources):
         row = step.obs_after.rows.get(s)
         if served(row) != (ghost.outcome == "current"):
@@ -354,8 +355,11 @@ def p1_withheld_until_complete(step):
             != canonical(s, ghost.revision, ghost.variant)
         ):
             yield f"S{s + 1} served a description other than the completed one"
-        if ghost.outcome == "withdrawn" and row["state"] != "withdrawn":
-            yield f"S{s + 1} withdrawal completed but the row is {row['state']}"
+        if (
+            ghost.outcome in ("withdrawn", "forgotten")
+            and row["state"] != ghost.outcome
+        ):
+            yield f"S{s + 1} {ghost.outcome} completed but the row is {row['state']}"
 
 
 def p2_independent_sources(step):
@@ -477,9 +481,17 @@ def begin_rules(op, prior):
     if prior is None:
         return
     saved = Plan.of(op.source, prior["plan"])
+    if not (
+        state in method.advances_from
+        or state in method.begins_from
+        or (state == "failed" and method.owns_failed_plan == saved.operation)
+    ):
+        yield f"{op.method} began on a {state} {saved.operation} row"
     for owner in METHODS.values():
-        owns = (state == "failed" and owner.owns_failed_plan == saved.operation) or (
-            state == "withdrawn" and owner.owns_withdrawn
+        owns = (
+            (state == "failed" and owner.owns_failed_plan == saved.operation)
+            or (state == "withdrawn" and owner.owns_withdrawn)
+            or (state == "forgotten" and owner.owns_forgotten)
         )
         if owns and owner.name != op.method:
             yield f"{state} {saved.operation} row resumed through {op.method}"
@@ -522,6 +534,7 @@ REACHABLE = (
     "row current",
     "row failed",
     "row withdrawn",
+    "row forgotten",
     "row pending",
     *(f"accepted {m}" for m in METHODS),
     "accepted complete",

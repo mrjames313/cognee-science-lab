@@ -7,11 +7,11 @@ description: Bounded exhaustive check of the Stage 6 identity publication ledger
 
 `support/ledger_check.py` drives the real `RecordStore` on a fresh in-memory SQLite store. It runs every sequence of ledger steps up to a depth bound, with two sources and two writers. After every step it checks six properties:
 
-- **P1. Withheld until complete.** A source is served exactly when its last accepted attempt completed as current, with that attempt's revision and description.
+- **P1. Withheld until complete.** A source is served exactly when its last accepted attempt completed as current, with that attempt's revision and description. A completed withdrawal or forget leaves the row in that state.
 - **P2. Independent sources.** A step on one source never changes another source's row or recovery events.
 - **P3. Stale calls are refused.** A stale expected revision, an acknowledgement for an ended or replaced attempt, or one for a description that was not begun, is refused. A refusal changes nothing.
 - **P4. One writer at a time.** At most one attempt is open, and the reservation names exactly that attempt.
-- **P5. Recovery is explicit and forward.** Revisions go up by one, only through a first publish or a replacement of a current row. Only the method that owns a saved intent resumes it. A retry keeps the saved plan. Each failure has one recovery event, and only its completion resolves it. No step removes an event, and no step changes a resolved event.
+- **P5. Recovery is explicit and forward.** Revisions go up by one, only through a first publish, a replacement of a current row or a new publication of a forgotten row. Each method begins only on the row states its `Method` entry names. Only the method that owns a saved intent resumes it. A retry keeps the saved plan. Each failure has one recovery event, and only its completion resolves it. No step removes an event, and no step changes a resolved event.
 - **P6. Failed rows can recover.** From a failed row and a free reservation, the method that owns the saved plan, called with the saved arguments, is accepted and completes.
 
 Each property is a function `p1_...` to `p6_...` in `ledger_check.py`. The docstring of each function states the property. The harm of each break, the code that makes each promise, and all measurements are in [reference.md](reference.md).
@@ -24,9 +24,10 @@ Run the check when your diff touches any of these.
 | --- | --- | --- |
 | `storage.py` | `RecordStore.begin`, `fail`, `complete`, `assert_pending`, `rows`, `events`, and the three tables | All of it. The checker calls these and nothing else. |
 | `retrieve.py` | `valid_sources` | The eligibility condition, copied as `served()`. Also the `fail()` call on a row that fails validation (the `reject` step). |
-| `publish.py` | `Publisher.publish`, `Publisher._apply_pending` | The publish and reconcile arguments, `assert_pending()` before the `try` block, and the `complete()` or `fail()` that ends the attempt. |
+| `publish.py` | `Publisher.publish`, `Publisher._apply_pending` | The publish, re-add and reconcile arguments and how the method is chosen, `assert_pending()` before the `try` block, and the `complete()` or `fail()` that ends the attempt. |
 | `replace.py` | `replace` | The replacement arguments, the retry with the saved plan, `plan["text_change"]`, and the failure stages. |
 | `withdraw.py` | `withdraw` | The withdrawal arguments, the reuse of a saved withdrawal plan, and `complete(state="withdrawn")`. |
+| `forget.py` | `forget` | The forget arguments, the reuse of a saved forget plan, and `complete(state="forgotten")`. |
 | `text_fixture.py` | `maintain_one` | It calls `replace` with a `text_change`. The checker sends that plan shape. |
 | `text_changes.py` | `TextChange` | Its fields, saved by `asdict()`. `TEXT_CHANGE` in the checker copies them. |
 | `revisions.py` | `replace_one` | It calls `replace` without a `text_change`. |
@@ -36,7 +37,7 @@ All paths are under `src/cognee_lab/identity/`. The test `test_served_copies_the
 **Sync commit:** `50ec7ff`. On 2026-10-21 the checker described the covered code at this commit. To see whether the check needs another look, run this command:
 
 ```bash
-git diff 50ec7ff -- src/cognee_lab/identity/{storage,retrieve,publish,replace,withdraw,text_fixture,text_changes,revisions}.py
+git diff 50ec7ff -- src/cognee_lab/identity/{storage,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
 ```
 
 If the diff touches a function in the table, read the changed lines against `METHODS` and the intents functions in `support/ledger_model.py`. Move the sync commit only after you read that the checker still describes the code. A passing check is not enough, because a passing check can describe old code.

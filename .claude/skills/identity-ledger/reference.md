@@ -20,15 +20,17 @@ Each step is one call sequence that the named caller makes. The checker treats e
 | Step label | Caller | RecordStore calls |
 | --- | --- | --- |
 | `Wn publish Sk rev=1 expect=0 plan=publish` | `Publisher.publish`, first publication | `begin(method="publish")` |
+| `Wn publish Sk rev=r+1 expect=r plan=publish` | `Publisher.publish` on a forgotten row, the re-add (`readd` CLI) | `begin(method="publish")` |
 | `Wn reconcile Sk rev=r expect=r plan=publish` | `Publisher.publish` with a saved revision, the `reconcile` CLI | `begin(method="reconcile")` |
 | `Wn replace Sk rev=r+1 expect=r plan=replace<rR` | `replace`, a new replacement plan from revision R | `begin(method="replace")` |
 | `Wn replace Sk rev=r+1 expect=r plan=text<rR` | `replace` with a `text_change` (`maintain_one`) | `begin(method="replace")` |
 | `Wn replace Sk rev=r+1 expect=r plan=regroup<rR` | `replace` with a regrouping `text_change` (`split-group`, `combine-groups`, `maintain_one`) | `begin(method="replace")` |
 | `Wn replace Sk rev=r expect=r plan=<saved>` | the retry branch of `replace` | `begin(method="replace")` with the saved plan |
 | `Wn withdraw Sk rev=r expect=r plan=withdraw` | `withdraw`, with the saved plan on retry | `begin(method="withdraw")` |
-| `Wn complete` | `Publisher._apply_pending`, `withdraw` | `assert_pending()` (not for withdraw), then `complete()`. If a call refuses, the caller's `fail()` runs. A publish whose `assert_pending()` refuses stops with the reservation held. |
+| `Wn forget Sk rev=r expect=r plan=forget` | `forget`, with the saved plan on retry | `begin(method="forget")` |
+| `Wn complete` | `Publisher._apply_pending`, `withdraw`, `forget` | `assert_pending()` (not for withdraw or forget), then `complete()`. If a call refuses, the caller's `fail()` runs. A publish whose `assert_pending()` refuses stops with the reservation held. |
 | `Wn complete desc=alt` | none (refusal input) | the same calls with a description other than the one begun |
-| `Wn fail@stage` | the `except` blocks of the callers | `fail()` with `nodes`, `replace_saved` or `withdraw_contributions` |
+| `Wn fail@stage` | the `except` blocks of the callers | `fail()` with `nodes`, `replace_saved`, `withdraw_contributions` or `forget_contributions` |
 | `Wn crash` | a hard crash (docs/SESSION_HANDOFF.md, "Constraints to preserve") | none. The writer keeps the reservation. |
 | `Wn repeat` | a duplicated or delayed acknowledgement | the writer's last `complete()` or `fail()` again |
 | `reject Sk` | `valid_sources` | `fail(..., "retrieval_validation", ...)` with the attempt of the row as it was last seen current |
@@ -39,10 +41,10 @@ Each step is one call sequence that the named caller makes. The checker treats e
 
 From every row version, the intents functions also send arguments that `begin()` must refuse. A missing guard then shows as a property failure.
 
-- The changed description at the saved revision, for reconcile, withdraw and the replace retry.
-- Reconcile and withdraw at the saved revision plus one.
-- Publish from no row at revision 2, and replace at the saved revision plus two.
-- A replacement whose plan is a publish plan.
+- The changed description at the saved revision, for reconcile, withdraw, forget and the replace retry.
+- Reconcile, withdraw and forget at the saved revision plus one.
+- Publish from no row at revision 2, publish at the saved revision on any row, and replace at the saved revision plus two.
+- A replacement whose plan is a publish plan, and a forget whose plan is a publish plan.
 - A replace retry whose plan changes `previous_description` or adds, drops or swaps `text_change` (a `text` plan for a `regroup` plan).
 
 ## Modeling choices
@@ -79,7 +81,7 @@ Measured on 2026-10-21 on the development Mac (10 cores). P = 0, 2 sources, 2 wr
 | 7 | PASS | 87700 / 85448 / 163.85 |
 | 8 | PASS | 482109 / 470249 / 893.41 |
 
-After the regrouping plan joined the step list on 2026-10-21, depth 5 gives 3828 nodes and 3717 sequences in about 6.7 s. The depths 6 to 8 rows above predate that change.
+After the regrouping plan joined the step list on 2026-10-21, depth 5 gave 3828 nodes and 3717 sequences in about 6.7 s. After the forget method and the re-add joined it on 2026-10-22, depth 5 gives 5548 nodes and 5429 sequences in about 9 s, and `--mutants` runs its 37 breaks in about 15 s. The depths 6 to 8 rows above predate both changes.
 
 P5 later gained two checks: no step removes a recovery event, and no step changes a resolved one. After that change, depths 6, 7 and 8 passed again with the same counts. Those runs ran in parallel, so their times are not in the table.
 
@@ -100,7 +102,7 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 
 ## Scratch breaks
 
-`support/ledger_mutants.py` holds the breaks. `--mutants` runs each one on an in-memory copy of storage.py, at the default bound, in parallel processes. It exits non-zero if a break is missed or is caught by a property other than the one it names. These results are from depth 5, 2 sources and 2 writers on 2026-10-21. The sequences leave out `expect=`, `plan=publish` and `plan=withdraw` from the labels.
+`support/ledger_mutants.py` holds the breaks. `--mutants` runs each one on an in-memory copy of storage.py, at the default bound, in parallel processes. It exits non-zero if a break is missed or is caught by a property other than the one it names. These results are from depth 5, 2 sources and 2 writers on 2026-10-21, and on 2026-10-22 for the forget and re-add breaks. The sequences leave out `expect=`, `plan=publish` and `plan=withdraw` from the labels.
 
 | Break | Property | Minimal sequence |
 | --- | --- | --- |
@@ -120,6 +122,13 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `no-replace-recovery-choice` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 reconcile S1 rev=2` |
 | `no-withdraw-recovery-choice` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 withdraw S1 rev=1`, `W1 fail@withdraw_contributions`, `W1 reconcile S1 rev=1` |
 | `no-withdrawn-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 withdraw S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1` |
+| `no-forgotten-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete`, `W1 reconcile S1 rev=1` |
+| `no-forget-recovery-choice` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 fail@forget_contributions`, `W1 reconcile S1 rev=1` |
+| `forget-from-any-failed-row` | P5 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 forget S1 rev=1 plan=forget` |
+| `forget-takes-any-plan` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=publish` |
+| `publish-restarts-saved-row` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 publish S1 rev=2 expect=1` |
+| `readd-at-forgotten-revision` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete`, `W1 publish S1 rev=1 expect=1` |
+| `complete-forgotten-as-withdrawn` | P1 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete` |
 | `no-advance-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=2` |
 | `advance-guard-ignores-method` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=2` |
 | `no-revision-reuse` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1 desc=alt` |

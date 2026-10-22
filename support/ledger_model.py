@@ -75,10 +75,11 @@ def variant_of(s, saved):
 class Plan:
     """A plan a caller saves, reduced to the fields storage.py reads.
 
-    Publisher.publish, replace() in replace.py and withdraw() in withdraw.py.
+    Publisher.publish, replace() in replace.py, withdraw() in withdraw.py and
+    forget() in forget.py.
     """
 
-    operation: Literal["publish", "replace", "withdraw"]
+    operation: Literal["publish", "replace", "withdraw", "forget"]
     revision: int
     previous: tuple[int, int] | None = None  # (revision, variant) it replaces
     change: Literal["text", "regroup"] | None = None
@@ -220,11 +221,17 @@ Op = Begin | Finish | Crash | Repeat | Reject
 
 
 def publish_intents(w, s, view):
-    if view is not None:
-        return []
+    if view is None:
+        return [
+            Begin(w, s, "publish", 0, 1, Plan("publish", 1)),
+            Begin(w, s, "publish", 0, 2, Plan("publish", 2)),
+        ]
+    # A re-add after forget: Publisher.publish with the saved revision as the
+    # guard and the next revision as the description. Refused on other rows.
+    r, v = view.revision, view.variant
     return [
-        Begin(w, s, "publish", 0, 1, Plan("publish", 1)),
-        Begin(w, s, "publish", 0, 2, Plan("publish", 2)),
+        Begin(w, s, "publish", r, r + 1, Plan("publish", r + 1)),
+        Begin(w, s, "publish", r, r, Plan("publish", r), v),
     ]
 
 
@@ -288,6 +295,20 @@ def withdraw_intents(w, s, view):
     ]
 
 
+def forget_intents(w, s, view):
+    if view is None:
+        return []
+    r, v = view.revision, view.variant
+    reuse = view.state == "failed" and view.plan.operation == "forget"
+    plan = view.plan if reuse else Plan("forget", r)  # as forget() chooses
+    return [
+        Begin(w, s, "forget", r, r, plan, v),
+        Begin(w, s, "forget", r, r, plan, 1 - v),
+        Begin(w, s, "forget", r, r + 1, Plan("forget", r + 1)),
+        Begin(w, s, "forget", r, r, Plan("publish", r), v),
+    ]
+
+
 @dataclass(frozen=True)
 class Method:
     """How one caller drives RecordStore, and which rows only it may resume.
@@ -317,8 +338,12 @@ class Method:
     fail_stage: str
     ack_stage: str  # the stage fail() records when complete() refuses
     advances_from: frozenset  # row states (None: no row) it may advance from
+    # Row states it may begin on at the saved revision, besides a failed row
+    # that holds its own plan (owns_failed_plan).
+    begins_from: frozenset
     owns_failed_plan: str | None  # a failed row with this plan resumes only here
     owns_withdrawn: bool  # a withdrawn row restarts only here
+    owns_forgotten: bool  # a forgotten row restarts only here
     requires_plan: str | None  # begin() must carry a plan of this operation
     preserved_on_retry: tuple[str, ...]  # Plan fields a retry keeps
     recovers: str | None  # P6: the saved plan operation it resumes
@@ -327,7 +352,7 @@ class Method:
 METHODS = {
     m.name: m
     for m in (
-        Method(  # Publisher.publish with expected_revision 0
+        Method(  # Publisher.publish: a first publication, or a re-add after forget
             name="publish",
             intents=publish_intents,
             done_state="current",
@@ -335,9 +360,11 @@ METHODS = {
             on_assert_refused=None,
             fail_stage="nodes",
             ack_stage="verification",
-            advances_from=frozenset({None}),
+            advances_from=frozenset({None, "forgotten"}),
+            begins_from=frozenset(),
             owns_failed_plan=None,
             owns_withdrawn=False,
+            owns_forgotten=True,
             requires_plan=None,
             preserved_on_retry=(),
             recovers=None,
@@ -351,8 +378,10 @@ METHODS = {
             fail_stage="nodes",
             ack_stage="verification",
             advances_from=frozenset(),
+            begins_from=frozenset({"current", "failed"}),
             owns_failed_plan=None,
             owns_withdrawn=False,
+            owns_forgotten=False,
             requires_plan=None,
             preserved_on_retry=(),
             recovers="publish",
@@ -366,8 +395,10 @@ METHODS = {
             fail_stage="replace_saved",
             ack_stage="verification",
             advances_from=frozenset({"current"}),
+            begins_from=frozenset(),
             owns_failed_plan="replace",
             owns_withdrawn=False,
+            owns_forgotten=False,
             requires_plan="replace",
             preserved_on_retry=("previous", "change"),
             recovers="replace",
@@ -381,11 +412,30 @@ METHODS = {
             fail_stage="withdraw_contributions",
             ack_stage="withdraw_verification",
             advances_from=frozenset(),
+            begins_from=frozenset({"current", "failed", "withdrawn"}),
             owns_failed_plan="withdraw",
             owns_withdrawn=True,
+            owns_forgotten=False,
             requires_plan=None,
             preserved_on_retry=(),
             recovers="withdraw",
+        ),
+        Method(  # forget()
+            name="forget",
+            intents=forget_intents,
+            done_state="forgotten",
+            asserts_pending=False,
+            on_assert_refused=None,
+            fail_stage="forget_contributions",
+            ack_stage="forget_verification",
+            advances_from=frozenset(),
+            begins_from=frozenset({"current"}),
+            owns_failed_plan="forget",
+            owns_withdrawn=False,
+            owns_forgotten=False,
+            requires_plan="forget",
+            preserved_on_retry=(),
+            recovers="forget",
         ),
     )
 }
@@ -416,7 +466,7 @@ class Served(NamedTuple):
     revision: int
 
 
-Outcome = Literal["open", "current", "withdrawn", "failed"] | None
+Outcome = Literal["open", "current", "withdrawn", "forgotten", "failed"] | None
 
 
 @dataclass

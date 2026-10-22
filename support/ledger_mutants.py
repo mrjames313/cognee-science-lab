@@ -131,9 +131,62 @@ MUTANTS = {
         "            if False:",
         "P5",
     ),
+    "no-forgotten-guard": Mutant(
+        '            if row and row.state == "forgotten" and method != "publish":',
+        "            if False:",
+        "P5",
+    ),
+    "publish-restarts-saved-row": Mutant(
+        '                if row.state != "forgotten":\n'
+        "                    raise IntentError(\n"
+        '                        "recovery_choice", "Reconcile a saved publication explicitly"\n',
+        "                if False:\n"
+        "                    raise IntentError(\n"
+        '                        "recovery_choice", "Reconcile a saved publication explicitly"\n',
+        "P5",
+    ),
+    "readd-at-forgotten-revision": Mutant(
+        "                if source.revision != actual_revision + 1:\n"
+        "                    raise IntentError(\n"
+        '                        "revision_sequence",\n'
+        '                        "Re-add a forgotten source at exactly the next revision",\n',
+        "                if False:\n"
+        "                    raise IntentError(\n"
+        '                        "revision_sequence",\n'
+        '                        "Re-add a forgotten source at exactly the next revision",\n',
+        "P5",
+    ),
+    "no-forget-recovery-choice": Mutant(
+        '                and json.loads(row.plan).get("operation") == "identity_forget"\n'
+        '                and method != "forget"\n',
+        '                and json.loads(row.plan).get("operation") == "identity_forget"\n'
+        "                and False\n",
+        "P5",
+    ),
+    "forget-from-any-failed-row": Mutant(
+        "                if not (\n"
+        '                    row.state == "current"\n'
+        '                    or json.loads(row.plan).get("operation") == "identity_forget"\n'
+        "                ):",
+        "                if False:",
+        "P5",
+    ),
+    "forget-takes-any-plan": Mutant(
+        '                if plan.get("operation") != "identity_forget":\n',
+        "                if False:\n",
+        "P5",
+    ),
+    "complete-forgotten-as-withdrawn": Mutant(
+        '        values = {"state": state}\n',
+        '        values = {"state": "withdrawn" if state == "forgotten" else state}\n',
+        "P1",
+    ),
     "no-advance-guard": Mutant(
         "            if row and source.revision != actual_revision:\n"
-        '                if method != "replace" or row.state != "current":\n'
+        "                if not (\n"
+        '                    (method == "replace" and row.state == "current")\n'
+        '                    or method == "publish"\n'
+        "                ):\n"
         "                    raise IntentError(\n"
         '                        "recovery_choice",\n'
         '                        "Advance a current revision through replacement",\n'
@@ -142,8 +195,8 @@ MUTANTS = {
         "P5",
     ),
     "advance-guard-ignores-method": Mutant(
-        '                if method != "replace" or row.state != "current":',
-        '                if row.state != "current":',
+        '                    (method == "replace" and row.state == "current")\n',
+        '                    (row.state == "current")\n',
         "P5",
     ),
     "no-revision-reuse": Mutant(
