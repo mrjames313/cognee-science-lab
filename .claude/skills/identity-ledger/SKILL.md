@@ -34,10 +34,10 @@ Run the check when your diff touches any of these.
 
 All paths are under `src/cognee_lab/identity/`. The test `test_served_copies_the_retrieval_eligibility_test` fails if the eligibility condition in `valid_sources` changes.
 
-**Sync commit:** `f5e581b`. On 2026-10-22 the checker described the covered code at this commit, after forget and the re-add joined it. To see whether the check needs another look, run this command:
+**Sync commit:** `7c82af2`. On 2026-10-22 the checker described the covered code at this commit, after the forget review fixes: the explicit `Publisher.publish`, `reconcile` and `readd` entry points, `RecordStore.row`, the shared guard messages, the forget on a missing row and the event outcome check. To see whether the check needs another look, run this command:
 
 ```bash
-git diff f5e581b -- src/cognee_lab/identity/{storage,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
+git diff 7c82af2 -- src/cognee_lab/identity/{storage,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
 ```
 
 If the diff touches a function in the table, read the changed lines against `METHODS` and the intents functions in `support/ledger_model.py`. Move the sync commit only after you read that the checker still describes the code. A passing check is not enough, because a passing check can describe old code.
