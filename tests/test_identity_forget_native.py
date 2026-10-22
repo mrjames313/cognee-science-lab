@@ -267,3 +267,60 @@ def test_native_forget_failure_withholds_the_source_and_reconcile_finishes_it(
     assert incident["outcome"] == "forgotten" and incident["resolved_at"]
     assert incident["recovery_attempts"][-1]["method"] == "forget"
     assert incident["recovery_attempts"][-1]["outcome"] == "verified"
+
+
+@pytest.mark.integration
+def test_native_reconcile_finishes_a_readd_that_failed_before_its_facts(tmp_path):
+    """A fault at the nodes stage comes before the captured facts are written.
+    The reconcile of that failed re-add writes them."""
+    root = tmp_path / "readd_failure"
+    command(root, "multi-fixture")
+    initial = result_of(root)
+    command(root, "forget", "--source", "doc01", "--expected-revision", "1")
+    failed = command(
+        root,
+        "readd",
+        "--source",
+        "doc01",
+        "--expected-revision",
+        "1",
+        "--fault-stage",
+        "nodes",
+        expect=1,
+    )
+    assert "recovery_event_id=" in error_of(failed)["message"]
+    status = json.loads(command(root, "status").stdout)
+    assert sorted(p["state"] for p in status["publications"]) == ["current", "failed"]
+
+    command(root, "reconcile", "--source", "doc01")
+    recovered = result_of(root)
+    back = recovered["sources"]["doc01"]
+    assert back["state"] == "current"
+    assert (back["saved_revision"], back["verified_revision"]) == (2, 2)
+    assert back["original_fact_present"] and back["original_evidence_present"]
+    intact(initial, recovered, "doc02")
+    assert len(recovered["result"]["facts"]) == 2
+    (incident,) = recovered["recovery_events"]
+    assert incident["outcome"] == "restored" and incident["resolved_at"]
+
+
+@pytest.mark.integration
+def test_native_reconcile_finishes_a_first_publication_that_failed_before_its_facts(
+    tmp_path,
+):
+    root = tmp_path / "publish_failure"
+    command(root, "fixture", "--fault-stage", "nodes", expect=1)
+    status = json.loads(command(root, "status").stdout)
+    assert [p["state"] for p in status["publications"]] == ["failed"]
+    command(root, "reconcile")
+    recovered = json.loads((root / "result.json").read_text())
+    fact = next(
+        f for f in recovered["result"]["facts"] if f["relationship"] == "limits"
+    )
+    assert fact["identity"]["state"] == "accepted" and fact["evidence"]
+    assert recovered["result"]["unavailable_sources"] == []
+    (incident,) = recovered["recovery_events"]
+    assert incident["stage"] == "nodes"
+    assert incident["outcome"] == "restored" and incident["resolved_at"]
+    status = json.loads(command(root, "status").stdout)
+    assert [p["state"] for p in status["publications"]] == ["current"]

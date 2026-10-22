@@ -172,8 +172,8 @@ async def publish_one(
 ):
     """Run one publication through the native pipeline: `publish` a first
     revision, `reconcile` the saved one, or `readd` a forgotten source at the
-    next one. A publication writes the captured facts; a reconcile only
-    verifies them."""
+    next one. Each writes the captured facts that are missing and verifies
+    them."""
     from .fixture import context_for, write_semantics, verify_semantics
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
@@ -199,10 +199,8 @@ async def publish_one(
                 ctx=ctx,
                 origin="test/fault_injection" if fault_stage else "test",
                 fault_stage=fault_stage,
-                semantic_writer=(
-                    (lambda: write_semantics(publisher, item, chunks, original_ctx))
-                    if operation != "reconcile"
-                    else None
+                semantic_writer=lambda: write_semantics(
+                    publisher, item, chunks, original_ctx
                 ),
                 verify_semantics=lambda: verify_semantics(
                     publisher, item, chunks, original_ctx

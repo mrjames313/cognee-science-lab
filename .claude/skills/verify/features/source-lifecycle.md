@@ -13,12 +13,14 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-fault` fails a forget at an injected stage, withholds the source, then finishes it with `reconcile`.
 - `readd` publishes a forgotten source again at the next revision with new UUIDs for its mentions and for every Entity the forget removed.
 - `readd-fence` refuses a re-add that would consume a source whose forget is unfinished (native test `test_native_readd_of_a_consumer_waits_for_the_unfinished_forget`).
+- `readd-fault` fails a re-add at an injected stage, withholds the source, then finishes it with `reconcile`, which writes the captured facts the failure skipped.
 
 ## How to get to it (user POV)
 
 - Run `uv run python -m cognee_lab.identity multi-fixture --root <new dir>`. Add `--dependent` to make doc02 consume doc01's text and private singleton.
 - Run `uv run python -m cognee_lab.identity forget --root <dir> --source doc01 --expected-revision 1`.
-- Add `--fault-stage forget_contributions|forget_identity|forget_document|forget_verification` to inject a failure, then run `reconcile --source doc01`.
+- Add `--fault-stage forget_contributions|forget_identity|forget_document|forget_verification|forget_identity_committed|forget_document_committed` to inject a failure, then run `reconcile --source doc01`. The two `_committed` stages fail after Cognee committed the Data delete and before it swept the item's evidence rows and stored files.
+- Add `--fault-stage nodes|identity_edges|verification` to `readd` to fail the re-add, then run `reconcile --source doc01`.
 - Run `uv run python -m cognee_lab.identity readd --root <dir> --source doc01 --expected-revision 1` on a root whose doc01 is forgotten.
 - Run `retrieve` and `status` against the same root.
 
@@ -163,6 +165,36 @@ $V check "$RUN" after '(.facts | length) == 1 and .unavailable_sources == []' 'a
 $V drive "$RUN" main final -- status
 $V check "$RUN" final '[.publications[].state] | sort == ["current", "forgotten"]' 'doc01 is forgotten and doc02 is current'
 $V check "$RUN" final '.recovery_events | length == 1 and all(.resolved_at != null)' 'no incident stays open'
+```
+
+**F4 re-add fault and reconcile.** Proves `readd-fault`. Guide: "Interrupted re-adds". doc01 is forgotten, then re-added with `--fault-stage nodes`, which fails before the captured facts are written. `retrieve` lists doc01 as unavailable. `reconcile --source doc01` finishes the re-add: it writes the missing facts, doc01 is current at revision 2 with its fact and evidence, doc02 is intact, and the incident records `outcome: restored`.
+
+```bash journey F4
+$V drive "$RUN" main fixture -- multi-fixture
+M02=$(val fixture '.sources.doc02.mention_entity_id')
+$V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1
+$V check "$RUN" forget '[.sources.doc01.state, .sources.doc02.state] == ["forgotten", "current"]' 'doc01 is forgotten'
+
+$V drive "$RUN" main fail -- readd --source doc01 --expected-revision 1 --fault-stage nodes
+$V check "$RUN" fail '.error == "IntentError" and (.message | test("recovery_event_id=[0-9a-f-]{36}"))' 'the injected failure names a recovery event'
+EID=$(val fail '.message | capture("recovery_event_id=(?<id>[0-9a-f-]+)") | .id')
+
+$V drive "$RUN" main withheld -- retrieve
+$V check "$RUN" withheld '[.facts[].source_id] == ["'"$M02"'"]' 'only the doc02 fact is returned'
+$V check "$RUN" withheld '.unavailable_sources | length == 1 and (.[0] | .reason == "publication_failed" and .recovery_event_id == "'"$EID"'")' 'doc01 is unavailable with the incident id'
+$V drive "$RUN" main before -- status
+$V check "$RUN" before '[.publications[].state] | sort == ["current", "failed"]' 'doc01 is failed and doc02 is current'
+$V check "$RUN" before '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .operation == "publish" and .stage == "nodes" and .resolved_at == null)' 'one open publish incident at the nodes stage'
+
+$V drive "$RUN" main rec -- reconcile --source doc01
+$V check "$RUN" rec '.sources.doc01 | .state == "current" and .saved_revision == 2 and .verified_revision == 2 and .registered_revision == 2' 'reconcile finishes the re-add at revision 2'
+$V check "$RUN" rec '.sources.doc01 | .original_marker_present and .original_fact_present and .original_fact_owned_by_chunk and .original_evidence_present and .private_singleton_present' 'the reconcile wrote the missing fact and evidence'
+$V check "$RUN" rec '.sources.doc02 | .original_marker_present and .original_fact_present and .original_evidence_present and .private_singleton_present' 'doc02 is intact'
+$V check "$RUN" rec '(.result.facts | length) == 2 and .result.unavailable_sources == []' 'both facts return and nothing is unavailable'
+$V check "$RUN" rec '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .outcome == "restored" and .resolved_at != null and .recovery_attempts[-1].outcome == "verified")' 'the same incident records outcome restored with one verified attempt'
+
+$V drive "$RUN" main after -- retrieve
+$V check "$RUN" after '(.facts | length) == 2 and .unavailable_sources == []' 'a new process returns both facts'
 ```
 
 ## Gotchas

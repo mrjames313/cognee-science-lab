@@ -60,7 +60,29 @@ async def load_chunks(source, ctx, *, budget=None):
     ]
 
 
+async def fact_written(publisher, source, chunk, group, ctx):
+    """Whether this chunk already owns the group's captured fact with its
+    evidence row, so a reconcile after a failure writes only what is missing."""
+    from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
+
+    from .native import mention_fact
+
+    fact = await mention_fact(publisher, source, group.entity_id)
+    ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunk.id)
+    return (
+        fact.edge is not None
+        and ref in fact.edge.source_ref_keys
+        and any(
+            e.data_id == ctx.data_item.id and e.chunk_id == chunk.id
+            for e in fact.evidence
+        )
+    )
+
+
 async def write_semantics(publisher, source, chunks, ctx):
+    """Write the captured facts of the source's chunks. Idempotent: a chunk
+    whose fact and evidence are in place is skipped, so a first publication, a
+    re-add and the reconcile of either call this."""
     from cognee.modules.provenance.edge_evidence.persistence import (
         flush_context_provenance,
     )
@@ -71,6 +93,8 @@ async def write_semantics(publisher, source, chunks, ctx):
         selected = fact_chunks(source, chunks, group_key=key, fact_text=text)
         group = source.mention_groups.get(key)
         for chunk in selected:
+            if await fact_written(publisher, source, chunk, group, ctx):
+                continue
             await write_fact_chunk(publisher, source, chunk, group, ctx, fact_text=text)
     await flush_context_provenance(ctx)
 
@@ -315,10 +339,8 @@ async def run(args, root):
                 ctx=ctx,
                 origin="test/fault_injection" if args.fault_stage else "test",
                 fault_stage=args.fault_stage,
-                semantic_writer=(
-                    (lambda: write_semantics(publisher, item, chunks, original_ctx))
-                    if creating
-                    else None
+                semantic_writer=lambda: write_semantics(
+                    publisher, item, chunks, original_ctx
                 ),
                 verify_semantics=lambda: verify_semantics(
                     publisher, item, chunks, original_ctx
