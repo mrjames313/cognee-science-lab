@@ -1,6 +1,6 @@
 """Bounded whole-document text replacement through native Cognee interfaces."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from .admission import OccurrenceMap, identity_map, occurrence, parse_occurrence_map
 from .models import ChunkInput
@@ -127,7 +127,7 @@ class TextChange:
         """Read the text change a plan saved. Only plans with the general
         `occurrence_map` are read; the roots that hold older plans are history."""
         saved = plan["text_change"]
-        if "occurrence_map" not in saved:
+        if "occurrence_map" not in saved or set(saved) - {f.name for f in fields(cls)}:
             raise IntentError(
                 "recovery_plan",
                 "Saved text change predates the general occurrence map; this root is history and its plan cannot be resumed",

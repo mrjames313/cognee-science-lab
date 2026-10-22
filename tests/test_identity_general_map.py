@@ -113,6 +113,20 @@ def test_a_plan_without_the_general_map_is_refused_as_history(
     assert refused.value.code == "recovery_plan"
 
 
+def test_a_plan_with_the_general_map_and_a_legacy_key_is_refused(source_payload):
+    _, _, before, after = removal_case(source_payload)
+    text_change = dict(
+        previous_text=before,
+        text=after,
+        chunk_budget=512,
+        occurrence_map={"g01": [None, ["g01", 0]], "g02": [["g02", 0]]},
+        occurrence_retention={"g01": [1], "g02": []},
+    )
+    with pytest.raises(IntentError) as refused:
+        TextChange.from_plan(dict(text_change=text_change))
+    assert refused.value.code == "recovery_plan"
+
+
 @pytest.mark.parametrize("case", GENERAL_MAPS, ids=lambda c: c.__name__)
 def test_a_text_change_survives_the_saved_plan(source_payload, case):
     _, _, before, after = case(source_payload)
