@@ -8,14 +8,8 @@ reviewer wrote both texts and both maps; the process infers nothing.
 """
 
 import json
-from uuid import UUID
 
-from .captured_chunks import (
-    FACT_TEXT,
-    REINTERPRET_ENTITY,
-    REINTERPRET_UNRESOLVED,
-    bind_chunks,
-)
+from .captured_chunks import REINTERPRET_ENTITY, REINTERPRET_UNRESOLVED, bind_chunks
 from .captured_revision import (
     begin_revision,
     declare_group,
@@ -108,75 +102,8 @@ def describe_unresolved(old, before, chunks):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def local_fact(publisher, source, key):
-    """The regenerated fact of a fresh group: graph edge, text and evidence."""
-    from cognee.modules.engine.utils import generate_edge_object_id
-    from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
-
-    from .fixture import OSCILLATIONS_ID
-    from .native import edge_metadata
-
-    mid = source.mention_groups[key].entity_id
-    edge = await edge_metadata(publisher.graph, mid, OSCILLATIONS_ID, "limits")
-    edge_id = UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))
-    evidence = await get_edge_evidence_records(
-        [edge_id], source.dataset_id, per_edge_limit=100, total_limit=100
-    )
-    doc = source.inputs[source.original_input_ref]
-    decision = next(
-        r for r in source.mention_resolutions.values() if r.group_ref == key
-    )
-    return dict(
-        group=key,
-        mention_entity_id=str(mid),
-        resolution_status=decision.status,
-        fact_edge_id=str(edge_id),
-        fact_present=edge is not None,
-        fact_text=edge.edge_properties.get("edge_text") if edge else None,
-        evidence_chunk_ids=sorted(
-            str(e.chunk_id) for e in evidence if e.data_id == doc.data_id
-        ),
-    )
-
-
-def inspector(queries, key, rid):
-    """Retrieval under the given named queries, and the regenerated fresh fact."""
-
-    async def inspect(publisher, sources):
-        from .retrieve import retrieve
-
-        source = sources["doc01"]
-        result = dict(
-            queries={
-                name: dict(
-                    query=text, **await retrieve(publisher, source.dataset_id, text)
-                )
-                for name, text in queries.items()
-            },
-            fresh=await local_fact(publisher, source, key),
-        )
-        decision = source.mention_resolutions[rid]
-        if isinstance(decision, Accepted):
-            target = str(decision.target_entity_id)
-            result["fresh"].update(
-                target_entity_id=target,
-                target_present=await publisher.graph.get_node(target) is not None,
-                target_indexed=bool(
-                    await publisher.vector.retrieve("Entity_name", [target])
-                ),
-            )
-        return result
-
-    return inspect
-
-
-HELIOS = "What does Helios controller limit?"
-inspect_new_entity = inspector(
-    {
-        "helios_controller": HELIOS,
-        "backup_controller": "What does Backup controller limit?",
-    },
-    "g07",
-    "r07",
-)
-inspect_unresolved = inspector({"helios_controller": HELIOS}, "g08", "r08")
+UNRESOLVED_QUERIES = {"helios_controller": "What does Helios controller limit?"}
+ENTITY_QUERIES = {
+    **UNRESOLVED_QUERIES,
+    "backup_controller": "What does Backup controller limit?",
+}

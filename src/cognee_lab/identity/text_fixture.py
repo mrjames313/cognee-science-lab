@@ -1,7 +1,6 @@
 """Captured prefix-edit example; semantic/identity decisions are explicit test input."""
 
 import json
-from uuid import UUID
 
 from .models import ChunkInput, IdentitySource
 from .multisource import current_sources, snapshot
@@ -47,20 +46,15 @@ def describe_prefix_edit(old, text, chunks, *, prefix=PREFIX):
 
 
 async def verify_rebuilt_semantics(publisher, source, chunks, ctx):
-    from .fixture import OSCILLATIONS_ID, verify_semantics
-    from cognee.modules.engine.utils import generate_edge_object_id
-    from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
+    from .fixture import verify_semantics
+    from .native import mention_fact
 
     await verify_semantics(publisher, source, chunks, ctx)
     from .captured_chunks import fixture_mention_id
 
-    mid = fixture_mention_id(source)
-    eid = UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))
-    evidence = await get_edge_evidence_records(
-        [eid], source.dataset_id, per_edge_limit=100, total_limit=100
-    )
+    fact = await mention_fact(publisher, source, fixture_mention_id(source))
     allowed = {c.id for c in chunks}
-    own = [e for e in evidence if e.data_id == ctx.data_item.id]
+    own = [e for e in fact.evidence if e.data_id == ctx.data_item.id]
     if ("g01" in source.mention_groups and not own) or any(
         e.chunk_id not in allowed for e in own
     ):
@@ -152,15 +146,58 @@ def decision_method(source):
     ]
 
 
+async def added_group(publisher, source, key):
+    """A fresh group's Entity, markers, decision and regenerated fact."""
+    from .models import Accepted
+    from .native import mention_fact
+
+    group = source.mention_groups[key]
+    mid = str(group.entity_id)
+    decision = next(
+        (r for r in source.mention_resolutions.values() if r.group_ref == key), None
+    )
+    resolution = dict(status=decision.status) if decision else None
+    if isinstance(decision, Accepted):
+        target = str(decision.target_entity_id)
+        resolution.update(
+            target_entity_id=target,
+            target_present=await publisher.graph.get_node(target) is not None,
+            target_indexed=bool(
+                await publisher.vector.retrieve("Entity_name", [target])
+            ),
+        )
+    fact = await mention_fact(publisher, source, mid)
+    doc = source.inputs[source.original_input_ref]
+    return dict(
+        entity_id=mid,
+        entity_present=await publisher.graph.get_node(mid) is not None,
+        entity_indexed=bool(await publisher.vector.retrieve("Entity_name", [mid])),
+        marker_chunk_ids=[
+            str(i.chunk_id)
+            for i in source.inputs.values()
+            if isinstance(i, ChunkInput)
+            and await publisher.graph.has_edge(
+                str(i.chunk_id), mid, "has_identity_mention"
+            )
+        ],
+        resolution=resolution,
+        fact=dict(
+            edge_id=str(fact.edge_id),
+            present=fact.edge is not None,
+            text=fact.edge.edge_properties.get("edge_text") if fact.edge else None,
+            evidence_chunk_ids=sorted(
+                str(e.chunk_id) for e in fact.evidence if e.data_id == doc.data_id
+            ),
+        ),
+    )
+
+
 async def transition_summary(publisher, row):
-    from .fixture import OSCILLATIONS_ID
-    from cognee.modules.engine.utils import generate_edge_object_id
-    from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
+    from .captured_chunks import fixture_mention_id
+    from .native import mention_fact
 
     old = IdentitySource.model_validate_json(row["plan"]["previous_description"])
     source = IdentitySource.model_validate_json(row["description"])
-    from .captured_chunks import fixture_mention_id
-
     change = TextChange.from_plan(row["plan"])
     key = source.original_input_ref
     old_ids = {
@@ -170,16 +207,11 @@ async def transition_summary(publisher, row):
         str(i.chunk_id) for i in source.inputs.values() if isinstance(i, ChunkInput)
     }
     retired = old_ids - new_ids
-    eid = UUID(
-        generate_edge_object_id(
-            str(fixture_mention_id(source)), str(OSCILLATIONS_ID), "limits"
-        )
-    )
-    evidence = await get_edge_evidence_records(
-        [eid], source.dataset_id, per_edge_limit=100, total_limit=100
-    )
+    primary = await mention_fact(publisher, source, fixture_mention_id(source))
     own_ids = {
-        str(e.chunk_id) for e in evidence if e.data_id == source.inputs[key].data_id
+        str(e.chunk_id)
+        for e in primary.evidence
+        if e.data_id == source.inputs[key].data_id
     }
     return dict(
         identity_data_id=str(source.identity_data_id),
@@ -246,23 +278,8 @@ async def transition_summary(publisher, row):
         },
         occurrence_map=change.occurrence_map,
         added_groups={
-            k: dict(
-                entity_id=str(g.entity_id),
-                entity_present=await publisher.graph.get_node(str(g.entity_id))
-                is not None,
-                entity_indexed=bool(
-                    await publisher.vector.retrieve("Entity_name", [str(g.entity_id)])
-                ),
-                marker_chunk_ids=[
-                    str(i.chunk_id)
-                    for i in source.inputs.values()
-                    if isinstance(i, ChunkInput)
-                    and await publisher.graph.has_edge(
-                        str(i.chunk_id), str(g.entity_id), "has_identity_mention"
-                    )
-                ],
-            )
-            for k, g in source.mention_groups.items()
+            k: await added_group(publisher, source, k)
+            for k in source.mention_groups
             if k not in old.mention_groups
         },
         retired_groups={

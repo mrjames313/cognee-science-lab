@@ -1,7 +1,7 @@
 """Captured occurrence edits on doc01; explicit review, not a Describe matcher."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from . import kind_change, reinterpretation
@@ -91,6 +91,8 @@ class OccurrenceCommand:
     describe: Callable
     result_name: str
     occurrence_map: dict
+    # Named retrieval queries, run once after the edit and reported under `queries`.
+    queries: dict = field(default_factory=dict)
     # An async (publisher, sources) callable that adds what the shared snapshot
     # does not report, under the keys it returns.
     inspect: Callable | None = None
@@ -138,28 +140,30 @@ COMMANDS = {
         reinterpretation.describe_new_entity,
         "reinterpretation_new_entity_result.json",
         reinterpretation.ENTITY_MAP,
-        reinterpretation.inspect_new_entity,
+        reinterpretation.ENTITY_QUERIES,
     ),
     "reinterpret-unresolved": OccurrenceCommand(
         reinterpretation.UNRESOLVED_AFTER,
         reinterpretation.describe_unresolved,
         "reinterpretation_unresolved_result.json",
         reinterpretation.UNRESOLVED_MAP,
-        reinterpretation.inspect_unresolved,
+        reinterpretation.UNRESOLVED_QUERIES,
     ),
     "change-kind-to-mention": OccurrenceCommand(
         BEFORE,
         kind_change.describe_to_mention,
         "kind_change_to_mention_result.json",
         kind_change.TO_MENTION_MAP,
-        kind_change.inspect,
+        kind_change.QUERIES,
+        kind_change.inspect_hc_entity,
     ),
     "change-kind-to-reusable": OccurrenceCommand(
         BEFORE,
         kind_change.describe_to_reusable,
         "kind_change_to_reusable_result.json",
         kind_change.TO_REUSABLE_MAP,
-        kind_change.inspect,
+        kind_change.QUERIES,
+        kind_change.inspect_hc_entity,
     ),
 }
 
@@ -169,6 +173,7 @@ async def run(args, root):
     from .fixture import context_for
     from .multisource import current_sources, snapshot
     from .publish import Publisher
+    from .retrieve import retrieve
     from .text_changes import TextChange, chunk_text, original_context, read_original
     from .text_fixture import maintain_one
 
@@ -216,6 +221,12 @@ async def run(args, root):
     )
     sources = await current_sources(root, publisher)
     result = await snapshot(publisher, sources, args.query)
+    if command.queries:
+        dataset = sources["doc01"].dataset_id
+        result["queries"] = {
+            name: dict(query=text, **await retrieve(publisher, dataset, text))
+            for name, text in command.queries.items()
+        }
     if command.inspect is not None:
         result.update(await command.inspect(publisher, sources))
     (root / command.result_name).write_text(json.dumps(result, indent=2))

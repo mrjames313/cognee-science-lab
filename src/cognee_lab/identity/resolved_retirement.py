@@ -1,7 +1,6 @@
 """Captured retirement of the primary mention, resolution and local fact."""
 
 import json
-from uuid import UUID
 
 from .captured_chunks import FACT_TEXT, bind_chunks
 from .captured_revision import (
@@ -39,17 +38,13 @@ def describe_retirement(old, before, chunks):
 
 async def retirement_checks(publisher, source, mid):
     from .fixture import OSCILLATIONS_ID
-    from .native import edge_metadata
-    from cognee.modules.engine.utils import generate_edge_object_id, generate_node_id
+    from .native import edge_metadata, mention_fact
+    from cognee.modules.engine.utils import generate_node_id
     from cognee.modules.graph.models.EdgeType import EdgeType
-    from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from .models import ChunkInput
 
     target = source.inputs["existing_A"].entity_id
-    fact_id = UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))
-    evidence = await get_edge_evidence_records(
-        [fact_id], source.dataset_id, per_edge_limit=100, total_limit=100
-    )
+    fact = await mention_fact(publisher, source, mid)
 
     async def indexed(collection, key):
         return await publisher.vector.has_collection(collection) and bool(
@@ -60,18 +55,15 @@ async def retirement_checks(publisher, source, mid):
     resolution_triplet = generate_node_id(str(mid) + "resolves_to" + str(target))
     return dict(
         mention_entity_id=str(mid),
-        fact_edge_id=str(fact_id),
+        fact_edge_id=str(fact.edge_id),
         mention_entity_present=await publisher.graph.get_node(str(mid)) is not None,
         mention_entity_indexed=await indexed("Entity_name", mid),
         resolution_edge_present=await edge_metadata(
             publisher.graph, mid, target, "resolves_to"
         )
         is not None,
-        fact_edge_present=await edge_metadata(
-            publisher.graph, mid, OSCILLATIONS_ID, "limits"
-        )
-        is not None,
-        fact_evidence_count=len(evidence),
+        fact_edge_present=fact.edge is not None,
+        fact_evidence_count=len(fact.evidence),
         fact_triplet_indexed=await indexed("Triplet_text", fact_triplet),
         resolution_triplet_indexed=await indexed("Triplet_text", resolution_triplet),
         current_marker_present=any(

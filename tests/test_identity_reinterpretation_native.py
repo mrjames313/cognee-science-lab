@@ -1,11 +1,11 @@
-"""Changed interpretation through native stores: g01 retires, a fresh g03 follows."""
+"""Changed interpretation through native stores: g01 retires, a fresh group follows."""
 
 import json
 from uuid import UUID
 
 import pytest
 
-from test_identity_native import command
+from test_identity_native import command, doc_facts
 from cognee_lab.identity.reinterpretation import ENTITY_MAP, UNRESOLVED_MAP
 from cognee_lab.identity.validation import fresh_entity_id, fresh_mention_id
 
@@ -27,14 +27,9 @@ OCCURRENCES = {
 }
 
 
-def doc02_facts(result, before):
-    mention = before["sources"]["doc02"]["mention_entity_id"]
-    return [f for f in result["facts"] if f["source_id"] == mention]
-
-
 def check_reinterpreted(case, before, after):
-    """doc01's g01 is gone, g03 is current and holds the regenerated fact, and
-    doc02 is unchanged."""
+    """doc01's g01 is gone, the fresh group is current and holds the regenerated
+    fact, and doc02 is unchanged."""
     a, b = after["sources"]["doc01"], after["sources"]["doc02"]
     assert (
         a["saved_revision"] == a["verified_revision"] == a["registered_revision"] == 2
@@ -44,12 +39,16 @@ def check_reinterpreted(case, before, after):
     assert after["borrowed_entity"] == before["borrowed_entity"]
     identity = UUID(a["identity_data_id"])
     key, rid = KEYS[case]
-    g03 = after["fresh"]
-    assert g03["mention_entity_id"] == str(fresh_mention_id(identity, 2, key))
-    assert g03["fact_present"] and g03["fact_text"] == "it limits oscillations"
-    assert (
-        g03["evidence_chunk_ids"] and a["mention_entity_id"] != g03["mention_entity_id"]
-    )
+    occurrences = OCCURRENCES[case]
+    (change,) = after["text_changes"]
+    fresh = change["added_groups"][key]
+    mention = str(fresh_mention_id(identity, 2, key))
+    assert fresh["entity_id"] == mention != a["mention_entity_id"]
+    assert fresh["entity_present"] and fresh["entity_indexed"]
+    assert fresh["marker_chunk_ids"]
+    fact = fresh["fact"]
+    assert fact["present"] and fact["text"] == "it limits oscillations"
+    assert fact["evidence_chunk_ids"]
     # The retired g01 leaves no fact, link, marker or node, and the shared
     # endpoint stays.
     gone = a["resolved_group_retirement"]
@@ -65,38 +64,38 @@ def check_reinterpreted(case, before, after):
     )
     assert gone["shared_fact_endpoint_present"] and gone["fact_evidence_count"] == 0
     # Neither the default query nor the Helios controller reaches doc01's fact.
-    expected = doc02_facts(before["result"], before)
+    expected = doc_facts(before, "doc02")
     assert after["result"]["facts"] == expected
     assert after["queries"]["helios_controller"]["facts"] == expected
     assert after["recovery_events"] == []
     if case == "new-entity":
-        backup = str(fresh_entity_id(identity, 2, "r07"))
-        assert g03["resolution_status"] == "accepted"
-        assert g03["target_entity_id"] == backup
-        assert g03["target_present"] and g03["target_indexed"]
-        (fact,) = after["queries"]["backup_controller"]["facts"]
-        assert fact["source_id"] == g03["mention_entity_id"]
-        assert fact["identity"]["assignment_id"] == "r07"
-        assert fact["identity"]["target_entity_id"] == backup
-        assert fact["identity"]["occurrences"] == OCCURRENCES[case]
-        assert "it limits oscillations" in "".join(e["text"] for e in fact["evidence"])
+        backup = str(fresh_entity_id(identity, 2, rid))
+        assert fresh["resolution"] == dict(
+            status="accepted",
+            target_entity_id=backup,
+            target_present=True,
+            target_indexed=True,
+        )
+        (answer,) = after["queries"]["backup_controller"]["facts"]
+        assert answer["source_id"] == mention
+        assert answer["identity"]["assignment_id"] == rid
+        assert answer["identity"]["target_entity_id"] == backup
+        assert answer["identity"]["occurrences"] == occurrences
+        assert "it limits oscillations" in "".join(
+            e["text"] for e in answer["evidence"]
+        )
         assert after["queries"]["backup_controller"]["seed_entity_ids"] == [backup]
     else:
-        assert g03["resolution_status"] == "unresolved"
-        assert "target_entity_id" not in g03
+        assert fresh["resolution"] == dict(status="unresolved")
         # An unresolved mention is not reached through any reusable Entity.
         assert all(
-            f["source_id"] != g03["mention_entity_id"]
+            f["source_id"] != mention
             for q in after["queries"].values()
             for f in q["facts"]
         )
-    (change,) = after["text_changes"]
     assert change["occurrence_map"] == MAPS[case]
     assert change["position_shift"] is None
-    assert change["groups"][key]["occurrences"] == OCCURRENCES[case]
-    added = change["added_groups"][key]
-    assert added["entity_present"] and added["entity_indexed"]
-    assert added["marker_chunk_ids"]
+    assert change["groups"][key]["occurrences"] == occurrences
     retired = change["retired_groups"]["g01"]
     assert not (
         retired["entity_present"]
@@ -144,7 +143,7 @@ def test_native_reinterpretation_recovers_after_an_injected_failure(tmp_path, st
         expect=1,
     )
     query = json.loads(command(root, "retrieve").stdout)
-    assert query["facts"] == doc02_facts(query, before)
+    assert query["facts"] == doc_facts(before, "doc02")
     assert query["unavailable_sources"][0]["reason"] == "publication_failed"
     failed = next(
         r

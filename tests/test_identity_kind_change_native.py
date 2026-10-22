@@ -4,16 +4,11 @@ import json
 
 import pytest
 
-from test_identity_native import command
+from test_identity_native import command, doc_facts
 from cognee_lab.identity.kind_change import HC_ID, TO_MENTION_MAP, TO_REUSABLE_MAP
 
 TO_MENTION = "kind_change_to_mention_result.json"
 TO_REUSABLE = "kind_change_to_reusable_result.json"
-
-
-def doc_facts(result, before, doc):
-    mention = before["sources"][doc]["mention_entity_id"]
-    return [f for f in result["facts"] if f["source_id"] == mention]
 
 
 def check_common(before, after, revision):
@@ -44,10 +39,18 @@ def check_mention(before, after):
     change = check_common(before, after, 2)
     assert change["occurrence_map"] == TO_MENTION_MAP
     assert change["retired_groups"] == {}
-    added = change["added_groups"]["g03"]
+    added = change["added_groups"]["g09"]
     assert added["entity_present"] and added["entity_indexed"]
     assert len(added["marker_chunk_ids"]) == 1
-    assert change["groups"]["g03"]["occurrences"] == [dict(start=19, end=21, text="HC")]
+    # The HC mention resolves to the Helios controller and generates no fact.
+    assert added["resolution"] == dict(
+        status="accepted",
+        target_entity_id=before["sources"]["doc01"]["resolution_target_entity_id"],
+        target_present=True,
+        target_indexed=True,
+    )
+    assert not added["fact"]["present"] and not added["fact"]["evidence_chunk_ids"]
+    assert change["groups"]["g09"]["occurrences"] == [dict(start=19, end=21, text="HC")]
     # The shared HC edge keeps only doc02's contribution and owner; the HC
     # Entity survives because doc02 owns it.
     shared = after["shared_variant"]
@@ -57,9 +60,7 @@ def check_mention(before, after):
     assert after["hc_entity"]["owner_count"] == 1
     # HC no longer reaches doc01. The Helios controller still does, with the
     # same fact and with the facts generated again from the rebuilt chunks.
-    assert after["queries"]["hc"]["facts"] == doc_facts(
-        after["queries"]["hc"], before, "doc02"
-    )
+    assert after["queries"]["hc"]["facts"] == doc_facts(before, "doc02")
     helios = after["queries"]["helios_controller"]["facts"]
     old = {f["source_id"]: f for f in before["result"]["facts"]}
     assert {f["source_id"] for f in helios} == set(old)
@@ -71,7 +72,7 @@ def check_reusable(before, after):
     change = check_common(before, after, 3)
     assert change["occurrence_map"] == TO_REUSABLE_MAP
     assert change["added_groups"] == {}
-    retired = change["retired_groups"]["g03"]
+    retired = change["retired_groups"]["g09"]
     assert not (
         retired["entity_present"]
         or retired["entity_indexed"]
@@ -158,7 +159,7 @@ def test_native_kind_change_recovers_after_an_injected_failure(tmp_path, stage):
         expect=1,
     )
     query = json.loads(command(root, "retrieve").stdout)
-    assert query["facts"] == doc_facts(query, baseline, "doc02")
+    assert query["facts"] == doc_facts(baseline, "doc02")
     assert query["unavailable_sources"][0]["reason"] == "publication_failed"
     failed = next(
         r
@@ -200,7 +201,7 @@ def test_native_mention_to_reusable_recovers_after_an_injected_failure(tmp_path)
         expect=1,
     )
     query = json.loads(command(root, "retrieve").stdout)
-    assert query["facts"] == doc_facts(query, baseline, "doc02")
+    assert query["facts"] == doc_facts(baseline, "doc02")
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())
     (event,) = [e for e in after["recovery_events"] if e["resolved_at"]]

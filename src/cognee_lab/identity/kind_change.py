@@ -27,6 +27,10 @@ from .validation import IntentError, object_digest
 TO_REUSABLE = "stage6-captured-kind-change-to-reusable"
 HC_ID = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
 HC_RECIPE = dict(name="HC", description="Abbreviated reusable form in DOC01.")
+QUERIES = {
+    "hc": "What does HC limit?",
+    "helios_controller": "What does Helios controller limit?",
+}
 TO_MENTION_MAP = {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}
 TO_REUSABLE_MAP = {**TO_MENTION_MAP, "g09": [None]}
 MENTION_REF = "to_mention_review"
@@ -104,22 +108,11 @@ def describe_to_reusable(old, before, chunks):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def inspect(publisher, sources):
-    """HC and Helios controller retrieval, and who owns the HC Entity."""
-    from .retrieve import retrieve
-
-    source = sources["doc01"]
-    queries = {
-        "hc": "What does HC limit?",
-        "helios_controller": "What does Helios controller limit?",
-    }
+async def inspect_hc_entity(publisher, sources):
+    """Who owns the HC Entity, and every Entity that carries the name HC."""
     nodes, _ = await publisher.graph.get_graph_data()
     owners = (await publisher.graph.get_node_delete_data([HC_ID])).get(HC_ID)
     return dict(
-        queries={
-            name: dict(query=text, **await retrieve(publisher, source.dataset_id, text))
-            for name, text in queries.items()
-        },
         hc_entity=dict(
             id=HC_ID,
             present=owners is not None,

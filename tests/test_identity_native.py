@@ -32,6 +32,15 @@ def command(root, operation, *args, expect=0):
     return result
 
 
+def doc_facts(baseline, doc):
+    """The baseline's facts of one document. Fails when it has none, so a
+    later absence check cannot pass on an empty result."""
+    mention = baseline["sources"][doc]["mention_entity_id"]
+    facts = [f for f in baseline["result"]["facts"] if f["source_id"] == mention]
+    assert facts
+    return facts
+
+
 @pytest.mark.integration
 def test_native_publish_query_and_idempotent_reconcile(tmp_path):
     root = tmp_path / "native"
