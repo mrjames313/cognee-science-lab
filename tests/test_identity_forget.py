@@ -12,7 +12,12 @@ from cognee_lab.identity.forget import refuse_dependents
 from cognee_lab.identity.forget_fixture import describe_readd
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.retirement import dependents, refuse_retiring_inputs
-from cognee_lab.identity.validation import IntentError, fresh_mention_id, object_digest
+from cognee_lab.identity.validation import (
+    IntentError,
+    fresh_entity_id,
+    fresh_mention_id,
+    object_digest,
+)
 
 
 def source_of(payload):
@@ -257,14 +262,17 @@ async def test_a_readd_derives_every_group_from_the_next_revision(source_payload
 
 
 @pytest.mark.asyncio
-async def test_a_readd_replaces_a_reusable_entity_the_forget_removed(source_payload):
+async def test_a_readd_derives_a_named_replacement_from_a_key_that_names_it(
+    source_payload,
+):
     """HC was owned by this source alone, so the forget removed it. The re-add
-    does not recreate it under its old UUID: the recipe returns under a UUID
-    derived from the removed one, and the variant that named HC follows."""
+    does not recreate it under its old UUID. Variant v01 names HC, so its
+    replacement derives from the next revision and that key, as any new
+    reusable Entity does, and the variant follows."""
     forgotten = source_of(source_payload)
     text = TEXT
     readded = describe_readd(forgotten, {HC}, text, chunks_of(forgotten, text))
-    new_hc = replacement_entity_id(forgotten.identity_data_id, 2, HC)
+    new_hc = fresh_entity_id(forgotten.identity_data_id, 2, "v01")
     assert HC not in readded.entity_constructions
     assert readded.entity_constructions[new_hc] == forgotten.entity_constructions[HC]
     assert readded.variant_assignments["v01"].source_entity_id == new_hc
@@ -276,21 +284,89 @@ async def test_a_readd_replaces_a_reusable_entity_the_forget_removed(source_payl
         await admit_readd(AbsentGraph(), forgotten, kept, {HC})
     assert refused.value.code == "forgotten_uuid_reused"
 
-    underived = readded.model_copy(
-        update={
-            "entity_constructions": {
-                (uuid4() if eid == new_hc else eid): recipe
-                for eid, recipe in readded.entity_constructions.items()
-            }
-        }
-    )
-    with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, underived, {HC})
-    assert refused.value.code == "entity_uuid_not_derived"
+    # The replaces form is only for an Entity nothing names.
+    by_removed_uuid = replacement_entity_id(forgotten.identity_data_id, 2, HC)
+    for wrong in (uuid4(), by_removed_uuid):
+        underived = renamed_entity(readded, new_hc, wrong)
+        with pytest.raises(IntentError) as refused:
+            await admit_readd(AbsentGraph(), forgotten, underived, {HC})
+        assert refused.value.code == "entity_uuid_not_derived"
 
     with pytest.raises(IntentError) as refused:
         await admit_readd(OccupiedGraph([new_hc]), forgotten, readded, {HC})
     assert refused.value.code == "entity_uuid_in_graph"
+
+
+@pytest.mark.asyncio
+async def test_a_readd_replaces_an_unnamed_entity_by_the_removed_uuid(source_payload):
+    """No resolution or variant names a private singleton, so its replacement
+    derives from the UUID it replaces."""
+    payload = json.loads(json.dumps(source_payload))
+    singleton = uuid4()
+    payload["entity_constructions"][str(singleton)] = dict(
+        name="doc01 instrument", description="Supported by this source only."
+    )
+    forgotten = source_of(payload)
+    text = TEXT
+    readded = describe_readd(forgotten, {singleton}, text, chunks_of(forgotten, text))
+    new = replacement_entity_id(forgotten.identity_data_id, 2, singleton)
+    assert singleton not in readded.entity_constructions
+    assert (
+        readded.entity_constructions[new] == forgotten.entity_constructions[singleton]
+    )
+    await admit_readd(AbsentGraph(), forgotten, readded, {singleton})
+
+    underived = renamed_entity(readded, new, uuid4())
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(AbsentGraph(), forgotten, underived, {singleton})
+    assert refused.value.code == "entity_uuid_not_derived"
+
+
+def test_a_readd_gives_two_removed_entities_one_key_names_separate_replacements(
+    source_payload,
+):
+    """A and HC are both removed. v01 names both, r01 names A too, so A takes
+    r01 and HC v01. When one variant is the only name of two removed
+    Entities, no second key is free, and the describer refuses rather than
+    merge them."""
+    forgotten = source_of(source_payload)
+    a = forgotten.mention_resolutions["r01"].target_entity_id
+    readded = describe_readd(forgotten, {a, HC}, TEXT, chunks_of(forgotten, TEXT))
+    identity = forgotten.identity_data_id
+    v01 = readded.variant_assignments["v01"]
+    assert v01.target_entity_id == fresh_entity_id(identity, 2, "r01")
+    assert v01.source_entity_id == fresh_entity_id(identity, 2, "v01")
+
+    payload = json.loads(json.dumps(source_payload))
+    del payload["mention_resolutions"]["r01"]["target_entity_id"]
+    payload["mention_resolutions"]["r01"]["status"] = "unresolved"
+    payload["mention_resolutions"]["r01"]["explanation"] = None
+    only_v01 = source_of(payload)
+    with pytest.raises(IntentError) as refused:
+        describe_readd(only_v01, {a, HC}, TEXT, chunks_of(only_v01, TEXT))
+    assert refused.value.code == "entity_uuid_not_derived"
+
+
+def renamed_entity(source, old, new):
+    """The description with one Entity recipe moved to another UUID."""
+    return source.model_copy(
+        update={
+            "entity_constructions": {
+                (new if eid == old else eid): recipe
+                for eid, recipe in source.entity_constructions.items()
+            },
+            "variant_assignments": {
+                k: v.model_copy(
+                    update={
+                        end: new
+                        for end in ("source_entity_id", "target_entity_id")
+                        if getattr(v, end) == old
+                    }
+                )
+                for k, v in source.variant_assignments.items()
+            },
+        }
+    )
 
 
 @pytest.mark.asyncio

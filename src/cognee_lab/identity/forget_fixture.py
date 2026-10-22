@@ -41,25 +41,36 @@ def add_dependency(payload, first, text):
 
 def describe_readd(forgotten, removed, text, chunks):
     """The forgotten description again at the next revision. Every group is
-    fresh, so its Entity UUID derives from the new revision and its key, and
-    every reusable Entity the forget removed is replaced by one derived from
-    the removed UUID."""
-    from .admission import replacement_entity_id
+    fresh, so its Entity UUID derives from the new revision and its key. A
+    reusable Entity the forget removed is replaced: under the UUID derived
+    from the first key of a resolution or variant that names it and that no
+    other replacement took, or, when nothing names it, under the UUID derived
+    from the removed one."""
+    from .admission import naming_keys, replacement_entity_id
     from .captured_chunks import bind_chunks
-    from .validation import fresh_mention_id
+    from .validation import fresh_entity_id, fresh_mention_id
 
     payload = forgotten.model_dump(mode="json")
     revision = payload["revision"] = forgotten.revision + 1
+    identity = forgotten.identity_data_id
     renamed = {}
     for key, group in payload["mention_groups"].items():
-        renamed[group["entity_id"]] = str(
-            fresh_mention_id(forgotten.identity_data_id, revision, key)
-        )
+        renamed[group["entity_id"]] = str(fresh_mention_id(identity, revision, key))
     for old in sorted(str(e) for e in removed):
-        if old in payload["entity_constructions"] and old not in renamed:
-            renamed[old] = str(
-                replacement_entity_id(forgotten.identity_data_id, revision, UUID(old))
+        if old not in payload["entity_constructions"] or old in renamed:
+            continue
+        keys = sorted(naming_keys(forgotten, UUID(old)))
+        if not keys:
+            renamed[old] = str(replacement_entity_id(identity, revision, UUID(old)))
+            continue
+        derived = (str(fresh_entity_id(identity, revision, k)) for k in keys)
+        free = [u for u in derived if u not in renamed.values()]
+        if not free:
+            raise IntentError(
+                "entity_uuid_not_derived",
+                "Every key that names a removed Entity already names another replacement",
             )
+        renamed[old] = free[0]
     payload["entity_constructions"] = {
         renamed.get(eid, eid): recipe
         for eid, recipe in payload["entity_constructions"].items()

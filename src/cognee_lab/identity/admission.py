@@ -562,27 +562,29 @@ def check_removed_entity_ids(source, removed):
 
 
 def replacement_entity_id(identity_data_id, revision, removed_id):
-    """The UUID a re-add gives the Entity that replaces a removed one."""
+    """The UUID a re-add gives the replacement of a removed Entity that no
+    resolution or variant names."""
     return fresh_entity_id(identity_data_id, revision, f"replaces:{removed_id}")
 
 
 def check_readd_entity_ids(forgotten, source, removed):
     """A new reusable Entity in a re-add derives from the key of a resolution
-    or variant that names it, as in any revision, or replaces a removed
-    Entity by that Entity's UUID."""
+    or variant that names it, as in any revision. Only an Entity nothing
+    names replaces a removed one by that Entity's UUID."""
     replacements = {
         replacement_entity_id(forgotten.identity_data_id, source.revision, r)
         for r in removed
     }
     for eid in new_reusable_ids(forgotten, source):
-        derived = {
+        keys = naming_keys(source, eid)
+        allowed = {
             fresh_entity_id(forgotten.identity_data_id, source.revision, k)
-            for k in naming_keys(source, eid)
+            for k in keys
         }
-        if eid not in derived | replacements:
+        if eid not in (allowed if keys else replacements):
             raise IntentError(
                 "entity_uuid_not_derived",
-                "A re-added reusable Entity's UUID derives from a key that names it or from the removed Entity it replaces",
+                "A re-added reusable Entity's UUID derives from a key that names it; only an Entity nothing names derives from the removed Entity it replaces",
             )
 
 
@@ -591,7 +593,8 @@ async def admit_readd(graph, forgotten, source, removed):
     at the next revision. Every group is fresh: its UUID derives from the new
     revision, repeats nothing the forgotten revision used, and is not in the
     graph. No Entity in `removed`, the ones the forget took away, returns; a
-    reusable one is replaced by a derived UUID."""
+    reusable one is replaced by a derived UUID: from a key that names it, or
+    from the removed UUID when nothing names it."""
     from .storage import READD_REVISION
 
     old_doc = forgotten.inputs[forgotten.original_input_ref]
