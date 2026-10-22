@@ -75,7 +75,7 @@ def describe_to_reusable(old, before, chunks):
         old,
         before,
         set(TO_REUSABLE_MAP),
-        "Mention to reusable requires doc01 produced by to-mention",
+        "Mention to reusable requires doc01 produced by change-kind-to-mention",
         revision=2,
         produced=(MENTION_REF, TO_MENTION),
     )

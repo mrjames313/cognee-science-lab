@@ -129,7 +129,7 @@ def test_native_kind_change_refuses_the_wrong_root_or_revision(tmp_path):
         "1",
         expect=1,
     )
-    assert "requires doc01 produced by to-mention" in refused.stdout
+    assert "requires doc01 produced by change-kind-to-mention" in refused.stdout
     command(root, "change-kind-to-mention", "--expected-revision", "1")
     for direction, revision in [("to-mention", "2"), ("to-reusable", "1")]:
         command(
