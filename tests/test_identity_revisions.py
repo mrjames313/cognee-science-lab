@@ -5,14 +5,9 @@ from uuid import uuid4
 
 import pytest
 
-from cognee_lab.identity.admission import (
-    GroupFate,
-    admit,
-    check_absent_from_graph,
-    identity_map,
-)
+from cognee_lab.identity.admission import GroupFate
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.replace import admit_correction, retained_contributions
+from cognee_lab.identity.replace import admit_replacement, retained_contributions
 from cognee_lab.identity.revisions import corrected
 from cognee_lab.identity.storage import RecordStore
 from cognee_lab.identity.validation import (
@@ -24,10 +19,26 @@ from cognee_lab.identity.validation import (
 TEXT = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
 
 
-def test_captured_correction_preserves_occurrence_and_fact_anchors(source_payload):
+class Graph:
+    def __init__(self, present=()):
+        self.present = set(present)
+
+    async def get_node(self, key):
+        return {"id": key} if key in self.present else None
+
+
+async def correct(old, new, texts={"doc01": TEXT}, present=(), *, retry=False):
+    """Admit a replacement without a text change through the entry point
+    `replace` uses."""
+    return await admit_replacement(Graph(present), old, new, texts, None, retry=retry)
+
+
+async def test_captured_correction_preserves_occurrence_and_fact_anchors(
+    source_payload,
+):
     old = IdentitySource.model_validate_json(json.dumps(source_payload))
     new = corrected(old)
-    fate = admit_correction(old, new, TEXT, first_attempt=True)
+    fate = await correct(old, new)
     assert fate == GroupFate({"g01"}, frozenset(), frozenset())
     assert new.revision == 2
     assert new.identity_data_id == old.identity_data_id
@@ -46,7 +57,7 @@ def test_captured_correction_preserves_occurrence_and_fact_anchors(source_payloa
     )
 
 
-def test_a_correction_may_not_name_an_underived_new_entity_on_a_first_attempt(
+async def test_a_correction_may_not_name_an_underived_new_entity_on_a_first_attempt(
     source_payload,
 ):
     old = IdentitySource.model_validate_json(json.dumps(source_payload))
@@ -60,9 +71,9 @@ def test_a_correction_may_not_name_an_underived_new_entity_on_a_first_attempt(
     payload["variant_assignments"]["v01"]["target_entity_id"] = other
     saved = IdentitySource.model_validate_json(json.dumps(payload))
     with pytest.raises(IntentError, match="derives from its source") as refused:
-        admit_correction(old, saved, TEXT, first_attempt=True)
+        await correct(old, saved)
     assert refused.value.code == "entity_uuid_not_derived"
-    retried = admit_correction(old, saved, TEXT, first_attempt=False)
+    retried = await correct(old, saved, retry=True)
     assert retried.continuing == {"g01"}
 
 
@@ -89,23 +100,15 @@ async def test_a_correction_may_not_name_a_new_entity_the_graph_already_holds(
 ):
     old = IdentitySource.model_validate_json(json.dumps(source_payload))
     new = corrected(old)
-    fate = admit_correction(old, new, TEXT, first_attempt=True)
-
-    class Graph:
-        def __init__(self, present):
-            self.present = present
-
-        async def get_node(self, key):
-            return {"id": key} if key in self.present else None
-
-    await check_absent_from_graph(Graph(set()), old, new, fate)
-    present = Graph({str(new.mention_resolutions["r01"].target_entity_id)})
+    present = {str(new.mention_resolutions["r01"].target_entity_id)}
     with pytest.raises(IntentError, match="already exists") as refused:
-        await check_absent_from_graph(present, old, new, fate)
+        await correct(old, new, present=present)
     assert refused.value.code == "entity_uuid_in_graph"
+    retried = await correct(old, new, present=present, retry=True)
+    assert retried.continuing == {"g01"}
 
 
-def test_a_correction_declines_changed_text_and_needs_a_rebuild_for_new_groups(
+async def test_a_correction_declines_changed_text_and_needs_a_rebuild_for_new_groups(
     source_payload,
 ):
     old = IdentitySource.model_validate_json(json.dumps(source_payload))
@@ -114,10 +117,10 @@ def test_a_correction_declines_changed_text_and_needs_a_rebuild_for_new_groups(
     changed["inputs"]["doc01"]["text_sha256"] = "0" * 64
     new = IdentitySource.model_validate_json(json.dumps(changed))
     with pytest.raises(IntentError, match="fingerprints disagree") as refused:
-        admit_correction(old, new, TEXT, first_attempt=True)
+        await correct(old, new)
     assert refused.value.code == "source_changed"
     with pytest.raises(IntentError, match="text is missing") as refused:
-        admit_correction(old, new, None, first_attempt=True)
+        await correct(old, new, texts={})
     assert refused.value.code == "source_changed"
     changed = deepcopy(source_payload)
     changed["revision"] = 2
@@ -133,7 +136,7 @@ def test_a_correction_declines_changed_text_and_needs_a_rebuild_for_new_groups(
     )
     new = IdentitySource.model_validate_json(json.dumps(changed))
     with pytest.raises(IntentError, match="requires a text change") as refused:
-        admit_correction(old, new, TEXT, first_attempt=True)
+        await correct(old, new)
     assert refused.value.code == "rebuild_required"
 
 
@@ -196,7 +199,7 @@ async def test_saved_replacement_is_guarded_and_retried_without_new_intent(
     assert incidents[0]["recovery_event_id"] == event and incidents[0]["resolved_at"]
 
 
-def test_a_correction_may_not_move_an_occurrence_to_another_span_with_the_same_text(
+async def test_a_correction_may_not_move_an_occurrence_to_another_span_with_the_same_text(
     source_payload,
 ):
     old = IdentitySource.model_validate_json(json.dumps(source_payload))
@@ -208,5 +211,5 @@ def test_a_correction_may_not_move_an_occurrence_to_another_span_with_the_same_t
     )
     moved = IdentitySource.model_validate_json(json.dumps(payload))
     with pytest.raises(IntentError, match="keeps its start and end") as refused:
-        admit(old, moved, TEXT, TEXT, identity_map(old))
+        await correct(old, moved)
     assert refused.value.code == "occurrence_moved"

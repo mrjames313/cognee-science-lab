@@ -2,14 +2,7 @@
 
 from dataclasses import dataclass
 
-from .admission import (
-    OccurrenceMap,
-    admit,
-    check_absent_from_graph,
-    identity_map,
-    occurrence,
-    parse_occurrence_map,
-)
+from .admission import OccurrenceMap, identity_map, occurrence, parse_occurrence_map
 from .models import ChunkInput, IdentitySource, SourceTextInput
 from .validation import IntentError, map_chunks
 
@@ -236,21 +229,13 @@ class TextChange:
         return delta
 
     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
+        """Text, chunk and capability checks. `replace` admits the change
+        before calling this."""
         from cognee.infrastructure.databases.provenance.markers import (
             stores_provenance_in_graph,
         )
         from cognee.infrastructure.databases.unified import get_unified_engine
 
-        fate = admit(
-            old,
-            source,
-            self.previous_text,
-            self.text,
-            self.occurrence_map,
-            first_attempt=not retry,
-        )
-        if not retry:
-            await check_absent_from_graph(publisher.graph, old, source, fate)
         if not 1 <= self.chunk_budget <= 4096:
             raise IntentError("not_admitted", "Invalid captured chunk budget")
         if texts != {source.original_input_ref: self.text}:

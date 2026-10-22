@@ -14,6 +14,7 @@ from cognee_lab.identity.captured_chunks import (
     retired_mentions,
 )
 from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.replace import admit_replacement
 from cognee_lab.identity.multisource import fixture_id
 from cognee_lab.identity.occurrence_addition import (
     AFTER,
@@ -185,8 +186,7 @@ async def test_new_group_cannot_reuse_an_existing_graph_uuid(source_payload):
         async def get_node(self, key):
             return {"id": key, "type": "Entity"}
 
-    publisher = SimpleNamespace(graph=Graph())
     change = TextChange(BEFORE, AFTER, parse_occurrence_map(ADDITION_MAP))
     with pytest.raises(IntentError, match="already exists") as refused:
-        await change.preflight(publisher, old, intended, {}, {}, None, retry=False)
+        await admit_replacement(Graph(), old, intended, {}, change, retry=False)
     assert refused.value.code == "fresh_uuid_in_graph"

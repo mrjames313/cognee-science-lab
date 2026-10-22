@@ -7,16 +7,26 @@ from .registered import read_registered, write_registered
 from .validation import IntentError
 
 
-def admit_correction(old, source, text, *, first_attempt):
-    """Admit a replacement without a text change: the same text, every
-    occurrence in place. A retired or fresh group needs the rebuild that only a
-    text change runs, so it is refused here."""
+def transition(old, texts, text_change):
+    """The text transition and map a replacement states: the text change's,
+    or the same text with every occurrence in place."""
+    if text_change is not None:
+        return text_change.previous_text, text_change.text, text_change.occurrence_map
+    text = texts.get(old.original_input_ref)
     if text is None:
         raise IntentError("source_changed", "Replacement text is missing")
-    fate = admit(
-        old, source, text, text, identity_map(old), first_attempt=first_attempt
-    )
-    if fate.retired or fate.fresh:
+    return text, text, identity_map(old)
+
+
+async def admit_replacement(graph, old, source, texts, text_change, *, retry):
+    """The one admission of a replacement. A first attempt also probes the
+    graph for the UUIDs the revision introduces. Without a text change nothing
+    rebuilds the document, so a retired or fresh group is refused."""
+    before, after, occurrence_map = transition(old, texts, text_change)
+    fate = admit(old, source, before, after, occurrence_map, first_attempt=not retry)
+    if not retry:
+        await check_absent_from_graph(graph, old, source, fate)
+    if text_change is None and (fate.retired or fate.fresh):
         raise IntentError(
             "rebuild_required",
             "Retiring or adding a group requires a text change and its rebuild",
@@ -132,22 +142,17 @@ async def replace(
         if text_change is not None and text_change != saved_change:
             raise IntentError("recovery_plan", "Use the exact saved text change")
         text_change = saved_change
-    if text_change is None:
-        if semantic_writer is not None:
-            raise IntentError(
-                "not_admitted", "Semantic rebuilding requires a text change"
-            )
-        fate = admit_correction(
-            old, source, texts.get(source.original_input_ref), first_attempt=not retry
+    if text_change is None and semantic_writer is not None:
+        raise IntentError("not_admitted", "Semantic rebuilding requires a text change")
+    if text_change is not None and (
+        semantic_writer is None or verify_semantics is None
+    ):
+        raise IntentError(
+            "semantic_rebuild",
+            "Text replacement requires explicit semantic writer and verifier",
         )
-        if not retry:
-            await check_absent_from_graph(graph, old, source, fate)
-    else:
-        if semantic_writer is None or verify_semantics is None:
-            raise IntentError(
-                "semantic_rebuild",
-                "Text replacement requires explicit semantic writer and verifier",
-            )
+    await admit_replacement(graph, old, source, texts, text_change, retry=retry)
+    if text_change is not None:
         await text_change.preflight(
             publisher, old, source, texts, chunks, ctx, retry=retry
         )
