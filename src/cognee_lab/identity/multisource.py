@@ -637,6 +637,10 @@ async def run(args, root):
                 for r in await publisher.records.rows(selected.dataset_id)
                 if r["source"] == str(selected.identity_data_id)
             )
+            if row["state"] == "forgotten":
+                from .storage import FORGOTTEN_SOURCE
+
+                raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
             if (
                 row["state"] == "failed"
                 and row["plan"].get("operation") == "identity_forget"

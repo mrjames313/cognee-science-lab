@@ -21,7 +21,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - **Fence.** A journey is a fenced block with the info string `bash journey ID [stages=a,b,c] [env]`. The block holds only `drive`, `check` and shell lines. It never defines `V`, `RUN`, `val` or a cleanup.
 - **Stages.** `stages=` lists the fault stages. The runner sets `STAGE` for each one, in its own run. `--stage S` runs one.
 - **env.** The `env` token marks a journey that calls the embedding API.
-- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes, `G` is group regrouping, `I` is changed interpretation and `K` is kind change. The `E` journeys live in the revision file, and the `I` and `K` journeys live in the reinterpretation file.
+- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes, `G` is group regrouping, `I` is changed interpretation, `K` is kind change and `F` is forget and re-add. The `E` journeys live in the revision file, and the `I` and `K` journeys live in the reinterpretation file.
 - **Fault journeys.** A fault journey lives with the feature that it breaks.
 - **Cited values.** Every expected value comes from a guide under `docs/` or from `docs/SESSION_HANDOFF.md`. An inference from a guide says so in the paragraph.
 - **Non-vacuous checks.** A check on a field requires the field to exist. Use `length > 0`, a type test or `!= null` where a missing field would otherwise pass.
@@ -54,6 +54,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - [Occurrence changes](./occurrence-changes.md) covers `remove-occurrences`, `retire-resolved-group`, `add-occurrences` and `revise-occurrences`, each with its recovery case.
 - [Group regrouping](./group-regrouping.md) covers `split-group` and `combine-groups`, each with its `replace_published` recovery case.
 - [Reinterpretation](./reinterpretation.md) covers `reinterpret-new-entity`, `reinterpret-unresolved`, `change-kind-to-mention` and `change-kind-to-reusable`, their recovery cases and their scope refusals.
+- [Source lifecycle](./source-lifecycle.md) covers `forget` of a source nothing depends on, its refusal with dependents, its recovery at each fault stage, and `readd` at the next revision.
 
 There is no separate failure-recovery file. Every fault journey lives with the feature that it breaks, so the recovery steps stay next to the happy path that they restore.
 
@@ -65,7 +66,7 @@ These are current refusals or gaps. They are not journeys. Do not write a journe
 - Changed interpretation and representation-kind changes work only as the four captured commands `reinterpret-new-entity`, `reinterpret-unresolved`, `change-kind-to-mention` and `change-kind-to-reusable`. Other kind changes, other changed interpretations, a corpus-scoped variant change in a text edit and a retargeted continuing group in a text edit stay refused (`docs/stage6_identity_reinterpretation.md`).
 - An edit that would affect a dependent saved identity source is refused before it changes anything. Automatic reconsideration of that source does not exist (`docs/stage6_identity_text_changes.md`).
 - Arbitrary text edits are not supported. `edit-text` applies only the captured prefix insertion, and the removal, retirement, addition, split and combination commands apply only their captured edits (`docs/stage6_identity_group_split.md` for the last two).
-- Identity withdrawal is not a full source Forget. It keeps the original Data, its facts, markers and evidence.
+- Identity withdrawal is not a Forget. It keeps the original Data, its facts, markers and evidence. `forget` removes them, but only for a current source that no other source consumed. A forget with dependents is refused and lists them; what erasure does to dependents waits for step-4 item 3 (`docs/stage6_identity_forget.md`). A withdrawn source, or one whose first publication failed, cannot be forgotten.
 - A root made before embedding profiles opens only for `status` and `retrieve`. Do not use one as a verification root.
 - A hard process crash can leave the project writer reserved. The map covers only caught, injected failures.
 

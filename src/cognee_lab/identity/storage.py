@@ -43,6 +43,11 @@ class RecoveryEvent(Base):
     details: Mapped[str] = mapped_column(Text)
 
 
+FORGOTTEN_SOURCE = (
+    "Forgotten source accepts only a new publication at the next revision"
+)
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -165,10 +170,7 @@ class RecordStore:
                     "Withdrawn source requires explicit new publication intent",
                 )
             if row and row.state == "forgotten" and method != "publish":
-                raise IntentError(
-                    "forgotten_source",
-                    "Forgotten source accepts only a new publication at the next revision",
-                )
+                raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
             if method == "publish" and row:
                 # A publication starts a lineage: from no row, or again after forget.
                 if row.state != "forgotten":

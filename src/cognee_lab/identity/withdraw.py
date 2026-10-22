@@ -95,15 +95,16 @@ def retired_sources(rows):
 
 
 async def verify_no_contributions(graph, source, triples):
+    from .publish import contributions
+
     for a, b, relation in triples:
         edge = await edge_metadata(graph, a, b, relation)
-        if edge is not None:
-            from .publish import contributions
-
-            if any(is_own(source, c) for c in contributions(edge.edge_properties)):
-                raise IntentError(
-                    "verify_withdrawal", "Retired identity contribution remains"
-                )
+        if edge is not None and any(
+            is_own(source, c) for c in contributions(edge.edge_properties)
+        ):
+            raise IntentError(
+                "verify_withdrawal", "Retired identity contribution remains"
+            )
 
 
 async def verify_survivors(graph, vector, source, plan, released, retired):

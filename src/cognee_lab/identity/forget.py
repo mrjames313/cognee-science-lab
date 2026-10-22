@@ -13,6 +13,7 @@ from uuid import UUID
 
 from .models import IdentitySource
 from .native import require_graph_methods
+from .storage import FORGOTTEN_SOURCE
 from .validation import IntentError, dependents
 from .withdraw import (
     contribution_triples,
@@ -237,6 +238,8 @@ async def forget(
         # native deletion has since detached or removed.
         plan = dict(row["plan"])
     else:
+        if row["state"] == "forgotten":
+            raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
         if row["state"] != "current":
             raise IntentError(
                 "forget_state", "Forget a current source, or retry its failed forget"
