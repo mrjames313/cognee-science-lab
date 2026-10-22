@@ -14,7 +14,11 @@ from typing import NamedTuple
 from uuid import UUID, uuid5
 
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.validation import fresh_mention_id, text_digest
+from cognee_lab.identity.validation import (
+    fresh_entity_id,
+    fresh_mention_id,
+    text_digest,
+)
 
 FIXTURE = (
     Path(__file__).parents[1]
@@ -196,10 +200,20 @@ def describe(payload, text, revision):
     return payload
 
 
-def materialize(world, same_text=False):
+def stable(world):
+    """Every old occurrence survives and nothing is added, so the same text can
+    carry the new grouping."""
+    kept = sum(len(g.items) for g in world.new)
+    return world.additions == 0 and kept == len(world.old_occurrences())
+
+
+def materialize(world, same_text=False, text_changed=True):
     """Real old and new descriptions as JSON payloads and models, both texts
     and the general map. With same_text, every occurrence has the same surface
-    text."""
+    text. Without text_changed, a stable world keeps the old text as the new
+    text, so only the grouping and decisions change."""
+    if not text_changed and not stable(world):
+        raise ValueError("only a stable world keeps its text")
     payload = base_payload()
     identity = UUID(payload["identity_data_id"])
     before, old_spans = layout(world.old_occurrences(), same_text)
@@ -212,7 +226,9 @@ def materialize(world, same_text=False):
         )
         old["mention_resolutions"][f"r{key}"] = resolution(key)
     new_items = sorted((o for g in world.new for o in g.items), key=text_order)
-    after, new_spans = layout(new_items, same_text, prefix="new ")
+    after, new_spans = layout(
+        new_items, same_text, prefix="new " if text_changed else ""
+    )
     new = describe(payload, after, 2)
     place = {}
     for key, uuid, items in world.new:
@@ -239,3 +255,332 @@ def materialize(world, same_text=False):
         after=after,
         general=general,
     )
+
+
+# Decision choices layered on an admitted world. Each names the groups it
+# needs, edits the old and new payloads, and states the outcome the rules
+# give it from whether the text changed and whether this is a first attempt.
+ADMIT = "admit"
+HC = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
+CORPUS = dict(kind="corpus")
+DOCUMENT = dict(kind="document", document_ref="doc01")
+SPANS = dict(kind="text_spans", document_ref="doc01", ranges=[dict(start=0, end=1)])
+
+
+class Decision(NamedTuple):
+    name: str
+    needs: frozenset
+    change: object
+    expected: object
+
+    def attempt_sensitive(self):
+        return any(
+            self.expected(text_changed, True) != self.expected(text_changed, False)
+            for text_changed in (True, False)
+        )
+
+
+def admit_always(text_changed, first_attempt):
+    return ADMIT
+
+
+def always(*codes):
+    return lambda text_changed, first_attempt: frozenset(codes)
+
+
+def unless_unchanged_text(*codes):
+    return lambda text_changed, first_attempt: (
+        frozenset(codes) if text_changed else ADMIT
+    )
+
+
+def first_attempt_only(*codes):
+    return lambda text_changed, first_attempt: (
+        frozenset(codes) if first_attempt else ADMIT
+    )
+
+
+def derived(ctx, key):
+    return str(fresh_entity_id(ctx["identity"], 2, key))
+
+
+def other_entity(ctx):
+    return str(uuid5(ctx["identity"], "other:entity"))
+
+
+def add_recipe(payload, entity_id):
+    payload["entity_constructions"][entity_id] = dict(name="new", description="new")
+
+
+def retarget(payload, rid, entity_id):
+    payload["mention_resolutions"][rid]["target_entity_id"] = entity_id
+
+
+def variant(source_id, target_id, scope):
+    return dict(
+        status="accepted",
+        source_entity_id=source_id,
+        target_entity_id=target_id,
+        applicability=scope,
+        input_refs=["doc01"],
+        producer_ref="fixture",
+    )
+
+
+def continuing_rid(ctx):
+    return f"r{ctx['continuing']}"
+
+
+def fresh_rid(ctx):
+    return f"s{ctx['fresh']}"
+
+
+def unresolve(old, new, ctx):
+    new["mention_resolutions"][continuing_rid(ctx)] = dict(
+        group_ref=ctx["continuing"],
+        status="unresolved",
+        input_refs=["doc01"],
+        producer_ref="fixture",
+    )
+
+
+def retarget_continuing_to_derived(old, new, ctx):
+    entity_id = derived(ctx, continuing_rid(ctx))
+    add_recipe(new, entity_id)
+    retarget(new, continuing_rid(ctx), entity_id)
+
+
+def retarget_continuing_to_underived(old, new, ctx):
+    add_recipe(new, other_entity(ctx))
+    retarget(new, continuing_rid(ctx), other_entity(ctx))
+
+
+def retarget_continuing_to_hc(old, new, ctx):
+    retarget(new, continuing_rid(ctx), HC)
+
+
+def rename_continuing_resolution(old, new, ctx):
+    new["mention_resolutions"][f"t{ctx['continuing']}"] = new[
+        "mention_resolutions"
+    ].pop(continuing_rid(ctx))
+
+
+def change_continuing_recipe(old, new, ctx):
+    entity_id = new["mention_groups"][ctx["continuing"]]["entity_id"]
+    new["entity_constructions"][entity_id]["name"] = "changed"
+
+
+def keep_retired_recipe(old, new, ctx):
+    add_recipe(new, old["mention_groups"][ctx["retired"]]["entity_id"])
+
+
+def drop_unused_reusable(old, new, ctx):
+    add_recipe(old, str(uuid5(ctx["identity"], "spare")))
+
+
+def change_retained_reusable(old, new, ctx):
+    new["entity_constructions"][HELIOS]["name"] = "changed"
+
+
+def add_unreferenced_recipe(old, new, ctx):
+    add_recipe(new, other_entity(ctx))
+
+
+def add_corpus_referenced_entity(old, new, ctx):
+    entity_id = str(uuid5(ctx["identity"], "corpus:entity"))
+    add_recipe(new, entity_id)
+    new["inputs"]["existing_Z"] = dict(new["inputs"]["existing_A"], entity_id=entity_id)
+    new["variant_assignments"]["v02"] = variant(HC, entity_id, DOCUMENT)
+
+
+def resolve_fresh_to_derived(old, new, ctx):
+    entity_id = derived(ctx, fresh_rid(ctx))
+    add_recipe(new, entity_id)
+    retarget(new, fresh_rid(ctx), entity_id)
+
+
+def resolve_fresh_to_underived(old, new, ctx):
+    add_recipe(new, other_entity(ctx))
+    retarget(new, fresh_rid(ctx), other_entity(ctx))
+
+
+def derive_from_a_key_that_does_not_name_it(old, new, ctx):
+    entity_id = derived(ctx, "zz")
+    add_recipe(new, entity_id)
+    new["variant_assignments"]["v01"]["target_entity_id"] = entity_id
+
+
+def retarget_document_variant(old, new, ctx):
+    entity_id = derived(ctx, "v01")
+    add_recipe(new, entity_id)
+    new["variant_assignments"]["v01"]["target_entity_id"] = entity_id
+
+
+def drop_document_variant(old, new, ctx):
+    new["variant_assignments"].pop("v01")
+
+
+def add_document_variant(old, new, ctx):
+    new["variant_assignments"]["v02"] = variant(HELIOS, HC, DOCUMENT)
+
+
+def add_variant_under_old_resolution_key(old, new, ctx):
+    new["variant_assignments"][f"r{ctx['retired']}"] = variant(HELIOS, HC, DOCUMENT)
+
+
+def scope_both(scope):
+    def change(old, new, ctx):
+        for payload in (old, new):
+            payload["variant_assignments"]["v01"]["applicability"] = scope
+
+    return change
+
+
+def retarget_corpus_variant(old, new, ctx):
+    scope_both(CORPUS)(old, new, ctx)
+    retarget_document_variant(old, new, ctx)
+
+
+def drop_corpus_variant(old, new, ctx):
+    scope_both(CORPUS)(old, new, ctx)
+    drop_document_variant(old, new, ctx)
+
+
+def add_corpus_variant(old, new, ctx):
+    new["variant_assignments"]["v02"] = variant(HELIOS, HC, CORPUS)
+
+
+def rescope_variant_to_corpus(old, new, ctx):
+    new["variant_assignments"]["v01"]["applicability"] = CORPUS
+
+
+def retarget_span_variant(old, new, ctx):
+    scope_both(SPANS)(old, new, ctx)
+    retarget_document_variant(old, new, ctx)
+
+
+def span_refused_in_text_edits(text_changed, first_attempt):
+    return frozenset({"not_admitted"}) if text_changed else ADMIT
+
+
+def underived_unless_text_edit(text_changed, first_attempt):
+    if text_changed:
+        return frozenset({"continuing_decision_changed"})
+    return frozenset({"entity_uuid_not_derived"}) if first_attempt else ADMIT
+
+
+CONTINUING, RETIRED, FRESH = "continuing", "retired", "fresh"
+DECISIONS = [
+    Decision(name, frozenset(needs), change, expected)
+    for name, needs, change, expected in [
+        (
+            "continuing group unresolved",
+            [CONTINUING],
+            unresolve,
+            unless_unchanged_text("continuing_decision_changed"),
+        ),
+        (
+            "continuing group retargeted to a derived new Entity",
+            [CONTINUING],
+            retarget_continuing_to_derived,
+            unless_unchanged_text("continuing_decision_changed"),
+        ),
+        (
+            "continuing group retargeted to an underived new Entity",
+            [CONTINUING],
+            retarget_continuing_to_underived,
+            underived_unless_text_edit,
+        ),
+        (
+            "continuing group retargeted to a declared Entity",
+            [CONTINUING],
+            retarget_continuing_to_hc,
+            unless_unchanged_text("continuing_decision_changed"),
+        ),
+        (
+            "continuing resolution renamed",
+            [CONTINUING],
+            rename_continuing_resolution,
+            always("continuing_decision_changed"),
+        ),
+        (
+            "continuing mention recipe changed",
+            [CONTINUING],
+            change_continuing_recipe,
+            always("mention_recipe_changed"),
+        ),
+        (
+            "retired mention recipe kept",
+            [RETIRED],
+            keep_retired_recipe,
+            always("mention_recipe_changed"),
+        ),
+        ("unused reusable recipe dropped", [], drop_unused_reusable, admit_always),
+        (
+            "retained reusable recipe changed",
+            [],
+            change_retained_reusable,
+            always("reusable_recipe_changed"),
+        ),
+        (
+            "new recipe that nothing names",
+            [],
+            add_unreferenced_recipe,
+            first_attempt_only("entity_uuid_not_derived"),
+        ),
+        (
+            "new Entity named by a corpus input",
+            [],
+            add_corpus_referenced_entity,
+            admit_always,
+        ),
+        (
+            "fresh group resolved to a derived new Entity",
+            [FRESH],
+            resolve_fresh_to_derived,
+            admit_always,
+        ),
+        (
+            "fresh group resolved to an underived new Entity",
+            [FRESH],
+            resolve_fresh_to_underived,
+            first_attempt_only("entity_uuid_not_derived"),
+        ),
+        (
+            "new Entity derived from a key that does not name it",
+            [],
+            derive_from_a_key_that_does_not_name_it,
+            first_attempt_only("entity_uuid_not_derived"),
+        ),
+        ("document variant retargeted", [], retarget_document_variant, admit_always),
+        ("document variant dropped", [], drop_document_variant, admit_always),
+        ("document variant added", [], add_document_variant, admit_always),
+        (
+            "document variant added under an old resolution key",
+            [RETIRED],
+            add_variant_under_old_resolution_key,
+            always("variant_key_reused"),
+        ),
+        (
+            "corpus variant retargeted",
+            [],
+            retarget_corpus_variant,
+            always("variant_changed"),
+        ),
+        ("corpus variant dropped", [], drop_corpus_variant, always("variant_changed")),
+        ("corpus variant added", [], add_corpus_variant, always("variant_changed")),
+        (
+            "variant rescoped to the corpus",
+            [],
+            rescope_variant_to_corpus,
+            always("variant_changed"),
+        ),
+        ("span variant unchanged", [], scope_both(SPANS), span_refused_in_text_edits),
+        (
+            "span variant retargeted",
+            [],
+            retarget_span_variant,
+            always("variant_changed"),
+        ),
+    ]
+]

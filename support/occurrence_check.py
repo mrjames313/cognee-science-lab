@@ -1,17 +1,20 @@
-"""Bounded exhaustive check of text-change admission against the group-fate oracle.
+"""Bounded exhaustive check of replacement admission against the independent oracle.
 
 Enumerates every small world in support/occurrence_worlds.py and materializes
-real old and new descriptions. Two checks run:
+real old and new descriptions. Three checks run:
 
-- The general admitter agrees with the oracle on every world, on a first
-  attempt and on a retry. Every admitted world is also checked with all
-  occurrences sharing one surface text, and each of its corruptions must be
+- The admitter agrees with the group-fate oracle on every world, on a first
+  attempt and on a retry. A stable world, where every occurrence survives and
+  nothing is added, is also checked with unchanged text. Every admitted world
+  is also checked with all occurrences sharing one surface text.
+- Each corruption of an admitted world's map, slices or revision must be
   refused by the rule it breaks.
-- With --mutants, switching off any one rule of the general admitter makes
-  some small world come out wrong.
-
-The oracle covers group fate and fresh keys and UUIDs. The shape, slice,
-revision and carryover rules are covered by the corruptions.
+- Each decision choice in `DECISIONS` (a changed decision, a new or dropped
+  Entity recipe, a variant change by scope) layered on an admitted world must
+  come out as the rules say, with changed and, where the world allows,
+  unchanged text, and on a retry where the outcome depends on the attempt.
+- With --mutants, switching off any one rule of the admitter makes some small
+  world come out wrong.
 
     uv run python support/occurrence_check.py
     uv run python support/occurrence_check.py --mutants
@@ -23,12 +26,21 @@ import sys
 import time
 from collections import Counter
 from contextlib import contextmanager
+from uuid import UUID
 
 from cognee_lab.identity import admission
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.validation import IntentError, text_digest
+from cognee_lab.identity.validation import IntentError
 from occurrence_mutants import MUTANTS
-from occurrence_worlds import OLD_SHAPES, materialize, oracle, worlds
+from occurrence_worlds import (
+    ADMIT,
+    DECISIONS,
+    OLD_SHAPES,
+    materialize,
+    oracle,
+    stable,
+    worlds,
+)
 
 SMALL = ((1,), (2,), (1, 1))
 
@@ -39,11 +51,11 @@ REASONS = {
 }
 
 
-def outcome(case, admit):
+def outcome(admit):
     try:
         fate = admit()
     except IntentError as error:
-        return ("refuse", REASONS.get(error.code, str(error)))
+        return ("refuse", error.code, str(error))
     except Exception as error:  # a broken rule can let a bad map reach a lookup
         return ("crash", repr(error))
     return ("admit", fate.continuing, fate.retired, fate.fresh)
@@ -65,15 +77,27 @@ def general(case, mapping=None, first_attempt=True, **parts):
 def agrees(expected, got):
     if expected[0] == "admit":
         return got == expected
-    return got[0] == "refuse" and got[1] in expected[1]
+    return got[0] == "refuse" and REASONS.get(got[1]) in expected[1]
+
+
+def refused_with(got, code=None, message=None):
+    return (
+        got[0] == "refuse"
+        and (code is None or got[1] == code)
+        and (message is None or message in got[2])
+    )
 
 
 def check_general(world, case):
-    for first_attempt in (True, False):
-        expected = oracle(world, first_attempt)
-        got = outcome(case, general(case, first_attempt=first_attempt))
-        setting = "first attempt" if first_attempt else "retry"
-        yield f"general {setting}", agrees(expected, got), expected, got
+    cases = [("", case)]
+    if stable(world):
+        cases.append(("unchanged text ", materialize(world, text_changed=False)))
+    for label, variant in cases:
+        for first_attempt in (True, False):
+            expected = oracle(world, first_attempt)
+            got = outcome(general(variant, first_attempt=first_attempt))
+            setting = "first attempt" if first_attempt else "retry"
+            yield f"general {label}{setting}", agrees(expected, got), expected, got
 
 
 def rebuilt(payload, change):
@@ -129,34 +153,8 @@ def map_corruptions(case, same_text):
 
 
 def payload_corruptions(case, fate):
-    """Descriptions or texts that break a slice, revision or carryover rule."""
+    """Descriptions that break a slice, revision or fresh-resolution rule."""
     old_payload, new_payload = case["old_payload"], case["new_payload"]
-    if not new_payload["mention_groups"]:
-        unchanged = text_digest(case["before"])
-        yield (
-            "unchanged text",
-            "requires changed text",
-            dict(
-                after=case["before"],
-                new=rebuilt(
-                    new_payload,
-                    lambda p: p["inputs"]["doc01"].update(text_sha256=unchanged),
-                ),
-            ),
-        )
-    spans = dict(kind="text_spans", document_ref="doc01", ranges=[dict(start=0, end=1)])
-
-    def span_variant(p):
-        p["variant_assignments"]["v01"]["applicability"] = spans
-
-    yield (
-        "span variant",
-        "Span-scoped variants",
-        dict(
-            old=rebuilt(old_payload, span_variant),
-            new=rebuilt(new_payload, span_variant),
-        ),
-    )
 
     def shift(occurrence):
         occurrence.update(start=occurrence["start"] + 1, end=occurrence["end"] + 1)
@@ -191,35 +189,6 @@ def payload_corruptions(case, fate):
         "advances exactly one revision",
         dict(new=rebuilt(new_payload, lambda p: p.update(revision=3))),
     )
-    yield (
-        "variant changed",
-        "Variant assignments stay unchanged",
-        dict(
-            new=rebuilt(
-                new_payload,
-                lambda p: p["variant_assignments"]["v01"].update(
-                    applicability=dict(kind="corpus")
-                ),
-            )
-        ),
-    )
-    for key in sorted(fate.continuing)[:1]:
-        unresolved = dict(
-            group_ref=key,
-            status="unresolved",
-            input_refs=["doc01"],
-            producer_ref="fixture",
-        )
-        yield (
-            "continuing decision changed",
-            "keeps its reviewed resolutions",
-            dict(
-                new=rebuilt(
-                    new_payload,
-                    lambda p: p["mention_resolutions"].update({f"r{key}": unresolved}),
-                )
-            ),
-        )
     for key in sorted(fate.fresh)[:1]:
         yield (
             "fresh resolution missing",
@@ -242,40 +211,78 @@ def payload_corruptions(case, fate):
             "no old resolution or assignment",
             dict(new=rebuilt(new_payload, reuse_id)),
         )
-    for key in sorted(fate.retired)[:1]:
-        retired = str(case["old"].mention_groups[key].entity_id)
-        recipe = {retired: dict(name=key, description=key)}
-        yield (
-            "retired recipe kept",
-            "Recipes are the old ones",
-            dict(
-                new=rebuilt(
-                    new_payload, lambda p: p["entity_constructions"].update(recipe)
-                )
-            ),
-        )
+
+
+def admitted_fate(world):
+    expected = oracle(world)
+    return admission.GroupFate(*expected[1:]) if expected[0] == "admit" else None
 
 
 def check_corruptions(world, case):
-    expected = oracle(world)
-    if expected[0] != "admit":
+    fate = admitted_fate(world)
+    if fate is None:
         return
-    fate = admission.GroupFate(*expected[1:])
+    expected = oracle(world)
     same = materialize(world, same_text=True)
-    got = outcome(same, general(same))
+    got = outcome(general(same))
     yield "general same text", got == expected, expected, got
     for variant, same_text in ((case, False), (same, True)):
         for name, message, mapping in map_corruptions(variant, same_text):
-            got = outcome(variant, general(variant, mapping))
-            ok = got[0] == "refuse" and message in got[1]
+            got = outcome(general(variant, mapping))
+            ok = refused_with(got, message=message)
             yield f"corrupt map: {name}", ok, ("refuse", message), got
     for name, message, parts in payload_corruptions(case, fate):
-        got = outcome(case, general(case, **parts))
-        ok = got[0] == "refuse" and message in got[1]
+        got = outcome(general(case, **parts))
+        ok = refused_with(got, message=message)
         yield f"corrupt description: {name}", ok, ("refuse", message), got
 
 
-CHECKS = (check_general, check_corruptions)
+def decided(case, decision, ctx, first_attempt):
+    """The case with one decision choice applied to both descriptions."""
+    old, new = (json.loads(json.dumps(case[k])) for k in ("old_payload", "new_payload"))
+    decision.change(old, new, ctx)
+    return general(
+        case,
+        first_attempt=first_attempt,
+        old=IdentitySource.model_validate_json(json.dumps(old)),
+        new=IdentitySource.model_validate_json(json.dumps(new)),
+    )
+
+
+def check_decisions(world, case):
+    fate = admitted_fate(world)
+    if fate is None:
+        return
+    admitted = ("admit", fate.continuing, fate.retired, fate.fresh)
+    available = {
+        kind for kind in ("continuing", "retired", "fresh") if getattr(fate, kind)
+    }
+    ctx = dict(
+        identity=UUID(case["old_payload"]["identity_data_id"]),
+        **{kind: min(getattr(fate, kind), default=None) for kind in available},
+    )
+    cases = [(True, case)]
+    if stable(world):
+        cases.append((False, materialize(world, text_changed=False)))
+    for decision in DECISIONS:
+        if not decision.needs <= available:
+            continue
+        attempts = (True, False) if decision.attempt_sensitive() else (True,)
+        for text_changed, variant in cases:
+            for first_attempt in attempts:
+                expected = decision.expected(text_changed, first_attempt)
+                got = outcome(decided(variant, decision, ctx, first_attempt))
+                if expected == ADMIT:
+                    ok, want = got == admitted, admitted
+                else:
+                    ok, want = got[0] == "refuse" and got[1] in expected, (
+                        "refuse",
+                        expected,
+                    )
+                yield f"decision: {decision.name}", ok, want, got
+
+
+CHECKS = (check_general, check_corruptions, check_decisions)
 
 
 def run(shapes=OLD_SHAPES, max_additions=1, checks=CHECKS):
@@ -306,7 +313,7 @@ def run_mutants():
     caught = {}
     for name in MUTANTS:
         with patched(name):
-            _, failures = run(SMALL, checks=(check_general, check_corruptions))
+            _, failures = run(SMALL)
         # Prefer a world the broken admitter wrongly admits over one where only
         # the refusal reason changes.
         admitted = [f for f in failures if f[3][0] == "admit"]
@@ -325,7 +332,7 @@ def main():
         for name, failure in run_mutants().items():
             missed += failure is None
             detail = f"{failure[1]} on {failure[0]}" if failure else "NOT CAUGHT"
-            print(f"  {name:<28} {detail}")
+            print(f"  {name:<40} {detail}")
         print(f"seconds={time.monotonic() - started:.1f}")
         print("FAIL" if missed else "PASS")
         return 1 if missed else 0
@@ -335,7 +342,7 @@ def main():
         f"admitted={tally['admit']} refused={tally['refuse']}"
     )
     for name in sorted(k for k in tally if k not in ("admit", "refuse")):
-        print(f"  {name:<44} {tally[name]}")
+        print(f"  {name:<64} {tally[name]}")
     print(f"seconds={time.monotonic() - started:.1f}")
     for world, name, expected, got in failures[:10]:
         print(f"FAIL {name}: {world}\n  expected={expected}\n  got={got}")

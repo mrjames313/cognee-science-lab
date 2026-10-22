@@ -1,18 +1,21 @@
-"""Admission of a reviewed text change: what the new description may claim.
+"""Admission of a reviewed replacement: what the new description may claim.
 
 One map states the edit. For each old occurrence, in order, it gives the new
 occurrence it became, or None if it was removed; a new occurrence that nothing
 maps to is an addition. The rules are stated over occurrences and groups, never
-over kinds of edit, so removal, addition, split, combination, a prefix shift
-and their mixtures are particular maps. Functions below follow the order in
-which `admit` applies them.
+over kinds of edit, so removal, addition, split, combination, a prefix shift,
+a correction with unchanged text and their mixtures are particular maps.
+Whether the text changed decides only two rules: a continuing group may change
+its decision in place when the text is unchanged, and span-scoped variants are
+refused when it changed. Functions below follow the order in which `admit`
+applies them.
 """
 
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from .models import ChunkInput, CorpusObjectInput, SourceTextInput
-from .validation import IntentError, fresh_mention_id, text_digest
+from .models import Accepted, ChunkInput, CorpusObjectInput, SourceTextInput
+from .validation import IntentError, fresh_entity_id, fresh_mention_id, text_digest
 
 
 class OccurrenceRef(NamedTuple):
@@ -77,13 +80,13 @@ class Origin:
 
 
 def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
-    """Admit any reviewed mix of kept, removed, added and regrouped occurrences.
+    """Admit any reviewed mix of kept, removed, added and regrouped occurrences,
+    with changed or unchanged text.
 
-    Only a first attempt chooses fresh UUIDs; a retry completes a saved plan,
-    which may predate the revision-scoped rule.
+    Only a first attempt chooses new UUIDs; a retry completes a saved plan,
+    which may predate the derivation rules.
     """
     check_source_identity(old, source, before, after)
-    check_changed_text(before, after)
     check_next_revision(old, source)
     origins = map_origins(old, occurrence_map)
     check_old_slices(old, before)
@@ -96,12 +99,18 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     check_unused_entity_ids(old, source, fate.fresh)
     if first_attempt:
         check_revision_scoped_ids(old, source, fate.fresh)
-    check_continuing_decisions(old, source, fate)
-    check_variants_unchanged(old, source)
+    text_changed = before != after
+    check_continuing_decisions(old, source, fate, text_changed)
     check_fresh_resolution_ids(old, source, fate)
     check_one_resolution_per_fresh_group(source, fate)
-    check_recipes(old, source, fate)
-    check_no_span_variants(source)
+    check_mention_recipes(old, source, fate)
+    check_reusable_recipes(old, source)
+    if first_attempt:
+        check_derived_entity_ids(old, source)
+    check_scoped_variants(old, source)
+    check_new_variant_keys(old, source)
+    if text_changed:
+        check_no_span_variants(source)
     return fate
 
 
@@ -137,11 +146,6 @@ def check_source_identity(old, source, before, after):
         raise IntentError(
             "source_changed", "Saved text transition fingerprints disagree"
         )
-
-
-def check_changed_text(before, after):
-    if not before or not after or before == after:
-        raise IntentError("not_admitted", "A text change requires changed text")
 
 
 def check_next_revision(old, source):
@@ -305,20 +309,19 @@ def resolutions_of(description, groups):
     }
 
 
-def check_continuing_decisions(old, source, fate):
-    if reviewed_decisions(resolutions_of(source, fate.continuing)) != (
-        reviewed_decisions(resolutions_of(old, fate.continuing))
-    ):
+def check_continuing_decisions(old, source, fate, text_changed):
+    """A continuing group keeps its resolution record. With changed text it
+    also keeps the reviewed decision, because a changed meaning in a text edit
+    is a fresh group; with unchanged text the decision may change in place."""
+    previous = resolutions_of(old, fate.continuing)
+    current = resolutions_of(source, fate.continuing)
+    if {k: r.group_ref for k, r in previous.items()} != {
+        k: r.group_ref for k, r in current.items()
+    } or (text_changed and reviewed_decisions(current) != reviewed_decisions(previous)):
         raise IntentError(
-            "not_admitted", "A continuing group keeps its reviewed resolutions"
+            "continuing_decision_changed",
+            "A continuing group keeps its resolution record, and its reviewed decision when the text changes",
         )
-
-
-def check_variants_unchanged(old, source):
-    if reviewed_decisions(source.variant_assignments) != reviewed_decisions(
-        old.variant_assignments
-    ):
-        raise IntentError("not_admitted", "Variant assignments stay unchanged")
 
 
 def check_fresh_resolution_ids(old, source, fate):
@@ -339,20 +342,109 @@ def check_one_resolution_per_fresh_group(source, fate):
         )
 
 
-def check_recipes(old, source, fate):
-    retired = {old.mention_groups[k].entity_id for k in fate.retired}
-    recipes = {
+def check_mention_recipes(old, source, fate):
+    """Mention recipes are the old ones, minus the retired groups', plus the
+    fresh groups'. The model supplies each fresh group's recipe, and the fresh
+    UUID rules keep it distinct, so this checks the continuing and retired."""
+    for key in fate.continuing:
+        eid = old.mention_groups[key].entity_id
+        if source.entity_constructions[eid] != old.entity_constructions[eid]:
+            raise IntentError(
+                "mention_recipe_changed",
+                "A continuing group keeps its mention recipe",
+            )
+    for key in fate.retired:
+        if old.mention_groups[key].entity_id in source.entity_constructions:
+            raise IntentError(
+                "mention_recipe_changed",
+                "A retired group's mention recipe is dropped",
+            )
+
+
+def reusable_recipes(description):
+    mentions = {g.entity_id for g in description.mention_groups.values()}
+    return {
         eid: recipe
-        for eid, recipe in old.entity_constructions.items()
-        if eid not in retired
+        for eid, recipe in description.entity_constructions.items()
+        if eid not in mentions
     }
-    for key in fate.fresh:
-        eid = source.mention_groups[key].entity_id
-        recipes[eid] = source.entity_constructions[eid]
-    if source.entity_constructions != recipes:
+
+
+def check_reusable_recipes(old, source):
+    """A reusable recipe may be added or dropped in any edit; a retained one is
+    unchanged."""
+    previous, current = reusable_recipes(old), reusable_recipes(source)
+    if any(current[eid] != previous[eid] for eid in set(previous) & set(current)):
         raise IntentError(
-            "not_admitted",
-            "Recipes are the old ones, minus the retired groups', plus the fresh groups'",
+            "reusable_recipe_changed", "A retained reusable recipe stays unchanged"
+        )
+
+
+def new_reusable_ids(old, source):
+    """Reusable Entities this revision creates: added recipes that no corpus
+    input names as an existing Entity."""
+    existing = {
+        i.entity_id for i in source.inputs.values() if isinstance(i, CorpusObjectInput)
+    }
+    return set(reusable_recipes(source)) - set(old.entity_constructions) - existing
+
+
+def naming_keys(source, entity_id):
+    """Keys of the resolutions and variants that name an Entity."""
+    return {
+        k
+        for k, r in source.mention_resolutions.items()
+        if isinstance(r, Accepted) and r.target_entity_id == entity_id
+    } | {
+        k
+        for k, v in source.variant_assignments.items()
+        if entity_id in (v.source_entity_id, v.target_entity_id)
+    }
+
+
+def check_derived_entity_ids(old, source):
+    """A new reusable Entity's UUID derives from the source, the new revision
+    and the key of a resolution or variant that names it."""
+    for eid in new_reusable_ids(old, source):
+        derived = {
+            fresh_entity_id(old.identity_data_id, source.revision, k)
+            for k in naming_keys(source, eid)
+        }
+        if eid not in derived:
+            raise IntentError(
+                "entity_uuid_not_derived",
+                "A new reusable Entity's UUID derives from its source, revision and the key of a resolution or variant that names it",
+            )
+
+
+FIXED_SCOPES = frozenset({"corpus", "text_spans"})
+
+
+def scoped_variants(description, kinds):
+    return {
+        k: v
+        for k, v in description.variant_assignments.items()
+        if v.applicability.kind in kinds
+    }
+
+
+def check_scoped_variants(old, source):
+    """Document-scoped variants may be added, dropped or retargeted. Corpus-
+    and span-scoped ones reach beyond this edit, so they stay unchanged."""
+    if reviewed_decisions(scoped_variants(source, FIXED_SCOPES)) != (
+        reviewed_decisions(scoped_variants(old, FIXED_SCOPES))
+    ):
+        raise IntentError(
+            "variant_changed",
+            "Corpus- and span-scoped variant assignments stay unchanged",
+        )
+
+
+def check_new_variant_keys(old, source):
+    added = set(source.variant_assignments) - set(old.variant_assignments)
+    if added & set(old.mention_resolutions):
+        raise IntentError(
+            "variant_key_reused", "A new variant key is not an old resolution key"
         )
 
 
@@ -364,3 +456,25 @@ def check_no_span_variants(source):
         raise IntentError(
             "not_admitted", "Span-scoped variants require explicit scope remapping"
         )
+
+
+async def check_absent_from_graph(graph, old, source, fate):
+    """On a first attempt, no UUID this revision introduces is a graph node yet."""
+    probes = [
+        (
+            source.mention_groups[key].entity_id,
+            "fresh_uuid_in_graph",
+            "New mention Entity UUID already exists in the graph",
+        )
+        for key in sorted(fate.fresh)
+    ] + [
+        (
+            eid,
+            "entity_uuid_in_graph",
+            "New reusable Entity UUID already exists in the graph",
+        )
+        for eid in sorted(new_reusable_ids(old, source))
+    ]
+    for entity_id, code, message in probes:
+        if await graph.get_node(str(entity_id)) is not None:
+            raise IntentError(code, message)

@@ -13,9 +13,11 @@ def test_admission_agrees_with_the_oracle_on_small_worlds():
     for name in (
         "general first attempt",
         "general retry",
+        "general unchanged text first attempt",
         "general same text",
         "corrupt map: two origins",
-        "corrupt description: continuing decision changed",
+        "decision: continuing group unresolved",
+        "decision: new Entity named by a corpus input",
     ):
         assert tally[name] > 0
 

@@ -129,10 +129,10 @@ def test_addition_refuses_incomplete_or_false_maps(source_payload, mapping):
 @pytest.mark.parametrize(
     "mutation,code",
     [
-        ("retarget", "not_admitted"),
-        ("recipe", "not_admitted"),
+        ("retarget", "continuing_decision_changed"),
+        ("recipe", "mention_recipe_changed"),
         ("missing_resolution", "not_admitted"),
-        ("reused_assignment", "not_admitted"),
+        ("reused_assignment", "continuing_decision_changed"),
         ("new_uuid_reused", "fresh_uuid_reused"),
         ("bad_span", "occurrence_changed"),
         ("retire_group", "occurrence_changed"),

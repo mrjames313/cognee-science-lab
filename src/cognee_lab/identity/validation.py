@@ -33,6 +33,11 @@ def fresh_mention_id(identity_data_id: UUID, revision: int, key: str) -> UUID:
     return uuid5(identity_data_id, f"mention:r{revision}:{key}")
 
 
+def fresh_entity_id(identity_data_id: UUID, revision: int, key: str) -> UUID:
+    """A new reusable Entity, named by the resolution or variant key that targets it."""
+    return uuid5(identity_data_id, f"entity:r{revision}:{key}")
+
+
 def object_digest(value: Any) -> str:
     return sha256(rfc8785.dumps(value)).hexdigest()
 

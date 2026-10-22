@@ -70,7 +70,7 @@ def test_exact_unicode_remap_preserves_occurrence_identity_and_reviews_context(
     "kind,code,message",
     [
         ("stale_offsets", "occurrence_changed", "exact document slice"),
-        ("changed_interpretation", "not_admitted", "keeps its reviewed resolutions"),
+        ("changed_interpretation", "continuing_decision_changed", "keeps its resolution record"),
         ("group_uuid", "fresh_key_reused", "key that no old group used"),
         ("arbitrary_edit", "source_changed", "fingerprints disagree"),
     ],

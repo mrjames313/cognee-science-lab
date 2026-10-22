@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from .admission import (
     OccurrenceMap,
     admit,
+    check_absent_from_graph,
     identity_map,
     occurrence,
     parse_occurrence_map,
@@ -249,17 +250,7 @@ class TextChange:
             first_attempt=not retry,
         )
         if not retry:
-            for key in fate.fresh:
-                if (
-                    await publisher.graph.get_node(
-                        str(source.mention_groups[key].entity_id)
-                    )
-                    is not None
-                ):
-                    raise IntentError(
-                        "fresh_uuid_in_graph",
-                        "New mention Entity UUID already exists in the graph",
-                    )
+            await check_absent_from_graph(publisher.graph, old, source, fate)
         if not 1 <= self.chunk_budget <= 4096:
             raise IntentError("not_admitted", "Invalid captured chunk budget")
         if texts != {source.original_input_ref: self.text}:
