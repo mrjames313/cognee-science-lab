@@ -45,6 +45,8 @@ def occurrence(after, text, anchor=None):
 def declare_group(
     payload, old, key, rid, name, description, occurrences, resolution, ref
 ):
+    """Declare a fresh group. `resolution` is the reviewed decision it copies,
+    accepted or unresolved, from an old record or one the caller builds."""
     entity_id = str(fresh_mention_id(old.identity_data_id, payload["revision"], key))
     payload["entity_constructions"][entity_id] = dict(
         name=name, description=description
@@ -58,10 +60,8 @@ def declare_group(
         producer_ref=ref,
     )
     payload["mention_resolutions"][rid] = dict(
+        resolution.model_dump(mode="json"),
         group_ref=key,
-        status="accepted",
-        target_entity_id=str(resolution.target_entity_id),
-        input_refs=list(resolution.input_refs),
         producer_ref=ref,
         explanation=None,
     )

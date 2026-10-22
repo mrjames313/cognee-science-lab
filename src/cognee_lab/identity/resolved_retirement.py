@@ -45,7 +45,7 @@ async def retirement_checks(publisher, source, mid):
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from .models import ChunkInput
 
-    target = source.variant_assignments["v01"].target_entity_id
+    target = source.inputs["existing_A"].entity_id
     fact_id = UUID(generate_edge_object_id(str(mid), str(OSCILLATIONS_ID), "limits"))
     evidence = await get_edge_evidence_records(
         [fact_id], source.dataset_id, per_edge_limit=100, total_limit=100

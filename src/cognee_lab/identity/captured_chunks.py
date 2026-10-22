@@ -11,10 +11,15 @@ ADDITION = "stage6-captured-occurrence-addition"
 SPLIT = "stage6-captured-group-split"
 COMBINATION = "stage6-captured-group-combination"
 ADDED_FACT_TEXT = "the controller limits oscillations"
+REINTERPRET_ENTITY = "stage6-captured-reinterpretation-new-entity"
+REINTERPRET_UNRESOLVED = "stage6-captured-reinterpretation-unresolved"
+TO_MENTION = "stage6-captured-kind-change-to-mention"
+TO_REUSABLE = "stage6-captured-kind-change-to-reusable"
 
 
 @dataclass(frozen=True)
 class CapturedGroup:
+    key: str
     created: int
     creator: str | None
     fact: str | None
@@ -24,37 +29,43 @@ class CapturedGroup:
 # the group; None marks an original group. A group has retired only when its
 # creating edit is in the source's lineage and the source no longer declares
 # it, because different edit sequences reach the same revision number. This
-# relies on describers only adding producers, never removing one.
-CAPTURED_GROUPS = {
-    "g01": CapturedGroup(1, None, FACT_TEXT),
-    "g03": CapturedGroup(2, ADDITION, ADDED_FACT_TEXT),
-    "g04": CapturedGroup(2, SPLIT, None),
-    "g05": CapturedGroup(2, SPLIT, FACT_TEXT),
-    "g06": CapturedGroup(3, COMBINATION, FACT_TEXT),
-}
+# relies on describers only adding producers, never removing one. Edits that
+# a root never combines may reuse a key, as g03 shows, so a source reads only
+# the entries of its own lineage.
+CAPTURED = (
+    CapturedGroup("g01", 1, None, FACT_TEXT),
+    CapturedGroup("g03", 2, ADDITION, ADDED_FACT_TEXT),
+    CapturedGroup("g04", 2, SPLIT, None),
+    CapturedGroup("g05", 2, SPLIT, FACT_TEXT),
+    CapturedGroup("g06", 3, COMBINATION, FACT_TEXT),
+    CapturedGroup("g03", 2, REINTERPRET_ENTITY, FACT_TEXT),
+    CapturedGroup("g03", 2, REINTERPRET_UNRESOLVED, FACT_TEXT),
+    CapturedGroup("g03", 2, TO_MENTION, None),
+)
+
+
+def lineage_groups(source):
+    """The captured groups that the source's edits can have declared, by key."""
+    lineage = {p.implementation for p in source.producers.values()}
+    return {g.key: g for g in CAPTURED if g.creator is None or g.creator in lineage}
 
 
 def captured_facts(source):
     """Explicit fixture outputs, independent of model inference or label matching."""
-    for key, group in CAPTURED_GROUPS.items():
+    for key, group in lineage_groups(source).items():
         if group.fact and key in source.mention_groups:
             yield key, group.fact
 
 
 def retired_keys(source):
-    lineage = {p.implementation for p in source.producers.values()}
-    return [
-        key
-        for key, group in CAPTURED_GROUPS.items()
-        if key not in source.mention_groups
-        and (group.creator is None or group.creator in lineage)
-    ]
+    return [key for key in lineage_groups(source) if key not in source.mention_groups]
 
 
 def retired_facts(source):
+    groups = lineage_groups(source)
     for key in retired_keys(source):
-        if CAPTURED_GROUPS[key].fact:
-            yield key, CAPTURED_GROUPS[key].fact
+        if groups[key].fact:
+            yield key, groups[key].fact
 
 
 def fixture_mention_id(source, key="g01"):
@@ -63,11 +74,10 @@ def fixture_mention_id(source, key="g01"):
     if group is not None:
         return group.entity_id
     if key != "g01":
-        if key not in CAPTURED_GROUPS:
+        groups = lineage_groups(source)
+        if key not in groups:
             raise IntentError("fixture_shape", f"Unknown captured group {key}")
-        return fresh_mention_id(
-            source.identity_data_id, CAPTURED_GROUPS[key].created, key
-        )
+        return fresh_mention_id(source.identity_data_id, groups[key].created, key)
     if source.identity_data_id == UUID("718efce2-4251-5f6f-8318-417bb4dd3525"):
         return UUID("233cb019-3986-5864-88bc-91f334a64372")
     raise IntentError(
@@ -128,7 +138,7 @@ def fact_chunks(source, chunks, *, group_key="g01", fact_text=FACT_TEXT):
         fixture_mention_id(source)
         if fact_text in text and not any(
             k in source.mention_groups
-            for k, g in CAPTURED_GROUPS.items()
+            for k, g in lineage_groups(source).items()
             if g.fact == fact_text
         ):
             raise IntentError(
