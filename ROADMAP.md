@@ -787,6 +787,7 @@ Entries below retain the decisions and evidence status at their stated date. The
 
 - Recorded Checkpoint C: `revise-occurrences` publishes one edit that removes, keeps and adds occurrences of a continuing group and retires another group, with no admission change.
 - Set the next task to choosing the next step-4 item with the user.
+- Added a CI step that runs the occurrence check at its default bound after the unit tests, with a 30-minute job timeout.
 - Brought "Current immediate work" up to date with the general map, and added dated entries for the general map and the mixed revision that record why the plan changed and how the remaining step-4 work changed.
 
 ## Revision record — 2026-10-21 (general occurrence map)
