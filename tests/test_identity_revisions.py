@@ -215,7 +215,22 @@ async def test_a_correction_may_not_move_an_occurrence_to_another_span_with_the_
     assert refused.value.code == "occurrence_moved"
 
 
-@pytest.mark.parametrize("listed", [True, False])
+async def test_a_correction_may_not_add_an_occurrence_without_a_rebuild(
+    source_payload,
+):
+    old = IdentitySource.model_validate_json(json.dumps(source_payload))
+    payload = corrected(old).model_dump(mode="json")
+    inside_limits = TEXT.index("limits") + 3
+    payload["mention_groups"]["g01"]["occurrences"].append(
+        dict(start=inside_limits, end=inside_limits + 2, text="it")
+    )
+    added = IdentitySource.model_validate_json(json.dumps(payload))
+    with pytest.raises(IntentError, match="requires a text change") as refused:
+        await correct(old, added)
+    assert refused.value.code == "rebuild_required"
+
+
+@pytest.mark.parametrize("listed", ["record", "group", "none"])
 async def test_a_corpus_input_exempts_an_entity_only_when_a_record_lists_it(
     source_payload, listed
 ):
@@ -229,10 +244,14 @@ async def test_a_corpus_input_exempts_an_entity_only_when_a_record_lists_it(
     payload["variant_assignments"]["v02"] = dict(
         payload["variant_assignments"]["v01"],
         target_entity_id=existing,
-        input_refs=["doc01", "existing_Z"] if listed else ["doc01"],
+        input_refs=["doc01", "existing_Z"] if listed == "record" else ["doc01"],
     )
+    if listed == "group":
+        # Input validation also checks a group's inputs, but only a decision
+        # that names the Entity may exempt it from derivation.
+        payload["mention_groups"]["g01"]["input_refs"].append("existing_Z")
     new = IdentitySource.model_validate_json(json.dumps(payload))
-    if listed:
+    if listed == "record":
         fate = await correct(old, new, present={existing})
         assert fate.continuing == {"g01"}
     else:

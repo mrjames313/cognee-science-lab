@@ -21,15 +21,18 @@ def transition(old, texts, text_change):
 async def admit_replacement(graph, old, source, texts, text_change, *, retry):
     """The one admission of a replacement. A first attempt also probes the
     graph for the UUIDs the revision introduces. Without a text change nothing
-    rebuilds the document, so a retired or fresh group is refused."""
+    rebuilds the document, so a retired or fresh group, or an added occurrence,
+    is refused."""
     before, after, occurrence_map = transition(old, texts, text_change)
     fate = admit(old, source, before, after, occurrence_map, first_attempt=not retry)
     if not retry:
         await check_absent_from_graph(graph, old, source, fate)
-    if text_change is None and (fate.retired or fate.fresh):
+    mapped = sum(ref is not None for refs in occurrence_map.values() for ref in refs)
+    occurrences = sum(len(g.occurrences) for g in source.mention_groups.values())
+    if text_change is None and (fate.retired or fate.fresh or occurrences > mapped):
         raise IntentError(
             "rebuild_required",
-            "Retiring or adding a group requires a text change and its rebuild",
+            "Retiring or adding a group or an occurrence requires a text change and its rebuild",
         )
     return fate
 
