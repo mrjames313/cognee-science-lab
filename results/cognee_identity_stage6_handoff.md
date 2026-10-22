@@ -8,7 +8,7 @@
 
 **Test configuration:** Ladybug, LanceDB and SQLite with shared physical storage. These providers do not define implementation dependencies.
 
-**Current status (2026-10-20):** The architecture review is complete. Bounded implementations cover parts of Stage-6 steps 1–4, including captured occurrence additions. Step 4 remains partial. Standard entry-point integration and broader retrieval remain incomplete.
+**Current status (2026-10-22):** The architecture review is complete. Bounded implementations cover parts of Stage-6 steps 1–4, including one general occurrence map for every text change. Step 4 remains partial. Standard entry-point integration and broader retrieval remain incomplete.
 
 Start a new session with [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md). It records the delivered code baseline, verification limits and next task. Section 11 defines the implementation sequence. Section 12 records dated checkpoints.
 
@@ -559,7 +559,7 @@ Develop sequence tests with each step. [SESSION_HANDOFF.md](../docs/SESSION_HAND
 | M0 / 1 | Runtime forms/schema, exact native chunk mapping and portable bookkeeping/capability checks exist. Tests cover only the initial backend profile. |
 | M1 / 2 | Captured custom Tasks publish a useful mention-anchored fact with original evidence. Explicit reconciliation works. Standard Cognify wiring and a registered public SearchType remain incomplete. |
 | M2 / 3 | Multi-source overlap, shared contributions, both withdrawal orders, singleton retention and unresolved mentions have fixtures. General exact-ID semantic conversion remains broader than the captured writer. |
-| M3 / 4 | Corrections, captured prefix/rechunk edits, partial removal, unresolved/resolved group retirement and captured additions/new-group publication are implemented. The remaining areas appear below. |
+| M3 / 4 | Corrections, captured prefix/rechunk edits, partial removal, unresolved/resolved group retirement, captured additions/new-group publication, a captured split and combination, one general occurrence map and a captured mixed edit are implemented. The remaining areas appear below. |
 | M4 / 5 | Standard-entry-point wiring, consumed-store admission and broader scoped retrieval/delivery/offline diagnostics remain unimplemented. |
 | M5 / 6 | Seeded rules/model Describe and separate consistency/quality evaluation remain unimplemented. |
 | Checkpoint | Review R1–R6 evidence and G01–G18 transfer status before Stages 7–8. |
@@ -569,12 +569,12 @@ Develop sequence tests with each step. [SESSION_HANDOFF.md](../docs/SESSION_HAND
 The remaining areas are:
 
 1. **Occurrence/group changes.** Representation-kind changes remain. Since 2026-10-21 one general occurrence map admits any mix of kept, removed, added and regrouped occurrences under the approved rules, with captured fixtures for removal, retirement, addition, split, combination and one mixed edit. These fixtures do not establish automatic matching.
-2. **Changed interpretation and semantic refresh.** Handle changed referents, definitions or applicability with coordinated saved decisions and regenerated facts/evidence. Unchanged-text retargeting and captured same-binding edits do not establish general semantic refresh.
+2. **Changed interpretation and semantic refresh.** Handle changed referents, definitions or applicability with coordinated saved decisions and regenerated facts/evidence. On 2026-10-22 the user decided that a changed decision retires the group and the reviewer declares a fresh group. Unchanged-text retargeting and captured same-binding edits do not establish general semantic refresh.
 3. **Dependencies.** Identify and reconsider sources that consumed changed documents, corpus fields or saved records. Support admitted span/record remapping. Current text edits reject known dependent sources. Positive dependencies alone do not identify new corpus opportunities.
 4. **Full source lifecycle.** Coordinate original removal, generated-source retirement/rebuild and authorized endpoint reconstruction. Preserve remaining owners. Distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal retains Data/descriptions and original facts, so it does not implement full source Forget.
 5. **Verification and recovery.** Extend revision/attempt, eligibility, ownership, index, evidence and retirement checks across these operations. Include incomplete/missing-plan diagnostics. General crash recovery is not a new prerequisite.
 
-Update, 2026-10-22: the separate `occurrence_retention`, `occurrence_continuity` and `occurrence_regrouping` admissions were replaced by one general occurrence map on 2026-10-21. A changed group decision means a fresh group, decided by the user on 2026-10-22. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the rules, the decisions, the proposed order and the next task. Group continuity alone still does not authorize fact transfer.
+[SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the rules, the decisions, the proposed order and the next task. Group continuity alone does not authorize fact transfer.
 
 ### Step 5 / M4: integration and retrieval
 

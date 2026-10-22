@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). **Next task:** pick the next step-4 item with the user. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). **Next task:** proposed, waiting for the user's approval: a captured single-document changed-interpretation case. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -243,32 +243,31 @@ The assistant drafted a mixed addition and removal case. The user asked why one 
 
 **Checkpoint C, completed 2026-10-22.** `revise-occurrences` publishes the case the user reviewed on 2026-10-21. g01 keeps `it` ([90,92) to [46,48)), loses `the controller` at [49,63) and gains `the controller` at [86,100); g02 retires. Its map, `{"g01": [null, ["g01", 0]], "g02": [null]}`, equals the removal map, because a map states only where old occurrences went. No admission code changed. `describe_mixed` and `describe_removal` share `keep_g01_retire_g02` in `occurrence_fixture.py`, and every captured describer is now built from the helpers in `captured_revision.py`; a byte comparison showed all seven describers produce the same descriptions as before. The added occurrence lies in a chunk without fact evidence, so g01 marks two chunks while its fact uses one. The [mixed occurrences guide](stage6_identity_mixed_occurrences.md) has the texts, decisions, run and evidence. Evidence, by the assistant on the user's Mac on 2026-10-21 and 2026-10-22: 269 unit tests passed. `support/occurrence_check.py` agreed with the oracle on all 540,045 worlds and 29,793 corruptions, and `--mutants` caught all 20 breaks. The ledger check passed. A native run of 16 tests in six touched files gave 13 passed and 3 failed. The 3 failures were wrong test expectations: the assistant had assumed four chunks where the native chunker makes five, and had assumed a healthy `reconcile` keeps the text-change record, which it does not. The other 13 tests passed in that run. After the corrections, only the 5 tests in `test_identity_mixed_native.py` and `test_identity_occurrences_native.py` were rerun, and all passed. No file under `src/` changed after the first run. Verify journeys O7 (17 PASS rows) and O8 (12 PASS rows for each of two fault stages) gave 0 FAIL. Each count includes three lab-store guard rows. The `journey all` run is under [Verification skill](#verification-skill).
 
-### Next task
-
-Pick the next step-4 item with the user, as a concrete case to review before any code. Run `support/occurrence_check.py` for any change to `admission.py`. The remaining step-4 items are listed above. The general map leaves these refused, and each is a separate semantic decision rather than another mix of adding and removing:
-
-- A continuing group whose resolution or meaning changes (step-4 item 2, changed interpretation).
-- A change of representation kind, using separate suitable Entities.
-- An occurrence that moves to another document, span-scoped variants, and dependent sources (step-4 item 3).
-
 ### Step-4 decisions, 2026-10-22
 
 The user and the assistant reviewed the remaining step-4 items on 2026-10-22.
 
 **Decisions the user made.**
 
-1. A changed decision means a fresh group. If an edit changes what a group refers to (a different referent, resolved to unresolved or the reverse), the group does not continue. The reviewer retires it and declares a fresh group, and its facts are generated again. A retired ID is never served with a new meaning. This keeps the current admission rule (`check_continuing_decisions`). A scope-only change to the same Entity might later be treated like the unchanged-text retarget correction; decide that only when a concrete case needs it.
-2. No successor record yet. Nothing records that an old group ID was replaced by a new one, beyond the revision's result file. Decide it with step-4 item 3 or the step-5 retrieval contract, where its callers are designed.
+1. A changed decision in a text edit means a fresh group. If a text edit changes what a group refers to (a different referent, resolved to unresolved or the reverse), the group does not continue. The group retires. The reviewer declares a fresh group. Facts are generated again from the fresh group. A retired ID is never served with a new meaning. This keeps the current admission rule (`check_continuing_decisions`). The existing correction that retargets a group without a text change is the one exception: it changes a continuing group's target in place and retires nothing. A variant applicability change is refused for the whole document today (`check_variants_unchanged`), and retire-and-fresh cannot express it. Decide how to treat it only when a concrete case needs it.
+2. No successor record yet. Nothing records that an old group ID was replaced by a new one, beyond the revision's result file and the current revision's saved plan, which the next revision overwrites. Decide it with step-4 item 3 or the step-5 retrieval contract, where its callers are designed.
 
 **What follows for each item.**
 
-- Changed interpretation (item 2) needs only a captured single-document fixture under the existing rules: retire, declare fresh, regenerate facts. It needs no logic to correct references. References inside the document are rebuilt by the retire-and-fresh path. References from other sources are dependencies (item 3), and a known dependent source is refused today.
+- Changed interpretation (item 2) needs no logic to correct references. References inside the document are rebuilt by the retire-and-fresh path. References from other sources are dependencies (item 3). Today a source that consumes the edited text is refused (`reject_dependents`). A source that consumes a mention UUID as a corpus object or saved record is not detected; that is an item-3 gap, and no fixture has one.
+- Under the existing rules, a fresh group may resolve only to an Entity whose recipe the old description already declared, or stay unresolved (`check_recipes`). So a captured case can move a group to unresolved, or to an already declared Entity, with no rule change. Retargeting to a new Entity needs a recipe-rule change. That overlaps item 1's open question of which source owns a new Entity.
 - Representation-kind changes (item 1): open decisions are which source owns the new reusable Entity, and what happens to other documents that use it. A single-document case can be specified now.
-- Dependencies (item 3) cannot be fully specified yet. The dependency record and the propagation policy (block, mark unavailable, queue for review or reconsider) depend on real dependent sources in the user's intended use. The cross-document parts of items 1, 2 and 4 wait for this policy.
+- Dependencies (item 3), including span-scoped variants and moves to another document, cannot be fully specified yet. The dependency record and the propagation policy (block, mark unavailable, queue for review or reconsider) depend on real dependent sources in the user's intended use. The cross-document parts of items 1, 2 and 4 wait for this policy.
 - Full source lifecycle (item 4): removing a source that no other source consumed can be specified now. Removing a consumed source waits for item 3.
 - Verification and recovery (item 5) follows each operation. Open choice: whether new operations get a small-world oracle check like admission.
 
-Proposed order: item 2's single-document case, then item 1's, while the user sketches a real dependent-source scenario for item 3.
+### Next task
+
+Proposed, waiting for the user's approval: a captured single-document case for changed interpretation (step-4 item 2), then one for a representation-kind change (item 1). Meanwhile the user sketches a real dependent-source scenario for dependencies (item 3). Review each case with the user before any code. Run `support/occurrence_check.py` for any change to `admission.py`. [Step-4 decisions, 2026-10-22](#step-4-decisions-2026-10-22) records the decisions and what can be specified now. The general map leaves these refused, and each is a separate semantic decision rather than another mix of adding and removing:
+
+1. A continuing group whose resolution or meaning changes (item 2). Decided: the group retires and the reviewer declares a fresh group.
+2. A change of representation kind, using separate suitable Entities (item 1).
+3. An occurrence that moves to another document, span-scoped variants, and dependent sources (item 3).
 
 ### Tracked follow-ups
 
