@@ -6,17 +6,21 @@ from uuid import uuid4
 
 import pytest
 
+from test_identity_additions import addition
 from test_identity_occurrences import example
 from test_identity_revisions import Graph
 from cognee_lab.identity.admission import GroupFate
 from cognee_lab.identity.captured_chunks import (
+    ADDED_FACT_TEXT,
     FACT_TEXT,
     captured_facts,
     fact_chunks,
+    lineage_groups,
     retired_facts,
     retired_mentions,
 )
 from cognee_lab.identity.captured_text import BEFORE
+from cognee_lab.identity.kind_change import describe_to_mention
 from cognee_lab.identity.models import Accepted, IdentitySource, Unresolved
 from cognee_lab.identity.reinterpretation import (
     NEW_ENTITY_AFTER,
@@ -184,3 +188,26 @@ def test_the_describers_refuse_any_root_but_a_fresh_doc01(source_payload, descri
     with pytest.raises(IntentError) as refused:
         describe(old, NEW_ENTITY_AFTER, [chunk])
     assert refused.value.code == "fixture_scope"
+
+
+def test_a_group_key_reads_the_entry_of_the_sources_own_lineage(source_payload):
+    facts = {}
+    old, _, intended, _, _, _ = reinterpreted(source_payload, "new_entity")
+    facts["reinterpretation"] = lineage_groups(intended)["g03"].fact
+    _, chunk, added = addition(source_payload)
+    facts["addition"] = lineage_groups(added)["g03"].fact
+    chunk = SimpleNamespace(
+        id=uuid4(),
+        chunk_index=0,
+        text=BEFORE,
+        is_part_of=SimpleNamespace(id=old.inputs["doc01"].data_id),
+    )
+    facts["kind change"] = lineage_groups(describe_to_mention(old, BEFORE, [chunk]))[
+        "g03"
+    ].fact
+    assert facts == {
+        "reinterpretation": FACT_TEXT,
+        "addition": ADDED_FACT_TEXT,
+        "kind change": None,
+    }
+    assert "g03" not in lineage_groups(old)
