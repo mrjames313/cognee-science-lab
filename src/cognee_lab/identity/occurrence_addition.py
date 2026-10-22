@@ -11,14 +11,15 @@ FIRST = " During startup, the controller remains active.\n\n"
 SECOND = "After calibration, the controller limits oscillations.\n"
 BASE = BEFORE.rstrip("\n")
 AFTER = BASE + FIRST + SECOND
-CONTINUITY = {"g01": [0, 1], "g02": [0]}
+# g01 keeps both occurrences and gains a third; g02 is unchanged; g03 is fresh.
+ADDITION_MAP = {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}
 
 
 def describe_addition(old, before, chunks):
     if (
         old.revision != 1
         or before != BEFORE
-        or set(old.mention_groups) != set(CONTINUITY)
+        or set(old.mention_groups) != set(ADDITION_MAP)
     ):
         raise IntentError(
             "fixture_scope",

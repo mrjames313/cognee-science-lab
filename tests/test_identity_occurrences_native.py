@@ -5,6 +5,7 @@ import json
 import pytest
 
 from test_identity_native import command
+from cognee_lab.identity.occurrence_fixture import REMOVAL_MAP
 
 
 def check_removal(before, after):
@@ -43,7 +44,7 @@ def check_removal(before, after):
     if "text_changes" in after:
         (change,) = after["text_changes"]
         assert change["position_shift"] is None
-        assert change["occurrence_retention"] == {"g01": [1], "g02": []}
+        assert change["occurrence_map"] == REMOVAL_MAP
         assert (
             change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
         )
@@ -113,10 +114,7 @@ def test_native_occurrence_removal_recovers_exact_continuity_and_retirement(
         for r in json.loads(command(root, "status").stdout)["publications"]
         if r["state"] == "failed"
     )
-    assert failed["plan"]["text_change"]["occurrence_retention"] == {
-        "g01": [1],
-        "g02": [],
-    }
+    assert failed["plan"]["text_change"]["occurrence_map"] == REMOVAL_MAP
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())
     check_removal(before, after)

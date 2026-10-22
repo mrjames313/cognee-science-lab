@@ -6,16 +6,11 @@ from uuid import UUID
 from .models import ChunkInput, IdentitySource
 from .multisource import current_sources, snapshot
 from .publish import Publisher
+from .admission import identity_map
 from .text_changes import TextChange, chunk_text, original_context, read_original
 from .validation import IntentError, text_digest
 
 PREFIX = "Revision note: Δ calibration schedule updated.\n\n"
-DECISION_METHODS = dict(
-    prefix="Captured review of unchanged interpretation; programmatic exact offset remap",
-    retention="Captured survivor review; programmatic exact span validation and whole-document rebuild",
-    continuity="Captured addition review; explicit old-to-new occurrence mapping and whole-document rebuild",
-    regrouping="Captured regrouping review; explicit old-to-new group and occurrence mapping, fresh groups, regenerated facts and whole-document rebuild",
-)
 
 
 def describe_prefix_edit(old, text, chunks, *, prefix=PREFIX):
@@ -137,6 +132,22 @@ async def maintain_one(
         pass
 
 
+def decision_method(source):
+    """The captured review that stated this revision's groups and decisions."""
+    refs = {
+        r.producer_ref
+        for r in [*source.mention_groups.values(), *source.mention_resolutions.values()]
+    }
+    return [
+        dict(
+            implementation=source.producers[ref].implementation,
+            policy=source.producers[ref].configuration.get("policy"),
+            mapping="explicit old-to-new occurrence map; whole-document rebuild",
+        )
+        for ref in sorted(refs)
+    ]
+
+
 async def transition_summary(publisher, row):
     from .fixture import OSCILLATIONS_ID
     from cognee.modules.engine.utils import generate_edge_object_id
@@ -146,7 +157,7 @@ async def transition_summary(publisher, row):
     source = IdentitySource.model_validate_json(row["description"])
     from .captured_chunks import fixture_mention_id
 
-    change = TextChange(**row["plan"]["text_change"])
+    change = TextChange.from_plan(row["plan"])
     key = source.original_input_ref
     old_ids = {
         str(i.chunk_id) for i in old.inputs.values() if isinstance(i, ChunkInput)
@@ -172,7 +183,7 @@ async def transition_summary(publisher, row):
         position_unit="Unicode code points; document-relative [start, end)",
         position_shift=(
             len(change.text) - len(change.previous_text)
-            if change.mode[0] == "prefix"
+            if change.is_prefix_shift
             else None
         ),
         text_length_delta=len(change.text) - len(change.previous_text),
@@ -233,9 +244,7 @@ async def transition_summary(publisher, row):
             )
             for k, g in source.mention_groups.items()
         },
-        occurrence_retention=change.occurrence_retention,
-        occurrence_continuity=change.occurrence_continuity,
-        occurrence_regrouping=change.occurrence_regrouping,
+        occurrence_map=change.occurrence_map,
         added_groups={
             k: dict(
                 entity_id=str(g.entity_id),
@@ -277,7 +286,7 @@ async def transition_summary(publisher, row):
             for k, g in old.mention_groups.items()
             if k not in source.mention_groups
         },
-        decision_method=DECISION_METHODS[change.mode[0]],
+        decision_method=decision_method(source),
     )
 
 
@@ -313,6 +322,7 @@ async def run(args, root):
     change = TextChange(
         previous_text=before,
         text=prefix + before,
+        occurrence_map=identity_map(old),
         chunk_budget=await recorded_budget(old, publisher.graph),
     )
     chunks = await chunk_text(

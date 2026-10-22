@@ -45,6 +45,8 @@ The paragraph grouping and the resolutions are reviewed inputs. The process does
 
 ## Admission and recovery intent
 
+**Superseded on 2026-10-21.** The general occurrence map replaced the separate admission modes. The command now saves `TextChange.occurrence_map`, and `admit` in `src/cognee_lab/identity/admission.py` applies one rule set to every edit. See "General occurrence map, approved 2026-10-21" in [the session handoff](SESSION_HANDOFF.md). The split and combination maps below are unchanged as general maps. The general rules drop "at least one group must retire" and "in order", and the result field `occurrence_regrouping` is now `occurrence_map`. The text below records this checkpoint as it was built.
+
 `TextChange.occurrence_regrouping` maps each **old group key** to a list of `[new group key, new occurrence index]` pairs. The list has one pair for each old occurrence, in old order. The split map is:
 
 ```json

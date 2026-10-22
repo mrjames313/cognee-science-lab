@@ -5,7 +5,7 @@ import pytest
 
 from test_identity_native import command
 from cognee_lab.identity.captured_chunks import FACT_TEXT
-from cognee_lab.identity.group_regrouping import COMBINE_AFTER, COMBINE_REGROUPING
+from cognee_lab.identity.group_regrouping import COMBINE_AFTER, COMBINE_MAP
 from cognee_lab.identity.validation import fresh_mention_id
 
 G01 = "233cb019-3986-5864-88bc-91f334a64372"
@@ -56,9 +56,7 @@ def check_combination(root, before, after):
         assert checks["shared_relationship_text_indexed"]
     if "text_changes" in after:
         (change,) = after["text_changes"]
-        assert change["occurrence_regrouping"] == COMBINE_REGROUPING
-        assert change["occurrence_retention"] is None
-        assert change["occurrence_continuity"] is None
+        assert change["occurrence_map"] == COMBINE_MAP
         assert change["position_shift"] is None
         assert (
             change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
@@ -176,7 +174,7 @@ def test_native_combine_recovers_the_exact_saved_group(tmp_path):
         if r["state"] == "failed"
     )
     assert row["revision"] == 3 and row["verified_revision"] == 2
-    assert row["plan"]["text_change"]["occurrence_regrouping"] == COMBINE_REGROUPING
+    assert row["plan"]["text_change"]["occurrence_map"] == COMBINE_MAP
     intended = json.loads(row["description"])
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())

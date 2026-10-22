@@ -444,7 +444,7 @@ async def run(args, root):
                     await maintain_one(
                         publisher,
                         selected,
-                        TextChange(**row["plan"]["text_change"]),
+                        TextChange.from_plan(row["plan"]),
                         expected_revision=selected.revision,
                     )
                 else:

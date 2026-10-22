@@ -8,27 +8,27 @@ from .captured_chunks import bind_chunks
 from .captured_text import BEFORE
 from .group_regrouping import (
     COMBINE_AFTER,
-    COMBINE_REGROUPING,
+    COMBINE_MAP,
     SPLIT_AFTER,
-    SPLIT_REGROUPING,
+    SPLIT_MAP,
     describe_combination,
     describe_split,
 )
 from .models import IdentitySource
-from .occurrence_addition import AFTER as added_text, CONTINUITY, describe_addition
+from .occurrence_addition import AFTER as added_text, ADDITION_MAP, describe_addition
 from .resolved_retirement import (
     AFTER as retired_text,
-    RETENTION as retired_indices,
+    RETIREMENT_MAP,
     describe_retirement,
 )
 from .validation import IntentError, text_digest
 
 AFTER = "Helios controller (HC) regulates heating, and it limits oscillations.\n"
-RETENTION = {"g01": [1], "g02": []}
+REMOVAL_MAP = {"g01": [None, ["g01", 0]], "g02": [None]}
 
 
 def describe_removal(old, before, chunks):
-    if before != BEFORE or set(old.mention_groups) != set(RETENTION):
+    if before != BEFORE or set(old.mention_groups) != set(REMOVAL_MAP):
         raise IntentError(
             "fixture_scope",
             "Use doc01 of a fresh chunked-fixture for captured occurrence removal",
@@ -70,7 +70,7 @@ class OccurrenceCommand:
     after: str
     describe: Callable
     result_name: str
-    mode: dict
+    occurrence_map: dict
 
 
 COMMANDS = {
@@ -78,31 +78,31 @@ COMMANDS = {
         AFTER,
         describe_removal,
         "occurrence_revision_result.json",
-        dict(occurrence_retention=RETENTION),
+        REMOVAL_MAP,
     ),
     "retire-resolved-group": OccurrenceCommand(
         retired_text,
         describe_retirement,
         "resolved_retirement_result.json",
-        dict(occurrence_retention=retired_indices),
+        RETIREMENT_MAP,
     ),
     "add-occurrences": OccurrenceCommand(
         added_text,
         describe_addition,
         "occurrence_addition_result.json",
-        dict(occurrence_continuity=CONTINUITY),
+        ADDITION_MAP,
     ),
     "split-group": OccurrenceCommand(
         SPLIT_AFTER,
         describe_split,
         "group_split_result.json",
-        dict(occurrence_regrouping=SPLIT_REGROUPING),
+        SPLIT_MAP,
     ),
     "combine-groups": OccurrenceCommand(
         COMBINE_AFTER,
         describe_combination,
         "group_combination_result.json",
-        dict(occurrence_regrouping=COMBINE_REGROUPING),
+        COMBINE_MAP,
     ),
 }
 
@@ -139,8 +139,8 @@ async def run(args, root):
     change = TextChange(
         before,
         command.after,
+        command.occurrence_map,
         await recorded_budget(old, publisher.graph),
-        **command.mode,
     )
     chunks = await chunk_text(
         command.after, await original_context(old, ctx), change.chunk_budget

@@ -7,21 +7,18 @@ import pytest
 from pydantic import ValidationError
 
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.admission import admit_remap
+from cognee_lab.identity.admission import admit, identity_map
 from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.validation import IntentError, validate_inputs
 
 
-def test_a_text_change_names_one_transition_mode():
-    assert TextChange("a", "ba").mode == ("prefix", None)
-    assert TextChange("a", "b", occurrence_retention={"g": []}).mode == (
-        "retention",
-        {"g": []},
-    )
-    assert TextChange("a", "b", occurrence_regrouping={}).mode == ("regrouping", {})
-    with pytest.raises(IntentError, match="Select one"):
-        TextChange("a", "b", occurrence_continuity={}, occurrence_regrouping={}).mode
+def test_only_an_unmoved_prefix_insertion_is_a_prefix_shift():
+    unmoved = {"g": [["g", 0], ["g", 1]]}
+    assert TextChange("a", "ba", unmoved).is_prefix_shift
+    assert not TextChange("a", "b", unmoved).is_prefix_shift
+    assert not TextChange("a", "ba", {"g": [None, ["g", 0]]}).is_prefix_shift
+    assert not TextChange("a", "ba", {"g": [["g", 1], ["g", 0]]}).is_prefix_shift
 
 
 def example(source_payload):
@@ -41,7 +38,7 @@ def test_exact_unicode_remap_preserves_occurrence_identity_and_reviews_context(
     source_payload,
 ):
     old, before, after, chunk, intended = example(source_payload)
-    assert admit_remap(old, intended, before, after).fresh == frozenset()
+    assert admit(old, intended, before, after, identity_map(old)).fresh == frozenset()
     assert len(PREFIX.encode("utf-8")) != len(PREFIX)
     assert intended.inputs["chunk01"].chunk_id == chunk.id
     assert (
@@ -58,10 +55,16 @@ def test_exact_unicode_remap_preserves_occurrence_identity_and_reviews_context(
 
 
 @pytest.mark.parametrize(
-    "kind", ["stale_offsets", "changed_interpretation", "group_uuid", "arbitrary_edit"]
+    "kind,code,message",
+    [
+        ("stale_offsets", "occurrence_changed", "exact document slice"),
+        ("changed_interpretation", "not_admitted", "keeps its reviewed resolutions"),
+        ("group_uuid", "fresh_key_reused", "key that no old group used"),
+        ("arbitrary_edit", "source_changed", "fingerprints disagree"),
+    ],
 )
 def test_text_admission_requires_exact_edit_and_reviewed_semantics(
-    source_payload, kind
+    source_payload, kind, code, message
 ):
     old, before, after, chunk, intended = example(source_payload)
     payload = intended.model_dump(mode="json")
@@ -83,8 +86,9 @@ def test_text_admission_requires_exact_edit_and_reviewed_semantics(
     else:
         after = after.replace("limits", "increases")
     changed = IdentitySource.model_validate_json(json.dumps(payload))
-    with pytest.raises(IntentError):
-        admit_remap(old, changed, before, after)
+    with pytest.raises(IntentError, match=message) as refused:
+        admit(old, changed, before, after, identity_map(old))
+    assert refused.value.code == code
 
 
 async def test_current_text_hash_does_not_make_stale_offsets_valid(source_payload):

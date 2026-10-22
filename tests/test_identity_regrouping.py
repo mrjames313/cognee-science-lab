@@ -15,9 +15,9 @@ from cognee_lab.identity.captured_chunks import (
 )
 from cognee_lab.identity.group_regrouping import (
     COMBINE_AFTER,
-    COMBINE_REGROUPING,
+    COMBINE_MAP,
     SPLIT_AFTER,
-    SPLIT_REGROUPING,
+    SPLIT_MAP,
     describe_combination,
     describe_split,
 )
@@ -29,10 +29,10 @@ from cognee_lab.identity.resolved_retirement import AFTER as RETIRED_AFTER
 from cognee_lab.identity.resolved_retirement import describe_retirement
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.admission import (
-    admit_occurrence_regrouping,
-    admit_remap,
-    check_revision_scoped_ids,
-    classify_regrouping,
+    GroupFate,
+    admit,
+    identity_map,
+    parse_occurrence_map,
 )
 from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import (
@@ -54,14 +54,8 @@ def split(payload):
     return old, chunk, describe_split(old, BEFORE, [chunk])
 
 
-def first_attempt(old, source, before, after, mapping):
-    admitted = admit_remap(old, source, before, after, occurrence_regrouping=mapping)
-    check_revision_scoped_ids(old, source, admitted.fresh)
-    return admitted
-
-
-def admit(old, source, mapping=SPLIT_REGROUPING):
-    return first_attempt(old, source, BEFORE, SPLIT_AFTER, mapping)
+def admit_split(old, source, mapping=SPLIT_MAP):
+    return admit(old, source, BEFORE, SPLIT_AFTER, parse_occurrence_map(mapping))
 
 
 def rebuilt(intended, mutate):
@@ -72,13 +66,7 @@ def rebuilt(intended, mutate):
 
 async def test_reviewed_split_into_fresh_groups(source_payload):
     old, chunk, intended = split(source_payload)
-    assert admit(old, intended).fresh == {"g04", "g05"}
-    plan = classify_regrouping(old, intended, SPLIT_REGROUPING)
-    assert (plan.continuing, plan.retired, plan.fresh) == (
-        {"g02"},
-        {"g01"},
-        {"g04", "g05"},
-    )
+    assert admit_split(old, intended) == GroupFate({"g02"}, {"g01"}, {"g04", "g05"})
     assert list(intended.mention_groups) == ["g02", "g04", "g05"]
     assert intended.mention_groups["g02"] == old.mention_groups["g02"].model_copy(
         update=dict(producer_ref="regrouping_review")
@@ -108,10 +96,11 @@ async def test_reviewed_split_into_fresh_groups(source_payload):
     assert set(retired_mentions(intended)) == {"g01"}
     assert fact_chunks(intended, [chunk], group_key="g05") == [chunk]
     assert fact_chunks(intended, [chunk], group_key="g01") == []
-    with pytest.raises(IntentError, match="prefix insertion"):
-        admit_remap(old, intended, BEFORE, SPLIT_AFTER)
-    change = TextChange(BEFORE, SPLIT_AFTER, occurrence_regrouping=SPLIT_REGROUPING)
-    assert TextChange(**json.loads(json.dumps(asdict(change)))) == change
+    with pytest.raises(IntentError, match="not in the new source"):
+        admit(old, intended, BEFORE, SPLIT_AFTER, identity_map(old))
+    change = TextChange(BEFORE, SPLIT_AFTER, SPLIT_MAP)
+    saved = dict(text_change=json.loads(json.dumps(asdict(change))))
+    assert TextChange.from_plan(saved) == change
 
 
 @pytest.mark.parametrize(
@@ -119,7 +108,7 @@ async def test_reviewed_split_into_fresh_groups(source_payload):
     [
         {},
         {"g01": [["g04", 0], ["g05", 0]]},
-        {**SPLIT_REGROUPING, "extra": []},
+        {**SPLIT_MAP, "extra": []},
         {"g01": [["g04", 0]], "g02": [["g02", 0]]},
         {"g01": [["g04", 0], ["g04", 0]], "g02": [["g02", 0]]},
         {"g01": [["g04", 0], ["g05", 1]], "g02": [["g02", 0]]},
@@ -130,48 +119,38 @@ async def test_reviewed_split_into_fresh_groups(source_payload):
         {"g01": [["g04", 0, 0], ["g05", 0]], "g02": [["g02", 0]]},
         {"g01": [["g04", True], ["g05", 0]], "g02": [["g02", 0]]},
         {"g01": [[4, 0], ["g05", 0]], "g02": [["g02", 0]]},
-        {"g01": [("g04", 0), ("g05", 0)], "g02": [["g02", 0]]},
         {"g01": "g04,g05", "g02": [["g02", 0]]},
         {"g01": [["g04", 0], ["g05", 0]], "g02": []},
     ],
 )
 def test_split_refuses_incomplete_or_false_maps(source_payload, mapping):
     old, _, intended = split(source_payload)
-    with pytest.raises(IntentError):
-        admit(old, intended, mapping)
+    with pytest.raises(IntentError) as refused:
+        admit_split(old, intended, mapping)
+    assert refused.value.code == "occurrence_changed"
 
 
 def test_split_refuses_a_map_that_swaps_occurrence_text(source_payload):
     old, _, intended = split(source_payload)
     swapped = {"g01": [["g05", 0], ["g04", 0]], "g02": [["g02", 0]]}
     with pytest.raises(IntentError, match="text differs"):
-        admit(old, intended, swapped)
+        admit_split(old, intended, swapped)
 
 
 def test_a_group_continues_only_when_it_alone_receives_its_occurrences(
     source_payload,
 ):
     old, _, intended = split(source_payload)
-    plan = classify_regrouping(old, intended, SPLIT_REGROUPING)
-    assert plan.images["g01"] == [("g04", 0), ("g05", 0)]
-    identity = {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}
-    nothing = classify_regrouping(old, old, identity)
-    assert nothing.retired == nothing.fresh == frozenset()
-    with pytest.raises(IntentError, match="regroups at least one"):
-        admit_occurrence_regrouping(old, old, BEFORE, SPLIT_AFTER, identity)
-
-
-def test_regrouping_refuses_a_fresh_group_that_reuses_an_old_key(source_payload):
-    old, _, intended = split(source_payload)
-    kept_key = {"g01": [["g01", 0], ["g05", 0]], "g02": [["g02", 0]]}
+    assert admit_split(old, intended).continuing == {"g02"}
+    peel_off = {"g01": [["g01", 0], ["g05", 0]], "g02": [["g02", 0]]}
 
     def reshape(p):
         p["mention_groups"]["g01"] = p["mention_groups"].pop("g04")
         p["mention_resolutions"]["r04"]["group_ref"] = "g01"
 
-    with pytest.raises(IntentError, match="key that no old group used") as refusal:
-        classify_regrouping(old, rebuilt(intended, reshape), kept_key)
-    assert refusal.value.code == "incompatible_group"
+    with pytest.raises(IntentError, match="key that no old group used") as refused:
+        admit_split(old, rebuilt(intended, reshape), peel_off)
+    assert refused.value.code == "fresh_key_reused"
 
 
 def chunk_of(old, text):
@@ -202,9 +181,9 @@ def test_retirement_follows_the_source_lineage_not_its_revision(source_payload):
 @pytest.mark.parametrize(
     "mutation, code, message",
     [
-        ("continuing_uuid", "occurrence_changed", "keeps its Entity UUID"),
-        ("fresh_reuses_old_uuid", "incompatible_group", "requires a fresh Entity"),
-        ("fresh_uuid_not_derived", "incompatible_group", "derives from its source"),
+        ("continuing_uuid", "fresh_key_reused", "key that no old group used"),
+        ("fresh_reuses_old_uuid", "fresh_uuid_reused", "requires a fresh Entity"),
+        ("fresh_uuid_not_derived", "fresh_uuid_not_derived", "derives from its source"),
         ("missing_resolution", "not_admitted", "one resolution per fresh group"),
         ("reused_assignment_id", "not_admitted", "no old resolution or assignment"),
         ("retarget_continuing", "not_admitted", "keeps its reviewed resolutions"),
@@ -257,7 +236,7 @@ def test_split_rejects_hidden_semantic_and_representation_changes(
         p["variant_assignments"]["v01"]["applicability"] = dict(kind="corpus")
     changed = IdentitySource.model_validate_json(json.dumps(p))
     with pytest.raises(IntentError, match=message) as refusal:
-        admit(old, changed)
+        admit_split(old, changed)
     assert refusal.value.code == code
 
 
@@ -274,36 +253,18 @@ def test_a_saved_key_only_fresh_uuid_passes_every_check_a_retry_repeats(
             p["mention_groups"][key]["entity_id"] = legacy
 
     saved = rebuilt(intended, key_only_ids)
-    with pytest.raises(IntentError, match="derives from its source"):
-        admit(old, saved)
-    retried = admit_remap(
-        old, saved, BEFORE, SPLIT_AFTER, occurrence_regrouping=SPLIT_REGROUPING
+    with pytest.raises(IntentError, match="derives from its source") as refused:
+        admit_split(old, saved)
+    assert refused.value.code == "fresh_uuid_not_derived"
+    retried = admit(
+        old,
+        saved,
+        BEFORE,
+        SPLIT_AFTER,
+        parse_occurrence_map(SPLIT_MAP),
+        first_attempt=False,
     )
     assert retried.fresh == {"g04", "g05"}
-
-
-def test_regrouping_is_separate_from_the_other_modes(source_payload):
-    old, _, intended = split(source_payload)
-    with pytest.raises(IntentError, match="Select one"):
-        admit_remap(
-            old,
-            intended,
-            BEFORE,
-            SPLIT_AFTER,
-            {"g01": [0, 1], "g02": [0]},
-            None,
-            SPLIT_REGROUPING,
-        )
-    with pytest.raises(IntentError, match="Select one"):
-        admit_remap(
-            old,
-            intended,
-            BEFORE,
-            SPLIT_AFTER,
-            None,
-            {"g01": [0, 1], "g02": [0]},
-            SPLIT_REGROUPING,
-        )
 
 
 async def test_fresh_group_cannot_reuse_an_existing_graph_uuid(source_payload):
@@ -314,9 +275,10 @@ async def test_fresh_group_cannot_reuse_an_existing_graph_uuid(source_payload):
             return {"id": key, "type": "Entity"}
 
     publisher = SimpleNamespace(graph=Graph())
-    change = TextChange(BEFORE, SPLIT_AFTER, occurrence_regrouping=SPLIT_REGROUPING)
-    with pytest.raises(IntentError, match="already exists"):
+    change = TextChange(BEFORE, SPLIT_AFTER, SPLIT_MAP)
+    with pytest.raises(IntentError, match="already exists") as refused:
         await change.preflight(publisher, old, intended, {}, {}, None, retry=False)
+    assert refused.value.code == "fresh_uuid_reused"
 
 
 def test_the_split_fixture_ids_follow_the_saved_source(source_payload):
@@ -342,18 +304,14 @@ def combine(payload):
     return split_source, chunk, describe_combination(split_source, SPLIT_AFTER, [chunk])
 
 
-def admit_combination(old, source, mapping=COMBINE_REGROUPING):
-    return first_attempt(old, source, SPLIT_AFTER, COMBINE_AFTER, mapping)
+def admit_combination(old, source, mapping=COMBINE_MAP):
+    return admit(old, source, SPLIT_AFTER, COMBINE_AFTER, parse_occurrence_map(mapping))
 
 
 async def test_reviewed_combination_into_one_fresh_group(source_payload):
     old, chunk, intended = combine(source_payload)
-    assert admit_combination(old, intended).fresh == {"g06"}
-    plan = classify_regrouping(old, intended, COMBINE_REGROUPING)
-    assert (plan.continuing, plan.retired, plan.fresh) == (
-        {"g02"},
-        {"g04", "g05"},
-        {"g06"},
+    assert admit_combination(old, intended) == GroupFate(
+        {"g02"}, {"g04", "g05"}, {"g06"}
     )
     assert list(intended.mention_groups) == ["g02", "g06"]
     assert intended.revision == 3
@@ -403,10 +361,9 @@ async def test_reviewed_combination_into_one_fresh_group(source_payload):
         chunks={str(chunk.id): chunk},
         graph=None,
     )
-    change = TextChange(
-        SPLIT_AFTER, COMBINE_AFTER, occurrence_regrouping=COMBINE_REGROUPING
-    )
-    assert TextChange(**json.loads(json.dumps(asdict(change)))) == change
+    change = TextChange(SPLIT_AFTER, COMBINE_AFTER, COMBINE_MAP)
+    saved = dict(text_change=json.loads(json.dumps(asdict(change))))
+    assert TextChange.from_plan(saved) == change
 
 
 def test_combination_needs_the_saved_split_output(source_payload):
@@ -432,7 +389,7 @@ def test_combination_needs_the_saved_split_output(source_payload):
     [
         {},
         {"g04": [["g06", 0]], "g02": [["g02", 0]]},
-        {**COMBINE_REGROUPING, "g01": []},
+        {**COMBINE_MAP, "g01": []},
         {"g04": [["g06", 0]], "g05": [], "g02": [["g02", 0]]},
         {"g04": [["g06", 0]], "g05": [["g06", 0]], "g02": [["g02", 0]]},
         {"g04": [["g06", 0]], "g05": [["g05", 0]], "g02": [["g02", 0]]},
@@ -445,8 +402,9 @@ def test_combination_needs_the_saved_split_output(source_payload):
 )
 def test_combination_refuses_incomplete_or_false_maps(source_payload, mapping):
     old, _, intended = combine(source_payload)
-    with pytest.raises(IntentError):
+    with pytest.raises(IntentError) as refused:
         admit_combination(old, intended, mapping)
+    assert refused.value.code == "occurrence_changed"
 
 
 def test_combination_refuses_a_map_that_swaps_occurrence_text(source_payload):
@@ -462,17 +420,17 @@ def test_combination_refuses_a_group_that_takes_only_part_of_the_merge(source_pa
     def drop_it(p):
         p["mention_groups"]["g06"]["occurrences"].pop()
 
-    with pytest.raises(IntentError, match="origin"):
+    with pytest.raises(IntentError, match="not in the new source"):
         admit_combination(old, rebuilt(intended, drop_it))
 
 
 @pytest.mark.parametrize(
     "mutation, code, message",
     [
-        ("reuses_g04_uuid", "incompatible_group", "requires a fresh Entity"),
-        ("reuses_g05_uuid", "incompatible_group", "requires a fresh Entity"),
-        ("reuses_g01_uuid", "incompatible_group", "derives from its source"),
-        ("not_derived_uuid", "incompatible_group", "derives from its source"),
+        ("reuses_g04_uuid", "fresh_uuid_reused", "requires a fresh Entity"),
+        ("reuses_g05_uuid", "fresh_uuid_reused", "requires a fresh Entity"),
+        ("reuses_g01_uuid", "fresh_uuid_not_derived", "derives from its source"),
+        ("not_derived_uuid", "fresh_uuid_not_derived", "derives from its source"),
         ("missing_resolution", "not_admitted", "one resolution per fresh group"),
         ("reused_assignment_id", "not_admitted", "no old resolution or assignment"),
         ("retired_recipe_kept", "not_admitted", "Recipes are the old ones"),
@@ -572,11 +530,13 @@ def test_a_returning_group_key_cannot_reuse_a_retired_uuid(source_payload):
     again = {"g06": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}
 
     def admit_again(source):
-        return first_attempt(combined, source, COMBINE_AFTER, SPLIT_AFTER, again)
+        return admit(
+            combined, source, COMBINE_AFTER, SPLIT_AFTER, parse_occurrence_map(again)
+        )
 
     with pytest.raises(IntentError) as refusal:
         admit_again(resplit(combined, chunk, rev2))
-    assert refusal.value.code == "incompatible_group"
+    assert refusal.value.code == "fresh_uuid_not_derived"
     derived = {k: fresh_mention_id(combined.identity_data_id, 4, k) for k in rev2}
     admit_again(resplit(combined, chunk, derived))
     assert all(derived[k] != rev2[k] for k in rev2)

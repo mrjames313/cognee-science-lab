@@ -5,6 +5,7 @@ import json
 import pytest
 
 from test_identity_native import command
+from cognee_lab.identity.resolved_retirement import RETIREMENT_MAP
 
 
 def check_retired(before, after):
@@ -61,7 +62,7 @@ def check_retired(before, after):
     )
     if "text_changes" in after:
         change = after["text_changes"][0]
-        assert change["occurrence_retention"] == {"g01": [], "g02": [0]}
+        assert change["occurrence_map"] == RETIREMENT_MAP
         assert (
             change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
         )

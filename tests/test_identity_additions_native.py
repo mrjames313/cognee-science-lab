@@ -4,7 +4,7 @@ import json
 import pytest
 
 from test_identity_native import command
-from cognee_lab.identity.occurrence_addition import AFTER, CONTINUITY
+from cognee_lab.identity.occurrence_addition import AFTER, ADDITION_MAP
 
 
 def check_addition(before, after):
@@ -39,10 +39,8 @@ def check_addition(before, after):
     )
     if "text_changes" in after:
         (change,) = after["text_changes"]
-        assert change["occurrence_continuity"] == CONTINUITY
-        assert (
-            change["occurrence_retention"] is None and change["position_shift"] is None
-        )
+        assert change["occurrence_map"] == ADDITION_MAP
+        assert change["position_shift"] is None
         assert (
             change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
         )
@@ -154,7 +152,7 @@ def test_native_addition_recovers_exact_new_group_and_fact(tmp_path, stage):
         for r in json.loads(command(root, "status").stdout)["publications"]
         if r["state"] == "failed"
     )
-    assert row["plan"]["text_change"]["occurrence_continuity"] == CONTINUITY
+    assert row["plan"]["text_change"]["occurrence_map"] == ADDITION_MAP
     intended = json.loads(row["description"])
     mid = intended["mention_groups"]["g03"]["entity_id"]
     # Explicit same-intent forward completion, not regeneration of a new group ID.

@@ -60,7 +60,7 @@ There is no separate failure-recovery file. Every fault journey lives with the f
 
 These are current refusals or gaps. They are not journeys. Do not write a journey that expects them to work.
 
-- A single edit cannot mix occurrence removal and occurrence addition. Removal and addition modes do not combine (`docs/stage6_identity_occurrence_addition.md`).
+- No command makes a mixed removal and addition yet. The general occurrence map admits one, and checkpoint C adds the captured case (`docs/SESSION_HANDOFF.md`).
 - Representation-kind changes, new reusable identities in an addition, and changed interpretations are not supported.
 - An edit that would affect a dependent saved identity source is refused before it changes anything. Automatic reconsideration of that source does not exist (`docs/stage6_identity_text_changes.md`).
 - Arbitrary text edits are not supported. `edit-text` applies only the captured prefix insertion, and the removal, retirement, addition, split and combination commands apply only their captured edits (`docs/stage6_identity_group_split.md` for the last two).

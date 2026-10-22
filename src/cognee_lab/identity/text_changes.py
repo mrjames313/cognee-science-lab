@@ -2,13 +2,8 @@
 
 from dataclasses import dataclass
 
-from .admission import (
-    MODE_FIELDS,
-    admit_remap,
-    check_revision_scoped_ids,
-    select_mode,
-)
-from .models import ChunkInput, SourceTextInput
+from .admission import OccurrenceMap, OccurrenceRef, admit, parse_occurrence_map
+from .models import ChunkInput, IdentitySource, SourceTextInput
 from .validation import IntentError, map_chunks
 
 
@@ -127,18 +122,79 @@ async def chunk_text(text, ctx, budget=512):
     ]
 
 
+# Plans saved before the general occurrence map hold at most one of these.
+LEGACY_FIELDS = (
+    "occurrence_retention",
+    "occurrence_continuity",
+    "occurrence_regrouping",
+)
+
+
+def legacy_occurrence_map(old, saved):
+    """The general map that states the same edit as a saved old-mode map."""
+    chosen = [f for f in LEGACY_FIELDS if saved.get(f) is not None]
+    groups = {k: len(g.occurrences) for k, g in old.mention_groups.items()}
+    if len(chosen) > 1:
+        raise IntentError("recovery_plan", "Saved plan selects more than one mode")
+    if not chosen:
+        return {k: [[k, i] for i in range(n)] for k, n in groups.items()}
+    field, reviewed = chosen[0], saved[chosen[0]]
+    ints = lambda v: isinstance(v, list) and all(type(i) is int for i in v)
+    if (
+        not isinstance(reviewed, dict)
+        or set(reviewed) != set(groups)
+        or (field != "occurrence_regrouping" and not all(map(ints, reviewed.values())))
+    ):
+        raise IntentError("recovery_plan", "Saved occurrence map is malformed")
+    if field == "occurrence_retention":
+        if any(
+            v != sorted(set(v)) or v and v[-1] >= groups[k] for k, v in reviewed.items()
+        ):
+            raise IntentError("recovery_plan", "Saved occurrence map is malformed")
+        return {
+            k: [
+                [k, reviewed[k].index(i)] if i in reviewed[k] else None
+                for i in range(n)
+            ]
+            for k, n in groups.items()
+        }
+    if field == "occurrence_continuity":
+        return {k: [[k, j] for j in reviewed[k]] for k in groups}
+    return reviewed
+
+
 @dataclass(frozen=True)
 class TextChange:
     previous_text: str
     text: str
+    occurrence_map: OccurrenceMap
     chunk_budget: int = 512
-    occurrence_retention: dict[str, list[int]] | None = None
-    occurrence_continuity: dict[str, list[int]] | None = None
-    occurrence_regrouping: dict[str, list[list[str | int]]] | None = None
+
+    def __post_init__(self):
+        parsed = parse_occurrence_map(self.occurrence_map)
+        object.__setattr__(self, "occurrence_map", parsed)
+
+    @classmethod
+    def from_plan(cls, plan):
+        """Read the text change a plan saved, converting an old-mode map
+        against the plan's previous description."""
+        saved = dict(plan["text_change"])
+        legacy = {f: saved.pop(f) for f in LEGACY_FIELDS if f in saved}
+        if "occurrence_map" not in saved:
+            old = IdentitySource.model_validate_json(plan["previous_description"])
+            saved["occurrence_map"] = legacy_occurrence_map(old, legacy)
+        elif any(v is not None for v in legacy.values()):
+            raise IntentError("recovery_plan", "Saved plan mixes map formats")
+        return cls(**saved)
 
     @property
-    def mode(self):
-        return select_mode(**{field: getattr(self, field) for _, field in MODE_FIELDS})
+    def is_prefix_shift(self):
+        """Every occurrence keeps its group and index and the text gains a prefix."""
+        return self.text.endswith(self.previous_text) and all(
+            ref == OccurrenceRef(k, i)
+            for k, refs in self.occurrence_map.items()
+            for i, ref in enumerate(refs)
+        )
 
     async def preflight(self, publisher, old, source, texts, chunks, ctx, *, retry):
         from cognee.infrastructure.databases.provenance.markers import (
@@ -146,20 +202,16 @@ class TextChange:
         )
         from cognee.infrastructure.databases.unified import get_unified_engine
 
-        admitted = admit_remap(
+        fate = admit(
             old,
             source,
             self.previous_text,
             self.text,
-            self.occurrence_retention,
-            self.occurrence_continuity,
-            self.occurrence_regrouping,
+            self.occurrence_map,
+            first_attempt=not retry,
         )
-        # Only the first attempt chooses fresh UUIDs. A retry completes the
-        # saved plan, which may predate the revision-scoped rule.
         if not retry:
-            check_revision_scoped_ids(old, source, admitted.fresh)
-            for key in admitted.fresh:
+            for key in fate.fresh:
                 if (
                     await publisher.graph.get_node(
                         str(source.mention_groups[key].entity_id)
@@ -167,7 +219,7 @@ class TextChange:
                     is not None
                 ):
                     raise IntentError(
-                        "incompatible_group",
+                        "fresh_uuid_reused",
                         "New mention Entity UUID already exists in the graph",
                     )
         if not 1 <= self.chunk_budget <= 4096:

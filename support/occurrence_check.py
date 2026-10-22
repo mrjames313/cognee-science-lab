@@ -1,16 +1,12 @@
 """Bounded exhaustive check of text-change admission against the group-fate oracle.
 
 Enumerates every small world in support/occurrence_worlds.py and materializes
-real old and new descriptions. Three checks run:
+real old and new descriptions. Two checks run:
 
 - The general admitter agrees with the oracle on every world, on a first
   attempt and on a retry. Every admitted world is also checked with all
   occurrences sharing one surface text, and each of its corruptions must be
   refused by the rule it breaks.
-- Each old admission mode that can express a world agrees with the oracle
-  wherever it admits, refuses an oracle-admitted world only with its own
-  "nothing of my kind changed" scope refusal, and converts to the world's
-  general map.
 - With --mutants, switching off any one rule of the general admitter makes
   some small world come out wrong.
 
@@ -36,17 +32,10 @@ from occurrence_worlds import OLD_SHAPES, materialize, oracle, worlds
 
 SMALL = ((1,), (2,), (1, 1))
 
-# Each old mode admits only its own kind of change, so it refuses an unchanged
-# grouping that the oracle admits as all-continuing.
-OLD_SCOPE_REFUSALS = {
-    "retention": "removes at least one occurrence",
-    "continuity": "adds at least one occurrence",
-    "regrouping": "regroups at least one group",
-}
 REASONS = {
-    "key that no old group used": "key",
-    "requires a fresh Entity UUID": "unused",
-    "derives from its source": "derived",
+    "fresh_key_reused": "key",
+    "fresh_uuid_reused": "unused",
+    "fresh_uuid_not_derived": "derived",
 }
 
 
@@ -54,29 +43,21 @@ def outcome(case, admit):
     try:
         fate = admit()
     except IntentError as error:
-        reason = next((r for m, r in REASONS.items() if m in str(error)), str(error))
-        return ("refuse", reason)
+        return ("refuse", REASONS.get(error.code, str(error)))
     except Exception as error:  # a broken rule can let a bad map reach a lookup
         return ("crash", repr(error))
-    if isinstance(fate, admission.GroupFate):
-        return ("admit", fate.continuing, fate.retired, fate.fresh)
-    continuing = frozenset(case["new"].mention_groups) - fate.fresh
-    return (
-        "admit",
-        continuing,
-        frozenset(case["old"].mention_groups) - continuing,
-        frozenset(fate.fresh),
-    )
+    return ("admit", fate.continuing, fate.retired, fate.fresh)
 
 
 def general(case, mapping=None, first_attempt=True, **parts):
     parts = {**case, **parts}
-    return lambda: admission.admit_general(
+    raw = parts["general"] if mapping is None else mapping
+    return lambda: admission.admit(
         parts["old"],
         parts["new"],
         parts["before"],
         parts["after"],
-        parts["general"] if mapping is None else mapping,
+        admission.parse_occurrence_map(raw),
         first_attempt=first_attempt,
     )
 
@@ -256,38 +237,7 @@ def check_corruptions(world, case):
         yield f"corrupt description: {name}", ok, ("refuse", message), got
 
 
-def check_old_modes(world, case):
-    expected = oracle(world)
-    for mode, mapping in case["modes"].items():
-        converted = admission.to_occurrence_map(case["old"], mode, mapping)
-        yield (
-            f"convert {mode}",
-            converted == case["general"],
-            case["general"],
-            converted,
-        )
-        maps = {} if mode == "prefix" else {f"occurrence_{mode}": mapping}
-
-        def admit():
-            admitted = admission.admit_remap(
-                case["old"], case["new"], case["before"], case["after"], **maps
-            )
-            admission.check_revision_scoped_ids(
-                case["old"], case["new"], admitted.fresh
-            )
-            return admitted
-
-        got = outcome(case, admit)
-        if got[0] == "admit" or expected[0] == "refuse":
-            ok = got[0] == expected[0] and (got[0] == "refuse" or got == expected)
-            yield f"old {mode}", ok, expected, got
-        else:
-            scope = OLD_SCOPE_REFUSALS.get(mode)
-            ok = scope is not None and scope in got[1]
-            yield f"old {mode} scope refusal", ok, expected, got
-
-
-CHECKS = (check_general, check_corruptions, check_old_modes)
+CHECKS = (check_general, check_corruptions)
 
 
 def run(shapes=OLD_SHAPES, max_additions=1, checks=CHECKS):

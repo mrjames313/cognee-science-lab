@@ -18,10 +18,10 @@ from cognee_lab.identity.multisource import fixture_id
 from cognee_lab.identity.occurrence_addition import (
     AFTER,
     BEFORE,
-    CONTINUITY,
+    ADDITION_MAP,
     describe_addition,
 )
-from cognee_lab.identity.admission import admit_remap, check_revision_scoped_ids
+from cognee_lab.identity.admission import admit, parse_occurrence_map
 from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import IntentError, validate_inputs
 
@@ -37,12 +37,6 @@ def addition(payload):
     return old, chunk, describe_addition(old, BEFORE, [chunk])
 
 
-def admit(old, source, mapping=CONTINUITY):
-    admitted = admit_remap(old, source, BEFORE, AFTER, occurrence_continuity=mapping)
-    check_revision_scoped_ids(old, source, admitted.fresh)
-    return admitted
-
-
 def test_a_saved_key_only_addition_passes_every_check_a_retry_repeats(
     source_payload,
 ):
@@ -55,15 +49,16 @@ def test_a_saved_key_only_addition_passes_every_check_a_retry_repeats(
     )
     payload["mention_groups"]["g03"]["entity_id"] = legacy
     saved = IdentitySource.model_validate_json(json.dumps(payload))
-    with pytest.raises(IntentError, match="derives from its source"):
-        admit(old, saved)
-    retried = admit_remap(old, saved, BEFORE, AFTER, occurrence_continuity=CONTINUITY)
+    with pytest.raises(IntentError, match="derives from its source") as refused:
+        admit(old, saved, BEFORE, AFTER, ADDITION_MAP)
+    assert refused.value.code == "fresh_uuid_not_derived"
+    retried = admit(old, saved, BEFORE, AFTER, ADDITION_MAP, first_attempt=False)
     assert retried.fresh == {"g03"}
 
 
 async def test_reviewed_continuation_and_same_text_new_group(source_payload):
     old, chunk, intended = addition(source_payload)
-    assert admit(old, intended).fresh == {"g03"}
+    assert admit(old, intended, BEFORE, AFTER, ADDITION_MAP).fresh == {"g03"}
     assert len(intended.mention_groups["g01"].occurrences) == 3
     assert (
         intended.mention_groups["g01"].entity_id == old.mention_groups["g01"].entity_id
@@ -93,50 +88,50 @@ async def test_reviewed_continuation_and_same_text_new_group(source_payload):
         "g03": ADDED_FACT_TEXT,
     }
     assert retired_mentions(intended) == {}
-    with pytest.raises(IntentError, match="prefix insertion"):
-        admit_remap(old, intended, BEFORE, AFTER)
-    # Manifest is durable recovery intent, including its separately named mode.
-    change = TextChange(BEFORE, AFTER, occurrence_continuity=CONTINUITY)
-    assert TextChange(**json.loads(json.dumps(asdict(change)))) == change
+    change = TextChange(BEFORE, AFTER, ADDITION_MAP)
+    saved = dict(text_change=json.loads(json.dumps(asdict(change))))
+    assert TextChange.from_plan(saved) == change
 
 
 @pytest.mark.parametrize(
     "mapping",
     [
         {},
-        {"g01": [0, 1]},
-        {"g01": [0, 1], "g02": [0], "extra": []},
-        {"g01": [0], "g02": [0]},
-        {"g01": [0, 0], "g02": [0]},
-        {"g01": [1, 0], "g02": [0]},
-        {"g01": [True, 1], "g02": [0]},
-        {"g01": [-1, 1], "g02": [0]},
-        {"g01": [0, 3], "g02": [0]},
-        {"g01": [1, 2], "g02": [0]},
-        {"g01": "0,1", "g02": [0]},
+        {"g01": [["g01", 0], ["g01", 1]]},
+        {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]], "extra": []},
+        {"g01": [["g01", 0]], "g02": [["g02", 0]]},
+        {"g01": [["g01", 0], ["g01", 0]], "g02": [["g02", 0]]},
+        {"g01": [["g01", 1], ["g01", 0]], "g02": [["g02", 0]]},
+        {"g01": [["g01", True], ["g01", 1]], "g02": [["g02", 0]]},
+        {"g01": [["g01", -1], ["g01", 1]], "g02": [["g02", 0]]},
+        {"g01": [["g01", 0], ["g01", 3]], "g02": [["g02", 0]]},
+        {"g01": [["g01", 1], ["g01", 2]], "g02": [["g02", 0]]},
+        {"g01": "0,1", "g02": [["g02", 0]]},
+        {"g01": [["g01", 0], ["g01", 1]], "g02": [["g01", 2]]},
     ],
 )
-def test_addition_refuses_incomplete_or_false_continuity(source_payload, mapping):
+def test_addition_refuses_incomplete_or_false_maps(source_payload, mapping):
     old, _, intended = addition(source_payload)
-    with pytest.raises(IntentError):
-        admit(old, intended, mapping)
+    with pytest.raises(IntentError) as refused:
+        admit(old, intended, BEFORE, AFTER, parse_occurrence_map(mapping))
+    assert refused.value.code == "occurrence_changed"
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    "mutation,code",
     [
-        "retarget",
-        "recipe",
-        "missing_resolution",
-        "reused_assignment",
-        "new_uuid_reused",
-        "bad_span",
-        "retire_group",
-        "change_uuid",
+        ("retarget", "not_admitted"),
+        ("recipe", "not_admitted"),
+        ("missing_resolution", "not_admitted"),
+        ("reused_assignment", "not_admitted"),
+        ("new_uuid_reused", "fresh_uuid_reused"),
+        ("bad_span", "occurrence_changed"),
+        ("retire_group", "occurrence_changed"),
+        ("change_uuid", "fresh_key_reused"),
     ],
 )
 def test_addition_rejects_hidden_semantic_and_representation_changes(
-    source_payload, mutation
+    source_payload, mutation, code
 ):
     old, _, intended = addition(source_payload)
     p = intended.model_dump(mode="json")
@@ -169,24 +164,9 @@ def test_addition_rejects_hidden_semantic_and_representation_changes(
         )
         p["mention_groups"]["g01"]["entity_id"] = mid
     changed = IdentitySource.model_validate_json(json.dumps(p))
-    with pytest.raises(IntentError):
-        admit(old, changed)
-
-
-def test_additions_are_separate_from_removal_mode(source_payload):
-    old, _, intended = addition(source_payload)
-    with pytest.raises(IntentError, match="Select one"):
-        admit_remap(
-            old, intended, BEFORE, AFTER, {"g01": [0, 1], "g02": [0]}, CONTINUITY
-        )
-    p = intended.model_dump(mode="json")
-    mid = p["mention_groups"].pop("g03")["entity_id"]
-    p["entity_constructions"].pop(mid)
-    p["mention_resolutions"].pop("r03")
-    p["mention_groups"]["g01"]["occurrences"].pop()
-    no_addition = IdentitySource.model_validate_json(json.dumps(p))
-    with pytest.raises(IntentError, match="adds at least one"):
-        admit(old, no_addition)
+    with pytest.raises(IntentError) as refused:
+        admit(old, changed, BEFORE, AFTER, ADDITION_MAP)
+    assert refused.value.code == code
 
 
 async def test_new_group_cannot_reuse_an_existing_graph_uuid(source_payload):
@@ -197,6 +177,7 @@ async def test_new_group_cannot_reuse_an_existing_graph_uuid(source_payload):
             return {"id": key, "type": "Entity"}
 
     publisher = SimpleNamespace(graph=Graph())
-    change = TextChange(BEFORE, AFTER, occurrence_continuity=CONTINUITY)
-    with pytest.raises(IntentError, match="already exists"):
+    change = TextChange(BEFORE, AFTER, ADDITION_MAP)
+    with pytest.raises(IntentError, match="already exists") as refused:
         await change.preflight(publisher, old, intended, {}, {}, None, retry=False)
+    assert refused.value.code == "fresh_uuid_reused"

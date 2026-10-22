@@ -29,7 +29,7 @@ Preconditions:
 - Each journey uses a new run and a new `chunked-fixture` root. Both sources are current at revision 1.
 - The fixture's doc01 text is `Helios controller (HC) regulates plasma heating, the controller adjusts coil current, and it limits oscillations.` with a trailing newline.
 
-**O1 remove an occurrence.** Proves `remove-partial`. Guide: occurrence removal, "Concrete example" and "Run and inspect". The retention map is `{"g01": [1], "g02": []}`. The guide says g01 keeps only `it` at `[46, 48)` with its Entity UUID, resolution target and fact ID. It says g02 is retired with no Entity, index entry or marker. It says `position_shift` is null and a healthy `reconcile` does not bring g02 back.
+**O1 remove an occurrence.** Proves `remove-partial`. Guide: occurrence removal, "Concrete example" and "Run and inspect". The occurrence map is `{"g01": [null, ["g01", 0]], "g02": [null]}`. The guide says g01 keeps only `it` at `[46, 48)` with its Entity UUID, resolution target and fact ID. It says g02 is retired with no Entity, index entry or marker. It says `position_shift` is null and a healthy `reconcile` does not bring g02 back.
 
 ```bash journey O1
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -51,7 +51,7 @@ $V check "$RUN" remove '.sources.doc01.mention_entity_id == "'"$M01"'" and .sour
 $V check "$RUN" remove '.sources.doc01.identity_data_id as $d | [.result.facts[] | select(.identity.identity_data_id == $d) | .edge_id] == ["'"$FACT01"'"]' 'the g01 fact ID continues'
 $V check "$RUN" remove '.sources.doc01 | .unresolved_marker_present == false and .unresolved_entity_present == false' 'the unresolved Entity and marker flags are false'
 $V check "$RUN" remove '.text_changes[0].retired_groups.g02 | .entity_present == false and .entity_indexed == false and .marker_present == false' 'g02 has no Entity, index entry or marker'
-$V check "$RUN" remove '.text_changes[0].occurrence_retention == {"g01": [1], "g02": []}' 'the retention map is the reviewed one'
+$V check "$RUN" remove '.text_changes[0].occurrence_map == {"g01": [null, ["g01", 0]], "g02": [null]}' 'the occurrence map is the reviewed removal'
 $V check "$RUN" remove '.text_changes[0] | .position_shift == null and (.text_length_delta | type) == "number" and .text_length_delta < 0' 'the shift is null and the text shrinks'
 $V check "$RUN" remove '.text_changes[0] | .retired_chunks_absent and .retired_chunk_vectors_absent and .evidence_uses_current_chunks and .mention_ids_preserved' 'retired chunks and vectors are absent and evidence uses current chunks'
 $V check "$RUN" remove '.sources.doc02 | .original_fact_present and .original_evidence_present and .unresolved_marker_present and .unresolved_entity_present and .fact_evidence_chunk_ids == '"$EV02" 'doc02 fact, evidence and unresolved group are unchanged'
@@ -103,7 +103,7 @@ $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revisi
 $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
-**O3 retire a resolved group.** Proves `retire-resolved`. Guide: resolved retirement, "Run" and "Scope". The replacement text is `Helios controller (HC) regulates plasma heating.` and the retention map is `{"g01": [], "g02": [0]}`. The guide says only doc02's fact is retrieved. It says doc01 has three chunks and no primary marker, fact or evidence, and g02 continues at `[33, 39)`. It lists the retirement fields that must be false or zero and the shared fields that must be true. A later withdrawal keeps doc02's facts and doc01's unresolved marker.
+**O3 retire a resolved group.** Proves `retire-resolved`. Guide: resolved retirement, "Run" and "Scope". The replacement text is `Helios controller (HC) regulates plasma heating.` and the occurrence map is `{"g01": [null, null], "g02": [["g02", 0]]}`. The guide says only doc02's fact is retrieved. It says doc01 has three chunks and no primary marker, fact or evidence, and g02 continues at `[33, 39)`. It lists the retirement fields that must be false or zero and the shared fields that must be true. A later withdrawal keeps doc02's facts and doc01's unresolved marker.
 
 ```bash journey O3
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -116,7 +116,7 @@ $V check "$RUN" retire '. as $r | [$r.result.facts[].source_id] == [$r.sources.d
 $V check "$RUN" retire '[.sources.doc01, .sources.doc02] | map([.saved_revision, .verified_revision, .registered_revision]) == [[2, 2, 2], [1, 1, 1]]' 'doc01 is at 2/2/2 and doc02 stays at 1/1/1'
 $V check "$RUN" retire '.result.unavailable_sources == [] and .recovery_events == []' 'no unavailable source and no incident'
 $V check "$RUN" retire '.sources.doc01.chunk_count == 3' 'doc01 has three chunks'
-$V check "$RUN" retire '.text_changes[0].occurrence_retention == {"g01": [], "g02": [0]}' 'the retention map is the reviewed one'
+$V check "$RUN" retire '.text_changes[0].occurrence_map == {"g01": [null, null], "g02": [["g02", 0]]}' 'the occurrence map is the reviewed retirement'
 $V check "$RUN" retire '.text_changes[0].groups.g02.occurrences | map([.start, .end]) == [[33, 39]]' 'g02 continues at [33,39)'
 $V check "$RUN" retire '.text_changes[0] | .retired_chunks_absent and .retired_chunk_vectors_absent and .evidence_uses_current_chunks and .evidence_chunk_ids == []' 'retired chunks and vectors are absent and no obsolete evidence remains'
 $V check "$RUN" retire '.sources.doc01.resolved_group_retirement | [.mention_entity_present, .mention_entity_indexed, .resolution_edge_present, .fact_edge_present, .current_marker_present, .fact_triplet_indexed, .resolution_triplet_indexed] | all(. == false)' 'the retired mention, resolution link, fact, marker and triplets are absent'
@@ -172,7 +172,7 @@ $V check "$RUN" after '.publications | all(.state == "current") and ([.[].revisi
 $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != null)' 'no incident stays open'
 ```
 
-**O5 add occurrences, then edit and withdraw.** Proves `add-continuing` and `add-follow-up`. Guide: occurrence addition, "Captured edit", "Run" and "Reopen and reconcile". The continuity map is `{"g01": [0, 1], "g02": [0]}`. The guide says three facts, doc01 at 2/2/2, doc02 at 1/1/1, no unavailable source and no incident. It says g01 keeps its Entity ID and goes from two occurrences to three. It says g03 is new with its Entity, name index, accepted resolution `r03`, and current marker chunks. The handoff records two marker chunks for g03. The guide says a later prefix edit at expected revision 2 keeps g03 and its fact at revision 3. It says withdrawal withholds doc01's two facts and keeps doc02.
+**O5 add occurrences, then edit and withdraw.** Proves `add-continuing` and `add-follow-up`. Guide: occurrence addition, "Captured edit", "Run" and "Reopen and reconcile". The occurrence map is `{"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}`. The guide says three facts, doc01 at 2/2/2, doc02 at 1/1/1, no unavailable source and no incident. It says g01 keeps its Entity ID and goes from two occurrences to three. It says g03 is new with its Entity, name index, accepted resolution `r03`, and current marker chunks. The handoff records two marker chunks for g03. The guide says a later prefix edit at expected revision 2 keeps g03 and its fact at revision 3. It says withdrawal withholds doc01's two facts and keeps doc02.
 
 ```bash journey O5
 $V drive "$RUN" main fixture -- chunked-fixture
@@ -190,7 +190,7 @@ $V check "$RUN" add '(.result.facts | length) == 3' 'three facts are retrieved'
 $V check "$RUN" add '[.result.facts[].text] | sort == ["it limits oscillations", "it limits oscillations", "the controller limits oscillations"]' 'two local facts from doc01 and the unchanged doc02 fact'
 $V check "$RUN" add '[.sources.doc01, .sources.doc02] | map([.saved_revision, .verified_revision, .registered_revision]) == [[2, 2, 2], [1, 1, 1]]' 'doc01 is at 2/2/2 and doc02 stays at 1/1/1'
 $V check "$RUN" add '.result.unavailable_sources == [] and .recovery_events == []' 'no unavailable source and no incident'
-$V check "$RUN" add '.text_changes[0] | .occurrence_continuity == {"g01": [0, 1], "g02": [0]} and .occurrence_retention == null and .position_shift == null' 'the continuity map is the reviewed one and the shift is null'
+$V check "$RUN" add '.text_changes[0] | .occurrence_map == {"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]} and .position_shift == null' 'the occurrence map is the reviewed addition and the shift is null'
 $V check "$RUN" add '.text_changes[0].groups.g01 | (.previous_occurrences | length) == 2 and (.occurrences | length) == 3 and .entity_id == "'"$M01"'"' 'g01 goes from two to three occurrences and keeps its Entity ID'
 $V check "$RUN" add '.text_changes[0].groups.g03 | (.previous_occurrences | length) == 0 and (.occurrences | length) == 1' 'g03 has no previous occurrence and one current occurrence'
 $V check "$RUN" add '.text_changes[0].added_groups.g03 | .entity_present and .entity_indexed and (.marker_chunk_ids | length) == 2' 'g03 has its node, name index and two current marker chunks'
@@ -256,8 +256,8 @@ $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != nul
 
 ## Gotchas
 
-- The three commands accept only their captured doc01 edit. They do not locate arbitrary phrases or infer continuity. See "Not yet supported" in the README.
-- The retention and continuity maps are checked exactly. A map from a different guide version fails the check, and that is a real mismatch.
+- The three commands accept only their captured doc01 edit. They do not locate arbitrary phrases or infer which occurrences continue. See "Not yet supported" in the README.
+- The occurrence maps are checked exactly. A map from a different guide version fails the check, and that is a real mismatch.
 - `position_shift` is null for removal, retirement and addition. A deletion has no single global shift.
 - After a successful retirement, the primary mention ID stays in `resolved_group_retirement` as a diagnostic constant. Its absence checks are the proof, not the ID.
 - `O5` runs `edit-text` at expected revision 2 on a root that already has an addition. The guide documents this sequence. If it is refused, report the refusal text.

@@ -28,14 +28,12 @@ DATASET = fixture()["dataset_id"]
 TEXT_CHANGE = dict(
     previous_text="ledger_check text",
     text="Revision note: ledger_check text",
+    occurrence_map={"g01": [["g01", 0], ["g01", 1]]},
     chunk_budget=512,
-    occurrence_retention=None,
-    occurrence_continuity=None,
-    occurrence_regrouping=None,
 )
 TEXT_REGROUP = dict(
     TEXT_CHANGE,
-    occurrence_regrouping={"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]},
+    occurrence_map={"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]},
 )
 TEXT_CHANGES = dict(text=TEXT_CHANGE, regroup=TEXT_REGROUP)
 TEXT_PLANS = (None, *TEXT_CHANGES)

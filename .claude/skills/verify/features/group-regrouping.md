@@ -46,7 +46,7 @@ $V check "$RUN" split '(.result.facts | length) == 2' 'two facts are retrieved'
 $V check "$RUN" split '[.result.facts[].text] == ["it limits oscillations", "it limits oscillations"]' 'the regenerated g05 fact and the unchanged doc02 fact'
 $V check "$RUN" split '[.sources.doc01, .sources.doc02] | map([.saved_revision, .verified_revision, .registered_revision]) == [[2, 2, 2], [1, 1, 1]]' 'doc01 is at 2/2/2 and doc02 stays at 1/1/1'
 $V check "$RUN" split '.result.unavailable_sources == [] and .recovery_events == []' 'no unavailable source and no incident'
-$V check "$RUN" split '.text_changes[0] | .occurrence_regrouping == {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]} and .occurrence_retention == null and .occurrence_continuity == null and .position_shift == null' 'the regrouping map is the reviewed one and the shift is null'
+$V check "$RUN" split '.text_changes[0] | .occurrence_map == {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]} and .position_shift == null' 'the occurrence map is the reviewed split and the shift is null'
 $V check "$RUN" split '.text_changes[0].added_groups | keys == ["g04", "g05"] and .g04.entity_id == "b584813e-92d6-5eb4-b330-cbb0414866cf" and .g05.entity_id == "2de73cc9-c7ff-5e83-b1e7-a189bedb1d37"' 'the fresh IDs derive from the saved source, the new revision and the group keys'
 $V check "$RUN" split '.text_changes[0].added_groups | [.g04, .g05] | all(.entity_present and .entity_indexed and (.marker_chunk_ids | length) > 0)' 'g04 and g05 have their nodes, name indexes and current marker chunks'
 $V check "$RUN" split '.text_changes[0].groups | (.g04.occurrences | map([.start, .end])) == [[53, 67]] and (.g05.occurrences | map([.start, .end])) == [[111, 113]] and .g04.previous_occurrences == [] and .g05.previous_occurrences == []' 'the fresh groups hold the reviewed occurrences and have no previous ones'
@@ -95,7 +95,7 @@ $V check "$RUN" withheld '[.facts[].source_id] == ["'"$M02"'"]' 'only the doc02 
 $V check "$RUN" withheld '.unavailable_sources | length == 1 and (.[0] | .reason == "publication_failed" and .recovery_event_id == "'"$EID"'")' 'doc01 is unavailable with the incident id'
 $V drive "$RUN" main before -- status
 $V check "$RUN" before '[.publications[] | select(.state == "failed")] | length == 1 and (.[0] | .revision == 2 and .verified_revision == 1)' 'doc01 is failed at revision 2 with last verified revision 1'
-$V check "$RUN" before '[.publications[] | select(.state == "failed")][0].plan.text_change.occurrence_regrouping == {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}' 'the saved plan holds the reviewed regrouping map'
+$V check "$RUN" before '[.publications[] | select(.state == "failed")][0].plan.text_change.occurrence_map == {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}' 'the saved plan holds the reviewed split map'
 $V check "$RUN" before '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .origin == "test/fault_injection" and .resolved_at == null)' 'one open incident labeled as fault injection'
 SAVED=$(val before '[.publications[] | select(.state == "failed")][0].description | fromjson | [.mention_groups.g04.entity_id, .mention_groups.g05.entity_id] | tojson')
 
@@ -139,7 +139,7 @@ $V check "$RUN" combine '(.result.facts | length) == 2' 'two facts are retrieved
 $V check "$RUN" combine '[.result.facts[].text] == ["it limits oscillations", "it limits oscillations"]' 'the regenerated g06 fact and the unchanged doc02 fact'
 $V check "$RUN" combine '[.sources.doc01, .sources.doc02] | map([.saved_revision, .verified_revision, .registered_revision]) == [[3, 3, 3], [1, 1, 1]]' 'doc01 is at 3/3/3 and doc02 stays at 1/1/1'
 $V check "$RUN" combine '.result.unavailable_sources == [] and .recovery_events == []' 'no unavailable source and no incident'
-$V check "$RUN" combine '.text_changes[0] | .occurrence_regrouping == {"g04": [["g06", 0]], "g05": [["g06", 1]], "g02": [["g02", 0]]} and .occurrence_retention == null and .occurrence_continuity == null and .position_shift == null' 'the regrouping map is the reviewed one and the shift is null'
+$V check "$RUN" combine '.text_changes[0] | .occurrence_map == {"g04": [["g06", 0]], "g05": [["g06", 1]], "g02": [["g02", 0]]} and .position_shift == null' 'the occurrence map is the reviewed combination and the shift is null'
 $V check "$RUN" combine '.text_changes[0].added_groups | keys == ["g06"] and .g06.entity_id == "da6e1b3e-2e1e-570b-893d-9fe8996abe83"' 'g06 is the only new group and its ID derives from the saved source, revision and group key'
 $V check "$RUN" combine '.text_changes[0].added_groups.g06 | .entity_present and .entity_indexed and (.marker_chunk_ids | length) > 0' 'g06 has its node, name index and current marker chunk'
 $V check "$RUN" combine '.text_changes[0].groups | (.g06.occurrences | map([.start, .end, .text])) == [[49, 63, "the controller"], [109, 111, "it"]] and .g06.previous_occurrences == []' 'g06 holds the two reviewed occurrences and has no previous ones'
@@ -194,7 +194,7 @@ $V check "$RUN" withheld '[.facts[].source_id] == ["'"$M02"'"]' 'only the doc02 
 $V check "$RUN" withheld '.unavailable_sources | length == 1 and (.[0] | .reason == "publication_failed" and .recovery_event_id == "'"$EID"'")' 'doc01 is unavailable with the incident id'
 $V drive "$RUN" main before -- status
 $V check "$RUN" before '[.publications[] | select(.state == "failed")] | length == 1 and (.[0] | .revision == 3 and .verified_revision == 2)' 'doc01 is failed at revision 3 with last verified revision 2'
-$V check "$RUN" before '[.publications[] | select(.state == "failed")][0].plan.text_change.occurrence_regrouping == {"g04": [["g06", 0]], "g05": [["g06", 1]], "g02": [["g02", 0]]}' 'the saved plan holds the reviewed combination map'
+$V check "$RUN" before '[.publications[] | select(.state == "failed")][0].plan.text_change.occurrence_map == {"g04": [["g06", 0]], "g05": [["g06", 1]], "g02": [["g02", 0]]}' 'the saved plan holds the reviewed combination map'
 $V check "$RUN" before '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .origin == "test/fault_injection" and .resolved_at == null)' 'one open incident labeled as fault injection'
 SAVED=$(val before '[.publications[] | select(.state == "failed")][0].description | fromjson | .mention_groups.g06.entity_id')
 
@@ -220,7 +220,7 @@ $V check "$RUN" after '.recovery_events | length > 0 and all(.resolved_at != nul
 
 - `split-group` and `combine-groups` accept only their captured doc01 edits. They do not locate arbitrary phrases or infer groups. See "Not yet supported" in the README.
 - `combine-groups` refuses any root where doc01 was not produced by `split-group`, with an `IntentError` that says it requires `split-group`. Run the split first and pass `--expected-revision 2`.
-- The regrouping map is checked exactly. A map from a different guide version fails the check, and that is a real mismatch.
+- The occurrence map is checked exactly. A map from a different guide version fails the check, and that is a real mismatch.
 - After a successful split or combination, the old g01 mention ID stays in `resolved_group_retirement` as a diagnostic constant. Its absence checks are the proof, not the ID. After a combination, `combined_group_retirement` holds the same checks for g04 and g05.
 - A healthy `reconcile` after a split or combination drops `text_changes` from the output. The `G1` and `G3` reconcile checks read `.sources` and `.result`.
 - Run `retrieve` after the split or combination in a new process. The command's own JSON comes from the process that wrote the change.

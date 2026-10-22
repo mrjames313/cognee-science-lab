@@ -197,9 +197,9 @@ def describe(payload, text, revision):
 
 
 def materialize(world, same_text=False):
-    """Real old and new descriptions as JSON payloads and models, both texts,
-    the general map and the old-mode maps that can express the world. With
-    same_text, every occurrence has the same surface text."""
+    """Real old and new descriptions as JSON payloads and models, both texts
+    and the general map. With same_text, every occurrence has the same surface
+    text."""
     payload = base_payload()
     identity = UUID(payload["identity_data_id"])
     before, old_spans = layout(world.old_occurrences(), same_text)
@@ -219,9 +219,7 @@ def materialize(world, same_text=False):
         entity_id = (
             fresh_mention_id(identity, 2, key)
             if uuid == DERIVED
-            else uuid5(identity, f"other:{key}")
-            if uuid == OTHER
-            else old_id[uuid]
+            else uuid5(identity, f"other:{key}") if uuid == OTHER else old_id[uuid]
         )
         new["entity_constructions"][str(entity_id)] = dict(name=key, description=key)
         new["mention_groups"][key] = group(entity_id, [new_spans[o] for o in items])
@@ -240,51 +238,4 @@ def materialize(world, same_text=False):
         before=before,
         after=after,
         general=general,
-        modes=old_mode_maps(world, place),
     )
-
-
-def old_mode_maps(world, place):
-    """Maps for the old admission modes, which checkpoint B deletes. They are
-    keyed by group, so they carry any UUID choice; the admitter judges it."""
-    old_keys = {k for k, _ in world.old}
-    everyone = world.old_occurrences()
-    survived = [o for o in everyone if o in place]
-    groups = {g.key: g for g in world.new}
-    keeps_own = {
-        k: k in groups and all(place[o][0] == k for o in survived if o.key == k)
-        for k in old_keys
-    }
-    all_survive = len(survived) == len(everyone) and not world.additions
-    modes = {}
-    if all_survive:
-        modes["regrouping"] = {
-            k: [place[Old(k, i)] for i in range(n)] for k, n in world.old
-        }
-        if set(groups) == old_keys and all(
-            keeps_own[k] and len(groups[k].items) == n for k, n in world.old
-        ):
-            modes["prefix"] = None
-    only_own = all(
-        g.key in old_keys
-        and all(isinstance(o, Old) and o.key == g.key for o in g.items)
-        for g in world.new
-    )
-    if not world.additions and only_own:
-        modes["retention"] = {
-            k: [i for i in range(n) if Old(k, i) in place] for k, n in world.old
-        }
-    only_additions_in_new_keys = all(
-        all(isinstance(o, Added) for o in g.items)
-        for g in world.new
-        if g.key not in old_keys
-    )
-    if (
-        len(survived) == len(everyone)
-        and all(keeps_own.values())
-        and only_additions_in_new_keys
-    ):
-        modes["continuity"] = {
-            k: [place[Old(k, i)][1] for i in range(n)] for k, n in world.old
-        }
-    return modes

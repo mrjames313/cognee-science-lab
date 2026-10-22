@@ -9,7 +9,7 @@ SPLIT_AFTER = (
     "Helios controller (HC) regulates plasma heating, and the controller adjusts "
     "coil current.\n\nDuring calibration, it limits oscillations.\n"
 )
-SPLIT_REGROUPING = {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}
+SPLIT_MAP = {"g01": [["g04", 0], ["g05", 0]], "g02": [["g02", 0]]}
 SPLIT_FRESH = (
     ("g04", "r04", "the controller", None),
     ("g05", "r05", "it", " it limits"),
@@ -18,7 +18,7 @@ COMBINE_AFTER = (
     "Helios controller (HC) regulates plasma heating, the controller adjusts coil "
     "current, and during calibration it limits oscillations.\n"
 )
-COMBINE_REGROUPING = {
+COMBINE_MAP = {
     "g04": [["g06", 0]],
     "g05": [["g06", 1]],
     "g02": [["g02", 0]],
@@ -98,7 +98,7 @@ def describe_split(old, before, chunks):
     if (
         old.revision != 1
         or before != BEFORE
-        or set(old.mention_groups) != set(SPLIT_REGROUPING)
+        or set(old.mention_groups) != set(SPLIT_MAP)
     ):
         raise IntentError(
             "fixture_scope", "Group split requires doc01 of a fresh chunked-fixture"
@@ -136,7 +136,7 @@ def describe_combination(old, before, chunks):
     if (
         old.revision != 2
         or before != SPLIT_AFTER
-        or set(old.mention_groups) != set(COMBINE_REGROUPING)
+        or set(old.mention_groups) != set(COMBINE_MAP)
         or split is None
         or split.implementation != SPLIT
     ):

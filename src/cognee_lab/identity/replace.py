@@ -133,7 +133,7 @@ async def replace(
     if retry and plan.get("text_change"):
         from .text_changes import TextChange
 
-        saved_change = TextChange(**plan["text_change"])
+        saved_change = TextChange.from_plan(plan)
         if text_change is not None and text_change != saved_change:
             raise IntentError("recovery_plan", "Use the exact saved text change")
         text_change = saved_change
@@ -290,7 +290,7 @@ async def replace(
                     "Retired Entity declaration still owns its node",
                 )
             for field in old_node["indexed_fields"]:
-                collection = f'{old_node["type"]}_{field}'
+                collection = f"{old_node['type']}_{field}"
                 indexed = await vector.has_collection(collection) and bool(
                     await vector.retrieve(collection, [key])
                 )

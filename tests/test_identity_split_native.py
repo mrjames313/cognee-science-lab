@@ -5,7 +5,7 @@ import pytest
 
 from test_identity_native import command
 from cognee_lab.identity.captured_chunks import FACT_TEXT
-from cognee_lab.identity.group_regrouping import SPLIT_AFTER, SPLIT_REGROUPING
+from cognee_lab.identity.group_regrouping import SPLIT_AFTER, SPLIT_MAP
 from cognee_lab.identity.validation import fresh_mention_id
 
 
@@ -41,9 +41,7 @@ def check_split(root, before, after):
     assert gone["shared_relationship_text_indexed"]
     if "text_changes" in after:
         (change,) = after["text_changes"]
-        assert change["occurrence_regrouping"] == SPLIT_REGROUPING
-        assert change["occurrence_retention"] is None
-        assert change["occurrence_continuity"] is None
+        assert change["occurrence_map"] == SPLIT_MAP
         assert change["position_shift"] is None
         assert (
             change["retired_chunks_absent"] and change["retired_chunk_vectors_absent"]
@@ -148,7 +146,7 @@ def test_native_split_recovers_the_exact_saved_groups(tmp_path):
         for r in json.loads(command(root, "status").stdout)["publications"]
         if r["state"] == "failed"
     )
-    assert row["plan"]["text_change"]["occurrence_regrouping"] == SPLIT_REGROUPING
+    assert row["plan"]["text_change"]["occurrence_map"] == SPLIT_MAP
     intended = json.loads(row["description"])
     command(root, "reconcile", "--source", "doc01")
     after = json.loads((root / "multisource_result.json").read_text())

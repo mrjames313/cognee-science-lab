@@ -10,19 +10,19 @@ from cognee_lab.identity.occurrence_fixture import (
     AFTER,
     BEFORE,
     COMMANDS,
-    RETENTION,
+    REMOVAL_MAP,
     describe_removal,
 )
-from cognee_lab.identity.admission import admit_remap
+from cognee_lab.identity.admission import admit, identity_map, parse_occurrence_map
 from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
 
 
-def test_each_occurrence_command_selects_one_mode_and_its_own_result_file():
+def test_each_occurrence_command_has_its_own_result_file_and_a_non_prefix_map():
     assert len({c.result_name for c in COMMANDS.values()}) == len(COMMANDS)
     for command in COMMANDS.values():
-        kind, _ = TextChange("a", command.after, **command.mode).mode
-        assert kind != "prefix"
+        change = TextChange("a", command.after, command.occurrence_map)
+        assert not change.is_prefix_shift
 
 
 def example(payload):
@@ -45,7 +45,7 @@ def example(payload):
 
 async def test_reviewed_partial_and_empty_group_removal(source_payload):
     old, chunk, intended = example(source_payload)
-    assert admit_remap(old, intended, BEFORE, AFTER, RETENTION).fresh == frozenset()
+    assert admit(old, intended, BEFORE, AFTER, REMOVAL_MAP).fresh == frozenset()
     assert list(intended.mention_groups) == ["g01"]
     assert (
         intended.mention_groups["g01"].entity_id == old.mention_groups["g01"].entity_id
@@ -64,28 +64,31 @@ async def test_reviewed_partial_and_empty_group_removal(source_payload):
     await validate_inputs(
         checked, texts={"doc01": AFTER}, chunks={str(chunk.id): chunk}, graph=None
     )
-    # Broad reviewed removal is opt-in; the old prefix-only API remains guarded.
-    with pytest.raises(IntentError, match="prefix insertion"):
-        admit_remap(old, intended, BEFORE, AFTER)
+    with pytest.raises(IntentError, match="Mapped occurrence is not in the new source"):
+        admit(old, intended, BEFORE, AFTER, identity_map(old))
 
 
 @pytest.mark.parametrize(
     "mapping",
     [
-        {"g01": [1]},
-        {"g01": [1, 1], "g02": []},
-        {"g01": [True], "g02": []},
-        {"g01": [2], "g02": []},
-        {"g01": [0], "g02": []},
-        {"g01": [1], "g02": [], "unknown": []},
+        {"g01": [None, ["g01", 0]]},
+        {"g01": [["g01", 0]], "g02": [None]},
+        {"g01": [None, ["g01", 0]], "g02": []},
+        {"g01": [None, ["g01", 0], None], "g02": [None]},
+        {"g01": [None, ["g01", 0]], "g02": [["g01", 0]]},
+        {"g01": [None, ["g01", True]], "g02": [None]},
+        {"g01": [None, ["g01", 1]], "g02": [None]},
+        {"g01": [None, ["g01", 0]], "g02": [None], "unknown": []},
+        {"g01": [None, "g01"], "g02": [None]},
     ],
 )
-def test_explicit_continuity_refuses_incomplete_or_invalid_indices(
+def test_a_map_must_state_every_old_occurrence_once_and_truthfully(
     source_payload, mapping
 ):
     old, _, intended = example(source_payload)
-    with pytest.raises(IntentError):
-        admit_remap(old, intended, BEFORE, AFTER, mapping)
+    with pytest.raises(IntentError) as refused:
+        admit(old, intended, BEFORE, AFTER, parse_occurrence_map(mapping))
+    assert refused.value.code == "occurrence_changed"
 
 
 def test_removal_does_not_silently_retarget_a_continuing_group(source_payload):
@@ -96,7 +99,7 @@ def test_removal_does_not_silently_retarget_a_continuing_group(source_payload):
     ]["v01"]["source_entity_id"]
     changed = IdentitySource.model_validate_json(json.dumps(payload))
     with pytest.raises(IntentError, match="keeps its reviewed resolutions"):
-        admit_remap(old, changed, BEFORE, AFTER, RETENTION)
+        admit(old, changed, BEFORE, AFTER, REMOVAL_MAP)
 
 
 def test_new_positions_must_match_text_even_with_a_current_fingerprint(source_payload):
@@ -107,4 +110,4 @@ def test_new_positions_must_match_text_even_with_a_current_fingerprint(source_pa
     occurrence["end"] -= 1
     changed = IdentitySource.model_validate_json(json.dumps(payload))
     with pytest.raises(IntentError, match="exact document slice"):
-        admit_remap(old, changed, BEFORE, AFTER, RETENTION)
+        admit(old, changed, BEFORE, AFTER, REMOVAL_MAP)

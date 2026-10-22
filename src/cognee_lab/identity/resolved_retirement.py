@@ -9,14 +9,14 @@ from .models import IdentitySource
 from .validation import IntentError, text_digest
 
 AFTER = "Helios controller (HC) regulates plasma heating.\n"
-RETENTION = {"g01": [], "g02": [0]}
+RETIREMENT_MAP = {"g01": [None, None], "g02": [["g02", 0]]}
 
 
 def describe_retirement(old, before, chunks):
     if (
         old.revision != 1
         or before != BEFORE
-        or set(old.mention_groups) != set(RETENTION)
+        or set(old.mention_groups) != set(RETIREMENT_MAP)
     ):
         raise IntentError(
             "fixture_scope",
