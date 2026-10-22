@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules. **Next task:** Checkpoint E, four captured changed-interpretation and kind-change fixtures; show the user their exact spans and maps first. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules, and Checkpoint E added four changed-interpretation and kind-change fixtures. **Next task:** a `forget` command for a source nothing depends on (step-4 item 4). See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -11,7 +11,7 @@ Read this document first, then:
 1. [ROADMAP.md](../ROADMAP.md): project stages and current scope.
 2. [Stage-6 architecture/contract](../results/cognee_identity_stage6_handoff.md): physical representation, ownership, continuity, recovery and original six-step build order. Its dated implementation subsections are checkpoint history.
 3. [R1–R6 requirements](../results/cognee_stage5_4_5_requirements_review.md): outcome constraints, not a claim of complete coverage.
-4. [Latest fixture guide](stage6_identity_mixed_occurrences.md), followed by the earlier guides linked below for individual commands.
+4. [Latest fixture guide](stage6_identity_reinterpretation.md), followed by the earlier guides linked below for individual commands.
 5. [Integration playbook](../results/cognee_knowledge_integration_playbook.md): findings tagged with Describe/Publish/Maintain/Retrieve and transfer questions for other integrations.
 
 The [representation decision record](../results/cognee_stage5_4_5_identity_representation_proposal.md) and [pinned native extension reference](../results/cognee_extension_architecture_reference_v1.6.2.md) explain rationale and native behavior. Do not treat their early dated “next” or “not implemented at that checkpoint” statements as current implementation status. The roadmap and this handoff identify current work; later explicit approved scope changes supersede earlier proposals.
@@ -68,6 +68,7 @@ At session start, inspect `git status --short`, `git log -1 --oneline`, the file
 | Partial/empty unresolved groups | Explicit old-occurrence retention indices, stable continuing group, retirement of empty unresolved group/node/vector/markers, independent support preserved | [Occurrence removal](stage6_identity_occurrence_removal.md) |
 | Empty resolved fact-bearing group | Retire saved group/resolution/declaration, physical mention/node vector, resolution link, local fact/evidence/markers; preserve doc02's distinct fact and shared endpoint/index | [Resolved retirement](stage6_identity_resolved_retirement.md) |
 | Occurrence additions and new group | Explicit old-to-new continuity, stable continuing IDs/fresh same-text local group, accepted link and new original-owned local fact/evidence, reopen/reconcile and explicit recovery | [Occurrence addition](stage6_identity_occurrence_addition.md) |
+| Changed interpretation and kind change | Text edits that retire g01 for a fresh group resolved to a new derived Entity or unresolved; unchanged-text edits that turn doc01's HC variant into a local mention and back, referencing doc02's existing HC Entity; reopen/reconcile and explicit recovery | [Reinterpretation](stage6_identity_reinterpretation.md) |
 | Mixed occurrence revision | One edit keeps `it`, removes `the controller`, adds a startup `the controller` to continuing g01 and retires g02, through the general occurrence map with no admission change; reopen/reconcile and explicit recovery | [Mixed occurrences](stage6_identity_mixed_occurrences.md) |
 | Group split and combination | Explicit `occurrence_regrouping` map (since replaced by the general map); g01 splits into fresh g04 and g05, then g04 and g05 combine into fresh g06; retired groups, links, facts, evidence and triplets physically removed; facts generated again from the fresh groups, never transferred; fresh IDs from source, new revision and key; reopen/reconcile and explicit recovery | [Group split](stage6_identity_group_split.md) |
 
@@ -310,16 +311,32 @@ The oracle covers the 540,045 fate worlds, the 18,842 stable worlds again with u
 
 Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: 282 unit tests passed. `support/occurrence_check.py` passed on all 540,045 fate worlds (about 100 s alone, 119 s under load), and `--mutants` caught all 25 rule breaks. The ledger check passed with `PINNED` unchanged at 3828 nodes and 3717 sequences. `verify.py journey all` gave 736 PASS and 0 FAIL in 37 runs on `f90652d`. The last commit only adds the added-occurrence refusal and two tests, and journey R1 gave 27 PASS on it. The 36 native integration tests in the nine files that drive the touched modules passed (722 s). Three thermo reviews found two medium holes and four low issues, all fixed with a test that failed first. A correction could move an occurrence to another span with the same text. An unreferenced corpus input let a new Entity skip derivation. A correction could add an occurrence without a rebuild. Empty text was no longer refused.
 
+**Checkpoint E, completed 2026-10-22.** Four captured fixtures on doc01 of a `chunked-fixture` root, which the user approved on 2026-10-22. The [reinterpretation guide](stage6_identity_reinterpretation.md) has the texts, spans, maps, UUIDs, runs and evidence.
+
+- `reinterpret-new-entity` (text edit, revision 1 to 2): g01 retires; fresh g07 holds `the backup controller` and `it` and resolves (r07) to a new "Backup controller" Entity whose UUID derives from r07. A Helios controller query no longer returns doc01's fact; a Backup controller query returns g07's regenerated fact.
+- `reinterpret-unresolved` (text edit, revision 1 to 2): g01 retires; fresh g08 holds `A controller` and `it` and is unresolved. Its fact is in the graph with evidence, and no query returns it.
+- `change-kind-to-mention` (unchanged text, revision 1 to 2): doc01 drops v01 and its HC recipe; fresh mention group g09 `HC` resolves to the Helios controller. The shared HC edge and the HC Entity survive on doc02's claim. An HC query no longer reaches doc01's fact, because a local mention is not a global name.
+- `change-kind-to-reusable` (unchanged text, revision 2 to 3): g09 retires; doc01 references doc02's existing HC Entity through a corpus input that v02 lists, and adds the doc01-scoped variant v02. The HC edge regains doc01's contribution, one HC Entity remains with two owners, and an HC query returns the same two facts as at revision 1.
+
+The two kind changes are the first runs of a TextChange with equal texts. It needed no code change: the document was forgotten, ingested again and rebuilt with the same chunk IDs. Shared changes: `declare_group` takes a status and an optional target; `require_fresh_doc01` became `require_root`; `mention_fact` in `native.py` is the one fact-and-evidence lookup; each command may list retrieval `queries`; `transition_summary` reports each fresh group's resolution and fact.
+
+Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: 299 unit tests passed. 45 native integration tests passed (983 s), covering the two new native files and every module the change touched. `verify.py journey all` gave 965 PASS and 0 FAIL in 49 runs on `63b30b7`. The admission code, `replace.py` and `text_changes.py` did not change, so the occurrence and ledger checks were not rerun. Two thermo reviews found no medium or high issue; their simplifications are in the branch: unique group keys g07 to g09 instead of reusing g03, four flat commands, and one fact-and-evidence lookup. A third review compared every earlier captured describer with `main` and found them byte-identical.
+
 ### Next task
 
-Checkpoint E: four captured fixtures on doc01, which the user approved in outline on 2026-10-22. Before any fixture code, show the user their exact texts, spans and maps checked against the Checkpoint D rules.
+Step-4 item 4, full source lifecycle: a `forget` command that removes a source no other source depends on. The user decided on 2026-10-22:
 
-1. Changed interpretation to a new Entity: a text edit to `the backup controller`; g01 retires; fresh g03 holds `the backup controller` and `it` and resolves to a new derived Entity.
-2. Changed interpretation to unresolved: a text edit to `A controller`; g01 retires; fresh g03 holds `A controller` and `it` and is unresolved.
-3. Reusable to mention, unchanged text, revision 1 to 2: doc01 drops v01 and its HC recipe; fresh mention group `HC` resolves to the Helios controller. doc02's claim keeps the shared HC edge and Entity.
-4. Mention to reusable, unchanged text, revision 2 to 3: the HC mention group retires; doc01 references doc02's existing HC Entity through a corpus input and adds a doc01-scoped variant again.
+- A forgotten source leaves a record of its last revision, so a re-added document continues at the next revision and never derives a retired UUID again.
+- `forget` is a separate command from `withdraw`, which keeps the original Data and facts.
+- Verification is the ledger model plus fault-stage journeys, with no small-world oracle.
 
-Meanwhile the user sketches a real dependent-source scenario for dependencies (item 3). Run `support/occurrence_check.py` for any change to `admission.py`.
+Definition of "depends on", approved 2026-10-22. Source X consumed Y when X's description lists Y as an input. A source depends on doc01 when it consumed doc01's text, a span or a chunk of it, or lists as a corpus input an Entity that only doc01 owns. An Entity that another source also owns survives with unchanged fields, so a source that read it is unaffected. Indirect dependence through a third document belongs to step-4 item 3.
+
+Forget has two intents, which the user raised on 2026-10-22. Cleanup ("no longer needed") may safely refuse when dependents exist. Erasure ("must go": privacy, legal, licence, a fabricated source) must not be blocked by dependents, and step 5 will route Cognee's own deletes here. Both intents agree when nothing depends on the source, so build that part now. While dependents exist, `forget` refuses and lists them; this refusal is a placeholder until item 3 decides what erasure does to dependents (withhold them from retrieval until reconsidered, remove them too, or withhold by default with an explicit removal option). Record as an item-3 requirement: when a source must go, its dependents cannot block it.
+
+Dependency examples for item 3, given to the user on 2026-10-22: a glossary or abbreviation list, a protocol or method document, an instrument calibration record, a review or meta-analysis, and measurement records naming a sample defined elsewhere. Corrections and retractions are left out until time is handled explicitly (user, 2026-10-22).
+
+The user decided on 2026-10-22 to retire the reviewed roots under `outputs/stage6_*` as history. Their result files stay readable, but current code need not open them, so delete `TextChange.from_plan`'s legacy readers and the tracked follow-up that kept them. Run `support/occurrence_check.py` for any change to `admission.py`.
 
 ### Tracked follow-ups
 
@@ -349,7 +366,7 @@ Paths below are relative to `src/cognee_lab/identity/`.
 | `revisions.py`, `text_fixture.py` | Captured identity correction/prefix edit, shared maintenance callbacks and transition diagnostics |
 | `occurrence_fixture.py`, `occurrence_addition.py`, `resolved_retirement.py` | Captured addition/removal/mixed/retirement examples and physical absence/shared-survival checks. `COMMANDS` in `occurrence_fixture.py` maps each occurrence command to its text, describer, result file and occurrence map |
 | `group_regrouping.py` | Captured split and combination texts, regrouping maps and the `describe_split` and `describe_combination` intended descriptions |
-| `captured_revision.py` | Shared building blocks for captured describers: `require_fresh_doc01`, `begin_revision`, `retire_group`, `declare_group`, `occurrence` and `stamp_producer` |
+| `captured_revision.py` | Shared building blocks for captured describers: `require_root`, `begin_revision`, `retire_group`, `declare_group`, `occurrence` and `stamp_producer` |
 | `__main__.py` | Fixture CLI arguments, `--embedding` reopen checks and command dispatch |
 | `environment.py`, `fixture.env`, `fixture_embeddings.py` | Root marker, per-root embedding profile and store isolation. `environment.py` imports no Cognee. Cognee loads the comment-only `fixture.env` instead of `.env`. `fixture_embeddings.py` is the deterministic loopback embedding service |
 
@@ -393,7 +410,7 @@ The user agreed this routine on 2026-10-21:
 
 The integration suite, `uv run pytest -q -m integration`, takes about 10 minutes and runs only on a local machine. Run the focused native tests for the changed path.
 
-**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 26 journey blocks. `journey all` runs the 25 loopback blocks as 37 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. [Verification skill](#verification-skill) lists each `journey all` run.
+**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 35 journey blocks. `journey all` runs the 34 loopback blocks as 49 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. [Verification skill](#verification-skill) lists each `journey all` run.
 
 An earlier full run on 2026-10-21 took about 2 hours. The step timings suggest that macOS idle throttling caused most of it. Every step took a flat 40 s or so until `caffeinate` started, and about 4 s after. This is an inference from the timings, not a proven cause. A warm step costs about 3.6 to 6.7 s, and about 2.4 s of that is imports. An unthrottled full run is estimated at about 11 minutes.
 

@@ -353,3 +353,15 @@ The assistant ran the evidence on the user's Mac on 2026-10-21 and 2026-10-22 wi
 | An exemption must be checked by the code that grants it. | M | New Entities named by a corpus input skip derivation. The first version exempted any corpus input, but input validation checks only inputs that a record lists. The exemption now requires a listing record. | When a rule exempts records that another check validates, make the exemption depend on the same condition that triggers the validation. |
 
 The assistant and its subagents ran the evidence on the user's Mac with loopback embeddings. The [session handoff](../docs/SESSION_HANDOFF.md) records the rules and the evidence.
+
+## Changed interpretation and kind change — 2026-10-22
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| A changed meaning shows as a new identity, never as a changed one. | D, M | When "the controller" came to mean a backup controller, or nothing identifiable, the group retired and a fresh group with a new UUID took its occurrences. The fact was generated again with a new edge ID, so no ID served before now carries a different meaning. | When a reading's interpretation changes, give the reinterpreted reading a new identity, and retire the old one. Do not change what an existing ID means. |
+| A local mention is not a global name. | D, R | When doc01 turned HC from a reusable variant into a local mention of the Helios controller, an HC query stopped reaching doc01's fact. A Helios controller query still found it. | Keep "this document calls X by this name" separate from "this name means X everywhere". Only the second should widen what other queries find. |
+| Reuse an existing shared object instead of recreating it. | D, P | Turning HC back into a reusable name referenced doc02's existing HC Entity through a checked corpus input. One HC Entity remained, now with two owners. | When a record needs an object another source already provides, reference it with a content check rather than create a duplicate that must be merged later. |
+| Reusing a key for a different object needs machinery that a unique key avoids. | M | The first version reused group key g03 in three new fixtures, which forced lineage tracking in shared code and could pick the wrong group silently. Unique keys g07 to g09 removed that code. | Give each new object its own key, even when an earlier object with the same key can no longer coexist with it. |
+
+The assistant and its subagents ran the evidence on the user's Mac with loopback embeddings. The [reinterpretation guide](../docs/stage6_identity_reinterpretation.md) records the commands.
+
