@@ -45,7 +45,37 @@ def add_lifecycle_records(payload, label, text):
     )
 
 
-async def prepare(root, *, chunked=False):
+def add_dependency(payload, first, text):
+    """doc02 consumed doc01: its r01 decision lists doc01's text and doc01's
+    private singleton as inputs, so forgetting doc01 would take away what doc02
+    reasoned from."""
+    from .validation import object_digest
+
+    doc = first.inputs[first.original_input_ref]
+    singleton = fixture_id("doc01:singleton")
+    recipe = first.entity_constructions[UUID(singleton)]
+    payload["inputs"]["doc01_text"] = dict(
+        kind="source_text",
+        dataset_id=str(doc.dataset_id),
+        data_id=str(doc.data_id),
+        text_sha256=doc.text_sha256,
+    )
+    payload["inputs"]["doc01_instrument"] = dict(
+        kind="corpus_object",
+        dataset_id=str(first.dataset_id),
+        entity_id=singleton,
+        selected_fields=["name", "description"],
+        content_sha256=object_digest(
+            dict(name=recipe.name, description=recipe.description)
+        ),
+    )
+    payload["mention_resolutions"]["r01"]["input_refs"] += [
+        "doc01_text",
+        "doc01_instrument",
+    ]
+
+
+async def prepare(root, *, chunked=False, dependent=False):
     import cognee
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
@@ -97,6 +127,8 @@ async def prepare(root, *, chunked=False):
     for key in [fixture_id("doc01:singleton"), fixture_id("doc01:unresolved")]:
         payload["entity_constructions"].pop(key)
     add_lifecycle_records(payload, "doc02", text)
+    if dependent:
+        add_dependency(payload, first, text)
     from .captured_chunks import bind_chunks
 
     bind_chunks(payload, text, chunks2)
@@ -110,6 +142,7 @@ async def prepare(root, *, chunked=False):
     info = dict(
         dataset_id=str(first.dataset_id),
         sources={"doc01": "identity.json", "doc02": "identity02.json"},
+        dependent=dependent,
     )
     (root / "multi-fixture-info.json").write_text(json.dumps(info, indent=2))
     if chunked:
@@ -153,31 +186,35 @@ async def publish_one(
     root,
     label,
     *,
-    reconcile=False,
+    expected_revision=0,
     fault_stage=None,
 ):
+    """Publish a source. A publication (first, or a re-add after forget)
+    introduces the next revision and writes the captured facts; a reconcile
+    completes the saved revision and only verifies them."""
     from .fixture import context_for, write_semantics, verify_semantics
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 
     ctx = await context_for(source.identity_data_id)
+    publishes = source.revision == expected_revision + 1
 
     async def task(items, ctx=None):
-        from .text_changes import read_original
+        from .registered import read_texts
 
         for item in items:
             await publisher.publish(
                 item,
-                texts={item.original_input_ref: await read_original(item, ctx)},
+                texts=await read_texts(item),
                 chunks={str(c.id): c for c in chunks},
                 ctx=ctx,
-                expected_revision=source.revision if reconcile else 0,
+                expected_revision=expected_revision,
                 origin="test/fault_injection" if fault_stage else "test",
                 fault_stage=fault_stage,
                 semantic_writer=(
-                    None
-                    if reconcile
-                    else lambda: write_semantics(publisher, item, chunks, original_ctx)
+                    (lambda: write_semantics(publisher, item, chunks, original_ctx))
+                    if publishes
+                    else None
                 ),
                 verify_semantics=lambda: verify_semantics(
                     publisher, item, chunks, original_ctx
@@ -189,6 +226,138 @@ async def publish_one(
         [Task(task, needs_llm=False)], [source], ctx.user, ctx
     ):
         pass
+
+
+def describe_readd(forgotten, text, chunks):
+    """The forgotten description again at the next revision. Every group is
+    fresh, so its Entity UUID derives from the new revision and its key."""
+    from .captured_chunks import bind_chunks
+    from .validation import fresh_mention_id
+
+    payload = forgotten.model_dump(mode="json")
+    payload["revision"] = forgotten.revision + 1
+    for key, group in payload["mention_groups"].items():
+        fresh = str(
+            fresh_mention_id(forgotten.identity_data_id, payload["revision"], key)
+        )
+        payload["entity_constructions"][fresh] = payload["entity_constructions"].pop(
+            group["entity_id"]
+        )
+        group["entity_id"] = fresh
+    bind_chunks(payload, text, chunks)
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+async def readd(publisher, root, label, forgotten, *, expected_revision, fault_stage):
+    """Add the forgotten document and identity source again from the files in
+    the root, then publish at the next revision."""
+    import cognee
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.storage import add_data_points
+    from .fixture import context_for, load_chunks
+    from .validation import text_digest
+
+    row = next(
+        r
+        for r in await publisher.records.rows(forgotten.dataset_id)
+        if r["source"] == str(forgotten.identity_data_id)
+    )
+    if row["state"] != "forgotten":
+        raise IntentError("forget_state", "Re-add needs a forgotten source")
+    doc = forgotten.inputs[forgotten.original_input_ref]
+    text_file = root / ("source.txt" if label == "doc01" else "source02.txt")
+    text = text_file.read_text()
+    if text_digest(text) != doc.text_sha256:
+        raise IntentError("source_changed", "Re-add the forgotten document's text")
+    budget = 512
+    if (root / "chunked-fixture-info.json").exists():
+        budget = json.loads((root / "chunked-fixture-info.json").read_text())[
+            "chunk_budget"
+        ]
+    await cognee.add(
+        DataItem(data=str(text_file), data_id=doc.data_id),
+        dataset_name="stage6_isolated_fixture",
+        skip_connection_test=True,
+    )
+    ctx = await context_for(doc.data_id)
+    chunks = await load_chunks(None, ctx, budget=budget)
+    await add_data_points(chunks, ctx=ctx)
+    source = describe_readd(forgotten, text, chunks)
+    path = root / f"identity_{label}_revision{source.revision}.json"
+    path.write_text(source.model_dump_json(indent=2) + "\n")
+    await cognee.add(
+        DataItem(data=str(path), data_id=source.identity_data_id),
+        dataset_name="stage6_isolated_fixture",
+        skip_connection_test=True,
+    )
+    await publish_one(
+        publisher,
+        source,
+        chunks,
+        ctx,
+        root,
+        label,
+        expected_revision=expected_revision,
+        fault_stage=fault_stage,
+    )
+
+
+async def forget_checks(publisher, source, plan, label):
+    """What remains of a source whose forget began: the booleans a journey
+    reads after a failure and after completion."""
+    from pathlib import Path
+    from urllib.parse import unquote, urlparse
+    from .captured_chunks import fixture_mention_id
+    from .forget import data_present, evidence_rows, owned_objects
+    from .native import mention_fact
+    from .withdraw import contribution_triples, is_own
+
+    graph, vector = publisher.graph, publisher.vector
+    doc = source.inputs[source.original_input_ref]
+    location = plan.get("raw_data_location") or ""
+    raw_file = Path(unquote(urlparse(location).path)) if location else None
+    nodes, edges = await owned_objects(graph, source)
+    mention_ids = [str(g.entity_id) for g in source.mention_groups.values()]
+    contribution_present = False
+    for a, b, relation in contribution_triples(plan):
+        edge = await edge_metadata(graph, a, b, relation)
+        if edge and any(is_own(source, c) for c in contributions(edge.edge_properties)):
+            contribution_present = True
+    return dict(
+        original_data_present=await data_present(doc.data_id, source.dataset_id),
+        identity_data_present=await data_present(
+            source.identity_data_id, source.dataset_id
+        ),
+        raw_file_present=raw_file is not None and raw_file.exists(),
+        document_node_present=await graph.get_node(str(doc.data_id)) is not None,
+        chunks_present=[
+            c for c in plan["chunk_ids"] if await graph.get_node(c) is not None
+        ],
+        chunk_vectors_present=[
+            c
+            for c in plan["chunk_ids"]
+            if await vector.retrieve("DocumentChunk_text", [c])
+        ],
+        mention_nodes_present=[
+            m for m in mention_ids if await graph.get_node(m) is not None
+        ],
+        mention_vectors_present=[
+            m for m in mention_ids if await vector.retrieve("Entity_name", [m])
+        ],
+        original_fact_present=(
+            await mention_fact(publisher, source, fixture_mention_id(source))
+        ).edge
+        is not None,
+        evidence_rows=await evidence_rows(source.dataset_id, doc.data_id),
+        private_singleton_present=await graph.get_node(fixture_id(label + ":singleton"))
+        is not None,
+        private_singleton_indexed=bool(
+            await vector.retrieve("Entity_name", [fixture_id(label + ":singleton")])
+        ),
+        identity_contribution_present=contribution_present,
+        owned_nodes=len(nodes),
+        owned_edges=len(edges),
+    )
 
 
 async def snapshot(publisher, sources, query="What does HC limit?"):
@@ -231,9 +400,28 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         borrowed_entity=await publisher.graph.get_node(str(variant.target_entity_id)),
         recovery_events=await publisher.records.events(first.dataset_id),
     )
+    hc = await publisher.graph.get_node_delete_data([str(variant.source_entity_id)])
+    result["hc_entity"] = dict(
+        present=str(variant.source_entity_id) in hc,
+        owners=sorted(
+            hc[str(variant.source_entity_id)].source_ref_keys
+            if str(variant.source_entity_id) in hc
+            else []
+        ),
+    )
     for label, source in sources.items():
         from .registered import read_registered
 
+        row = rows[str(source.identity_data_id)]
+        if row["plan"].get("operation") == "identity_forget":
+            result["sources"][label] = dict(
+                identity_data_id=str(source.identity_data_id),
+                state=row["state"],
+                saved_revision=source.revision,
+                verified_revision=row["verified_revision"],
+                forget=await forget_checks(publisher, source, row["plan"], label),
+            )
+            continue
         registered = await read_registered(source)
         mid = fixture_mention_id(source)
         unresolved_group = source.mention_groups.get("g02")
@@ -386,7 +574,9 @@ async def run(args, root):
 
     if args.command in {"multi-fixture", "chunked-fixture"}:
         publisher, prepared = await prepare(
-            root, chunked=args.command == "chunked-fixture"
+            root,
+            chunked=args.command == "chunked-fixture",
+            dependent=args.dependent,
         )
         args._fixture_publisher = publisher
         sources = {label: value[0] for label, value in prepared.items()}
@@ -417,23 +607,44 @@ async def run(args, root):
                 "source_missing", "Selected document is not in this fixture"
             )
         selected = sources[args.source]
+        origin = "test/fault_injection" if args.fault_stage else "test"
         if args.command == "withdraw":
             await publisher.withdraw(
                 selected,
                 expected_revision=selected.revision,
-                origin="test/fault_injection" if args.fault_stage else "test",
+                origin=origin,
+                fault_stage=args.fault_stage,
+            )
+        elif args.command == "forget":
+            await publisher.forget(
+                selected,
+                expected_revision=args.expected_revision,
+                origin=origin,
+                fault_stage=args.fault_stage,
+            )
+        elif args.command == "readd":
+            await readd(
+                publisher,
+                root,
+                args.source,
+                selected,
+                expected_revision=args.expected_revision,
                 fault_stage=args.fault_stage,
             )
         elif args.command == "reconcile":
-            ctx = await context_for(
-                selected.inputs[selected.original_input_ref].data_id
-            )
             row = next(
                 r
                 for r in await publisher.records.rows(selected.dataset_id)
                 if r["source"] == str(selected.identity_data_id)
             )
             if (
+                row["state"] == "failed"
+                and row["plan"].get("operation") == "identity_forget"
+            ):
+                await publisher.forget(
+                    selected, expected_revision=selected.revision, origin="test"
+                )
+            elif (
                 row["state"] == "failed"
                 and row["plan"].get("operation") == "identity_replace"
             ):
@@ -458,6 +669,9 @@ async def run(args, root):
                         expected_revision=selected.revision,
                     )
             else:
+                ctx = await context_for(
+                    selected.inputs[selected.original_input_ref].data_id
+                )
                 await publish_one(
                     publisher,
                     selected,
@@ -465,8 +679,10 @@ async def run(args, root):
                     ctx,
                     root,
                     args.source,
-                    reconcile=True,
+                    expected_revision=selected.revision,
                 )
+        # Forget and re-add change the saved descriptions; report the new ones.
+        sources = await current_sources(root, publisher)
     if len(sources) == 1:
         result = dict(
             result=await retrieve(publisher, selected.dataset_id, args.query),

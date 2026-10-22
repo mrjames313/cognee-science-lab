@@ -95,6 +95,19 @@ class Publisher:
             fault_stage=fault_stage,
         )
 
+    async def forget(
+        self, source, *, expected_revision, origin="runtime", fault_stage=None
+    ):
+        from .forget import forget
+
+        return await forget(
+            self,
+            source,
+            expected_revision=expected_revision,
+            origin=origin,
+            fault_stage=fault_stage,
+        )
+
     async def replace(
         self,
         source,
@@ -279,7 +292,27 @@ class Publisher:
             raise IntentError(
                 "recovery_choice", "Reconcile the saved replacement plan explicitly"
             )
-        await self.preflight(source, texts, chunks, ctx)
+        if (
+            row
+            and row["state"] == "failed"
+            and row["plan"].get("operation") == "identity_forget"
+        ):
+            raise IntentError("recovery_choice", "Retry the failed forget explicitly")
+        if row and row["state"] == "forgotten":
+            from .forget import admit_readd
+
+            await admit_readd(
+                self.graph,
+                IdentitySource.model_validate_json(row["description"]),
+                source,
+            )
+        await self.preflight(
+            source,
+            texts,
+            chunks,
+            ctx,
+            saved_revision=row["revision"] if row else None,
+        )
         wanted = identity_edges(source)
         markers = [
             (str(source.inputs[key].chunk_id), str(group.entity_id), key)
@@ -295,12 +328,16 @@ class Publisher:
             withdraw=[],
             runtime_profile=self.runtime_profile,
         )
+        # A publication introduces a revision: the first one, or the next one
+        # after forget. A reconcile completes the saved revision again.
         attempt = await self.records.begin(
             source,
             expected_revision=expected_revision,
             plan=plan,
             origin=origin,
-            method="reconcile" if expected_revision else "publish",
+            method=(
+                "publish" if source.revision == expected_revision + 1 else "reconcile"
+            ),
         )
         return await self._apply_pending(
             source,

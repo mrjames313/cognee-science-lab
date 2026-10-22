@@ -3,29 +3,20 @@
 from dataclasses import dataclass
 
 from .admission import OccurrenceMap, identity_map, occurrence, parse_occurrence_map
-from .models import ChunkInput, IdentitySource, SourceTextInput
-from .validation import IntentError, map_chunks
+from .models import ChunkInput
+from .validation import IntentError, dependents, map_chunks
 
 
 def reject_dependents(old, rows):
-    doc = old.inputs[old.original_input_ref]
-    for row in rows:
-        if (row["source"], row["dataset"]) == (
-            str(old.identity_data_id),
-            str(old.dataset_id),
-        ):
-            continue
-        if row["state"] == "withdrawn":
-            continue
-        other = IdentitySource.model_validate_json(row["description"])
-        if any(
-            isinstance(i, SourceTextInput) and i.data_id == doc.data_id
-            for i in other.inputs.values()
-        ):
-            raise IntentError(
-                "dependent_source",
-                "Another saved identity source depends on the edited text; reconsideration is required",
-            )
+    """A text edit changes what its readers consumed. Entities the edit drops
+    are not checked here: that is step-4 item 3."""
+    found = dependents(old, rows)
+    if found:
+        raise IntentError(
+            "dependent_source",
+            "Another saved identity source depends on the edited text; reconsideration is required",
+            details=dict(dependents=found),
+        )
 
 
 async def reject_unsafe_cascades(publisher, source):

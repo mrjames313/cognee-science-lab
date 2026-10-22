@@ -4,22 +4,21 @@ import re
 from types import SimpleNamespace
 from uuid import UUID
 
-from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
+from .models import Accepted, ChunkInput, IdentitySource
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
 from .validation import IntentError, validate_inputs
 
 
 async def valid_sources(publisher, dataset_id, rows):
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data
-    from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from .registered import read_registered, read_texts
 
     valid, unavailable = [], []
     events = await publisher.records.events(dataset_id)
     for row in rows:
         if row["state"] != "current" or row["revision"] != row["verified_revision"]:
-            if row["state"] != "withdrawn":
+            # A deliberate retirement is not unavailable: nothing is withheld.
+            if row["state"] not in {"withdrawn", "forgotten"}:
                 incident = next(
                     (
                         e
@@ -41,26 +40,12 @@ async def valid_sources(publisher, dataset_id, rows):
             continue
         source = IdentitySource.model_validate_json(row["description"])
         try:
-            from .registered import read_registered
-
             if await read_registered(source) != source:
                 raise IntentError(
                     "generated_source_changed",
                     "Registered identity snapshot differs from saved current intent",
                 )
-            texts, chunks = {}, {}
-            async with get_relational_engine().get_async_session() as session:
-                for key, item in source.inputs.items():
-                    if isinstance(item, SourceTextInput):
-                        data = await session.get(Data, item.data_id)
-                        if data is None or data.dataset_id != item.dataset_id:
-                            raise IntentError(
-                                "source_missing", "Original Data item missing"
-                            )
-                        async with open_data_file(
-                            data.raw_data_location, mode="r", encoding="utf-8"
-                        ) as f:
-                            texts[key] = f.read()
+            texts, chunks = await read_texts(source), {}
             for item in source.inputs.values():
                 if isinstance(item, ChunkInput):
                     node = await publisher.graph.get_node(str(item.chunk_id))

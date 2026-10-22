@@ -44,6 +44,8 @@ def main():
             "edit-text",
             *OCCURRENCE_COMMANDS,
             "withdraw",
+            "forget",
+            "readd",
             "retrieve",
             "status",
             "reconcile",
@@ -71,6 +73,10 @@ def main():
             "withdraw_contributions",
             "withdraw_owners",
             "withdraw_verification",
+            "forget_contributions",
+            "forget_identity",
+            "forget_document",
+            "forget_verification",
             "replace_saved",
             "replace_registered",
             "replace_published",
@@ -82,6 +88,12 @@ def main():
         ],
     )
     parser.add_argument(
+        "--dependent",
+        action="store_true",
+        help="multi-fixture only: doc02 lists doc01's text and private singleton "
+        "as inputs of its resolution, so doc01 has a dependent",
+    )
+    parser.add_argument(
         "--embedding",
         choices=["env", "loopback"],
         help="Embedding profile. Creation records it (default env: EMBEDDING_* from "
@@ -90,7 +102,7 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     if (
-        args.command in {"revise", "edit-text", *OCCURRENCE_COMMANDS}
+        args.command in {"revise", "edit-text", "forget", "readd", *OCCURRENCE_COMMANDS}
         and args.expected_revision is None
     ):
         parser.error(f"{args.command} requires --expected-revision")
@@ -100,17 +112,19 @@ def main():
                 parser.error("Fault stage does not match the selected operation")
         elif args.fault_stage.startswith("text_"):
             parser.error("Text failure boundaries require a text-changing command")
-        prefix = (
-            "withdraw_"
-            if args.command == "withdraw"
-            else "replace_" if args.command == "revise" else None
-        )
+        prefix = {
+            "withdraw": "withdraw_",
+            "forget": "forget_",
+            "revise": "replace_",
+        }.get(args.command)
         if (prefix and not args.fault_stage.startswith(prefix)) or (
             not prefix
             and args.command not in TEXT_COMMANDS
-            and args.fault_stage.startswith(("withdraw_", "replace_"))
+            and args.fault_stage.startswith(("withdraw_", "replace_", "forget_"))
         ):
             parser.error("Fault stage does not match the selected operation")
+    if args.dependent and args.command != "multi-fixture":
+        parser.error("--dependent applies to multi-fixture only")
     creating = args.command in CREATION_COMMANDS
     if creating and root.exists():
         parser.error("Fixture root already exists; choose a new directory")
@@ -137,7 +151,13 @@ def main():
             from .text_fixture import run
         elif args.command == "revise":
             from .revisions import run
-        elif args.command in {"multi-fixture", "chunked-fixture", "withdraw"} or (
+        elif args.command in {
+            "multi-fixture",
+            "chunked-fixture",
+            "withdraw",
+            "forget",
+            "readd",
+        } or (
             args.command == "reconcile" and (root / "multi-fixture-info.json").exists()
         ):
             from .multisource import run
@@ -162,7 +182,10 @@ def main():
         try:
             result = asyncio.run(execute())
         except Exception as exc:
-            print(json.dumps({"error": type(exc).__name__, "message": str(exc)}))
+            report = {"error": type(exc).__name__, "message": str(exc)}
+            if getattr(exc, "details", None) is not None:
+                report["details"] = exc.details
+            print(json.dumps(report, default=str))
             raise SystemExit(1) from exc
         print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
 
