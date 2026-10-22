@@ -85,14 +85,36 @@ async def stored_files(data_ids):
     return files
 
 
-async def stored_file_present(location):
+async def stored_file_present(location, data_ids):
     """Whether a stored file that Cognee manages, one under the data root,
-    still exists. A location outside the data root is the user's own file."""
+    still exists and no Data row but `data_ids` references it. A location
+    outside the data root is the user's own file. Cognee stores a file under a
+    content address, so another item with the same bytes shares it, and
+    `remove_data_file_if_unreferenced` keeps it for that item."""
     from urllib.parse import unquote
+    from sqlalchemy import func, or_, select
+    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+    from cognee.modules.data.models import Data
 
     data_root = get_storage_config()["data_root_directory"]
     if data_root not in location:
+        return False
+    async with get_relational_engine().get_async_session() as session:
+        others = (
+            await session.execute(
+                select(func.count())
+                .select_from(Data)
+                .where(
+                    or_(
+                        Data.raw_data_location == location,
+                        Data.original_data_location == location,
+                    ),
+                    Data.id.notin_([UUID(str(i)) for i in data_ids]),
+                )
+            )
+        ).scalar()
+    if others:
         return False
     relative = unquote(location.split(data_root, 1)[1].lstrip("/\\"))
     return await get_file_storage(data_root).file_exists(relative)
@@ -212,7 +234,7 @@ async def remains(publisher, source, plan):
             location
             for locations in plan["stored_files"].values()
             for location in locations
-            if await stored_file_present(location)
+            if await stored_file_present(location, plan["stored_files"])
         ],
         document_node_present=await graph.get_node(str(doc.data_id)) is not None,
         chunks_present=[

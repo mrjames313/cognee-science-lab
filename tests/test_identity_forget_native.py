@@ -1,6 +1,7 @@
 """Forget and re-add through real configured stores in fresh subprocesses."""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -190,6 +191,63 @@ def test_native_readd_replaces_what_a_later_forget_of_a_co_owner_removed(tmp_pat
     assert not final["shared_singleton_present"]
     assert len(final["result"]["facts"]) == 2
     assert final["recovery_events"] == []
+
+
+DUPLICATE = """
+import asyncio, sys, uuid
+from pathlib import Path
+from cognee_lab.identity.environment import fixture_environment
+
+root = Path(sys.argv[1])
+copy = root / "copy" / "source.txt"
+copy.parent.mkdir()
+copy.write_text((root / "source.txt").read_text())
+with fixture_environment(root):
+    import cognee
+    from cognee.tasks.ingestion.data_item import DataItem
+
+    asyncio.run(
+        cognee.add(
+            DataItem(data=str(copy), data_id=uuid.uuid4()),
+            dataset_name="stage6_isolated_fixture",
+            skip_connection_test=True,
+        )
+    )
+"""
+
+
+@pytest.mark.integration
+def test_native_forget_finishes_when_another_item_keeps_the_stored_file(tmp_path):
+    """Cognee stores a file under a content address, so another Data item with
+    the same bytes and name shares doc01's stored file and Cognee keeps it.
+    The forget completes and leaves that file for the other item."""
+    import subprocess
+    import sys
+    from urllib.parse import unquote, urlparse
+
+    from test_identity_native import REPO
+
+    root = tmp_path / "duplicate"
+    command(root, "multi-fixture")
+    subprocess.run(
+        [sys.executable, "-c", DUPLICATE, str(root)],
+        cwd=REPO,
+        check=True,
+        capture_output=True,
+        timeout=300,
+    )
+    command(root, "forget", "--source", "doc01", "--expected-revision", "1")
+    final = result_of(root)
+    assert final["sources"]["doc01"]["state"] == "forgotten"
+    assert final["sources"]["doc01"]["forget"] == ABSENT
+    status = json.loads(command(root, "status").stdout)
+    plan = next(p for p in status["publications"] if p["state"] == "forgotten")["plan"]
+    kept = [
+        unquote(urlparse(location).path) if "://" in location else location
+        for location in plan["stored_files"][plan["original_data_id"]]
+        if str(root.resolve() / "data") in location
+    ]
+    assert kept and all(Path(k).exists() for k in kept)
 
 
 @pytest.mark.integration
