@@ -18,9 +18,9 @@ The [representation decision record](../results/cognee_stage5_4_5_identity_repre
 
 ## Code baseline and delivery status
 
-Runtime code is in `src/cognee_lab/identity/`. The implementation admits every text change through one **general occurrence map** (`admit` in `admission.py`), which covers the captured prefix edits, removals, additions, split and combination. It does not include general regrouping, automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The regrouping update extends transition admission, captured semantic output, diagnostics, CLI commands, the ledger model, verify journeys and tests. The saved-source schema and dependencies are unchanged.
+Runtime code is in `src/cognee_lab/identity/`. The implementation admits every text change through one **general occurrence map** (`admit` in `admission.py`), which covers the captured prefix edits, removals, additions, split, combination and one mixed edit. The map refuses a changed resolution or meaning, a change of representation kind, a move to another document, span-scoped variants and dependent sources. The implementation does not include automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The general-map update changed admission, the saved text-change plan, result JSON, the captured describers, a CLI command, the ledger model, verify journeys and tests. The saved-source schema and dependencies are unchanged.
 
-The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The user approved the split and combination case on 2026-10-21. The assistant's subagents verified the implementation on the user's Mac with loopback embeddings. This handoff records no user-reviewed fixture roots for it. [Next task](#next-task) gives the next task.
+The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The user approved the split and combination case and the general occurrence map on 2026-10-21, and the mixed case on the same day. The assistant and its subagents verified their implementation on the user's Mac with loopback embeddings. This handoff records no user-reviewed fixture roots for them. [Next task](#next-task) gives the next task.
 
 Generation began from lab checkout commit `5a179881b4314ba458ed2836fc3d7e78edae8169`. Later code was first delivered as patches. That hash identifies only the generation base. The code and documents are now committed.
 
@@ -69,7 +69,7 @@ At session start, inspect `git status --short`, `git log -1 --oneline`, the file
 | Empty resolved fact-bearing group | Retire saved group/resolution/declaration, physical mention/node vector, resolution link, local fact/evidence/markers; preserve doc02's distinct fact and shared endpoint/index | [Resolved retirement](stage6_identity_resolved_retirement.md) |
 | Occurrence additions and new group | Explicit old-to-new continuity, stable continuing IDs/fresh same-text local group, accepted link and new original-owned local fact/evidence, reopen/reconcile and explicit recovery | [Occurrence addition](stage6_identity_occurrence_addition.md) |
 | Mixed occurrence revision | One edit keeps `it`, removes `the controller`, adds a startup `the controller` to continuing g01 and retires g02, through the general occurrence map with no admission change; reopen/reconcile and explicit recovery | [Mixed occurrences](stage6_identity_mixed_occurrences.md) |
-| Group split and combination | Explicit `occurrence_regrouping` map; g01 splits into fresh g04 and g05, then g04 and g05 combine into fresh g06; retired groups, links, facts, evidence and triplets physically removed; facts generated again from the fresh groups, never transferred; fresh IDs from source, new revision and key; reopen/reconcile and explicit recovery | [Group split](stage6_identity_group_split.md) |
+| Group split and combination | Explicit `occurrence_regrouping` map (since replaced by the general map); g01 splits into fresh g04 and g05, then g04 and g05 combine into fresh g06; retired groups, links, facts, evidence and triplets physically removed; facts generated again from the fresh groups, never transferred; fresh IDs from source, new revision and key; reopen/reconcile and explicit recovery | [Group split](stage6_identity_group_split.md) |
 
 ### Tests run in the generation environment
 
@@ -157,14 +157,15 @@ The assistant measured these results on the user's Mac after the fix:
 
 The project verification skill (`.claude/skills/verify/`) found this issue, and the fix removed its blocker. Its grounding-run evidence is in `outputs/verify/20261020T201147Z-grounding/evidence/`. The 24 lab data files that the probe and grounding runs of that session wrote are listed in `outputs/verify/lab-data-leaked-files-2026-10-20.txt`. The lab relational store does not reference them.
 
-Proof history, 2026-10-20 to 2026-10-21:
+Proof history, 2026-10-20 to 2026-10-22:
 
 - 2026-10-20. The 20 journey blocks ran as 31 runs on the Mac against Cognee 1.6.2, with 500 assertions and 0 failures. The tokenizer fix was applied.
 - 2026-10-21. A fix round added the `journey` runner, `probe`, the lab-store guard and `reopen_problem`. The rerun passed all 31 runs with 567 assertions and 0 failures. `journey all` ran the 30 loopback runs, and `journey P5 --include-env` ran the env run.
 - 2026-10-21, before the regrouping journeys. The assistant ran `journey all` on the Mac. The 19 loopback journey blocks ran as 30 runs, with 586 PASS rows and 0 FAIL rows. P5 is the 20th block. It needs `--include-env` and did not run in this pass.
 - 2026-10-21, group split and combination. The assistant's subagents ran journeys G1 (32 PASS rows), G2 (20), G3 (36) and G4 (21) on the Mac with loopback embeddings, with 0 FAIL rows. After the fresh-ID change they reran O5 (27), O6 `replace_published` (17) and O6 `text_chunks` (17), with 0 FAIL rows. The map now has 24 journey blocks, and `journey all` runs the 23 loopback blocks as 34 runs.
 - 2026-10-21, checkpoint run for group split and combination. The assistant ran `journey all` on the Mac on the final branch head, serially. The 23 loopback blocks ran as 34 runs, with 695 PASS rows and 0 FAIL rows, in 15 min 17 s. P5 needs `--include-env` and did not run.
-- 2026-10-22, checkpoint run for the mixed revision. The assistant ran `journey all` on the Mac with 4 jobs. The 25 loopback blocks ran as 37 runs, with 735 PASS rows and 2 FAIL rows, in 308 s. Both FAIL rows were new O7 checks with wrong expectations, not code faults. After the expectations were corrected, O7 gave 17 PASS rows and 0 FAIL rows. No source file changed between the two runs.
+- 2026-10-22, checkpoint run for the mixed revision. The assistant ran `journey all` on the Mac with 4 jobs. The 25 loopback blocks ran as 37 runs, with 735 PASS rows and 2 FAIL rows, in 308 s. Both FAIL rows were new O7 checks with wrong expectations, not code faults. The O7 expectations in the feature map were corrected, and an O7 rerun gave 17 PASS rows and 0 FAIL rows. No file under `src/` changed after the full run.
+- 2026-10-22, clean checkpoint rerun. The assistant ran `journey all` again on the Mac with 4 jobs, on `main` at `5603310` plus documentation changes only. The 25 loopback blocks ran as 37 runs, with 736 PASS rows and 0 FAIL rows, in 307 s.
 - Not exercised against an env root. The warning path for a missing tokenizer fix, and the doctor failure path for an operator file that lacks a key.
 - Exercised. The doctor failure path for a pre-profile marker, a malformed marker, and an env root whose operator file names another model.
 
@@ -240,7 +241,7 @@ The assistant drafted a mixed addition and removal case. The user asked why one 
 - Result JSON reports `occurrence_map` instead of the three mode fields. `decision_method` is now a list of the producers that the revision's groups and decisions cite. `position_shift` is set only when every occurrence moved by the prefix length. Fixture maps are `REMOVAL_MAP`, `RETIREMENT_MAP`, `ADDITION_MAP`, `SPLIT_MAP` and `COMBINE_MAP`.
 - Evidence, run by the assistant on the user's Mac on 2026-10-21: 264 unit tests passed. `support/occurrence_check.py` agreed with the oracle on all 540,045 worlds, and 29,793 corruptions each met their rule's refusal (91.6 s). `--mutants` caught all 20 breaks. The ledger check passed with `PINNED` unchanged at 3828 nodes and 3717 sequences. `verify.py journey all` gave 695 PASS and 0 FAIL in 34 runs (285 s). Its only expectation changes were the seven checks that read the old map fields, which now read `occurrence_map`. The 23 native integration tests in the seven touched test files passed (465 s). Two thermo reviews found no high or medium bug; their fixes are in the branch.
 
-**Checkpoint C, completed 2026-10-22.** `revise-occurrences` publishes the case the user reviewed on 2026-10-21. g01 keeps `it` ([90,92) to [46,48)), loses `the controller` at [49,63) and gains `the controller` at [86,100); g02 retires. Its map, `{"g01": [null, ["g01", 0]], "g02": [null]}`, equals the removal map, because a map states only where old occurrences went. No admission code changed. `describe_mixed` and `describe_removal` share `keep_g01_retire_g02` in `occurrence_fixture.py`, and every captured describer is now built from the helpers in `captured_revision.py`; a byte comparison showed all seven describers produce the same descriptions as before. The added occurrence lies in a chunk without fact evidence, so g01 marks two chunks while its fact uses one. The [mixed occurrences guide](stage6_identity_mixed_occurrences.md) has the texts, decisions, run and evidence. Evidence, by the assistant on the user's Mac on 2026-10-21 and 2026-10-22: 269 unit tests passed. `support/occurrence_check.py` agreed with the oracle on all 540,045 worlds and 29,793 corruptions, and `--mutants` caught all 20 breaks. The ledger check passed. A native run of 16 tests in six touched files gave 13 passed and 3 failed. The 3 failures were wrong test expectations: the assistant had assumed four chunks where the native chunker makes five, and had assumed a healthy `reconcile` keeps the text-change record, which it does not. After the corrections, the 5 tests in `test_identity_mixed_native.py` and `test_identity_occurrences_native.py` passed. Verify journeys O7 (17 checks) and O8 (12 checks for each of two fault stages) gave 0 FAIL; the `journey all` run is under [Verification skill](#verification-skill).
+**Checkpoint C, completed 2026-10-22.** `revise-occurrences` publishes the case the user reviewed on 2026-10-21. g01 keeps `it` ([90,92) to [46,48)), loses `the controller` at [49,63) and gains `the controller` at [86,100); g02 retires. Its map, `{"g01": [null, ["g01", 0]], "g02": [null]}`, equals the removal map, because a map states only where old occurrences went. No admission code changed. `describe_mixed` and `describe_removal` share `keep_g01_retire_g02` in `occurrence_fixture.py`, and every captured describer is now built from the helpers in `captured_revision.py`; a byte comparison showed all seven describers produce the same descriptions as before. The added occurrence lies in a chunk without fact evidence, so g01 marks two chunks while its fact uses one. The [mixed occurrences guide](stage6_identity_mixed_occurrences.md) has the texts, decisions, run and evidence. Evidence, by the assistant on the user's Mac on 2026-10-21 and 2026-10-22: 269 unit tests passed. `support/occurrence_check.py` agreed with the oracle on all 540,045 worlds and 29,793 corruptions, and `--mutants` caught all 20 breaks. The ledger check passed. A native run of 16 tests in six touched files gave 13 passed and 3 failed. The 3 failures were wrong test expectations: the assistant had assumed four chunks where the native chunker makes five, and had assumed a healthy `reconcile` keeps the text-change record, which it does not. The other 13 tests passed in that run. After the corrections, only the 5 tests in `test_identity_mixed_native.py` and `test_identity_occurrences_native.py` were rerun, and all passed. No file under `src/` changed after the first run. Verify journeys O7 (17 PASS rows) and O8 (12 PASS rows for each of two fault stages) gave 0 FAIL. Each count includes three lab-store guard rows. The `journey all` run is under [Verification skill](#verification-skill).
 
 ### Next task
 
@@ -252,10 +253,10 @@ Pick the next step-4 item with the user, as a concrete case to review before any
 
 ### Tracked follow-ups
 
-These came out of the 2026-10-21 review. Neither blocks the next case.
+Neither blocks the next case.
 
-- The three nullable map fields on `TextChange` became one general map with a plan reader on 2026-10-21 (Checkpoint B).
-- The admitters moved out of `text_changes.py` into `admission.py` on 2026-10-21.
+- Delete `TextChange.from_plan`'s legacy readers once no kept root holds a plan without `occurrence_map`.
+- The oracle's worlds do not cover more than one addition or reordering. A unit test pins reordering, and the captured addition fixture's general map pins two additions. Widen the bound if a later rule depends on either.
 
 ## Code map
 
@@ -302,14 +303,14 @@ The latest happy path, with a **new** root, is:
 
 ```bash
 uv run python -m cognee_lab.identity chunked-fixture --root outputs/stage6_resume_check --embedding loopback
-uv run python -m cognee_lab.identity split-group --root outputs/stage6_resume_check --source doc01 --expected-revision 1
-uv run python -m cognee_lab.identity combine-groups --root outputs/stage6_resume_check --source doc01 --expected-revision 2
+uv run python -m cognee_lab.identity revise-occurrences --root outputs/stage6_resume_check --source doc01 --expected-revision 1
+uv run python -m cognee_lab.identity retrieve --root outputs/stage6_resume_check
 uv run python -m cognee_lab.identity reconcile --root outputs/stage6_resume_check --source doc01
 ```
 
 This sequence uses loopback embeddings. Without `--embedding loopback`, `chunked-fixture` uses the default `--embedding env` profile. That profile needs `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in the repository `.env`, and it calls that embedding endpoint. Later commands read the profile from the root marker, so they do not need the flag. pytest always uses loopback and does not need `.env`.
 
-Expected: two facts after the split and after the combination, doc01 current at 2/2/2 after the split and 3/3/3 after the combination, doc02 unchanged at 1/1/1, fresh g06 and its generated fact, g01, g04 and g05 absent, g02/shared support present, no recovery incident. The [group split guide](stage6_identity_group_split.md) has the expected values and separate fresh-root `replace_published` failure/recovery sequences. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
+Expected: two retrieved facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, continuing g01 with `it` at [46,48) and `the controller` at [86,100), g02 retired with no Entity, index entry or marker, and no recovery incident. The [mixed occurrences guide](stage6_identity_mixed_occurrences.md) has the expected values and the injected-failure recovery. The [group split guide](stage6_identity_group_split.md) has the split and combination sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
 
 ## Verification and landing
 
@@ -322,7 +323,7 @@ The user agreed this routine on 2026-10-21:
 
 The integration suite, `uv run pytest -q -m integration`, takes about 10 minutes and runs only on a local machine. Run the focused native tests for the changed path.
 
-**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 26 journey blocks. `journey all` runs the 25 loopback blocks as 37 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. The earlier `journey all` run on 2026-10-21, before the regrouping journeys, gave 586 PASS rows and 0 FAIL rows on the Mac.
+**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 26 journey blocks. `journey all` runs the 25 loopback blocks as 37 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. [Verification skill](#verification-skill) lists each `journey all` run.
 
 An earlier full run on 2026-10-21 took about 2 hours. The step timings suggest that macOS idle throttling caused most of it. Every step took a flat 40 s or so until `caffeinate` started, and about 4 s after. This is an inference from the timings, not a proven cause. A warm step costs about 3.6 to 6.7 s, and about 2.4 s of that is imports. An unthrottled full run is estimated at about 11 minutes.
 
