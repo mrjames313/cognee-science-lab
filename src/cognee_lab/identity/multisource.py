@@ -301,19 +301,14 @@ async def readd(publisher, root, label, forgotten, *, expected_revision, fault_s
 async def forget_checks(publisher, source, plan, label):
     """What remains of a source whose forget began, plus the fixture's own
     objects: the values a journey reads after a failure and after completion."""
-    from pathlib import Path
-    from urllib.parse import unquote, urlparse
     from .captured_chunks import fixture_mention_id
     from .forget import remains
     from .native import mention_fact
 
     graph, vector = publisher.graph, publisher.vector
-    location = plan.get("raw_data_location") or ""
-    raw_file = Path(unquote(urlparse(location).path)) if location else None
     mention_ids = [str(g.entity_id) for g in source.mention_groups.values()]
     return dict(
         **await remains(publisher, source, plan),
-        raw_file_present=raw_file is not None and raw_file.exists(),
         mention_nodes_present=[
             m for m in mention_ids if await graph.get_node(m) is not None
         ],

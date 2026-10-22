@@ -4,13 +4,13 @@ import json
 
 import pytest
 
-from cognee_lab.identity.forget import STAGES
+from cognee_lab.identity.forget import COMMITTED_FAULTS, FAULT_STAGES
 from test_identity_native import command
 
 ABSENT = dict(
     original_data_present=False,
     identity_data_present=False,
-    raw_file_present=False,
+    stored_files_present=[],
     document_node_present=False,
     chunks_present=[],
     chunk_vectors_present=[],
@@ -174,10 +174,11 @@ def test_native_forget_refuses_a_dependent_until_it_is_withdrawn(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("stage", STAGES)
+@pytest.mark.parametrize("fault", FAULT_STAGES)
 def test_native_forget_failure_withholds_the_source_and_reconcile_finishes_it(
-    tmp_path, stage
+    tmp_path, fault
 ):
+    stage = COMMITTED_FAULTS.get(fault, fault)
     root = tmp_path / "forget_failure"
     command(root, "multi-fixture")
     initial = result_of(root)
@@ -189,7 +190,7 @@ def test_native_forget_failure_withholds_the_source_and_reconcile_finishes_it(
         "--expected-revision",
         "1",
         "--fault-stage",
-        stage,
+        fault,
         expect=1,
     )
     assert "recovery_event_id=" in error_of(failed)["message"]

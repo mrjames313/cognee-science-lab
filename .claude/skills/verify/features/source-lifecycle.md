@@ -43,7 +43,7 @@ BD=$(val fixture '.borrowed_entity.description')
 $V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1
 $V check "$RUN" forget '[.sources.doc01.state, .sources.doc02.state] == ["forgotten", "current"]' 'doc01 is forgotten and doc02 is current'
 $V check "$RUN" forget '.sources.doc01 | .saved_revision == 1 and .verified_revision == 1' 'the forgotten row keeps revision 1'
-$V check "$RUN" forget '.sources.doc01.forget | .original_data_present == false and .identity_data_present == false and .raw_file_present == false and .document_node_present == false' 'the original and identity Data, the stored file and the document node are gone'
+$V check "$RUN" forget '.sources.doc01.forget | .original_data_present == false and .identity_data_present == false and .stored_files_present == [] and .document_node_present == false' 'the original and identity Data, the stored files and the document node are gone'
 $V check "$RUN" forget '.sources.doc01.forget | .chunks_present == [] and .chunk_vectors_present == [] and .mention_nodes_present == [] and .mention_vectors_present == []' 'chunks, chunk vectors, mention nodes and mention vectors are gone'
 $V check "$RUN" forget '.sources.doc01.forget | .original_fact_present == false and .evidence_rows == 0 and .private_singleton_present == false and .private_singleton_indexed == false' 'the fact, its evidence rows and the private singleton are gone'
 $V check "$RUN" forget '.sources.doc01.forget | .identity_contribution_present == false and .owned_nodes == 0 and .owned_edges == 0' 'no contribution and no owned graph object remain'
@@ -125,7 +125,7 @@ $V check "$RUN" after '.facts == [] and .unavailable_sources == []' 'a new proce
 
 **F3 forget fault and reconcile.** Proves `forget-fault`. Guide: "Interrupted forgets". The fence lists the four stages. The runner runs each in its own run. The command fails with an injected error and a recovery event. `retrieve` returns only doc02's fact and lists doc01 as unavailable with the incident. `status` shows the open forget incident at that stage. `withdraw` and `readd` are refused while the forget is incomplete. `reconcile --source doc01` finishes the forget: doc01 is forgotten with nothing left, doc02 is intact, and the same incident records `outcome: forgotten` with one verified forget attempt.
 
-```bash journey F3 stages=forget_contributions,forget_identity,forget_document,forget_verification
+```bash journey F3 stages=forget_contributions,forget_identity,forget_document,forget_verification,forget_identity_committed,forget_document_committed
 $V drive "$RUN" main fixture -- multi-fixture
 M02=$(val fixture '.sources.doc02.mention_entity_id')
 
@@ -139,7 +139,7 @@ $V check "$RUN" withheld '.unavailable_sources | length == 1 and (.[0] | .reason
 
 $V drive "$RUN" main before -- status
 $V check "$RUN" before '[.publications[].state] | sort == ["current", "failed"]' 'doc01 is failed and doc02 is current'
-$V check "$RUN" before '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .operation == "forget" and .stage == "'"$STAGE"'" and .origin == "test/fault_injection" and .resolved_at == null)' 'one open forget incident at the injected stage'
+$V check "$RUN" before '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .operation == "forget" and .stage == ("'"$STAGE"'" | sub("_committed$"; "")) and .origin == "test/fault_injection" and .resolved_at == null)' 'one open forget incident at the stage the fault interrupted'
 
 $V drive "$RUN" main blocked -- withdraw --source doc01
 $V check "$RUN" blocked '.error == "IntentError" and (.message | contains("Retry the failed forget explicitly"))' 'withdraw is refused while the forget is incomplete'
@@ -148,7 +148,7 @@ $V check "$RUN" blocked2 '.error == "IntentError" and (.message | contains("Re-a
 
 $V drive "$RUN" main rec -- reconcile --source doc01
 $V check "$RUN" rec '[.sources.doc01.state, .sources.doc02.state] == ["forgotten", "current"]' 'reconcile finishes the forget'
-$V check "$RUN" rec '.sources.doc01.forget | .original_data_present == false and .identity_data_present == false and .raw_file_present == false and .document_node_present == false and .chunks_present == [] and .chunk_vectors_present == [] and .mention_nodes_present == [] and .mention_vectors_present == [] and .original_fact_present == false and .evidence_rows == 0 and .private_singleton_present == false and .identity_contribution_present == false and .owned_nodes == 0 and .owned_edges == 0' 'nothing of doc01 remains'
+$V check "$RUN" rec '.sources.doc01.forget | .original_data_present == false and .identity_data_present == false and .stored_files_present == [] and .document_node_present == false and .chunks_present == [] and .chunk_vectors_present == [] and .mention_nodes_present == [] and .mention_vectors_present == [] and .original_fact_present == false and .evidence_rows == 0 and .private_singleton_present == false and .identity_contribution_present == false and .owned_nodes == 0 and .owned_edges == 0' 'nothing of doc01 remains'
 $V check "$RUN" rec '.sources.doc02 | .original_marker_present and .original_fact_present and .original_fact_owned_by_chunk and .original_evidence_present and .private_singleton_present and .unresolved_entity_present' 'doc02 is intact'
 $V check "$RUN" rec '. as $r | [$r.result.facts[].source_id] == ["'"$M02"'"]' 'only the doc02 fact is returned'
 $V check "$RUN" rec '.shared_variant | (.contributions | length) == 1 and (.owners | length) == 1' 'one shared contribution and one owner remain'

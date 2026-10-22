@@ -34,6 +34,14 @@ STAGES = (
     "forget_document",
     "forget_verification",
 )
+# A fault after Cognee committed the Data delete and before it swept the
+# item's evidence rows and stored files, as a process that dies there leaves
+# them. The event records the stage the item was in.
+COMMITTED_FAULTS = {
+    "forget_identity_committed": "forget_identity",
+    "forget_document_committed": "forget_document",
+}
+FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS)
 
 
 async def owned_objects(graph, source):
@@ -53,23 +61,89 @@ async def owned_objects(graph, source):
     return nodes, edges
 
 
-async def forget_plan(publisher, source):
-    """Everything the source owns, recorded before any destructive write."""
+async def stored_files(data_ids):
+    """The raw and original file locations of Data items, by item."""
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
+
+    files = {}
+    async with get_relational_engine().get_async_session() as session:
+        for data_id in data_ids:
+            data = await session.get(Data, UUID(str(data_id)))
+            files[str(data_id)] = sorted(
+                {
+                    location
+                    for location in (
+                        (data.raw_data_location, data.original_data_location)
+                        if data
+                        else ()
+                    )
+                    if location
+                }
+            )
+    return files
+
+
+async def stored_file_present(location):
+    """Whether a stored file that Cognee manages, one under the data root,
+    still exists. A location outside the data root is the user's own file."""
+    from urllib.parse import unquote
+    from cognee.infrastructure.files.storage import get_file_storage, get_storage_config
+
+    data_root = get_storage_config()["data_root_directory"]
+    if data_root not in location:
+        return False
+    relative = unquote(location.split(data_root, 1)[1].lstrip("/\\"))
+    return await get_file_storage(data_root).file_exists(relative)
+
+
+async def sweep(dataset_id, data_id, locations):
+    """Remove what Cognee's Data delete sweeps after its commit: the item's
+    edge evidence rows and its stored files, once nothing references them.
+    Idempotent, so a retry after a death between the commit and the sweep
+    converges."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.provenance.edge_evidence.cleanup import delete_edge_evidence
+
+    await delete_edge_evidence(dataset_id, UUID(str(data_id)))
+    engine = get_relational_engine()
+    for location in locations:
+        await engine.remove_data_file_if_unreferenced(location)
+
+
+def dying_after_commit(stage, fault_stage):
+    """A context that makes the native forget of this stage's item fail right
+    after Cognee committed the Data delete, when the fault stage asks for it."""
+    from contextlib import nullcontext
+    from unittest.mock import patch
+
+    if COMMITTED_FAULTS.get(fault_stage) != stage:
+        return nullcontext()
+
+    async def die(*_):
+        raise IntentError(
+            "injected_failure",
+            f"Injected failure after the Data delete commit at {stage}",
+        )
+
+    return patch(
+        "cognee.modules.provenance.edge_evidence.cleanup.delete_edge_evidence", die
+    )
+
+
+async def forget_plan(publisher, source):
+    """Everything the source owns, recorded before any destructive write."""
     from .publish import identity_edges
 
     graph = publisher.graph
     doc = source.inputs[source.original_input_ref]
     node_ids, edge_ids = await owned_objects(graph, source)
-    async with get_relational_engine().get_async_session() as session:
-        data = await session.get(Data, doc.data_id)
     return dict(
         operation="identity_forget",
         revision=source.revision,
         runtime_profile=publisher.runtime_profile,
         original_data_id=str(doc.data_id),
-        raw_data_location=data.raw_data_location if data else None,
+        stored_files=await stored_files([doc.data_id, source.identity_data_id]),
         chunk_ids=sorted(
             str(i.chunk_id) for i in source.inputs.values() if isinstance(i, ChunkInput)
         ),
@@ -140,6 +214,12 @@ async def remains(publisher, source, plan):
         identity_data_present=await data_present(
             source.identity_data_id, source.dataset_id
         ),
+        stored_files_present=[
+            location
+            for locations in plan["stored_files"].values()
+            for location in locations
+            if await stored_file_present(location)
+        ],
         document_node_present=await graph.get_node(str(doc.data_id)) is not None,
         chunks_present=[
             c for c in plan["chunk_ids"] if await graph.get_node(c) is not None
@@ -238,18 +318,19 @@ async def forget(
         user = await get_default_user()
         doc = source.inputs[source.original_input_ref]
         # Native deletion of a Data item removes every graph and vector object
-        # that only its refs own, then its Data row, stored file and evidence
-        # rows. Both calls converge on a missing item, so a retry repeats them.
-        stage = identity_stage
-        await native_forget(
-            data_id=source.identity_data_id, dataset_id=source.dataset_id, user=user
-        )
-        injected(stage)
-        stage = document_stage
-        await native_forget(
-            data_id=doc.data_id, dataset_id=source.dataset_id, user=user
-        )
-        injected(stage)
+        # that only its refs own, then its Data row, stored files and evidence
+        # rows. On a missing item it finds nothing to delete and sweeps
+        # nothing, so the sweep runs here too and a retry converges.
+        for stage, data_id in (
+            (identity_stage, source.identity_data_id),
+            (document_stage, doc.data_id),
+        ):
+            with dying_after_commit(stage, fault_stage):
+                await native_forget(
+                    data_id=data_id, dataset_id=source.dataset_id, user=user
+                )
+            await sweep(source.dataset_id, data_id, plan["stored_files"][str(data_id)])
+            injected(stage)
         stage = verification_stage
         await verify_forgotten(publisher, source, plan)
         injected(stage)

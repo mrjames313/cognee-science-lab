@@ -14,7 +14,7 @@ from .environment import (
     fixture_environment,
     read_embedding,
 )
-from .forget import STAGES as FORGET_STAGES
+from .forget import FAULT_STAGES as FORGET_STAGES
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 
 TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
