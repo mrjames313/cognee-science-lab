@@ -7,10 +7,10 @@ import pytest
 from pydantic import ValidationError
 
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.admission import admit, identity_map
+from cognee_lab.identity.admission import admit, identity_map, parse_occurrence_map
 from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
-from cognee_lab.identity.validation import IntentError, validate_inputs
+from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
 
 
 def test_only_an_unmoved_prefix_insertion_reports_a_shift(source_payload):
@@ -70,7 +70,11 @@ def test_exact_unicode_remap_preserves_occurrence_identity_and_reviews_context(
     "kind,code,message",
     [
         ("stale_offsets", "occurrence_changed", "exact document slice"),
-        ("changed_interpretation", "continuing_decision_changed", "keeps its resolution record"),
+        (
+            "changed_interpretation",
+            "continuing_decision_changed",
+            "keeps its resolution record",
+        ),
         ("group_uuid", "fresh_key_reused", "key that no old group used"),
         ("arbitrary_edit", "source_changed", "fingerprints disagree"),
     ],
@@ -203,3 +207,20 @@ async def test_unretained_endpoint_cannot_cascade_into_another_owner_edge(
         await reject_unsafe_cascades(publisher, source)
     publisher.graph.retained = True
     await reject_unsafe_cascades(publisher, source)
+
+
+def test_an_edit_to_empty_text_is_refused_even_when_it_removes_every_group(
+    source_payload,
+):
+    old, before, _, _, _ = example(source_payload)
+    payload = old.model_dump(mode="json")
+    payload["revision"] = 2
+    payload["inputs"]["doc01"]["text_sha256"] = text_digest("")
+    payload["inputs"].pop("chunk01")
+    payload["entity_constructions"].pop(payload["mention_groups"]["g01"]["entity_id"])
+    payload["mention_groups"], payload["mention_resolutions"] = {}, {}
+    emptied = IdentitySource.model_validate_json(json.dumps(payload))
+    everything_removed = parse_occurrence_map({"g01": [None, None]})
+    with pytest.raises(IntentError, match="empty") as refused:
+        admit(old, emptied, before, "", everything_removed)
+    assert refused.value.code == "empty_text"

@@ -38,6 +38,7 @@ MUTANTS = {
     "skip_old_slices": ("check_old_slices", skip),
     "skip_new_slices": ("check_new_slices", skip),
     "skip_revision_step": ("check_next_revision", skip),
+    "allow_empty_text": ("check_text_present", skip),
     "allow_changed_decisions": ("check_continuing_decisions", skip),
     "allow_changed_decisions_in_text_edits": (
         "check_continuing_decisions",

@@ -86,6 +86,7 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     Only a first attempt chooses new UUIDs; a retry completes a saved plan,
     which may predate the derivation rules.
     """
+    check_text_present(before, after)
     check_source_identity(old, source, before, after)
     check_next_revision(old, source)
     origins = map_origins(old, occurrence_map)
@@ -112,6 +113,11 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     if text_changed:
         check_no_span_variants(source)
     return fate
+
+
+def check_text_present(before, after):
+    if not before or not after:
+        raise IntentError("empty_text", "A replacement keeps a non-empty text")
 
 
 def check_source_identity(old, source, before, after):

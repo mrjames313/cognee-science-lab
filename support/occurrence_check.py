@@ -30,7 +30,7 @@ from uuid import UUID
 
 from cognee_lab.identity import admission
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.validation import IntentError
+from cognee_lab.identity.validation import IntentError, text_digest
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import (
     ADMIT,
@@ -189,6 +189,17 @@ def payload_corruptions(case, fate):
         "advances exactly one revision",
         dict(new=rebuilt(new_payload, lambda p: p.update(revision=3))),
     )
+    if not new_payload["mention_groups"]:
+
+        def empty(p):
+            p["inputs"].pop("chunk01")
+            p["inputs"]["doc01"]["text_sha256"] = text_digest("")
+
+        yield (
+            "emptied text",
+            "non-empty text",
+            dict(after="", new=rebuilt(new_payload, empty)),
+        )
     for key in sorted(fate.fresh)[:1]:
         yield (
             "fresh resolution missing",
