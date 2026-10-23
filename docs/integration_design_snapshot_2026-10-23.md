@@ -484,3 +484,59 @@ CLI and environment code (`F`) and scenario fixtures (`S.first`, `S.change`) are
 5. Work through the hierarchical wiki in more depth.
 6. Dig into the two-description-copies case study (section 12).
 7. Revise the playbook, the roadmap pointer and the handoff to the new framing, once the user approves edits to them.
+
+## 16. Which operations rest on Cognee, identity or new code (2026-10-23)
+
+The assistant wrote this section on the user's Mac after surveying Cognee 1.6.2's provenance code. It covers the operations that identity, units and the wiki need. The units and wiki rows are inferences from the dry runs in section 10, because neither integration exists.
+
+The split follows one line. Cognee records which source owns an object. The integration layer records what a decision depended on and whether it may be served. Every operation in the first table is about ownership or native processing. Every operation in the second is about dependency, eligibility or recovery.
+
+**Operations based on Cognee functions.** Use these as they are, or through a thin wrapper.
+
+| Operation | Cognee mechanism | Identity | Units | Wiki |
+|---|---|---|---|---|
+| Ingest and rebuild sources | `add`, `cognify`, incremental `update` | yes | yes, for documents that mention quantities | yes, pages are the sources |
+| Section-shaped chunks | a custom `Chunker`, passed again to `update` with the same `chunker_id` | no | no | yes |
+| Stable chunk identity | content-derived chunk IDs and a stable `Data.id` | base layer | base layer | base for section IDs |
+| Ownership of overlay objects | source refs and `attach_*_source_refs` | yes | yes | yes |
+| A generated source that owns the overlay | a registered Data item with a pinned ID | yes | likely, for an imported catalog | maybe, for summaries |
+| Retirement by last owner | `execute_source_ref_removal` and the delete planner | yes | yes | yes |
+| Undo of a failed native run | cognify rollback | yes | yes | yes |
+| Attribution at read time | `include_references` and edge evidence | partly | partly | partly |
+| Dropping cached answers after a delete | session invalidation on used element IDs | yes | yes | yes |
+
+**Operations based on identity functions.** These exist, but each must be generalized out of identity before another integration can use it.
+
+| Operation | Identity function today | Identity | Units | Wiki |
+|---|---|---|---|---|
+| Ledger with publication state | `RecordStore` states and transitions | yes | yes | yes |
+| Saved plan before destructive writes | `REQUIRED_PLANS` and the stage events | yes | yes | yes |
+| Forward recovery after a crash | recovery events and `reconcile` | yes | yes | yes |
+| Producer and input digests | `Producer` and the input models | yes | yes | yes |
+| Admission checks on inputs | the input checks in `admission.py` | yes | yes | yes |
+| Detection of changed inputs before publishing | `preflight`, with `source_changed` and `chunk_mapping` | yes | yes | yes |
+| Withholding per decision | `withholding.py` | yes | yes | likely, during a page edit |
+| Dependency response | `refresh_dependents`, `remapped` | yes | yes, when a quantity definition changes | yes, upward through summaries |
+| Continuity across revisions | the occurrence map, and retired IDs never reused | yes | small, because catalog IDs are stable | yes, a section continuity map |
+| Guards around forget | refusal while dependents exist, fencing, read-back | yes | yes | yes |
+| Eligibility at read time | `is_served`, `valid_sources`, `live_drift` | yes | yes | yes |
+
+Most of these are generic in shape but identity-specific in code. Continuity is the largest example, and its rules are the least likely to transfer (inferred from section 14's labels). Extracting a shared layer is real work in its own right.
+
+**Operations that need new functions.**
+
+| Operation | Why it is new | Who needs it |
+|---|---|---|
+| Overlay-aware retriever | The registered retriever (M4) is not built. It must override `get_context_evidence` and `extract_context_object_ids` to get evidence and cache invalidation. | all three |
+| Cache invalidation on update and re-add | Cognee invalidates on delete only, so R6 is half met. | all three |
+| A real Describe step | Identity's Import does no interpretation. | all three. Units detect quantities. The wiki structures pages with an LLM. |
+| Dependencies across integrations | Identity's dependents are local to identity. | likely, for example a wiki page that cites identity facts or units |
+| Import of a versioned external catalog | The catalog is not a Cognee document, so it has no native change detection. | units |
+| Store for measurement records | The origin is undecided. One idea is a single backend store. | units |
+| Ranges and conversion by context at read time | This is quantity logic with no counterpart in identity. | units |
+| Section hierarchy | A summary depends on its subsections, and retrieval walks the tree. | wiki |
+| Withholding during an edit session | An edit spans time, not one change. | wiki, undecided |
+| Cleanup of orphaned vectors | `DETACH DELETE` leaves Triplet and EdgeType vectors behind (inferred from the planner). | all three |
+| Store setup check | In-graph refs exist only if the graph was empty at its first write (`markers.py:48-73`). | all three |
+
+The shared layer would be the second table, generalized, sitting on the first. The new functions are of two kinds. Some are Cognee gaps that every integration hits: invalidation, orphaned vectors and the setup check. These belong in a thin Cognee adapter, or upstream. The rest are domain logic for units or the wiki and stay out of the shared layer (inferred). The open question is continuity. It may generalize to a map plus a registry of retired IDs with rules per integration, or it may stay per-integration code (guess, to be tested against the wiki).
