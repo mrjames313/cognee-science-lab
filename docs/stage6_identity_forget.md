@@ -304,7 +304,7 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 - `uv run python support/ledger_check.py`: `PASS verified within bound` at depth 5 with 8504 nodes and 8349 sequences, and at depth 6 with 56089 nodes and 55126 sequences. `--mutants` caught all 51 breaks by the property each names (exit 0), at `8e045aa`. `withdrawn-guard-admits-replace` fails at depth 7 by P5. `supersede-drops-chain` fails at depth 5 by P5, on these sources and on the `cb5fd20` sources, so it moved to the default breaks.
 - `uv run python support/occurrence_check.py`: `PASS`; `--mutants`: `PASS`.
 - `uv run pytest -q -m integration tests/test_identity_forget_native.py tests/test_identity_dependencies_native.py tests/test_identity_erasure_retry_native.py`: 36 passed in 905 s. New: `test_native_an_erasure_retry_of_a_failed_publication_retires_what_it_wrote`, and `test_native_a_failed_text_change_takes_the_removal` for a text change that failed before any write and after its writes.
-- Verify journeys, each with 0 FAIL rows: F1 (45 PASS), F2 (28), F3 (147 over seven stages), F4 (15), F5 (10), F6 (26 over two stages), F7 (8), F8 (8), F9 (6), F10 (12), F11 (9), F12 (9), F13 (13), F14 (10, new), D1 to D6 (128) and G1 to G4 (109); 583 PASS in all. `journey all` was not run.
+- Verify journeys, each with 0 FAIL rows: F1 (45 PASS), F2 (28), F3 (147 over seven stages), F4 (15), F5 (10), F6 (26 over two stages), F7 (8), F8 (8), F9 (6), F10 (12), F11 (9), F12 (9), F13 (13), F14 (10, new), D1 to D6 (128) and G1 to G4 (109); 583 PASS in all. `journey all` was not run in this round; it ran at the checkpoint, below.
 
 **Fix round 2.** The assistant (a subagent) ran these on the user's Mac on 2026-10-23 with loopback embeddings, on branch `stage6-erasure` at `cb5fd20`. The unit suite ran before each of the three code commits; the native tests, checks and journeys ran concurrently, so their times are inflated.
 
@@ -312,7 +312,7 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 - `uv run python support/ledger_check.py`: `PASS verified within bound` at depth 5 with 8504 nodes and 8349 sequences, and at depth 6 with 56089 nodes and 55126 sequences. `--mutants` caught all 49 breaks by the property each names (exit 0). The deep breaks fail at depth 7: `supersede-drops-chain` by P5 (a reconcile retry that drops `erased_from`) and `withdrawn-guard-admits-replace` by P5.
 - `uv run python support/occurrence_check.py`: `PASS`; `--mutants`: `PASS`, with the new break `erase_nothing` caught.
 - `uv run pytest -q -m integration tests/test_identity_forget_native.py tests/test_identity_dependencies_native.py`: 34 passed in 856 s. New: `test_native_a_failed_first_publication_takes_the_removal_in_its_saved_revision` and `test_native_a_failed_text_change_takes_the_removal_with_its_writer`.
-- Verify journeys, each with 0 FAIL rows: F1 (45 PASS), F2 (28), F3 (147 over seven stages), F4 (15), F5 (10), F6 (26 over two stages), F7 (8), F8 (8), F9 (6), F10 (12), F11 (9), F12 (9), F13 (13, new), D1 to D6 (128) and G1 to G4 (109); 573 PASS in all. `journey all` was not run.
+- Verify journeys, each with 0 FAIL rows: F1 (45 PASS), F2 (28), F3 (147 over seven stages), F4 (15), F5 (10), F6 (26 over two stages), F7 (8), F8 (8), F9 (6), F10 (12), F11 (9), F12 (9), F13 (13, new), D1 to D6 (128) and G1 to G4 (109); 573 PASS in all. `journey all` was not run in this round; it ran at the checkpoint, below.
 
 **Fix round 1.** The assistant (a subagent) ran these on the user's Mac on 2026-10-23 with loopback embeddings, on branch `stage6-erasure` at `8b109d0` unless stated:
 
@@ -320,7 +320,7 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 - `uv run python support/ledger_check.py`: `PASS verified within bound` at depth 5 with 6431 nodes and 6300 sequences, and at depth 6 with 38470 nodes and 37733 sequences. `--mutants` caught every break (exit 0); the deep break `supersede-drops-chain` fails at depth 6 by P6.
 - `uv run python support/occurrence_check.py`: `PASS` in 113 s; `--mutants`: `PASS` in 59 s, with the new breaks `erase_unbound` and `drop_read_recipes` caught.
 - `uv run pytest -q -m integration tests/test_identity_forget_native.py tests/test_identity_dependencies_native.py`: 32 passed in 710 s (also 32 passed at `cd7f486`). New: `test_native_a_failed_refresh_takes_the_removal_in_its_saved_revision`.
-- Verify journeys, each with 0 FAIL rows: F1 (45 PASS), F2 (28), F3 (147 over seven stages), F4 (15), F5 (10), F6 (26 over two stages), F7 (8), F8 (8), F9 (6), F10 (12), F11 (9), F12 (9, new), D1 to D6 (128) and G1 to G4 (109). `journey all` was not run.
+- Verify journeys, each with 0 FAIL rows: F1 (45 PASS), F2 (28), F3 (147 over seven stages), F4 (15), F5 (10), F6 (26 over two stages), F7 (8), F8 (8), F9 (6), F10 (12), F11 (9), F12 (9, new), D1 to D6 (128) and G1 to G4 (109). `journey all` was not run in this round; it ran at the checkpoint, below.
 
 **Checkpoint I.**
 
@@ -330,5 +330,12 @@ The assistant (a subagent) ran these on the user's Mac on 2026-10-23 with loopba
 - `uv run python support/ledger_check.py`: `PASS verified within bound` at depth 5 with 6287 nodes and 6156 sequences. `--mutants` caught all 45 breaks by the property each names (exit 0), among them the seven new ones: `complete-keeps-description`, `complete-keeps-plan` and `complete-keeps-messages` by P7, `forget-on-failed-replacement` and `forget-on-failed-withdrawal` by P5, and `forget-refuses-withdrawn` and `forget-refuses-failed-publication` as `INCONCLUSIVE`. The deep break `withdrawn-guard-admits-replace` fails at depth 7 after 8346 nodes with its recorded sequence.
 - `uv run python support/occurrence_check.py`: `PASS` with 540045 worlds in 123 s, each rule 6 row checked 54 times. `--mutants`: `PASS`, all 35 breaks caught, in 60 s.
 - `uv run pytest -q -m integration`: 76 passed in 1806 s. `tests/test_identity_forget_native.py` has 23 tests; the file alone passed in 512 s before the last refactor commit, which renames one function and names the stale-token refusal once.
-- Verify journeys, each with 0 FAIL rows, on `94de39c`: F1 (45 PASS), F2 (28), F3 (21 for each of seven stages), F4 (15), F5 (10), F6 (13 for each of two stages), F7 (8), F8 (8), F9 (6), F10 (12) and F11 (9). Every journey whose root takes `forget`, `readd` or `reconcile` also passed, on `94de39c`: D1 to D6 (128 PASS), P1 to P4 (66), W1 and W3 (89), R1 and R2 (107), E1 to E4 (125), O1 to O8 (219), G1 to G4 (109), I1 to I3 (94) and K1 to K4 (116). `journey all` was not run; the landing playbook runs it before the merge.
+- Verify journeys, each with 0 FAIL rows, on `94de39c`: F1 (45 PASS), F2 (28), F3 (21 for each of seven stages), F4 (15), F5 (10), F6 (13 for each of two stages), F7 (8), F8 (8), F9 (6), F10 (12) and F11 (9). Every journey whose root takes `forget`, `readd` or `reconcile` also passed, on `94de39c`: D1 to D6 (128 PASS), P1 to P4 (66), W1 and W3 (89), R1 and R2 (107), E1 to E4 (125), O1 to O8 (219), G1 to G4 (109), I1 to I3 (94) and K1 to K4 (116). `journey all` was not run in this round; it ran at the checkpoint, below.
 - A by-hand run on a `glossary-fixture` root failed doc01's forget at `forget_document` and finished it with `reconcile --source doc01`, through the glossary driver: doc01 forgotten, the incident resolved as `forgotten` with no message.
+
+**Checkpoint runs.** The assistant and its subagents ran `.claude/skills/verify/scripts/verify.py journey all` on the user's Mac on 2026-10-23 with loopback embeddings. P5 calls the embedding API and did not run.
+
+- On `d94b0a3` (after checkpoint I): 1407 PASS and 0 FAIL. The full integration suite's 76 passed in 1806 s above ran on this commit; its source files are as at `94de39c`.
+- On `686dc16` (after fix round 1): 1416 PASS and 0 FAIL.
+- On `af7218a` (after fix round 2): 1429 PASS and 0 FAIL.
+- On `d6133c7` (after fix round 3): 1439 PASS and 0 FAIL in 80 runs, the 54 loopback journey blocks. The unit suite gave 448 passed on this code.
