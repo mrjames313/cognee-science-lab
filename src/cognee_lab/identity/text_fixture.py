@@ -102,10 +102,14 @@ async def maintain_one(
             await verify_semantics(publisher, other, other_chunks, other_ctx)
 
     async def task(items, ctx=None):
+        from .registered import read_texts
+
         for item in items:
             await publisher.replace(
                 item,
-                texts={item.original_input_ref: change.text},
+                texts=await read_texts(
+                    item, known={item.original_input_ref: change.text}
+                ),
                 chunks=chunks,
                 ctx=ctx,
                 expected_revision=expected_revision,

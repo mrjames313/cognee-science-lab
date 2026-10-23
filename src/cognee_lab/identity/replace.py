@@ -7,10 +7,13 @@ from .registered import read_registered, write_registered
 from .stages import Operation, run_attempt, saved_row
 from .validation import IntentError
 
-REPLACE = Operation("replace", "Replacement", ("replace_registered",), None)
-# replace_saved fails before the snapshot recheck, then the stage above, then
-# the points inside the shared publisher (after its writes, after retirement,
-# before acknowledgement) and the text change's boundaries.
+REPLACE = Operation(
+    "replace", "Replacement", ("replace_dependents", "replace_registered"), None
+)
+# replace_saved fails before the snapshot recheck, then the stages above
+# (replace_dependents only runs for a text change), then the points inside
+# the shared publisher (after its writes, after retirement, before
+# acknowledgement) and the text change's boundaries.
 FAULT_STAGES = (
     "replace_saved",
     *REPLACE.faults,
@@ -350,6 +353,34 @@ async def replace(
                 "generated_source_changed", "Registered identity snapshot changed"
             )
 
+    async def withhold(_):
+        # Before the text changes: the rows are durable before the edit can
+        # complete, and the pending or failed row withholds every decision
+        # citing this document until then (withheld_decisions).
+        from .withholding import withhold_dependents
+
+        return await withhold_dependents(
+            publisher, old, text_change.previous_text, text_change.text, source.revision
+        )
+
+    async def clean_withholdings(_):
+        # Rows carry forward across revisions until the input validates or
+        # the decision or input is gone. Idempotent: a retry recomputes.
+        from .validation import decision_inputs, validate_inputs
+
+        own = str(source.identity_data_id)
+        rows = [w for w in await publisher.withholdings.rows() if w.source == own]
+        if not rows:
+            return
+        drift = await validate_inputs(source, texts=texts, chunks=chunks, graph=graph)
+        cited = decision_inputs(source)
+        kept = {
+            (w.assignment, w.input_ref)
+            for w in rows
+            if w.input_ref in drift and w.input_ref in cited.get(w.assignment, ())
+        }
+        await publisher.withholdings.keep(source.dataset_id, own, kept)
+
     async def remove_text(run):
         await text_change.apply(publisher, old, source, chunks, ctx, run.boundary)
 
@@ -379,8 +410,13 @@ async def replace(
         plan,
         [
             ("replace_saved", recheck),
-            *([("text_removal", remove_text)] if text_change is not None else []),
+            *(
+                [("replace_dependents", withhold), ("text_removal", remove_text)]
+                if text_change is not None
+                else []
+            ),
             ("replace_registered", register),
+            ("withholding_cleanup", clean_withholdings),
             ("replacement_publish", publish),
         ],
         expected_revision=expected_revision,

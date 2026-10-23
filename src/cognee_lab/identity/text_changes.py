@@ -4,18 +4,41 @@ from dataclasses import dataclass, fields
 
 from .admission import OccurrenceMap, identity_map, occurrence, parse_occurrence_map
 from .models import ChunkInput
-from .retirement import dependents
 from .validation import IntentError, map_chunks
 
 
-def reject_dependents(old, rows):
-    """A text edit changes what its readers consumed. Entities the edit drops
-    are not checked here: that is step-4 item 3."""
-    found = dependents(old, rows)
+async def reject_sole_owned_readers(publisher, old, source):
+    """A text edit does not wait for the sources that read the edited text:
+    the edit withholds their affected decisions (withholding.py). One case
+    stays refused. The edit drops a reusable recipe that only this source
+    owns, so the Entity leaves the graph, while another source reads that
+    Entity as a corpus object."""
+    from uuid import UUID
+
+    from .admission import reusable_recipes
+    from .retirement import dependents, owned_by
+
+    dropped = sorted(
+        str(e) for e in set(reusable_recipes(old)) - set(reusable_recipes(source))
+    )
+    if not dropped:
+        return
+    owners = await publisher.graph.get_node_delete_data(dropped)
+    own = owned_by(old, document=True)
+    sole = frozenset(
+        UUID(key)
+        for key, node in owners.items()
+        if all(own(ref) for ref in node.source_ref_keys)
+    )
+    found = [
+        d
+        for d in dependents(old, await publisher.records.rows(), sole)
+        if d["kind"] == "corpus_object"
+    ]
     if found:
         raise IntentError(
             "dependent_source",
-            "Another saved identity source depends on the edited text; reconsideration is required",
+            "Another saved identity source reads an Entity that only the edited source owns and the edit drops; reconsider that source first",
             details=dict(dependents=found),
         )
 
@@ -161,7 +184,8 @@ class TextChange:
 
         if not 1 <= self.chunk_budget <= 4096:
             raise IntentError("not_admitted", "Invalid captured chunk budget")
-        if texts != {source.original_input_ref: self.text}:
+        # Other documents' texts come from read_texts; only this one changes.
+        if texts.get(source.original_input_ref) != self.text:
             raise IntentError(
                 "source_changed", "Supplied text differs from saved transition"
             )
@@ -199,8 +223,7 @@ class TextChange:
             raise IntentError(
                 "chunk_mapping", "Describe must supply the complete new chunk mapping"
             )
-        # Refuse dependencies we cannot yet reconsider; do not silently invalidate them.
-        reject_dependents(old, await publisher.records.rows())
+        await reject_sole_owned_readers(publisher, old, source)
         await reject_unsafe_cascades(publisher, old)
         if not retry:
             old_chunks = await chunk_text(
@@ -219,7 +242,7 @@ class TextChange:
         from .registered import write_text
 
         # Repeat preconditions under the durable project writer reservation.
-        reject_dependents(old, await publisher.records.rows())
+        await reject_sole_owned_readers(publisher, old, source)
         await reject_unsafe_cascades(publisher, old)
         actual = await read_original(old, ctx)
         if actual not in (self.previous_text, self.text):

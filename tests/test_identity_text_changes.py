@@ -155,24 +155,66 @@ async def test_occurrence_crossing_chunk_boundary_requires_both_markers(source_p
         IdentitySource.model_validate_json(json.dumps(payload))
 
 
-def test_dependent_source_requires_reconsideration_before_edit(source_payload):
-    from cognee_lab.identity.text_changes import reject_dependents
+async def test_a_text_edit_refuses_only_a_reader_of_an_entity_it_drops_alone(
+    source_payload,
+):
+    """A source that read the edited text no longer refuses the edit; its
+    decisions are withheld instead. A source that reads, as a corpus object,
+    a reusable Entity the edit drops and only the edited source owns still
+    refuses it."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+
+    from cognee_lab.identity.text_changes import reject_sole_owned_readers
 
     old, before, after, chunk, intended = example(source_payload)
-    dependent = old.model_copy(update={"identity_data_id": uuid4()})
+    hc = old.variant_assignments["v01"].source_entity_id
+    payload = old.model_dump(mode="json")
+    payload["identity_data_id"] = str(uuid4())
+    payload["inputs"]["existing_HC"] = dict(
+        payload["inputs"]["existing_A"], entity_id=str(hc)
+    )
+    reader = IdentitySource.model_validate_json(json.dumps(payload))
     row = PublicationRow(
-        source=str(dependent.identity_data_id),
-        dataset=str(dependent.dataset_id),
+        source=str(reader.identity_data_id),
+        dataset=str(reader.dataset_id),
         state="current",
-        revision=dependent.revision,
-        verified_revision=dependent.revision,
+        revision=reader.revision,
+        verified_revision=reader.revision,
         attempt="attempt",
-        description=dependent.model_dump_json(),
+        description=reader.model_dump_json(),
         plan={},
     )
-    with pytest.raises(IntentError, match="reconsideration is required"):
-        reject_dependents(old, [row])
-    reject_dependents(old, [replace(row, state="withdrawn")])
+    dropping = intended.model_dump(mode="json")
+    dropping["variant_assignments"].pop("v01")
+    dropping["entity_constructions"].pop(str(hc))
+    dropping = IdentitySource.model_validate_json(json.dumps(dropping))
+    owners = {str(hc): [make_source_ref_key(old.dataset_id, old.identity_data_id)]}
+
+    class Graph:
+        async def get_node_delete_data(self, ids):
+            return {
+                k: SimpleNamespace(source_ref_keys=owners[k])
+                for k in ids
+                if k in owners
+            }
+
+    class Records:
+        async def rows(self, dataset=None):
+            return [row]
+
+    publisher = SimpleNamespace(graph=Graph(), records=Records())
+    await reject_sole_owned_readers(publisher, old, intended)
+    with pytest.raises(IntentError) as refused:
+        await reject_sole_owned_readers(publisher, old, dropping)
+    assert refused.value.code == "dependent_source"
+    assert [d["input_ref"] for d in refused.value.details["dependents"]] == [
+        "existing_HC"
+    ]
+    owners[str(hc)].append(make_source_ref_key(old.dataset_id, uuid4()))
+    await reject_sole_owned_readers(publisher, old, dropping)
+    owners[str(hc)].pop()
+    row = replace(row, state="withdrawn")
+    await reject_sole_owned_readers(publisher, old, dropping)
 
 
 async def test_unretained_endpoint_cannot_cascade_into_another_owner_edge(

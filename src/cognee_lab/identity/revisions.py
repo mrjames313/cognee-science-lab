@@ -58,12 +58,14 @@ async def replace_one(
     generated_ctx = await context_for(source.identity_data_id)
 
     async def task(items, ctx=None):
+        from .registered import read_texts
         from .text_changes import read_original
 
         for item in items:
+            own = {item.original_input_ref: await read_original(item, ctx)}
             await publisher.replace(
                 item,
-                texts={item.original_input_ref: await read_original(item, ctx)},
+                texts=await read_texts(item, known=own),
                 chunks={str(c.id): c for c in chunks},
                 ctx=ctx,
                 expected_revision=expected_revision,
