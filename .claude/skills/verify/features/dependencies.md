@@ -14,6 +14,7 @@ Guide: `docs/stage6_identity_dependencies.md`.
 - `replace-decision` replaces the withheld v01 with a new variant v02 for the entry's new meaning.
 - `failed-edit` withholds every decision citing the glossary while its edit is failed, then `reconcile` completes the edit and the refresh.
 - `interrupted-refresh` leaves doc01 failed when its refresh revision fails; `refresh-dependents` finishes it.
+- Glossary roots also take `forget` and `readd` for doc01.
 
 ## How to get to it (user POV)
 
@@ -171,4 +172,6 @@ $V check "$RUN" refresh '.recovery_events | length == 1 and .[0].outcome == "res
 
 - The review decisions are captured fixture input. They prove the withholding, refresh and re-confirm mechanics, not Describe.
 - `drive` exits 1 for an injected failure. That is the expected result; check `.error`.
-- Corpus-field drift is found per decision at retrieval and is not in `status`, which reads no graph.
+- `status` reads the graph and the registered texts like `retrieve`, so it lists every decision retrieval withholds, live drift included (a changed corpus field, a gone foreign chunk, a span stale after a re-add). Such a decision has no row and shows `refresh_needed`, and `reconfirm` answers it. The native test `test_native_readd_after_an_interrupted_refresh_leaves_no_decision_stuck` covers the re-add case; no journey does yet.
+- A review refuses with `edit_unfinished` while any document doc01 reads has a pending or failed edit, and `reconfirm` refuses a decision withheld with `input_removed`.
+- Every text-change command refreshes moved spans after its edit completes, `edit-text` and the occurrence commands included.
