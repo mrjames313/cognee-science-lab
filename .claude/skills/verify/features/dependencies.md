@@ -169,10 +169,151 @@ $V check "$RUN" refresh '.withholdings == [] and [.result.facts[].identity.assig
 $V check "$RUN" refresh '.recovery_events | length == 1 and .[0].outcome == "restored"' 'the incident is restored'
 ```
 
+## Chains: doc03 cites doc01's decisions
+
+`glossary-fixture --chain` adds doc03 to the root. Its resolution c01 cites doc01's r01 and its HC variant c02 cites doc01's v01, each as a saved record pinned by its fingerprint. Guide: `docs/stage6_identity_chains.md`.
+
+- `chain-hold`: an edit that withholds r01 and v01 withholds c01 and c02 down the chain, with `input_changed` and the derived status `upstream_withheld`; no reviewer answers them.
+- `upstream-reconfirm`: re-confirming r01 and v01 keeps their fingerprints, so c01 and c02 are released with no doc03 revision.
+- `key-replacement`: replacing v01 by v02 removes the record c02 cites, so c02 shows `input_removed` and cannot be re-confirmed.
+- `in-place-replacement`: `replace-decision --decision r01` leaves g01 unresolved in place, so c01's record changed and doc03's reviewer re-confirms c01 on it.
+- `admission-refusals`: `cite-record` tries a cycle, a self-citation, a missing record, a stale revision and a wrong fingerprint, and each is refused before anything is written.
+- `chain-erasure-pending`: a forget that would remove a record another source cites is refused; a forget of doc01 removes doc03's direct citations.
+- `upstream-unfinished`: a failed revision of doc01 withholds c01 and c02 with `edit_unfinished`, and doc03's review waits for `reconcile`.
+
+Run `reconfirm` and `replace-decision` with `--source doc03` for doc03's decisions, and `cite-record --source doc01|doc03 --citation cycle|self|missing|stale|digest --expected-revision N` for the refused citations. `cycle` cites from doc01; the others cite from doc03.
+
+**D7 an edit withholds down the chain.** Proves `chain-hold`. Guide: "The chain fixture" and "Withholding down a chain". The cosmetic edit withholds r01 and v01 for review, and c01 and c02 with `upstream_withheld`. `retrieve` lists all four, `refresh_needed` lists only doc01's two, and doc03's re-confirm of c01 is refused because c01 waits for r01.
+
+```bash journey D7
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V check "$RUN" fixture '.sources | [.doc01.state, .glossary.state, .doc03.state] == ["current", "current", "current"]' 'three sources are current'
+$V check "$RUN" fixture '.sources.doc03.identity_data_id == "bbbc442e-0647-552e-bb54-071604d213fa" and .sources.doc03.saved_revision == 1' 'doc03 is published at revision 1'
+$V check "$RUN" fixture '.sources.doc03.decisions | .c01.input_refs == ["doc03", "doc01_r01"] and .c02.input_refs == ["doc03", "doc01_v01"]' 'c01 and c02 cite doc01 records'
+$V check "$RUN" fixture '.sources.doc03.records | .doc01_r01.record_type == "mention_resolution" and .doc01_r01.record_id == "r01" and .doc01_r01.representation_revision == 1 and .doc01_v01.record_type == "variant_assignment" and .doc01_v01.record_id == "v01"' 'each citation names its record type, key and revision'
+$V check "$RUN" fixture '.withheld_decisions == [] and [.result.facts[].identity.assignment_id] == ["r01"]' 'nothing is withheld'
+
+$V drive "$RUN" main edit -- edit-glossary --source glossary --case cosmetic --expected-revision 1
+$V check "$RUN" edit '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["r01", "input_changed", "refresh_needed"], ["v01", "input_changed", "refresh_needed"], ["c01", "input_changed", "upstream_withheld"], ["c02", "input_changed", "upstream_withheld"]]' 'the edit withholds both levels'
+$V check "$RUN" edit '[.withheld_decisions[] | select(.assignment_id == "c01" or .assignment_id == "c02") | .input_refs] == [["doc01_r01"], ["doc01_v01"]]' 'c01 and c02 are held by their citations'
+$V check "$RUN" edit '[.refresh_needed[].assignment_id] == ["r01", "v01"]' 'only doc01 decisions await a reviewer'
+$V check "$RUN" edit '.withholdings | length == 2' 'only the two doc01 rows are written'
+$V check "$RUN" edit '.sources.doc03 | .saved_revision == 1 and .verified_revision == 1' 'doc03 is not revised'
+
+$V drive "$RUN" main after -- retrieve
+$V check "$RUN" after '[.unavailable_sources[] | [.assignment_id, .reason]] == [["r01", "input_changed"], ["v01", "input_changed"], ["c01", "input_changed"], ["c02", "input_changed"]]' 'a new process withholds the same four decisions'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.withheld_decisions[] | .status] == ["refresh_needed", "refresh_needed", "upstream_withheld", "upstream_withheld"]' 'status agrees with retrieval'
+
+$V drive "$RUN" main refused -- reconfirm --source doc03 --decision c01 --expected-revision 1
+$V check "$RUN" refused '.error == "IntentError" and (.message | contains("waits for a record it cites"))' 'c01 cannot be re-confirmed while r01 is withheld'
+```
+
+**D8 an upstream re-confirm releases the chain with no doc03 revision.** Proves `upstream-reconfirm`. Guide: "What a citation pins". Re-confirming r01 releases c01, and re-confirming v01 releases c02. doc03 stays at revision 1 with its revision-1 citations.
+
+```bash journey D8
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main edit -- edit-glossary --source glossary --case cosmetic --expected-revision 1
+$V check "$RUN" edit '.withheld_decisions | length == 4' 'four decisions are withheld'
+
+$V drive "$RUN" main r01 -- reconfirm --source doc01 --decision r01 --expected-revision 1
+$V check "$RUN" r01 '[.withheld_decisions[] | [.assignment_id, .status]] == [["v01", "refresh_needed"], ["c02", "upstream_withheld"]]' 're-confirming r01 releases r01 and c01'
+
+$V drive "$RUN" main v01 -- reconfirm --source doc01 --decision v01 --expected-revision 2
+$V check "$RUN" v01 '.withheld_decisions == [] and .withholdings == []' 'nothing is withheld'
+$V check "$RUN" v01 '.sources.doc01 | .saved_revision == 3 and .verified_revision == 3' 'doc01 is at revision 3'
+$V check "$RUN" v01 '.sources.doc03 | .saved_revision == 1 and .verified_revision == 1 and .records.doc01_r01.representation_revision == 1' 'doc03 keeps revision 1 and its citations'
+
+$V drive "$RUN" main after -- retrieve
+$V check "$RUN" after '.unavailable_sources == [] and [.facts[].identity.assignment_id] == ["r01"]' 'a new process serves everything'
+```
+
+**D9 a replacement under a new key removes the cited record.** Proves `key-replacement`. Guide: "Replacements upstream". The substantive edit withholds both levels. Replacing v01 by v02 takes v01 out of doc01, so c02 shows `input_removed` and needs review, and doc03's re-confirm of c02 is refused. Re-confirming r01 releases c01.
+
+```bash journey D9
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main edit -- edit-glossary --source glossary --case substantive --expected-revision 1
+$V check "$RUN" edit '[.withheld_decisions[] | .status] == ["refresh_needed", "refresh_needed", "upstream_withheld", "upstream_withheld"]' 'both levels are withheld'
+
+$V drive "$RUN" main replace -- replace-decision --source doc01 --decision v01 --expected-revision 1
+$V check "$RUN" replace '.sources.doc01.decisions | has("v02") and (has("v01") | not)' 'doc01 replaced v01 by v02'
+$V check "$RUN" replace '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["r01", "input_changed", "refresh_needed"], ["c01", "input_changed", "upstream_withheld"], ["c02", "input_removed", "refresh_needed"]]' 'c02 cites a record that is gone'
+
+$V drive "$RUN" main refused -- reconfirm --source doc03 --decision c02 --expected-revision 1
+$V check "$RUN" refused '.error == "IntentError" and (.message | contains("never re-confirmed"))' 'a removed record is never re-confirmed'
+
+$V drive "$RUN" main r01 -- reconfirm --source doc01 --decision r01 --expected-revision 2
+$V check "$RUN" r01 '[.withheld_decisions[] | [.assignment_id, .reason]] == [["c02", "input_removed"]]' 're-confirming r01 releases c01; c02 stays withheld'
+$V drive "$RUN" main after -- retrieve
+$V check "$RUN" after '[.unavailable_sources[] | [.assignment_id, .reason]] == [["c02", "input_removed"]]' 'a new process withholds only c02'
+```
+
+**D10 an in-place replacement upstream needs doc03's own review.** Proves `in-place-replacement`. Guide: "Replacements upstream". `replace-decision --decision r01` leaves g01 unresolved under the same key, which changes r01's fingerprint: c01 needs review, with `input_changed`. After v01's re-confirm releases c02, doc03's re-confirm cites r01 as it is now under a new key and producer, and nothing is withheld.
+
+```bash journey D10
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main edit -- edit-glossary --source glossary --case cosmetic --expected-revision 1
+
+$V drive "$RUN" main replace -- replace-decision --source doc01 --decision r01 --expected-revision 1
+$V check "$RUN" replace '.sources.doc01.decisions.r01 | .status == "unresolved" and .input_refs == ["doc01", "existing_A", "glossary_hc_r2"] and .producer_ref == "review_r01_r2"' 'r01 is unresolved in place'
+$V check "$RUN" replace '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["v01", "input_changed", "refresh_needed"], ["c01", "input_changed", "refresh_needed"], ["c02", "input_changed", "upstream_withheld"]]' 'c01 needs review of the changed record'
+
+$V drive "$RUN" main v01 -- reconfirm --source doc01 --decision v01 --expected-revision 2
+$V check "$RUN" v01 '[.withheld_decisions[] | .assignment_id] == ["c01"]' 'only c01 is withheld'
+
+$V drive "$RUN" main c01 -- reconfirm --source doc03 --decision c01 --expected-revision 1
+$V check "$RUN" c01 '.sources.doc03 | .saved_revision == 2 and .verified_revision == 2 and .decisions.c01.input_refs == ["doc03", "doc01_r01_r2"] and .decisions.c01.producer_ref == "review_c01_r2"' 'doc03 re-confirmed c01 on a new citation'
+$V check "$RUN" c01 '.sources.doc03.records | .doc01_r01_r2.representation_revision == 3 and (has("doc01_r01") | not)' 'the citation pins doc01 revision 3 and the old one is dropped'
+$V check "$RUN" c01 '.sources.doc03.producers.review_c01_r2 | .implementation == "re-confirmed" and (.configuration.new_digests.doc01_r01_r2 | length == 64)' 'the producer records the new fingerprint'
+$V check "$RUN" c01 '.withheld_decisions == [] and .recovery_events == []' 'nothing is withheld'
+$V drive "$RUN" main after -- retrieve
+$V check "$RUN" after '.unavailable_sources == []' 'a new process serves everything'
+```
+
+**D11 refused citations, the interim erasure refusal and an unfinished upstream.** Proves `admission-refusals`, `chain-erasure-pending` and `upstream-unfinished`. Guide: "Admission of a citation", "Forget of a cited source" and "An unfinished upstream". Each refused citation leaves every source at revision 1. The glossary's forget is refused because its removal would unresolve r01 and drop v01, which doc03 cites. doc01's dry run lists doc03 as a dependent whose c01 becomes unresolved and c02 goes, and the confirmed forget writes doc03 revision 2. On a second root a failed doc01 re-confirm withholds c01 and c02 with `edit_unfinished`, doc03's review waits, and `reconcile` releases c01.
+
+```bash journey D11
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main cycle -- cite-record --source doc01 --citation cycle --expected-revision 1
+$V check "$RUN" cycle '.message | contains("leads back here")' 'a citation that closes a cycle is refused'
+$V drive "$RUN" main self -- cite-record --source doc03 --citation self --expected-revision 1
+$V check "$RUN" self '.message | contains("does not cite its own saved records")' 'a self-citation is refused'
+$V drive "$RUN" main missing -- cite-record --source doc03 --citation missing --expected-revision 1
+$V check "$RUN" missing '.message | contains("No such saved record")' 'a missing record is refused'
+$V drive "$RUN" main stale -- cite-record --source doc03 --citation stale --expected-revision 1
+$V check "$RUN" stale '.message | contains("current revision")' 'a stale revision is refused'
+$V drive "$RUN" main digest -- cite-record --source doc03 --citation digest --expected-revision 1
+$V check "$RUN" digest '.message | contains("fingerprint differs")' 'a wrong fingerprint is refused'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.publications[] | [.revision, .state]] == [[1, "current"], [1, "current"], [1, "current"]] and .recovery_events == []' 'nothing was written'
+
+$V drive "$RUN" main gloss -- forget --source glossary --expected-revision 1 --dry-run
+$V check "$RUN" gloss '(.message | contains("not built yet")) and ([.details.citations[] | .record_id] == ["r01", "v01"])' 'the glossary forget would remove cited records'
+$V drive "$RUN" main dry -- forget --source doc01 --expected-revision 1 --dry-run
+$V check "$RUN" dry '[.dependents[] | .identity_data_id] == ["bbbc442e-0647-552e-bb54-071604d213fa"]' 'doc03 is the one dependent'
+$V check "$RUN" dry '[.dependents[0].decisions[] | [.assignment, .outcome, .citing[0].kind]] == [["c01", "unresolved", "saved_record"], ["c02", "dropped", "saved_record"]]' 'c01 becomes unresolved and c02 goes'
+TOKEN=$(val dry '.token')
+$V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1 --confirm "$TOKEN"
+$V check "$RUN" forget '.sources.doc01.state == "forgotten" and .dependents_failed == null' 'doc01 is forgotten'
+$V check "$RUN" forget '.sources.doc03 | .saved_revision == 2 and .verified_revision == 2 and .decisions.c01.status == "unresolved" and (.decisions | has("c02") | not) and .records == {}' 'doc03 revision 2 removes its citations'
+
+$V drive "$RUN" fault fixture2 -- glossary-fixture --chain
+$V drive "$RUN" fault edit2 -- edit-glossary --source glossary --case cosmetic --expected-revision 1
+$V drive "$RUN" fault fail -- reconfirm --source doc01 --decision r01 --expected-revision 1 --fault-stage replace_registered
+$V check "$RUN" fail '.message | contains("Injected failure at replace_registered")' 'the doc01 re-confirm fails'
+$V drive "$RUN" fault status2 -- status
+$V check "$RUN" status2 '[.withheld_decisions[] | select(.assignment_id == "c01" or .assignment_id == "c02") | .status] == ["edit_unfinished", "edit_unfinished"]' 'c01 and c02 wait for the unfinished doc01'
+$V drive "$RUN" fault waits -- reconfirm --source doc03 --decision c01 --expected-revision 1
+$V check "$RUN" waits '.message | contains("whose records this source cites")' 'doc03 review waits for doc01'
+$V drive "$RUN" fault done -- reconcile --source doc01
+$V check "$RUN" done '[.withheld_decisions[] | [.assignment_id, .status]] == [["v01", "refresh_needed"], ["c02", "upstream_withheld"]] and (.recovery_events | length == 1 and .[0].outcome == "restored")' 'reconcile releases r01 and c01'
+```
+
 ## Notes
 
 - The review decisions are captured fixture input. They prove the withholding, refresh and re-confirm mechanics, not Describe.
 - `drive` exits 1 for an injected failure. That is the expected result; check `.error`. The exception is `refresh_interrupted` on an edit command: the edit completed, so the command exits 0 and reports `refresh_failed`.
 - `status` reads the graph and the registered texts like `retrieve`, so it lists every decision retrieval withholds, live drift included (a changed corpus field, a gone foreign chunk, a span stale after a re-add). Such a decision has no row and shows `refresh_needed`, and `reconfirm` answers it. The native test `test_native_readd_after_an_interrupted_refresh_leaves_no_decision_stuck` covers the re-add case; no journey does yet.
-- A review refuses with `edit_unfinished` while any document doc01 reads has a pending or failed edit, and `reconfirm` refuses a decision withheld with `input_removed`.
+- A review refuses with `edit_unfinished` while any document the reviewed source reads has a pending or failed edit, or any source whose records it cites has a pending or failed attempt. `reconfirm` refuses a decision withheld with `input_removed`, and every review refuses one withheld with `upstream_withheld`.
+- The CLI prints a refusal's message, not its code, so the chain journeys check the message. The unit tests in `tests/test_identity_chains.py` check the codes.
 - Every text-change command refreshes moved spans after its edit completes, `edit-text` and the occurrence commands included.
