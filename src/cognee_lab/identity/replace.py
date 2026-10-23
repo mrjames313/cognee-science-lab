@@ -71,9 +71,12 @@ async def admit_replacement(
 async def plan_retirement(graph, plan, olds, source):
     """Record what replacing `olds` by `source` retires: the recipes they
     declared and `source` does not, and their identity edges with the refs
-    and contributions each holds now. An erasure retry adds what the saved
-    revision it supersedes declared or wrote; what the plan already holds
-    keeps the values its first attempt read. `new_edges` are the newest
+    and contributions each holds now. A replacement's `olds` are its
+    previous revision and the saved revisions erasure retries superseded; a
+    reconcile's are the superseded ones alone, since a failed attempt may
+    have written them. An erasure retry of a replacement adds what the
+    saved revision it supersedes declared or wrote; what the plan already
+    holds keeps the values its first attempt read. `new_edges` are the newest
     description's alone, on purpose: a superseded revision is never
     published, so only what it would retire carries over."""
     from cognee.infrastructure.databases.provenance import EdgeIdentity
@@ -128,6 +131,141 @@ def retained_contributions(source, previous, wanted, source_refs):
     return kept
 
 
+def wanted_contributions(source) -> dict:
+    """The contributions `source` makes, by identity edge."""
+    from .publish import identity_edges
+
+    wanted = {}
+    for a, b, relation, c in identity_edges(source):
+        wanted.setdefault((a, b, relation), []).append(c)
+    return wanted
+
+
+async def retire(graph, vector, source, plan):
+    """Remove what `plan` retires (plan_retirement): each contribution of
+    `source`'s owner that its description no longer makes, the owner's ref
+    on each identity edge nothing of it wants and on each retired recipe's
+    node; a node or edge no other ref owns goes, with its vectors."""
+    from cognee.infrastructure.databases.provenance import (
+        EdgeIdentity,
+        make_source_ref_key,
+    )
+    from cognee.infrastructure.databases.unified.provenance_delete_planner import (
+        execute_source_ref_removal,
+    )
+    from .publish import contributions
+    from .storage import encode
+
+    owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
+    wanted = wanted_contributions(source)
+    retire_edges = []
+    for triple in {tuple(e) for e in plan["old_edges"]}:
+        edge = await edge_metadata(graph, *triple)
+        if edge is None:
+            continue
+        before = contributions(edge.edge_properties)
+        kept = retained_contributions(
+            source, before, wanted.get(triple, []), edge.source_ref_keys
+        )
+        if kept != before:
+            await graph.add_edges(
+                [
+                    (
+                        *triple,
+                        dict(edge.edge_properties, identity_contributions=encode(kept)),
+                    )
+                ]
+            )
+        if not wanted.get(triple):
+            retire_edges.append(EdgeIdentity(*triple))
+    nodes = await graph.get_node_delete_data(list(plan["retired_entities"]))
+    edges = await graph.get_edge_delete_data(retire_edges)
+    await execute_source_ref_removal(
+        graph,
+        vector,
+        node_data=nodes,
+        edge_data=edges,
+        refs_by_node={key: [owner] for key in nodes},
+        refs_by_edge={key: [owner] for key in edges},
+    )
+
+
+async def verify_retired(graph, vector, records, source, plan):
+    """Nothing `plan` retires keeps `source`'s ownership or contributions, a
+    retired recipe's node and name vectors agree, and every contribution
+    another current source still makes on those edges survived with its
+    owner. New ownership and contributions are the common publisher's to
+    verify."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from .publish import contributions, identity_edges
+
+    owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
+    own_key = (str(source.dataset_id), str(source.identity_data_id))
+    wanted = wanted_contributions(source)
+    for triple in {tuple(e) for e in plan["old_edges"]}:
+        edge = await edge_metadata(graph, *triple)
+        if edge is None:
+            continue
+        own = [
+            c
+            for c in contributions(edge.edge_properties)
+            if (c.get("dataset_id"), c.get("identity_data_id")) == own_key
+        ]
+        if any(c not in wanted.get(triple, []) for c in own):
+            raise IntentError(
+                "verify_retirement", "Obsolete identity contribution remains"
+            )
+        if triple not in wanted and owner in edge.source_ref_keys:
+            raise IntentError(
+                "verify_retirement", "Obsolete identity edge ownership remains"
+            )
+    for key, old_node in plan["retired_entities"].items():
+        current = (await graph.get_node_delete_data([key])).get(key)
+        if current and owner in current.source_ref_keys:
+            raise IntentError(
+                "verify_retirement",
+                "Retired Entity declaration still owns its node",
+            )
+        for field in old_node["indexed_fields"]:
+            collection = f"{old_node['type']}_{field}"
+            indexed = await vector.has_collection(collection) and bool(
+                await vector.retrieve(collection, [key])
+            )
+            if indexed != (current is not None):
+                raise IntentError(
+                    "verify_index", "Retired Entity graph and vector disagree"
+                )
+    foreign_intent = {
+        (r.dataset, r.source): r.description
+        for r in await records.rows()
+        if r.state == "current"
+    }
+    for prior in plan["previous_edges"]:
+        triple = (prior["source"], prior["target"], prior["relation"])
+        edge = await edge_metadata(graph, *triple)
+        for c in contributions(prior["properties"]):
+            key = (c.get("dataset_id"), c.get("identity_data_id"))
+            other = foreign_intent.get(key)
+            if (
+                other
+                and key != own_key
+                and any(
+                    (a, b, rel) == triple and current == c
+                    for a, b, rel, current in identity_edges(other)
+                )
+            ):
+                foreign_owner = make_source_ref_key(*key)
+                if (
+                    edge is None
+                    or c not in contributions(edge.edge_properties)
+                    or foreign_owner not in edge.source_ref_keys
+                ):
+                    raise IntentError(
+                        "verify_survivor",
+                        "Independent identity contribution or owner was lost",
+                    )
+
+
 async def replace(
     publisher,
     source,
@@ -142,15 +280,7 @@ async def replace(
     text_change=None,
     semantic_writer=None,
 ):
-    from cognee.infrastructure.databases.provenance import (
-        EdgeIdentity,
-        make_source_ref_key,
-    )
-    from cognee.infrastructure.databases.unified.provenance_delete_planner import (
-        execute_source_ref_removal,
-    )
-    from .publish import contributions, identity_edges
-    from .storage import STALE_REVISION, encode
+    from .storage import STALE_REVISION
 
     graph, vector, records = publisher.graph, publisher.vector, publisher.records
     require_graph_methods(
@@ -261,7 +391,6 @@ async def replace(
     )
     if verify_semantics is not None and text_change is None:
         await verify_semantics()
-    owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
     if not retry and text_change is not None:
         from dataclasses import asdict
 
@@ -271,112 +400,9 @@ async def replace(
 
     async def retire_and_verify(run):
         run.inject("replace_published")
-        wanted = {}
-        for a, b, relation, c in identity_edges(source):
-            wanted.setdefault((a, b, relation), []).append(c)
-        retire_edges = []
-        for triple in {tuple(e) for e in plan["old_edges"]}:
-            edge = await edge_metadata(graph, *triple)
-            if edge is None:
-                continue
-            before = contributions(edge.edge_properties)
-            kept = retained_contributions(
-                source, before, wanted.get(triple, []), edge.source_ref_keys
-            )
-            if kept != before:
-                await graph.add_edges(
-                    [
-                        (
-                            *triple,
-                            dict(
-                                edge.edge_properties,
-                                identity_contributions=encode(kept),
-                            ),
-                        )
-                    ]
-                )
-            if not wanted.get(triple):
-                retire_edges.append(EdgeIdentity(*triple))
-        nodes = await graph.get_node_delete_data(list(plan["retired_entities"]))
-        edges = await graph.get_edge_delete_data(retire_edges)
-        await execute_source_ref_removal(
-            graph,
-            vector,
-            node_data=nodes,
-            edge_data=edges,
-            refs_by_node={key: [owner] for key in nodes},
-            refs_by_edge={key: [owner] for key in edges},
-        )
+        await retire(graph, vector, source, plan)
         run.inject("replace_retired")
-        # New ownership/contributions are verified by the common publisher.
-        # Here check that this source has no stale ownership or payloads.
-        for triple in {tuple(e) for e in plan["old_edges"]}:
-            edge = await edge_metadata(graph, *triple)
-            if edge is None:
-                continue
-            own = [
-                c
-                for c in contributions(edge.edge_properties)
-                if (c.get("dataset_id"), c.get("identity_data_id"))
-                == (str(source.dataset_id), str(source.identity_data_id))
-            ]
-            if any(c not in wanted.get(triple, []) for c in own):
-                raise IntentError(
-                    "verify_retirement", "Obsolete identity contribution remains"
-                )
-            if triple not in wanted and owner in edge.source_ref_keys:
-                raise IntentError(
-                    "verify_retirement", "Obsolete identity edge ownership remains"
-                )
-        for key, old_node in plan["retired_entities"].items():
-            current = (await graph.get_node_delete_data([key])).get(key)
-            if current and owner in current.source_ref_keys:
-                raise IntentError(
-                    "verify_retirement",
-                    "Retired Entity declaration still owns its node",
-                )
-            for field in old_node["indexed_fields"]:
-                collection = f"{old_node['type']}_{field}"
-                indexed = await vector.has_collection(collection) and bool(
-                    await vector.retrieve(collection, [key])
-                )
-                if indexed != (current is not None):
-                    raise IntentError(
-                        "verify_index", "Retired Entity graph and vector disagree"
-                    )
-        current_rows = await records.rows()
-        foreign_intent = {
-            (r.dataset, r.source): r.description
-            for r in current_rows
-            if r.state == "current"
-        }
-        for prior in plan["previous_edges"]:
-            edge = await edge_metadata(
-                graph, prior["source"], prior["target"], prior["relation"]
-            )
-            for c in contributions(prior["properties"]):
-                key = (c.get("dataset_id"), c.get("identity_data_id"))
-                other = foreign_intent.get(key)
-                if (
-                    other
-                    and key != (str(source.dataset_id), str(source.identity_data_id))
-                    and any(
-                        (a, b, rel)
-                        == (prior["source"], prior["target"], prior["relation"])
-                        and current == c
-                        for a, b, rel, current in identity_edges(other)
-                    )
-                ):
-                    foreign_owner = make_source_ref_key(*key)
-                    if (
-                        edge is None
-                        or c not in contributions(edge.edge_properties)
-                        or foreign_owner not in edge.source_ref_keys
-                    ):
-                        raise IntentError(
-                            "verify_survivor",
-                            "Independent identity contribution or owner was lost",
-                        )
+        await verify_retired(graph, vector, records, source, plan)
         if await read_registered(source) != source:
             raise IntentError(
                 "generated_source_changed",

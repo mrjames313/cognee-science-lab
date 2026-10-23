@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
 from .retirement import refuse_retiring_inputs
-from .storage import STALE_REVISION, RecordStore, cell_for, encode
+from .storage import STALE_REVISION, RecordStore, cell_for, encode, erased_from
 from .validation import IntentError, validate_inputs, validate_uses
 
 
@@ -409,8 +409,22 @@ class Publisher:
             withdraw=[],
             runtime_profile=self.runtime_profile,
         )
+        after_write = None
         if method == "reconcile":
             plan.update(await self.superseded(source))
+        if superseded := erased_from(plan):
+            # What the failed attempts wrote for the descriptions an erasure
+            # retry superseded, and the removal no longer declares, goes.
+            from .replace import plan_retirement, retire, verify_retired
+
+            await plan_retirement(self.graph, plan, superseded, source)
+
+            async def after_write():
+                await retire(self.graph, self.vector, source, plan)
+                await verify_retired(
+                    self.graph, self.vector, self.records, source, plan
+                )
+
         attempt = await self.records.begin(
             source,
             expected_revision=expected_revision,
@@ -427,6 +441,7 @@ class Publisher:
             fault_stage=fault_stage,
             semantic_writer=semantic_writer,
             verify_semantics=verify_semantics,
+            after_write=after_write,
             origin=origin,
         )
 
