@@ -20,17 +20,39 @@ def naming_keys(source, entity_id) -> set[str]:
     }
 
 
+def roles(source, entity_id) -> list[list[str]]:
+    """Each decision that names an Entity, by key, with the part the Entity
+    plays in it: an accepted resolution's target or an open resolution's
+    candidate, a variant's source or target. Unlike `naming_keys`, which
+    leaves out candidates and asks only whether a key names the Entity,
+    the role tells a variant's two endpoints apart."""
+    found = set()
+    for k, r in source.mention_resolutions.items():
+        match r.status:
+            case "accepted":
+                if r.target_entity_id == entity_id:
+                    found.add((k, "target"))
+            case "unresolved" | "ambiguous":
+                if entity_id in (r.candidate_entity_ids or ()):
+                    found.add((k, "candidate"))
+    for k, v in source.variant_assignments.items():
+        if v.source_entity_id == entity_id:
+            found.add((k, "source"))
+        if v.target_entity_id == entity_id:
+            found.add((k, "target"))
+    return [list(pair) for pair in sorted(found)]
+
+
 def decisions_digest(source) -> str:
     """A digest of a description's reviewed decisions that a re-add of the
     same decisions repeats: each resolution by key with its group, status
     and the Entities it names, each variant by key with its endpoints and
     applicability, and each recipe under the name of its Entity. A re-add
     renames the source's own Entities and moves to the next revision, so
-    an Entity is named by its group key, or by the keys of the resolutions
-    and variants that name it, never by its UUID. Each group's occurrences
-    count by their surface text and their place in the order of all the
-    source's occurrences, which a text shift keeps and a regrouping does
-    not. A span-scoped variant's ranges count as offsets: the description
+    an Entity is named by its group key, or by its `roles`, never by its
+    UUID. Each group's occurrences count by their surface text and their
+    place in the order of all the source's occurrences, which a text shift
+    keeps and a regrouping does not. A span-scoped variant's ranges count as offsets: the description
     holds no surface text for them, and a text edit does not remap them
     either (`admission.check_no_span_variants`), so a shifted range is
     another scope. Producers, inputs and explanations are left out: they
@@ -48,7 +70,7 @@ def decisions_digest(source) -> str:
         if entity_id in groups:
             return ["group", groups[entity_id]]
         if entity_id in source.entity_constructions:
-            return ["named_by", sorted(naming_keys(source, entity_id))]
+            return ["roles", roles(source, entity_id)]
         return ["entity", str(entity_id)]
 
     def names(entity_ids):

@@ -184,6 +184,10 @@ def describe_readd(caller, tombstone, removed, text, chunks):
         target = decision.get("target_entity_id")
         if target in renamed:
             decision["target_entity_id"] = renamed[target]
+        if decision.get("candidate_entity_ids"):
+            decision["candidate_entity_ids"] = [
+                renamed.get(e, e) for e in decision["candidate_entity_ids"]
+            ]
     for variant in payload["variant_assignments"].values():
         for end in ("source_entity_id", "target_entity_id"):
             variant[end] = renamed.get(variant[end], variant[end])
