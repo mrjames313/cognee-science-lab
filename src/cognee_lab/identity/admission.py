@@ -10,10 +10,12 @@ occurrence keeps its span and a continuing group may change its decision in
 place; with changed text span-scoped variants are refused. Another
 document's inputs and corpus objects keep their content under one key: a
 span may only move, and a decision re-confirmed on a new input names a new
-producer. Functions below
-follow the order in which `admit` applies them. `check_absent_from_graph` is
-the one rule that reads the graph: on a first attempt no UUID the revision
-introduces may be a node yet, so the caller runs it after `admit`.
+producer. Functions below follow the order in which `admit` applies them.
+Two rules read the graph, so their callers run them apart from `admit`. On
+a first attempt no UUID the revision introduces may be a node yet
+(`check_absent_from_graph`), and every corpus input a decision lists names
+an Entity that exists (`check_corpus_inputs_exist`, run by every admission
+of a publication).
 """
 
 from dataclasses import dataclass
@@ -607,6 +609,19 @@ async def check_absent_from_graph(graph, old, source, fate):
     for entity_id, code, message in probes:
         if await graph.get_node(str(entity_id)) is not None:
             raise IntentError(code, message)
+
+
+async def check_corpus_inputs_exist(graph, source):
+    """Every corpus input a decision lists names an Entity in the graph.
+    `referenced_corpus_ids` relies on this, so a listed input cannot exempt
+    an Entity this revision constructs from the derived-UUID rule. Only
+    admission refuses; retrieval and publication verification withhold the
+    decisions that read a removed Entity instead."""
+    for entity_id in sorted(referenced_corpus_ids(source), key=str):
+        if await graph.get_node(str(entity_id)) is None:
+            raise IntentError(
+                "missing_reasoning_input", f"Corpus input missing: {entity_id}"
+            )
 
 
 def entity_ids_named(source):

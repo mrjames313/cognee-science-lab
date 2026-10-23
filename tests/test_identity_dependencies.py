@@ -466,3 +466,35 @@ def test_a_substantive_change_replaces_v01_with_a_derived_variant(source_payload
     assert new.entity_constructions[coil].name == "Hybrid coil"
     assert new.mention_resolutions["r01"].input_refs[-1] == "glossary_hc"
     admit_same_text(old, new)
+
+
+# Admission keeps corpus object existence as a hard rule.
+
+
+def admitting_publisher(nodes):
+    from cognee_lab.identity.publish import Publisher
+
+    records = memory_publisher([]).records
+
+    async def row(_):
+        return None
+
+    records.row = row
+    return Publisher(Graph(nodes), None, records)
+
+
+async def test_admission_refuses_a_corpus_input_whose_entity_is_missing(
+    source_payload,
+):
+    """Retrieval withholds a decision whose Entity is gone, but admission
+    still refuses one: the derived-UUID rule trusts that a listed corpus input
+    names an Entity that exists, not one this revision constructs."""
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    entity = source.inputs["existing_A"].entity_id
+    texts = {"doc01": TEXT}
+    with pytest.raises(IntentError) as refused:
+        await admitting_publisher({}).admit_inputs(source, texts, own_chunks(source))
+    assert refused.value.code == "missing_reasoning_input"
+    # A changed field still only withholds the decisions that read it.
+    changed = {str(entity): dict(type="Entity", name="Changed", description="Changed")}
+    await admitting_publisher(changed).admit_inputs(source, texts, own_chunks(source))

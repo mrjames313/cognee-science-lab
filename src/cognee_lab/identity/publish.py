@@ -198,6 +198,9 @@ class Publisher:
             graph=self.graph,
             withheld=await self.withheld_for(source, rows),
         )
+        from .admission import check_corpus_inputs_exist
+
+        await check_corpus_inputs_exist(self.graph, source)
         descriptions = [
             IdentitySource.model_validate_json(r.description)
             for r in rows
