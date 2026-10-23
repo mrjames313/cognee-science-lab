@@ -48,9 +48,11 @@ from ledger_model import (
     candidates,
     canonical,
     description,
+    CONTENT_FREE_PLAN,
     canonical_tombstone,
+    completion,
+    scrubbed,
     source_id,
-    tombstone,
     variant_of,
     view_of,
 )
@@ -77,14 +79,6 @@ def served(row):
         and row.state == "current"
         and row.revision == row.verified_revision
     )
-
-
-def completion(method, attempt):
-    """The keyword arguments the caller passes complete(): forget() passes
-    the tombstone of the description it began."""
-    if method.done_state != "forgotten":
-        return {}
-    return dict(tombstone=tombstone(attempt.source, attempt.revision, attempt.variant))
 
 
 async def call(awaitable):
@@ -510,19 +504,6 @@ def p5_explicit_forward_recovery(step):
         yield from begin_rules(op, before.rows.get(op.source))
 
 
-def scrubbed(event):
-    """A recovery event as a completed forget leaves it: no message."""
-    event = dict(event)
-    if "message" in event:
-        event["message"] = None
-    if "recovery_attempts" in event:
-        event["recovery_attempts"] = [
-            dict(a, message=None) if "message" in a else a
-            for a in event["recovery_attempts"]
-        ]
-    return event
-
-
 def begin_rules(op, prior):
     method = METHODS[op.method]
     state = prior.state if prior else None
@@ -558,24 +539,6 @@ def p6_failed_rows_recoverable(step):
     for s, why in sorted(step.recovery.items()):
         if why:
             yield f"S{s + 1} failed row did not recover: {why}"
-
-
-# Plan fields that hold identifiers, refs, ranges or file locations, never
-# content. Restated here rather than read from storage.py.
-CONTENT_FREE_PLAN = frozenset(
-    {
-        "operation",
-        "revision",
-        "origin",
-        "method",
-        "original_data_id",
-        "stored_files",
-        "chunk_ids",
-        "identity_edges",
-        "entities",
-        "edges",
-    }
-)
 
 
 def p7_forgotten_rows_hold_no_content(step):

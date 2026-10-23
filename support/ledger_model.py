@@ -559,3 +559,42 @@ def candidates(world):
         if ghost.served is not None:
             ops.append(Reject(s))
     return ops
+
+
+def completion(method, attempt):
+    """The keyword arguments the caller passes complete(): forget() passes
+    the tombstone of the description it began."""
+    if method.done_state != "forgotten":
+        return {}
+    return dict(tombstone=tombstone(attempt.source, attempt.revision, attempt.variant))
+
+
+def scrubbed(event):
+    """A recovery event as a completed forget leaves it: no message."""
+    event = dict(event)
+    if "message" in event:
+        event["message"] = None
+    if "recovery_attempts" in event:
+        event["recovery_attempts"] = [
+            dict(a, message=None) if "message" in a else a
+            for a in event["recovery_attempts"]
+        ]
+    return event
+
+
+# Plan fields that hold identifiers, refs, ranges or file locations, never
+# content. Restated here rather than read from storage.py.
+CONTENT_FREE_PLAN = frozenset(
+    {
+        "operation",
+        "revision",
+        "origin",
+        "method",
+        "original_data_id",
+        "stored_files",
+        "chunk_ids",
+        "identity_edges",
+        "entities",
+        "edges",
+    }
+)
