@@ -470,8 +470,7 @@ def begin_rules(op, prior):
     method = METHODS[op.method]
     state = prior.state if prior else None
     actual = prior.revision if prior else 0
-    advance = 1 if state in method.advances_from else 0
-    if op.revision != actual + advance:
+    if op.revision != actual + method.begins.get(state, 0):
         yield f"begin moved S{op.source + 1} from revision {actual} to {op.revision} through {op.method}"
     if (
         prior
@@ -480,26 +479,17 @@ def begin_rules(op, prior):
         != json.loads(prior.description)
     ):
         yield f"begin changed S{op.source + 1}'s description at saved revision {actual}"
-    if method.requires_plan and op.plan.operation != method.requires_plan:
+    if method.requires_plan and op.plan.operation != method.recovers:
         yield f"{op.method} began with a {op.plan.operation} plan"
     if prior is None:
         return
     saved = Plan.of(op.source, prior.plan)
-    if not (
-        state in method.advances_from
-        or state in method.begins_from
-        or (state == "failed" and method.owns_failed_plan == saved.operation)
-    ):
+    if not (state in method.begins or method.owns(state, saved.operation)):
         yield f"{op.method} began on a {state} {saved.operation} row"
     for owner in METHODS.values():
-        owns = (
-            (state == "failed" and owner.owns_failed_plan == saved.operation)
-            or (state == "withdrawn" and owner.owns_withdrawn)
-            or (state == "forgotten" and owner.owns_forgotten)
-        )
-        if owns and owner.name != op.method:
+        if owner.owns(state, saved.operation) and owner.name != op.method:
             yield f"{state} {saved.operation} row resumed through {op.method}"
-    if state == "failed" and method.owns_failed_plan == saved.operation:
+    if state == "failed" and method.owns(state, saved.operation):
         for name in method.preserved_on_retry:
             if getattr(op.plan, name) != getattr(saved, name):
                 yield f"{op.method} retry changed the saved plan's {name}"

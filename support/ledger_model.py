@@ -338,16 +338,21 @@ class Method:
     # every fault the caller can inject.
     fail_stage: str
     ack_stage: str  # the stage fail() records when complete() refuses
-    advances_from: frozenset  # row states (None: no row) it may advance from
-    # Row states it may begin on at the saved revision, besides a failed row
-    # that holds its own plan (owns_failed_plan).
-    begins_from: frozenset
-    owns_failed_plan: str | None  # a failed row with this plan resumes only here
-    owns_withdrawn: bool  # a withdrawn row restarts only here
-    owns_forgotten: bool  # a forgotten row restarts only here
-    requires_plan: str | None  # begin() must carry a plan of this operation
-    preserved_on_retry: tuple[str, ...]  # Plan fields a retry keeps
+    # Row states (None: no row) it may begin on, each with its revision step:
+    # 0 at the saved revision, 1 at the next. A failed row that it owns
+    # (owns_recovery) is not listed.
+    begins: dict
     recovers: str | None  # P6: the saved plan operation it resumes
+    owns_recovery: bool  # a failed row with the `recovers` plan resumes only here
+    owns_terminal: str | None  # a row in this terminal state begins only here
+    requires_plan: bool  # begin() must carry a plan of the `recovers` operation
+    preserved_on_retry: tuple[str, ...]  # Plan fields a retry keeps
+
+    def owns(self, state, operation):
+        """Only this method may begin on a row in this state and saved plan."""
+        return state == self.owns_terminal or (
+            state == "failed" and self.owns_recovery and operation == self.recovers
+        )
 
 
 METHODS = {
@@ -361,14 +366,12 @@ METHODS = {
             on_assert_refused=None,
             fail_stage="nodes",
             ack_stage="verification",
-            advances_from=frozenset({None, "forgotten"}),
-            begins_from=frozenset(),
-            owns_failed_plan=None,
-            owns_withdrawn=False,
-            owns_forgotten=True,
-            requires_plan=None,
-            preserved_on_retry=(),
+            begins={None: 1, "forgotten": 1},
             recovers=None,
+            owns_recovery=False,
+            owns_terminal="forgotten",
+            requires_plan=False,
+            preserved_on_retry=(),
         ),
         Method(  # Publisher.reconcile; the reconcile CLI
             name="reconcile",
@@ -378,14 +381,12 @@ METHODS = {
             on_assert_refused=None,
             fail_stage="nodes",
             ack_stage="verification",
-            advances_from=frozenset(),
-            begins_from=frozenset({"current", "failed"}),
-            owns_failed_plan=None,
-            owns_withdrawn=False,
-            owns_forgotten=False,
-            requires_plan=None,
-            preserved_on_retry=(),
+            begins={"current": 0, "failed": 0},
             recovers="publish",
+            owns_recovery=False,
+            owns_terminal=None,
+            requires_plan=False,
+            preserved_on_retry=(),
         ),
         Method(  # replace(); revisions.replace_one, text_fixture.maintain_one
             name="replace",
@@ -395,14 +396,12 @@ METHODS = {
             on_assert_refused="replacement_publish",
             fail_stage="replace_saved",
             ack_stage="verification",
-            advances_from=frozenset({"current"}),
-            begins_from=frozenset(),
-            owns_failed_plan="replace",
-            owns_withdrawn=False,
-            owns_forgotten=False,
-            requires_plan="replace",
-            preserved_on_retry=("previous", "change"),
+            begins={"current": 1},
             recovers="replace",
+            owns_recovery=True,
+            owns_terminal=None,
+            requires_plan=True,
+            preserved_on_retry=("previous", "change"),
         ),
         Method(  # withdraw()
             name="withdraw",
@@ -412,14 +411,12 @@ METHODS = {
             on_assert_refused=None,
             fail_stage="withdraw_contributions",
             ack_stage="withdraw_verification",
-            advances_from=frozenset(),
-            begins_from=frozenset({"current", "failed", "withdrawn"}),
-            owns_failed_plan="withdraw",
-            owns_withdrawn=True,
-            owns_forgotten=False,
-            requires_plan=None,
-            preserved_on_retry=(),
+            begins={"current": 0, "failed": 0, "withdrawn": 0},
             recovers="withdraw",
+            owns_recovery=True,
+            owns_terminal="withdrawn",
+            requires_plan=False,
+            preserved_on_retry=(),
         ),
         Method(  # forget()
             name="forget",
@@ -429,14 +426,12 @@ METHODS = {
             on_assert_refused=None,
             fail_stage="forget_contributions",
             ack_stage="forget_verification",
-            advances_from=frozenset(),
-            begins_from=frozenset({"current"}),
-            owns_failed_plan="forget",
-            owns_withdrawn=False,
-            owns_forgotten=False,
-            requires_plan="forget",
-            preserved_on_retry=(),
+            begins={"current": 0},
             recovers="forget",
+            owns_recovery=True,
+            owns_terminal=None,
+            requires_plan=True,
+            preserved_on_retry=(),
         ),
     )
 }
