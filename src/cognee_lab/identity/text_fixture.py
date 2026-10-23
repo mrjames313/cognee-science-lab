@@ -66,6 +66,27 @@ async def verify_rebuilt_semantics(publisher, source, chunks, ctx):
 async def maintain_one(
     publisher, source, change, *, expected_revision, fault_stage=None
 ):
+    """Replace `source` with its text change, then refresh its dependents."""
+    await rebuild(
+        publisher,
+        source,
+        change,
+        expected_revision=expected_revision,
+        fault_stage=fault_stage,
+    )
+    from .revisions import refresh_dependents
+
+    # The edit completed: refresh its dependents at once (the user decided).
+    # A refresh failure is reported beside the completed edit.
+    return await refresh_dependents(publisher)
+
+
+async def rebuild(publisher, source, change, *, expected_revision, fault_stage=None):
+    """Replace `source` with its text change through the native pipeline,
+    with the semantic writer and verifier the captured edit needs. A failed
+    text change's retry may carry the removal of what a forget took away
+    (erasure.finish_dependents passes this as its `rebuild_text`); its own
+    dependents' ranges then wait for `refresh-dependents`."""
     from .fixture import context_for, write_semantics
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
@@ -125,11 +146,6 @@ async def maintain_one(
         [Task(task, needs_llm=False)], [source], generated.user, generated
     ):
         pass
-    from .revisions import refresh_dependents
-
-    # The edit completed: refresh its dependents at once (the user decided).
-    # A refresh failure is reported beside the completed edit.
-    return await refresh_dependents(publisher)
 
 
 def decision_method(source):

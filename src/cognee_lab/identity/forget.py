@@ -49,20 +49,23 @@ COMMITTED_FAULTS = {
     "forget_identity_committed": "forget_identity",
     "forget_document_committed": "forget_document",
 }
-# Faults in the dependents' removal revisions, after the forget completed.
-# One stops before the first revision begins, as a process that dies there
-# leaves them; the other fails each removal revision at replace_registered,
-# as REFRESH_FAULT does for a refresh.
-DEPENDENT_FAULTS = {
-    "forget_dependents": "interrupted",
-    "forget_dependent_revision": "replace_registered",
-}
+# Faults in the dependents' removal revisions, after the forget completed
+# (erasure.finish_dependents). The first stops before the first revision
+# begins, as a process that dies there leaves them; the second fails each
+# removal revision, as REFRESH_FAULT does for a refresh.
+DEPENDENT_FAULTS = ("forget_dependents", "forget_dependent_revision")
 IMPACT_CHANGED = (
     "impact_changed",
     "The impact changed since the token was issued; rerun the dry run and confirm its token",
 )
 FORGET = Operation("forget", "Forget", STAGES, "forgotten")
 FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS, *DEPENDENT_FAULTS)
+
+
+def split_fault(stage):
+    """A fault stage as (the forget's own, the dependents'): at most one is
+    set."""
+    return (None, stage) if stage in DEPENDENT_FAULTS else (stage, None)
 
 
 async def owned_objects(graph, source):
@@ -368,18 +371,19 @@ async def forget(
     confirm=None,
     origin="runtime",
     fault_stage=None,
-    dependents_fault=None,
+    rebuild_text=None,
 ):
     """Erase the source under one reservation, then write each dependent's
-    removal revision under its own (`erasure.finish_dependents`, which
-    `dependents_fault` fails). On a forgotten source, finish the dependents
-    a completed forget did not revise; refuse when none is left. Returns the
-    attempt and the dependents' outcome; a dependent failure is reported
-    beside the completed forget, not raised."""
+    removal revision under its own (`erasure.finish_dependents`, which a
+    stage in DEPENDENT_FAULTS fails; `rebuild_text` is the caller's writer
+    for a dependent's failed text change). On a forgotten source, finish
+    the dependents a completed forget did not revise; refuse when none is
+    left. Returns the attempt and the dependents' outcome; a dependent
+    failure is reported beside the completed forget, not raised."""
     from cognee import forget as native_forget
     from cognee.modules.users.methods import get_default_user
 
-    from .erasure import finish_dependents, impact, report
+    from .erasure import finish_dependents, impact, report, unfinished
 
     graph, records = publisher.graph, publisher.records
     require_graph_methods(
@@ -404,10 +408,15 @@ async def forget(
     )
     if row.revision != expected_revision:
         raise IntentError(*STALE_REVISION)
+    fault_stage, dependents_fault = split_fault(fault_stage)
     if row.tombstone is not None:
-        return dict(
-            attempt_id=None, **await resume_dependents(publisher, row, dependents_fault)
+        rows = await records.rows()
+        if not unfinished(row.tombstone, rows):
+            raise IntentError(*FORGOTTEN_SOURCE)
+        removal = await finish_dependents(
+            publisher, row.tombstone, rows, dependents_fault, rebuild_text
         )
+        return dict(attempt_id=None, state="forgotten", **removal)
     retry = resumes(row)
     plan = await plan_for(publisher, source, row)
     found = impact(source, plan, await records.rows())
@@ -464,16 +473,18 @@ async def forget(
 
         return stage
 
+    tombstone = None
+
     async def verification(run):
+        nonlocal tombstone
         await verify_forgotten(publisher, source, plan)
-        run.completion = dict(
-            tombstone=Tombstone.of(
-                source,
-                forgotten_at=now(),
-                removed_entity_ids=[UUID(e) for e in found.removed_entities],
-                impact_token=found.token if found.dependents else None,
-            )
+        tombstone = Tombstone.of(
+            source,
+            forgotten_at=now(),
+            removed_entity_ids=[UUID(e) for e in found.removed_entities],
+            impact_token=found.token if found.dependents else None,
         )
+        run.completion = dict(tombstone=tombstone)
 
     ids = source_ids(source)
     attempt, _ = await run_attempt(
@@ -496,19 +507,7 @@ async def forget(
         origin=origin,
         fault_stage=fault_stage,
     )
-    row = await records.row(source)
-    removal = await finish_dependents(publisher, row.tombstone, dependents_fault)
-    return dict(attempt_id=attempt, state="forgotten", **removal)
-
-
-async def resume_dependents(publisher, row, fault=None) -> dict:
-    """On a forgotten row, finish the dependents its completed forget did not
-    revise; refuse when none is left."""
-    from .erasure import finish_dependents, unfinished
-
-    if not unfinished(row.tombstone, await publisher.records.rows()):
-        raise IntentError(*FORGOTTEN_SOURCE)
-    return dict(
-        state="forgotten",
-        **await finish_dependents(publisher, row.tombstone, fault),
+    removal = await finish_dependents(
+        publisher, tombstone, await records.rows(), dependents_fault, rebuild_text
     )
+    return dict(attempt_id=attempt, state="forgotten", **removal)

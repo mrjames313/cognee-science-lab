@@ -89,6 +89,29 @@ async def replace_one(publisher, source, *, expected_revision, fault_stage=None)
         pass
 
 
+async def finish_publication(publisher, source, *, fault_stage=None):
+    """Finish any source's failed publication through the native pipeline
+    with `source` at its saved revision: the saved description, or the
+    removal applied to it, which supersedes it (an erasure retry, which
+    Publisher.reconcile plans and the store checks). The registered
+    snapshot shows `source` first, as preflight requires; a rerun finds it
+    written."""
+    from .fixture import context_for, load_chunks
+    from .multisource import publish_one
+    from .registered import write_registered
+
+    ctx = await context_for(source.inputs[source.original_input_ref].data_id)
+    await write_registered(source, await context_for(source.identity_data_id))
+    await publish_one(
+        publisher,
+        source,
+        await load_chunks(source, ctx),
+        ctx,
+        operation="reconcile",
+        fault_stage=fault_stage,
+    )
+
+
 def next_revision(reader: IdentitySource, change, *, revision=None) -> IdentitySource:
     """The reader's next revision, or `revision`, after `change(payload)`,
     with every input nothing cites any more dropped. Uncited inputs are known

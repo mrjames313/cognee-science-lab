@@ -331,11 +331,23 @@ def reconcile_intents(w, s, view):
     if view is None:
         return []
     r, v = view.revision, view.variant
-    return [
-        Begin(w, s, "reconcile", r, r, Plan("publish", r), v),
-        Begin(w, s, "reconcile", r, r, Plan("publish", r), 1 - v),
+    # Publisher.superseded: a failed row's erased list is kept, and an
+    # erasure retry adds the saved description to it.
+    kept = view.plan.erased if view.state == "failed" else ()
+    plan = Plan("publish", r, erased=kept)
+    ops = [
+        Begin(w, s, "reconcile", r, r, plan, v),
+        Begin(w, s, "reconcile", r, r, plan, 1 - v),
         Begin(w, s, "reconcile", r, r + 1, Plan("publish", r + 1)),
     ]
+    if view.state == "failed":
+        ops += [
+            Begin(w, s, "reconcile", r, r, superseding(plan, v), 1 - v),
+            Begin(w, s, "reconcile", r, r, superseding(plan, 1 - v), v),
+        ]
+    if kept:
+        ops.append(Begin(w, s, "reconcile", r, r, Plan("publish", r), v))
+    return ops
 
 
 def replace_intents(w, s, view):
@@ -457,9 +469,9 @@ class Method:
     terminals: frozenset[str]
     requires_plan: bool  # begin() must carry a plan of the `recovers` operation
     preserved_on_retry: tuple[str, ...]  # Plan fields a retry keeps
-    # A retry of a row it owns may begin with another description at the
-    # saved revision when its plan adds the saved one to `erased`; otherwise
-    # a retry keeps `erased`.
+    # A retry of a failed row whose plan it recovers may begin with another
+    # description at the saved revision when its plan adds the saved one to
+    # `erased`; otherwise a retry keeps `erased`.
     supersedes: bool = False
 
     def __post_init__(self):
@@ -494,7 +506,7 @@ METHODS = {
             requires_plan=False,
             preserved_on_retry=(),
         ),
-        Method(  # Publisher.reconcile; the reconcile CLI
+        Method(  # Publisher.reconcile; revisions.finish_publication
             name="reconcile",
             intents=reconcile_intents,
             done_state="current",
@@ -508,6 +520,7 @@ METHODS = {
             terminals=frozenset(),
             requires_plan=False,
             preserved_on_retry=(),
+            supersedes=True,
         ),
         Method(  # replace(); revisions.replace_one, text_fixture.maintain_one
             name="replace",

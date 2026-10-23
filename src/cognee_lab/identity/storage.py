@@ -196,6 +196,13 @@ REPLACEMENT_PLAN = Refusal(
     "recovery_plan", "Replacement requires a durable replacement plan"
 )
 FORGET_PLAN = Refusal("recovery_plan", "Forget requires a durable forget plan")
+STRAY_ERASURE = Refusal(
+    "recovery_plan", "Only a retry of a failed attempt names superseded revisions"
+)
+PUBLICATION_PLAN = Refusal("recovery_plan", "Reconcile requires a publication plan")
+PRESERVE_PUBLICATION = Refusal(
+    "recovery_plan", "Preserve the saved publication's superseded revisions"
+)
 PRESERVE_REPLACEMENT = Refusal(
     "recovery_plan", "Preserve the saved replacement retirement plan"
 )
@@ -306,6 +313,15 @@ REQUIRED_PLANS = {
         preserved=("previous_description", "text_change", ERASED_FROM),
         supersedes=True,
     ),
+    # A reconcile of a failed publication keeps the saved revisions erasure
+    # retries superseded, or supersedes the saved one (Publisher.superseded).
+    "reconcile": RequiredPlan(
+        "identity_publish",
+        PUBLICATION_PLAN,
+        PRESERVE_PUBLICATION,
+        preserved=(ERASED_FROM,),
+        supersedes=True,
+    ),
     "forget": RequiredPlan("identity_forget", FORGET_PLAN, FORGET_STATE),
 }
 
@@ -357,6 +373,8 @@ def admissible(row, method, plan, source, rows=()) -> Refusal | None:
         )
         if changed and not superseding:
             return required.off_row
+    elif plan.get(ERASED_FROM):
+        return STRAY_ERASURE
     if not row or revision != actual:
         return None if revision == actual + 1 else NEW_REVISION
     if not superseding and source != row.description:

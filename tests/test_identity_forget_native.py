@@ -648,6 +648,59 @@ def test_native_a_failed_refresh_takes_the_removal_in_its_saved_revision(tmp_pat
 
 
 @pytest.mark.integration
+def test_native_a_failed_first_publication_takes_the_removal_in_its_saved_revision(
+    tmp_path,
+):
+    """doc02's first publication failed while it reads doc01's text. Once
+    doc01 is forgotten, doc02's own reconcile cannot finish its saved
+    revision, which cites a document that is no longer registered, and
+    nothing of doc02 is served. Reconciling the forgotten doc01 applies the
+    removal to doc02's saved revision and finishes the publication with it."""
+    root = tmp_path / "failed_first"
+    command(
+        root,
+        "multi-fixture",
+        "--dependent",
+        "--source",
+        "doc02",
+        "--fault-stage",
+        "nodes",
+        expect=1,
+    )
+    token, report = token_of(root, "doc01")
+    (dependent,) = report["dependents"]
+    assert (dependent["state"], dependent["blocked"]) == ("failed", False)
+    forget = ("forget", "--source", "doc01", "--expected-revision", "1")
+    command(
+        root,
+        *forget,
+        "--confirm",
+        token,
+        "--fault-stage",
+        "forget_dependents",
+        expect=1,
+    )
+    interrupted = result_of(root)
+    assert interrupted["dependents_failed"]["code"] == "injected_failure"
+    assert interrupted["sources"]["doc02"]["state"] == "failed"
+    assert interrupted["result"]["facts"] == []
+    refused = command(root, "reconcile", "--source", "doc02", expect=1)
+    assert "Original Data item is not registered" in error_of(refused)["message"]
+    command(root, "reconcile", "--source", "doc01")
+    final = result_of(root)
+    assert final["dependents_failed"] is None
+    doc02 = final["sources"]["doc02"]
+    assert doc02["state"] == "current" and removed(doc02)
+    # The local fact stays; no identity query reaches it.
+    assert doc02["original_fact_present"] and doc02["original_evidence_present"]
+    assert final["result"]["facts"] == []
+    assert final["result"]["unavailable_sources"] == []
+    assert all(e["resolved_at"] for e in final["recovery_events"])
+    refused = command(root, "reconcile", "--source", "doc01", expect=1)
+    assert "Forgotten source" in error_of(refused)["message"]
+
+
+@pytest.mark.integration
 def test_native_readd_of_a_consumer_waits_for_the_unfinished_forget(tmp_path):
     """doc02 consumed doc01. With doc02 forgotten, doc01's forget fails at its
     first stage. Re-adding doc02 would make it a dependent again and leave
@@ -791,3 +844,77 @@ def test_native_reconcile_finishes_a_first_publication_that_failed_before_its_fa
     assert incident["outcome"] == "restored" and incident["resolved_at"]
     status = json.loads(command(root, "status").stdout)
     assert [p["state"] for p in status["publications"]] == ["current"]
+
+
+FAILED_TEXT_CHANGE = r"""
+import asyncio,json,sys
+from pathlib import Path
+from cognee_lab.identity.environment import fixture_environment
+root=Path(sys.argv[1])
+with fixture_environment(root):
+ from cognee_lab.identity.admission import identity_map
+ from cognee_lab.identity.captured_chunks import recorded_budget
+ from cognee_lab.identity.fixture import context_for
+ from cognee_lab.identity.forget import forget, preview
+ from cognee_lab.identity.multisource import current_sources
+ from cognee_lab.identity.publish import Publisher
+ from cognee_lab.identity.text_changes import TextChange,chunk_text,original_context,read_original
+ from cognee_lab.identity.text_fixture import PREFIX,describe_prefix_edit,rebuild
+ async def check():
+  p=await Publisher.configured()
+  sources=await current_sources(root,p)
+  old=sources["doc02"]
+  ctx=await context_for(old.identity_data_id)
+  before=await read_original(old,ctx)
+  change=TextChange(previous_text=before,text=PREFIX+before,occurrence_map=identity_map(old),chunk_budget=await recorded_budget(old,p.graph))
+  chunks=await chunk_text(change.text,await original_context(old,ctx),change.chunk_budget)
+  intended=describe_prefix_edit(old,change.text,chunks)
+  try:
+   await rebuild(p,intended,change,expected_revision=1,fault_stage="replace_saved")
+   raise SystemExit("the injected failure did not fail the text change")
+  except SystemExit: raise
+  except Exception: pass
+  row=await p.records.row(old)
+  assert (row.state,row.revision,row.resumed_by)==("failed",2,"replace"),row
+  doc01=sources["doc01"]
+  report=await preview(p,doc01,expected_revision=1)
+  assert [(d["state"],d["blocked"]) for d in report["dependents"]]==[("failed",False)],report
+  # Without the text change's writer the dependent waits.
+  first=await forget(p,doc01,expected_revision=1,confirm=report["token"])
+  assert first["dependents_failed"]["code"]=="dependent_unfinished",first
+  assert (await p.records.row(old)).state=="failed"
+  # With it, the forgotten source's forget finishes the text change with the removal.
+  second=await forget(p,doc01,expected_revision=1,rebuild_text=rebuild)
+  assert second["dependents_failed"] is None,second
+  row=await p.records.row(old)
+  assert (row.state,row.revision)==("current",2),row
+  assert row.description.inputs[row.description.original_input_ref].text_sha256==intended.inputs[intended.original_input_ref].text_sha256
+  doc01_data=doc01.inputs[doc01.original_input_ref].data_id
+  assert not any(getattr(i,"data_id",None)==doc01_data for i in row.description.inputs.values()),row.description.inputs
+  assert any(k.startswith("forget_") for k in row.description.producers)
+  print(json.dumps(dict(first=first,second=second)))
+ asyncio.run(check())
+"""
+
+
+@pytest.mark.integration
+def test_native_a_failed_text_change_takes_the_removal_with_its_writer(tmp_path):
+    """doc02's own text change failed while it reads doc01's text, which no
+    command can produce. A forget of doc01 without the text change's writer
+    leaves doc02 waiting; with it, forget finishes the text change with the
+    removal applied to its saved revision."""
+    import subprocess
+    import sys
+
+    root = tmp_path / "failed_text_change"
+    command(root, "multi-fixture", "--dependent")
+    completed = subprocess.run(
+        [sys.executable, "-c", FAILED_TEXT_CHANGE, str(root)],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert completed.returncode == 0, (
+        completed.stdout[-4000:] + completed.stderr[-4000:]
+    )

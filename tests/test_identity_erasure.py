@@ -227,10 +227,14 @@ def test_the_token_names_the_affected_decision_set(source_payload):
     one = impact(gloss, plan, [row_of(gloss), row_of(doc01)])
     assert one.token != alone.token
     assert impact(gloss, plan, [row_of(doc01), row_of(gloss)]).token == one.token
-    # A dependent whose own attempt failed is listed, blocked, and changes
-    # the token.
-    blocked = impact(gloss, plan, [row_of(gloss), row_of(doc01, "failed")])
+    # A dependent whose own withdrawal failed is listed, blocked, and
+    # changes the token. One whose publication failed takes the removal in
+    # its saved revision, and its state changes the token too.
+    withdrawing = {"operation": "identity_withdraw"}
+    blocked = impact(gloss, plan, [row_of(gloss), row_of(doc01, "failed", withdrawing)])
     assert blocked.dependents[0].blocked and blocked.token != one.token
+    failed = impact(gloss, plan, [row_of(gloss), row_of(doc01, "failed")])
+    assert not failed.dependents[0].blocked and failed.token != one.token
     # A new dependent changes it too.
     other = json.loads(doc01.model_dump_json())
     other["identity_data_id"] = str(uuid4())

@@ -354,8 +354,8 @@ class Harness:
 # A pass that never reaches one of these says nothing about it, so the run is
 # INCONCLUSIVE: row states, accepted calls of each step kind, a publish
 # accepted on a forgotten row (the re-add), an erasure retry that superseded a
-# failed replacement's description, and a failed row that completed as
-# current again.
+# failed replacement's description and one that superseded a failed
+# publication's, and a failed row that completed as current again.
 REACHABLE = (
     "row current",
     "row failed",
@@ -366,7 +366,8 @@ REACHABLE = (
     "accepted readd",
     "forget withdrawn",
     "forget failed publish",
-    "erasure retry",
+    "erasure retry replace",
+    "erasure retry reconcile",
     "accepted complete",
     "accepted fail",
     "accepted crash",
@@ -396,7 +397,7 @@ def tally(reached, step):
     if isinstance(step.op, Begin) and step.op.plan.erased:
         prior = Plan.of(step.op.source, step.obs_before.rows[step.op.source].plan)
         if step.op.plan.erased != prior.erased:
-            reached["erasure retry"] += 1
+            reached[f"erasure retry {step.op.method}"] += 1
     if isinstance(step.op, Finish) and step.op.stage is None:
         attempt = step.model_before.writers[step.op.writer].holds
         if attempt.from_failed and METHODS[attempt.method].done_state == "current":

@@ -39,7 +39,11 @@ async def test_guard_failure_event_and_explicit_reconciliation(source_payload):
     with pytest.raises(IntentError, match="revision changed"):
         await store.begin(source, expected_revision=0, plan={})
     second = await store.begin(
-        source, expected_revision=1, plan={}, method="reconcile", origin="test"
+        source,
+        expected_revision=1,
+        plan=dict(PUBLISH_INTENT),
+        method="reconcile",
+        origin="test",
     )
     same_event = await store.fail(
         source,
@@ -51,7 +55,11 @@ async def test_guard_failure_event_and_explicit_reconciliation(source_payload):
     assert same_event == event
     assert len(await store.events(source.dataset_id)) == 1
     second = await store.begin(
-        source, expected_revision=1, plan={}, method="reconcile", origin="test"
+        source,
+        expected_revision=1,
+        plan=dict(PUBLISH_INTENT),
+        method="reconcile",
+        origin="test",
     )
     with pytest.raises(IntentError, match="stale"):
         await store.complete(source, first)
@@ -83,7 +91,9 @@ async def test_withdrawal_guard_and_completion(source_payload):
         source, attempt, "withdraw_owners", IntentError("injected", "stopped")
     )
     with pytest.raises(IntentError, match="Retry the failed withdrawal"):
-        await store.begin(source, expected_revision=1, plan={}, method="reconcile")
+        await store.begin(
+            source, expected_revision=1, plan=dict(PUBLISH_INTENT), method="reconcile"
+        )
     attempt = await store.begin(
         source, expected_revision=1, plan=plan, method="withdraw"
     )
@@ -92,7 +102,9 @@ async def test_withdrawal_guard_and_completion(source_payload):
     assert row.state == "withdrawn" and row.verified_revision == 1
     assert (await store.events(source.dataset_id))[0]["outcome"] == "withdrawn"
     with pytest.raises(IntentError, match="Withdrawn source"):
-        await store.begin(source, expected_revision=1, plan={}, method="reconcile")
+        await store.begin(
+            source, expected_revision=1, plan=dict(PUBLISH_INTENT), method="reconcile"
+        )
     with pytest.raises(IntentError, match="Saved revision changed"):
         await store.begin(source, expected_revision=0, plan=plan, method="withdraw")
 
@@ -149,7 +161,9 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
         source, attempt, "forget_document", IntentError("injected", "quotes text")
     )
     with pytest.raises(IntentError, match="Retry the failed forget"):
-        await store.begin(source, expected_revision=1, plan={}, method="reconcile")
+        await store.begin(
+            source, expected_revision=1, plan=dict(PUBLISH_INTENT), method="reconcile"
+        )
     with pytest.raises(IntentError, match="Retry the failed forget"):
         await store.begin(source, expected_revision=1, plan=plan, method="withdraw")
     attempt = await store.begin(source, expected_revision=1, plan=plan, method="forget")
@@ -304,7 +318,8 @@ def caller_arguments(method, row):
     the saved one, and a retry keeps the saved plan. It restates the callers'
     retry choice on its own on purpose, rather than reading resumed_by."""
     if row is None:
-        return 1, 0, {"operation": f"identity_{method}"}
+        operation = "publish" if method == "reconcile" else method
+        return 1, 0, {"operation": f"identity_{operation}"}
     operation = row.operation
     if method == "publish":
         return row.revision + 1, row.revision, dict(PUBLISH_INTENT)

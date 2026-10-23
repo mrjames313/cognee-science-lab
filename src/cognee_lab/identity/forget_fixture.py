@@ -95,7 +95,8 @@ async def forget_command(publisher, root, args, label, selected):
     dependents' removal revisions beside the completed forget, and the
     caller's files, which a forget never deletes. A refusal that carries the
     dry-run report carries them too."""
-    from .forget import DEPENDENT_FAULTS, forget
+    from .forget import forget
+    from .text_fixture import rebuild
 
     files = caller_files(root, label)
     fault = args.fault_stage
@@ -106,8 +107,8 @@ async def forget_command(publisher, root, args, label, selected):
             expected_revision=args.expected_revision,
             confirm=args.confirm,
             origin="test/fault_injection" if fault else "test",
-            fault_stage=None if fault in DEPENDENT_FAULTS else fault,
-            dependents_fault=DEPENDENT_FAULTS.get(fault),
+            fault_stage=fault,
+            rebuild_text=rebuild,
         )
     except IntentError as exc:
         if isinstance(exc.details, dict) and exc.details.get("dry_run"):
@@ -134,16 +135,13 @@ async def reconcile_forget(publisher, row, selected):
     """`reconcile` of a source whose forget failed: finish the forget. Of a
     forgotten source whose dependents are not all revised: finish them. None
     for any other row."""
-    from .forget import resume_dependents
+    from .text_fixture import rebuild
 
-    if row.tombstone is not None:
-        outcome = dict(attempt_id=None, **await resume_dependents(publisher, row))
-    elif row.resumed_by == "forget":
-        outcome = await publisher.forget(
-            selected, expected_revision=row.revision, origin="test"
-        )
-    else:
+    if row.tombstone is None and row.resumed_by != "forget":
         return None
+    outcome = await publisher.forget(
+        selected, expected_revision=row.revision, origin="test", rebuild_text=rebuild
+    )
     return forget_outcome(outcome, selected)
 
 

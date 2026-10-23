@@ -317,6 +317,20 @@ class Publisher:
             **run,
         )
 
+    async def superseded(self, source) -> dict:
+        """What a reconcile of a failed publication keeps in its plan: the
+        saved revisions erasure retries superseded (`erased_from`), with the
+        saved description added when `source` is another one. That is an
+        erasure retry, the removal of what a forget took away applied to the
+        saved revision; the store refuses any other description."""
+        row = await self.records.row(source)
+        if row is None or row.state != "failed":
+            return {}
+        erased = list(row.plan.get("erased_from", []))
+        if source != row.description:
+            erased.append(row.description.model_dump_json())
+        return dict(erased_from=erased) if erased else {}
+
     async def forgotten_row(self, source):
         row = await self.records.row(source)
         if row is None or row.tombstone is None:
@@ -395,6 +409,8 @@ class Publisher:
             withdraw=[],
             runtime_profile=self.runtime_profile,
         )
+        if method == "reconcile":
+            plan.update(await self.superseded(source))
         attempt = await self.records.begin(
             source,
             expected_revision=expected_revision,

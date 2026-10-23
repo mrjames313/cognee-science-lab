@@ -250,6 +250,18 @@ MUTANTS = {
         'preserved=("previous_description", ERASED_FROM)',
         "P5",
     ),
+    # A plan names superseded revisions outside a retry of a failed row.
+    "erasure-outside-retry": Mutant(
+        "    elif plan.get(ERASED_FROM):\n        return STRAY_ERASURE\n",
+        "",
+        "P5",
+    ),
+    # A failed publication never takes a removal in its saved revision.
+    "reconcile-never-supersedes": Mutant(
+        "        preserved=(ERASED_FROM,),\n        supersedes=True,\n",
+        "        preserved=(ERASED_FROM,),\n",
+        "INCONCLUSIVE",
+    ),
     # The store begins an erasure retry without checking that each step of
     # its chain is the removal a forget allows (erasure_rules).
     "erasure-chain-unchecked": Mutant(
