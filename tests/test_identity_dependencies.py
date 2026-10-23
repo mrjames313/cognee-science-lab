@@ -202,7 +202,8 @@ def row_of(source, state="current", plan=None):
         verified_revision=source.revision if state == "current" else 0,
         state=state,
         attempt=str(uuid4()),
-        description=source.model_dump_json(),
+        description=source,
+        tombstone=None,
         plan=plan or {},
     )
 

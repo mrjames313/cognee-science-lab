@@ -1,7 +1,6 @@
 """Two captured original documents sharing identity output in native stores."""
 
 import json
-from dataclasses import asdict
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .models import IdentitySource
@@ -151,20 +150,19 @@ def read_sources(root):
     }
 
 
-async def current_sources(root, publisher):
-    """Each source's saved description, or the root's file when it has no
-    row or is forgotten: a tombstone keeps no description."""
-    sources = read_sources(root)
+async def saved_or_file(publisher, files):
+    """Each source's saved description, or its file from the root when it
+    has no row or a tombstone, which keeps no description."""
     rows = {r.source: r for r in await publisher.records.rows()}
-    found = {}
-    for label, source in sources.items():
-        row = rows.get(str(source.identity_data_id))
-        found[label] = (
-            source
-            if row is None or row.state == "forgotten"
-            else IdentitySource.model_validate_json(row.description)
-        )
-    return found
+    return {
+        label: getattr(rows.get(str(source.identity_data_id)), "description", None)
+        or source
+        for label, source in files.items()
+    }
+
+
+async def current_sources(root, publisher):
+    return await saved_or_file(publisher, read_sources(root))
 
 
 async def publish_one(
@@ -282,25 +280,27 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         row = rows[str(source.identity_data_id)]
         if row.operation == "identity_forget":
             from .forget_fixture import forget_checks
-            from .models import Tombstone
+            from .retirement import source_ids
 
-            # An unfinished forget keeps its description; its identifiers
-            # read the same as a tombstone's.
-            kept = (
-                row.tombstone
-                if row.state == "forgotten"
-                else Tombstone.of(
-                    IdentitySource.model_validate_json(row.description),
-                    forgotten_at="unfinished",
-                )
-            )
+            # A forgotten row reads its tombstone; an unfinished forget the
+            # identifiers of its saved description.
+            if (tomb := row.tombstone) is not None:
+                mentions, removed = tomb.mention_ids, tomb.removed_entity_ids
+            else:
+                mentions = {k: g.entity_id for k, g in source.mention_groups.items()}
+                removed = []
             result["sources"][label] = dict(
                 identity_data_id=str(source.identity_data_id),
                 state=row.state,
                 saved_revision=row.revision,
                 verified_revision=row.verified_revision,
                 forget=await forget_checks(
-                    publisher, kept, row.plan, private_singleton_id(source, label)
+                    publisher,
+                    source_ids(source),
+                    mentions,
+                    removed,
+                    row.plan,
+                    private_singleton_id(source, label),
                 ),
             )
             continue
@@ -508,6 +508,10 @@ async def run(args, root):
                 "source_missing", "Selected document is not in this fixture"
             )
         selected = sources[args.source]
+        if args.command == "forget" and args.dry_run:
+            from .forget_fixture import forget_dry_run
+
+            return await forget_dry_run(publisher, root, args, args.source, selected)
         origin = "test/fault_injection" if args.fault_stage else "test"
         if args.command == "withdraw":
             await publisher.withdraw(
@@ -520,18 +524,13 @@ async def run(args, root):
             from .forget_fixture import forget_command
 
             refresh = await forget_command(publisher, root, args, args.source, selected)
-            if args.dry_run:
-                return refresh
         elif args.command == "readd":
             from .forget_fixture import readd
 
-            manifest = json.loads((root / "multi-fixture-info.json").read_text())
             await readd(
                 publisher,
                 root,
                 args.source,
-                root / ("source.txt" if args.source == "doc01" else "source02.txt"),
-                root / manifest["sources"][args.source],
                 expected_revision=args.expected_revision,
                 fault_stage=args.fault_stage,
             )
@@ -577,7 +576,8 @@ async def run(args, root):
         result = dict(
             result=await retrieve(publisher, selected.dataset_id, args.query),
             publications=[
-                asdict(row) for row in await publisher.records.rows(selected.dataset_id)
+                row.record()
+                for row in await publisher.records.rows(selected.dataset_id)
             ],
             recovery_events=await publisher.records.events(selected.dataset_id),
         )

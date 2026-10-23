@@ -11,7 +11,8 @@ kept its refs and contributions.
 from typing import NamedTuple, TypedDict
 from uuid import UUID
 
-from .models import CorpusObjectInput, IdentitySource, SourceTextInput, Tombstone
+from .erasure_rules import Erasure, citations
+from .models import IdentitySource, Tombstone
 from .native import edge_metadata
 from .validation import IntentError
 
@@ -46,49 +47,32 @@ class Dependent(TypedDict):
     consumed: str
 
 
-def consumes(reader, target, sole_owned=frozenset()):
-    """The inputs through which `reader` consumed `target`'s document, or an
-    Entity in `sole_owned`. A chunk or span input names its document through
-    a source_text input of the same description, so the text check covers
-    it."""
+def consumes(reader, target, removed=frozenset()) -> list[Dependent]:
+    """The inputs through which `reader` reads `target`'s document or an
+    Entity in `removed`, as `erasure_rules.citations` decides it, each named
+    with its reader for a refusal's details."""
     ids = source_ids(target)
-    found = []
-    for key, item in reader.inputs.items():
-        if isinstance(item, SourceTextInput):
-            consumed = (item.dataset_id, item.data_id) == (
-                ids.dataset_id,
-                ids.original_data_id,
-            )
-            consumed_id = item.data_id
-        elif isinstance(item, CorpusObjectInput):
-            consumed = item.entity_id in sole_owned
-            consumed_id = item.entity_id
-        else:
-            continue
-        if consumed:
-            found.append(
-                Dependent(
-                    dataset_id=str(reader.dataset_id),
-                    identity_data_id=str(reader.identity_data_id),
-                    input_ref=key,
-                    kind=item.kind,
-                    consumed=str(consumed_id),
-                )
-            )
-    return found
+    erasure = Erasure(ids.original_data_id, frozenset(removed))
+    return [
+        Dependent(
+            dataset_id=str(reader.dataset_id),
+            identity_data_id=str(reader.identity_data_id),
+            **c._asdict(),
+        )
+        for c in citations(reader, erasure).values()
+    ]
 
 
 def dependents(source, rows, sole_owned=frozenset()):
-    """The saved sources that consumed this source's document, or an Entity
-    that only this source owns. Withdrawn and forgotten sources consume
-    nothing."""
-    own = (str(source.dataset_id), str(source.identity_data_id))
+    """The saved sources that read this source's document, or an Entity that
+    only this source owns. Withdrawn and forgotten sources read nothing."""
+    ids = source_ids(source)
+    own = (str(ids.dataset_id), str(ids.identity_data_id))
     found = []
     for row in rows:
         if (row.dataset, row.source) == own or row.is_retired:
             continue
-        reader = IdentitySource.model_validate_json(row.description)
-        found += consumes(reader, source, sole_owned)
+        found += consumes(row.description, ids, sole_owned)
     return found
 
 
@@ -146,7 +130,7 @@ def refuse_retiring_inputs(source, rows):
     for row in rows:
         if (row.dataset, row.source) == own or not retiring_by_forget(row):
             continue
-        retiring = IdentitySource.model_validate_json(row.description)
+        retiring = row.description
         found = consumes(source, retiring, removed_entities(retiring, row.plan, rows))
         if found:
             raise IntentError(

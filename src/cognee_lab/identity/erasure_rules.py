@@ -20,7 +20,6 @@ from .models import (
     Accepted,
     ChunkInput,
     CorpusObjectInput,
-    IdentitySource,
     SourceTextInput,
     TextSpanInput,
     Unresolved,
@@ -65,11 +64,10 @@ def erasures_of(rows, source) -> Erasures:
     forgotten, readers = {}, set()
     own = str(source.identity_data_id)
     for row in rows:
-        if row.state == "forgotten":
-            tomb = row.tombstone
+        if (tomb := row.tombstone) is not None:
             forgotten[tomb.original_data_id] = frozenset(tomb.removed_entity_ids)
         elif not row.is_retired and row.source != own:
-            readers |= corpus_reads(IdentitySource.model_validate_json(row.description))
+            readers |= corpus_reads(row.description)
     return Erasures(MappingProxyType(forgotten), frozenset(readers))
 
 
@@ -119,28 +117,36 @@ def erasure_of(old, source, erasures: Erasures) -> tuple[str, Erasure] | None:
     return key, Erasure(document, removed)
 
 
-def erased_inputs(description, erasure: Erasure) -> set[str]:
-    """The input keys that read the forgotten document, a span or chunk of
-    it, or an Entity the forget removed."""
+class Citation(NamedTuple):
+    """One input through which a reader reads what a retirement takes away:
+    its key, its kind and the document or Entity UUID it consumes."""
+
+    input_ref: str
+    kind: str
+    consumed: str
+
+
+def citations(reader, erasure: Erasure) -> dict[str, Citation]:
+    """The one dependency predicate: the reader's inputs, by key, that read
+    the erased document (its text, or a span or chunk of it) or an erased
+    Entity. Forget, a text edit's withholding and the retiring-source fence
+    all decide dependency here. Text inputs of another dataset are not
+    admitted, so the reader's own dataset names the document's."""
     texts = {
         k
-        for k, i in description.inputs.items()
+        for k, i in reader.inputs.items()
         if isinstance(i, SourceTextInput)
-        and (i.dataset_id, i.data_id) == (description.dataset_id, erasure.document)
+        and (i.dataset_id, i.data_id) == (reader.dataset_id, erasure.document)
     }
-    return (
-        texts
-        | {
-            k
-            for k, i in description.inputs.items()
-            if isinstance(i, (ChunkInput, TextSpanInput)) and i.document_ref in texts
-        }
-        | {
-            k
-            for k, i in description.inputs.items()
-            if isinstance(i, CorpusObjectInput) and i.entity_id in erasure.removed
-        }
-    )
+    found = {}
+    for key, item in sorted(reader.inputs.items()):
+        if key in texts or (
+            isinstance(item, (ChunkInput, TextSpanInput)) and item.document_ref in texts
+        ):
+            found[key] = Citation(key, item.kind, str(erasure.document))
+        elif isinstance(item, CorpusObjectInput) and item.entity_id in erasure.removed:
+            found[key] = Citation(key, item.kind, str(item.entity_id))
+    return found
 
 
 def erased_decisions(old, erased) -> set[str]:
@@ -169,7 +175,7 @@ def erasure_step(old, found) -> "ErasureStep | None":
     if found is None:
         return None
     producer, erasure = found
-    erased = erased_inputs(old, erasure)
+    erased = set(citations(old, erasure))
     return ErasureStep(producer, erased, erased_decisions(old, erased))
 
 

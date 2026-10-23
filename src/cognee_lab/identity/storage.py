@@ -91,9 +91,10 @@ def scrubbed_event(info: dict) -> dict:
 
 @dataclass(frozen=True)
 class PublicationRow:
-    """One saved publication, as RecordStore.rows() and row() read it. A
-    forgotten row's description is its tombstone; a forgotten row from
-    before tombstones is refused here."""
+    """One saved publication, as RecordStore.rows() and row() read it, parsed
+    once: a forgotten row holds its tombstone and no description, every
+    other row its description and no tombstone. A forgotten row from before
+    tombstones is refused here."""
 
     dataset: str
     source: str
@@ -101,16 +102,23 @@ class PublicationRow:
     verified_revision: int
     state: str
     attempt: str
-    description: str
+    description: IdentitySource | None
+    tombstone: Tombstone | None
     plan: dict
 
     @classmethod
     def of(cls, record: Publication) -> "PublicationRow":
+        description = tombstone = None
         if record.state == "forgotten":
             try:
-                Tombstone.model_validate_json(record.description)
+                tombstone = Tombstone.model_validate_json(record.description)
             except ValueError:
                 raise IntentError(*OLD_FORGOTTEN_ROW) from None
+        else:
+            try:
+                description = IdentitySource.model_validate_json(record.description)
+            except ValueError:
+                raise IntentError(*DESCRIPTION_FORMAT) from None
         return cls(
             dataset=record.dataset,
             source=record.source,
@@ -118,8 +126,23 @@ class PublicationRow:
             verified_revision=record.verified_revision,
             state=record.state,
             attempt=record.attempt,
-            description=record.description,
+            description=description,
+            tombstone=tombstone,
             plan=json.loads(record.plan),
+        )
+
+    def record(self) -> dict:
+        """The row as the fixture reports print it: the description column
+        as stored, a tombstone for a forgotten row."""
+        return dict(
+            dataset=self.dataset,
+            source=self.source,
+            revision=self.revision,
+            verified_revision=self.verified_revision,
+            state=self.state,
+            attempt=self.attempt,
+            description=(self.description or self.tombstone).model_dump_json(),
+            plan=self.plan,
         )
 
     @property
@@ -130,11 +153,6 @@ class PublicationRow:
     @property
     def is_retired(self) -> bool:
         return self.state in RETIRED_STATES
-
-    @property
-    def tombstone(self) -> Tombstone:
-        """What a forgotten row keeps of its source."""
-        return Tombstone.model_validate_json(self.description)
 
     @property
     def resumed_by(self) -> str | None:
@@ -183,6 +201,10 @@ PRESERVE_REPLACEMENT = Refusal(
 FORGET_STATE = Refusal(
     "forget_state",
     "Forget a current, withdrawn or failed-publication source, or retry its failed forget",
+)
+DESCRIPTION_FORMAT = Refusal(
+    "description_format",
+    "A saved row that is not forgotten holds an identity description",
 )
 OLD_FORGOTTEN_ROW = Refusal(
     "forgotten_format",
@@ -317,8 +339,10 @@ def supersedes(row: PublicationRow, plan: dict, same: bool) -> bool:
     """A replacement retry keeps the saved revisions it superseded,
     `erased_from`, and adds the saved description exactly when it begins
     with another one: an erasure retry (replace.py)."""
-    kept = row.plan.get("erased_from", [])
-    return plan.get("erased_from", []) == (kept if same else [*kept, row.description])
+    kept = [json.loads(d) for d in row.plan.get("erased_from", [])]
+    if not same:
+        kept.append(row.description.model_dump(mode="json"))
+    return [json.loads(d) for d in plan.get("erased_from", [])] == kept
 
 
 def now() -> str:
@@ -377,7 +401,7 @@ class RecordStore:
             row is None
             or row.state != "pending"
             or row.attempt != attempt
-            or IdentitySource.model_validate_json(row.description) != source
+            or row.description != source
         ):
             raise IntentError(
                 "stale_attempt", "Graph write does not match saved pending intent"

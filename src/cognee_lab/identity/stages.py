@@ -8,7 +8,6 @@ completes it, and records a recovery event for a failure.
 from collections.abc import Awaitable, Callable, Iterable
 from typing import NamedTuple
 
-from .models import IdentitySource
 from .validation import IntentError
 
 
@@ -56,9 +55,7 @@ async def saved_row(records, source, missing, exact=None):
     row = await records.row(source)
     if row is None:
         raise IntentError("source_missing", missing)
-    if row.state == "forgotten":
-        return row
-    if exact and IdentitySource.model_validate_json(row.description) != source:
+    if exact and row.description not in (None, source):
         raise IntentError("revision_reuse", exact)
     return row
 

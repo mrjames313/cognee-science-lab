@@ -1,5 +1,6 @@
-"""Forget: the dependents check, the removed Entities, the re-add admission
-and the ownership rules that need no store."""
+"""Forget without a store: the Entities a forget removes and the readers it
+revises, the fence on a source whose forget is unfinished, and the re-add's
+derived UUIDs and admission."""
 
 import json
 from dataclasses import replace
@@ -12,10 +13,7 @@ from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.erasure import impact
 from cognee_lab.identity.forget_fixture import describe_readd
 from cognee_lab.identity.models import IdentitySource, Tombstone
-from cognee_lab.identity.retirement import (
-    dependents,
-    refuse_retiring_inputs,
-)
+from cognee_lab.identity.retirement import refuse_retiring_inputs
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import (
     IntentError,
@@ -37,7 +35,8 @@ def row_of(source, state="current", plan=None):
         revision=source.revision,
         verified_revision=source.revision,
         attempt="attempt",
-        description=source.model_dump_json(),
+        description=source,
+        tombstone=None,
         plan=plan or {"operation": "identity_publish"},
     )
 
@@ -63,43 +62,6 @@ def reader_of(source_payload, *, text=False, entity_id=None):
         )
         payload["mention_resolutions"]["r01"]["input_refs"].append("read_entity")
     return source_of(payload)
-
-
-def test_a_source_that_consumed_the_text_is_a_dependent_unless_retired(
-    source_payload,
-):
-    source = source_of(source_payload)
-    reader = reader_of(source_payload, text=True)
-    doc = source.inputs[source.original_input_ref]
-    found = dependents(source, [row_of(source), row_of(reader)])
-    assert found == [
-        dict(
-            dataset_id=str(reader.dataset_id),
-            identity_data_id=str(reader.identity_data_id),
-            input_ref="doc01_text",
-            kind="source_text",
-            consumed=str(doc.data_id),
-        )
-    ]
-    for state in ("withdrawn", "forgotten"):
-        assert dependents(source, [row_of(reader, state)]) == []
-    assert dependents(source, [row_of(reader, "failed")]) == found
-    # A text that is a different document, even if the same bytes, is not ours.
-    assert dependents(source, [row_of(reader_of(source_payload))]) == []
-
-
-def test_an_entity_is_a_dependency_only_while_this_source_alone_owns_it(
-    source_payload,
-):
-    source = source_of(source_payload)
-    entity = uuid4()
-    reader = reader_of(source_payload, entity_id=entity)
-    rows = [row_of(reader)]
-    assert dependents(source, rows) == []
-    found = dependents(source, rows, sole_owned={entity})
-    assert [(d["input_ref"], d["kind"], d["consumed"]) for d in found] == [
-        ("read_entity", "corpus_object", str(entity))
-    ]
 
 
 def owned_plan(source, entity, other_refs):
@@ -137,7 +99,7 @@ def other_row(other, state):
         plan,
     )
     if state == "forgotten":
-        return replace(row, description=tomb(other).model_dump_json())
+        return replace(row, description=None, tombstone=tomb(other))
     return row
 
 

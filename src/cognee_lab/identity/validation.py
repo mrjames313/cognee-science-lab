@@ -17,6 +17,7 @@ from .models import (
     SourceTextInput,
     TextScope,
     TextSpanInput,
+    Tombstone,
 )
 
 
@@ -351,20 +352,22 @@ async def validate_inputs(
     return drift
 
 
-def validate_uses(sources: list[IdentitySource], tombstones=()) -> None:
-    """Build a transient UUID-use view; singleton declarations count as
-    reusable. A forgotten source's tombstone keeps its last revision's
-    mention and reusable UUIDs, which count too."""
+def validate_uses(saved: list) -> None:
+    """Build a transient UUID-use view of saved descriptions and tombstones;
+    singleton declarations count as reusable. A forgotten source's tombstone
+    keeps its last revision's mention and reusable UUIDs, which count too."""
     mentions, reusable = {}, set()
     uses = [
         (
-            s.identity_data_id,
-            {k: g.entity_id for k, g in s.mention_groups.items()},
-            set(s.entity_constructions),
+            (s.identity_data_id, dict(s.mention_ids), set(s.entity_ids))
+            if isinstance(s, Tombstone)
+            else (
+                s.identity_data_id,
+                {k: g.entity_id for k, g in s.mention_groups.items()},
+                set(s.entity_constructions),
+            )
         )
-        for s in sources
-    ] + [
-        (t.identity_data_id, dict(t.mention_ids), set(t.entity_ids)) for t in tombstones
+        for s in saved
     ]
     for identity_data_id, groups, declared in uses:
         reusable.update(declared - set(groups.values()))

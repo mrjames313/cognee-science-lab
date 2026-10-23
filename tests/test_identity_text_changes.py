@@ -12,7 +12,13 @@ from cognee_lab.identity.admission import admit, identity_map, parse_occurrence_
 from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
-from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
+from cognee_lab.identity.retirement import dependents
+from cognee_lab.identity.validation import (
+    IntentError,
+    object_digest,
+    text_digest,
+    validate_inputs,
+)
 
 
 def test_only_an_unmoved_prefix_insertion_reports_a_shift(source_payload):
@@ -181,7 +187,8 @@ async def test_a_text_edit_refuses_only_a_reader_of_an_entity_it_drops_alone(
         revision=reader.revision,
         verified_revision=reader.revision,
         attempt="attempt",
-        description=reader.model_dump_json(),
+        description=reader,
+        tombstone=None,
         plan={},
     )
     dropping = intended.model_dump(mode="json")
@@ -271,3 +278,77 @@ def test_an_edit_to_empty_text_is_refused_even_when_it_removes_every_group(
     with pytest.raises(IntentError, match="empty") as refused:
         admit(old, emptied, before, "", everything_removed)
     assert refused.value.code == "empty_text"
+
+
+def row_of(source, state="current"):
+    return PublicationRow(
+        dataset=str(source.dataset_id),
+        source=str(source.identity_data_id),
+        state=state,
+        revision=source.revision,
+        verified_revision=source.revision,
+        attempt="attempt",
+        description=source,
+        tombstone=None,
+        plan={"operation": "identity_publish"},
+    )
+
+
+def reader_of(source_payload, *, text=False, entity_id=None):
+    """Another source whose r01 decision lists doc01's text, an Entity, or
+    neither, as an input."""
+    payload = json.loads(json.dumps(source_payload))
+    payload["identity_data_id"] = str(uuid4())
+    ours = dict(payload["inputs"]["doc01"])
+    # The reader's own document is another one.
+    payload["inputs"]["doc01"]["data_id"] = str(uuid4())
+    if text:
+        payload["inputs"]["doc01_text"] = ours
+        payload["mention_resolutions"]["r01"]["input_refs"].append("doc01_text")
+    if entity_id is not None:
+        payload["inputs"]["read_entity"] = dict(
+            kind="corpus_object",
+            dataset_id=payload["dataset_id"],
+            entity_id=str(entity_id),
+            selected_fields=["name"],
+            content_sha256=object_digest({"name": "x"}),
+        )
+        payload["mention_resolutions"]["r01"]["input_refs"].append("read_entity")
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+def test_a_source_that_consumed_the_text_is_a_dependent_unless_retired(
+    source_payload,
+):
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    reader = reader_of(source_payload, text=True)
+    doc = source.inputs[source.original_input_ref]
+    found = dependents(source, [row_of(source), row_of(reader)])
+    assert found == [
+        dict(
+            dataset_id=str(reader.dataset_id),
+            identity_data_id=str(reader.identity_data_id),
+            input_ref="doc01_text",
+            kind="source_text",
+            consumed=str(doc.data_id),
+        )
+    ]
+    for state in ("withdrawn", "forgotten"):
+        assert dependents(source, [row_of(reader, state)]) == []
+    assert dependents(source, [row_of(reader, "failed")]) == found
+    # A text that is a different document, even if the same bytes, is not ours.
+    assert dependents(source, [row_of(reader_of(source_payload))]) == []
+
+
+def test_an_entity_is_a_dependency_only_while_this_source_alone_owns_it(
+    source_payload,
+):
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    entity = uuid4()
+    reader = reader_of(source_payload, entity_id=entity)
+    rows = [row_of(reader)]
+    assert dependents(source, rows) == []
+    found = dependents(source, rows, sole_owned={entity})
+    assert [(d["input_ref"], d["kind"], d["consumed"]) for d in found] == [
+        ("read_entity", "corpus_object", str(entity))
+    ]

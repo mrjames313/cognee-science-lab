@@ -165,6 +165,11 @@ class View(NamedTuple):
     variant: int
 
 
+def saved_json(row):
+    """A row's description, or a forgotten row's tombstone, as JSON."""
+    return (row.description or row.tombstone).model_dump(mode="json")
+
+
 def view_of(s, row):
     if row is None:
         return None
@@ -172,7 +177,7 @@ def view_of(s, row):
         row.revision,
         row.state,
         Plan.of(s, row.plan),
-        variant_of(s, json.loads(row.description)),
+        variant_of(s, saved_json(row)),
     )
 
 

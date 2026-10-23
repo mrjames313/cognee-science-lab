@@ -162,7 +162,8 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
     assert row.state == "forgotten"
     assert row.revision == 1 and row.verified_revision == 1
     assert row.tombstone == tombstone_of(source)
-    assert "The controller" not in row.description
+    assert row.description is None
+    assert "The controller" not in row.tombstone.model_dump_json()
     assert row.plan == {
         "operation": "identity_forget",
         "original_data_id": "x",
@@ -309,7 +310,10 @@ def caller_arguments(method, row):
         return row.revision + 1, row.revision, dict(PUBLISH_INTENT)
     retry = row.state == "failed" and operation == "identity_replace"
     if method == "replace" and not retry:
-        plan = dict(operation="identity_replace", previous_description=row.description)
+        plan = dict(
+            operation="identity_replace",
+            previous_description=(row.description or row.tombstone).model_dump_json(),
+        )
         return row.revision + 1, row.revision, plan
     keep = {
         "reconcile": PUBLISH_INTENT,
@@ -431,7 +435,7 @@ async def test_begin_transition_matrix(source_payload, row, method, expected):
     await reach(store, source, row)
     saved = next(iter(await store.rows()), None)
     if saved is not None and saved.state != "forgotten":
-        source = IdentitySource.model_validate_json(saved.description)
+        source = saved.description
     revision, expected_revision, plan = caller_arguments(method, saved)
     try:
         await store.begin(
@@ -459,7 +463,8 @@ def table_rows():
             verified_revision=2,
             state=state,
             attempt="a",
-            description="{}",
+            description=None,
+            tombstone=None,
             plan={"operation": operation} if operation else {},
         )
 

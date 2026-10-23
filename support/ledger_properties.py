@@ -22,6 +22,7 @@ from ledger_model import (
     World,
     canonical,
     canonical_tombstone,
+    saved_json,
     scrubbed,
     variant_of,
 )
@@ -97,8 +98,7 @@ def p1_withheld_until_complete(step):
             )
         if ghost.outcome == "current" and (
             row.revision != ghost.revision
-            or json.loads(row.description)
-            != canonical(s, ghost.revision, ghost.variant)
+            or saved_json(row) != canonical(s, ghost.revision, ghost.variant)
         ):
             yield f"S{s + 1} served a description other than the completed one"
         if ghost.outcome in ("withdrawn", "forgotten") and row.state != ghost.outcome:
@@ -230,7 +230,7 @@ def begin_rules(op, prior):
         return
     saved = Plan.of(op.source, prior.plan)
     if op.revision == actual:
-        prior_variant = variant_of(op.source, json.loads(prior.description))
+        prior_variant = variant_of(op.source, saved_json(prior))
         same = op.variant == prior_variant
         superseding = (
             state == "failed"
@@ -271,9 +271,7 @@ def p7_forgotten_rows_hold_no_content(step):
         row = step.obs_after.rows.get(s)
         if row is None or row.state != "forgotten":
             continue
-        if json.loads(row.description) != canonical_tombstone(
-            s, ghost.revision, ghost.variant
-        ):
+        if saved_json(row) != canonical_tombstone(s, ghost.revision, ghost.variant):
             yield f"S{s + 1} is forgotten but its description is not its tombstone"
         if set(row.plan) - CONTENT_FREE_PLAN or any(
             "properties" in e for e in row.plan.get("edges", [])

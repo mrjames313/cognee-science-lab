@@ -1,7 +1,6 @@
 """Real Cognee storage, captured decisions, synthetic original documents only."""
 
 import json
-from dataclasses import asdict
 from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -334,7 +333,7 @@ async def run(args, root):
 
         rows = await publisher.records.rows(dataset_id)
         return dict(
-            publications=[asdict(row) for row in rows],
+            publications=[row.record() for row in rows],
             recovery_events=await publisher.records.events(dataset_id),
             **await withholding_status(publisher, rows),
         )

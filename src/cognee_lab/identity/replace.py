@@ -171,7 +171,7 @@ async def replace(
     row = await saved_row(records, source, "Replacement requires a saved publication")
     if row.revision != expected_revision:
         raise IntentError(*STALE_REVISION)
-    saved = IdentitySource.model_validate_json(row.description)
+    saved = row.description
     retry = row.resumed_by == "replace"
     erased_from = []
     if retry:
@@ -180,7 +180,7 @@ async def replace(
         if source != saved:
             # Only an erasure retry: the removal of what a forget took away,
             # applied to the saved revision, which it supersedes.
-            erased_from.append(row.description)
+            erased_from.append(saved.model_dump_json())
             plan["erased_from"] = erased_from
         try:
             old = IdentitySource.model_validate_json(plan["previous_description"])
@@ -348,7 +348,7 @@ async def replace(
                     )
         current_rows = await records.rows()
         foreign_intent = {
-            (r.dataset, r.source): IdentitySource.model_validate_json(r.description)
+            (r.dataset, r.source): r.description
             for r in current_rows
             if r.state == "current"
         }

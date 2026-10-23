@@ -17,7 +17,7 @@ from cognee_lab.identity.erasure_rules import (
 from cognee_lab.identity.erasure import (
     impact,
     producer_key,
-    removal_revision,
+    revisions,
     unfinished,
 )
 from cognee_lab.identity.fixture import FIXTURES
@@ -44,7 +44,8 @@ def row_of(source, state="current", plan=None):
         revision=source.revision,
         verified_revision=source.revision,
         attempt="attempt",
-        description=source.model_dump_json(),
+        description=source,
+        tombstone=None,
         plan=plan or {"operation": "identity_publish"},
     )
 
@@ -119,6 +120,15 @@ def reader_of(source_payload, read, *, entity=None, scope=None):
     return source_of(payload)
 
 
+def removal(reader, gloss, *, token=None, state="current", plan=None):
+    """The reader's removal revision for the forget of `gloss`, with what it
+    does."""
+    ((_, revised, found),) = revisions(
+        [row_of(reader, state, plan)], source_ids(gloss), set(), token
+    )
+    return revised, found
+
+
 def test_a_reader_of_the_forgotten_span_loses_both_decisions(source_payload):
     gloss = glossary(source_payload)
     doc01 = reader_of(source_payload, gloss)
@@ -165,7 +175,7 @@ def test_the_removal_revision_is_admitted_and_cites_nothing_forgotten(
     gloss = glossary(source_payload)
     doc01 = reader_of(source_payload, gloss)
     ids = source_ids(gloss)
-    revised, _ = removal_revision(doc01, ids, set(), token="t" * 64)
+    revised, _ = removal(doc01, gloss, token="t" * 64)
     assert revised.revision == doc01.revision + 1
     r01 = revised.mention_resolutions["r01"]
     assert r01.status == "unresolved"
@@ -186,8 +196,8 @@ def test_the_removal_revision_is_admitted_and_cites_nothing_forgotten(
 def test_a_corpus_scoped_variant_citing_the_span_is_dropped(source_payload):
     gloss = glossary(source_payload)
     doc01 = reader_of(source_payload, gloss, scope=dict(kind="corpus"))
-    revised, parts = removal_revision(doc01, source_ids(gloss), set())
-    assert [r.assignment for r in parts["decisions"]] == ["r01", "v01"]
+    revised, found = removal(doc01, gloss)
+    assert [r.assignment for r in found.decisions] == ["r01", "v01"]
     admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=forgot(gloss))
 
 
@@ -254,7 +264,9 @@ def test_a_failed_replacement_takes_the_removal_in_its_saved_revision(
         [row_of(gloss), row_of(saved, "failed", {"operation": "identity_replace"})],
     )
     assert not found.dependents[0].blocked
-    revised, _ = removal_revision(saved, ids, set(), in_place=True)
+    revised, _ = removal(
+        saved, gloss, state="failed", plan={"operation": "identity_replace"}
+    )
     assert revised.revision == saved.revision
     assert revised.mention_resolutions["r01"].producer_ref == producer_key(
         ids, saved.revision
@@ -272,12 +284,18 @@ def test_unfinished_is_derived_from_the_rows(source_payload):
     doc01 = reader_of(source_payload, gloss)
     ids = source_ids(gloss)
     tombstone = Tombstone.of(gloss, forgotten_at="t")
-    revised, _ = removal_revision(doc01, ids, set())
+    revised, _ = removal(doc01, gloss)
     assert unfinished(tombstone, [row_of(doc01)]) == [row_of(doc01)]
     assert unfinished(tombstone, [row_of(revised)]) == []
     failed = row_of(revised, "failed", {"operation": "identity_replace"})
     assert unfinished(tombstone, [failed]) == [failed]
     assert unfinished(tombstone, [row_of(doc01, "withdrawn")]) == []
+    # A later revision that only carries the removal producer forward is not
+    # the removal revision, even when it fails.
+    later = json.loads(revised.model_dump_json())
+    later["revision"] += 1
+    replacing = {"operation": "identity_replace"}
+    assert unfinished(tombstone, [row_of(source_of(later), "failed", replacing)]) == []
 
 
 SPARE = uuid4()
@@ -290,7 +308,7 @@ def erasure_case(source_payload, change):
     payload = json.loads(json.dumps(source_payload))
     payload["entity_constructions"][str(SPARE)] = dict(name="spare", description="")
     doc01 = reader_of(payload, gloss)
-    revised, _ = removal_revision(doc01, source_ids(gloss), set())
+    revised, _ = removal(doc01, gloss)
     payload = json.loads(revised.model_dump_json())
     change(payload, doc01)
     with pytest.raises(IntentError) as refused:
@@ -366,7 +384,7 @@ def test_a_removal_is_bound_to_a_forgotten_source(source_payload):
     configured."""
     gloss = glossary(source_payload)
     doc01 = reader_of(source_payload, gloss)
-    revised, _ = removal_revision(doc01, source_ids(gloss), set())
+    revised, _ = removal(doc01, gloss)
     live = erasures_of([row_of(gloss), row_of(doc01)], doc01)
     assert dict(live.forgotten) == {}
     with pytest.raises(IntentError) as refused:
@@ -374,7 +392,7 @@ def test_a_removal_is_bound_to_a_forgotten_source(source_payload):
     assert refused.value.code == "erasure_unbound"
     tombstone = Tombstone.of(gloss, forgotten_at="t", removed_entity_ids=[HC])
     forgotten = replace(
-        row_of(gloss, "forgotten"), description=tombstone.model_dump_json()
+        row_of(gloss, "forgotten"), description=None, tombstone=tombstone
     )
     bound = erasures_of([forgotten, row_of(doc01)], doc01)
     assert dict(bound.forgotten) == {gloss.inputs["doc01"].data_id: frozenset({HC})}
@@ -388,8 +406,8 @@ def test_a_removal_never_drops_a_recipe_another_source_reads(source_payload):
     excluded."""
     gloss = glossary(source_payload)
     doc01 = reader_of(source_payload, gloss)
-    revised, parts = removal_revision(doc01, source_ids(gloss), set())
-    assert parts["dropped_entities"] == (str(HC),)
+    revised, found = removal(doc01, gloss)
+    assert found.dropped_entities == (str(HC),)
     third = json.loads(json.dumps(source_payload))
     third["identity_data_id"] = str(uuid4())
     third["inputs"]["doc01"]["data_id"] = str(uuid4())

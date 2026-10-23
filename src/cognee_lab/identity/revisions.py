@@ -157,11 +157,11 @@ async def refresh_dependents(publisher, fault_stage=None) -> dict:
     try:
         for source, (row, moved) in (await pending_moves(publisher)).items():
             if row.state != "current" and row.resumed_by == "replace":
-                saved = IdentitySource.model_validate_json(row.description)
+                saved = row.description
                 await write(saved, row, moved)
                 row, moved = (await pending_moves(publisher)).get(source, (row, []))
             if row.state == "current" and moved:
-                current = IdentitySource.model_validate_json(row.description)
+                current = row.description
                 await write(remapped(current, moved), row, moved)
     except Exception as exc:
         code = exc.code if isinstance(exc, IntentError) else type(exc).__name__

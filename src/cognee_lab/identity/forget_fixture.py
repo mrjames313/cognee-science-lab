@@ -3,21 +3,36 @@ drivers share, the re-add from the caller's files and the report of what
 remains."""
 
 import json
+from typing import NamedTuple
 from uuid import UUID
 
 from .models import IdentitySource
 from .validation import IntentError, text_digest
 
-# The root files that hold each source's own inputs: the caller's, which a
-# forget lists and never deletes. Revision files follow the fixture's names.
+
+class CallerFiles(NamedTuple):
+    """The root files that hold one source's own inputs: the caller's, which
+    a forget lists and never deletes and a re-add reads. `facts` says whether
+    the fixture captured facts for the source's chunks."""
+
+    text: str
+    identity: str
+    revisions: tuple[str, ...]
+    facts: bool = True
+
+
 CALLER_FILES = {
-    "doc01": ("source.txt", "identity.json", "identity_doc01_revision*.json"),
-    "doc02": ("source02.txt", "identity02.json", "identity_doc02_revision*.json"),
-    "glossary": (
+    "doc01": CallerFiles(
+        "source.txt", "identity.json", ("identity_doc01_revision*.json",)
+    ),
+    "doc02": CallerFiles(
+        "source02.txt", "identity02.json", ("identity_doc02_revision*.json",)
+    ),
+    "glossary": CallerFiles(
         "glossary.txt",
         "glossary_identity.json",
-        "glossary_revision*.txt",
-        "glossary_identity_revision*.json",
+        ("glossary_revision*.txt", "glossary_identity_revision*.json"),
+        facts=False,
     ),
 }
 RESULT_FILES = ("*_result.json", "result.json")
@@ -55,44 +70,58 @@ def add_dependency(payload, first, text):
 
 def caller_files(root, label):
     """The caller's own files for one source in the root, and the result
-    files the commands wrote there."""
-    patterns = (*CALLER_FILES.get(label, ()), *RESULT_FILES)
-    return sorted({p for pattern in patterns for p in root.glob(pattern)})
+    files the commands wrote there, as the report lists them."""
+    files = CALLER_FILES.get(label)
+    patterns = (
+        *((files.text, files.identity, *files.revisions) if files else ()),
+        *RESULT_FILES,
+    )
+    return [str(p) for p in sorted({p for g in patterns for p in root.glob(g)})]
+
+
+async def forget_dry_run(publisher, root, args, label, selected):
+    """`forget --dry-run` on either driver: the report, with the caller's
+    files, which a driver returns as the command's whole result."""
+    from .forget import preview
+
+    report = await preview(
+        publisher, selected, expected_revision=args.expected_revision
+    )
+    return dict(report, caller_files=caller_files(root, label))
 
 
 async def forget_command(publisher, root, args, label, selected):
-    """`forget`, with `--dry-run` or `--confirm`, on either driver. A dry run
-    returns its report and writes nothing; a forget returns the outcome of
-    its dependents' removal revisions beside the completed forget."""
-    from .forget import forget, preview
+    """`forget`, with `--confirm`, on either driver: the outcome of the
+    dependents' removal revisions beside the completed forget, and the
+    caller's files, which a forget never deletes. A refusal that carries the
+    dry-run report carries them too."""
+    from .forget import DEPENDENT_FAULTS, forget
 
-    row = await publisher.records.row(selected)
     files = caller_files(root, label)
-    if args.dry_run:
-        return await preview(
+    fault = args.fault_stage
+    try:
+        outcome = await forget(
             publisher,
             selected,
             expected_revision=args.expected_revision,
-            caller_files=files,
+            confirm=args.confirm,
+            origin="test/fault_injection" if fault else "test",
+            fault_stage=None if fault in DEPENDENT_FAULTS else fault,
+            dependents_fault=DEPENDENT_FAULTS.get(fault),
         )
-    outcome = await forget(
-        publisher,
-        selected,
-        expected_revision=args.expected_revision,
-        confirm=args.confirm,
-        caller_files=files,
-        origin="test/fault_injection" if args.fault_stage else "test",
-        fault_stage=args.fault_stage,
-    )
-    return dict(forget_outcome(outcome, row), caller_files=[str(f) for f in files])
+    except IntentError as exc:
+        if isinstance(exc.details, dict) and exc.details.get("dry_run"):
+            exc.details = dict(exc.details, caller_files=files)
+        raise
+    return dict(forget_outcome(outcome, selected), caller_files=files)
 
 
-def forget_outcome(outcome, row):
+def forget_outcome(outcome, selected):
     """What a command reports of a forget: its dependents' removal revisions,
     and the failure that stopped them, if any."""
     return dict(
         forget=dict(
-            identity_data_id=row.source if row else None,
+            identity_data_id=str(selected.identity_data_id),
             attempt_id=outcome["attempt_id"],
             dependents_revised=outcome["dependents_revised"],
             dependents_waiting=outcome["dependents_waiting"],
@@ -102,14 +131,20 @@ def forget_outcome(outcome, row):
 
 
 async def reconcile_forget(publisher, row, selected):
-    """`reconcile` of a source whose forget failed, or of a forgotten source
-    whose dependents are not all revised: finish it. None for any other row."""
-    if row.resumed_by != "forget" and row.state != "forgotten":
+    """`reconcile` of a source whose forget failed: finish the forget. Of a
+    forgotten source whose dependents are not all revised: finish them. None
+    for any other row."""
+    from .forget import resume_dependents
+
+    if row.tombstone is not None:
+        outcome = dict(attempt_id=None, **await resume_dependents(publisher, row))
+    elif row.resumed_by == "forget":
+        outcome = await publisher.forget(
+            selected, expected_revision=row.revision, origin="test"
+        )
+    else:
         return None
-    outcome = await publisher.forget(
-        selected, expected_revision=row.revision, origin="test"
-    )
-    return forget_outcome(outcome, row)
+    return forget_outcome(outcome, selected)
 
 
 def describe_readd(caller, tombstone, removed, text, chunks):
@@ -170,21 +205,12 @@ def chunk_budget(root):
     return 512
 
 
-async def readd(
-    publisher,
-    root,
-    label,
-    text_file,
-    identity_file,
-    *,
-    expected_revision,
-    fault_stage,
-    semantics=True,
-):
-    """Publish a forgotten source again from the caller's files: its text and
-    identity description, which may differ from what was forgotten. The
-    re-add is admitted on the in-memory text and chunks before anything is
-    written, so a refusal leaves the stores as the forget left them."""
+async def readd(publisher, root, label, *, expected_revision, fault_stage):
+    """Publish a forgotten source again from the caller's files
+    (`CALLER_FILES`): its text and identity description, which may differ
+    from what was forgotten. The re-add is admitted on the in-memory text
+    and chunks before anything is written, so a refusal leaves the stores as
+    the forget left them."""
     import cognee
     from types import SimpleNamespace
     from cognee.tasks.ingestion.data_item import DataItem
@@ -195,6 +221,8 @@ async def readd(
     from .retirement import readd_removed
     from .text_changes import chunk_text
 
+    files = CALLER_FILES[label]
+    text_file, identity_file = root / files.text, root / files.identity
     caller = IdentitySource.model_validate_json(identity_file.read_text())
     row = await publisher.forgotten_row(caller)
     tombstone = row.tombstone
@@ -247,22 +275,24 @@ async def readd(
         operation="readd",
         expected_revision=expected_revision,
         fault_stage=fault_stage,
-        semantics=semantics,
+        semantics=files.facts,
     )
 
 
-async def forget_checks(publisher, tombstone, plan, singleton):
-    """What remains of a forgotten source, plus the fixture's own objects:
-    the values a journey reads after the forget completed."""
+async def forget_checks(publisher, ids, mentions, removed, plan, singleton):
+    """What remains of a source whose forget began, plus the fixture's own
+    objects: the values a journey reads after the forget. `ids` is the
+    source's SourceIds, `mentions` its mention UUIDs by group key and
+    `removed` the Entities its forget removed."""
     from .forget import remains
     from .native import mention_fact
 
     graph, vector = publisher.graph, publisher.vector
-    mention_ids = [str(m) for m in tombstone.mention_ids.values()]
-    removed = [str(e) for e in tombstone.removed_entity_ids]
-    primary = tombstone.mention_ids.get("g01")
+    mention_ids = [str(m) for m in mentions.values()]
+    removed = [str(e) for e in removed]
+    primary = mentions.get("g01")
     return dict(
-        **await remains(publisher, tombstone, plan),
+        **await remains(publisher, ids, plan),
         mention_nodes_present=[
             m for m in mention_ids if await graph.get_node(m) is not None
         ],
@@ -274,7 +304,7 @@ async def forget_checks(publisher, tombstone, plan, singleton):
             e for e in removed if await graph.get_node(e) is not None
         ],
         original_fact_present=primary is not None
-        and (await mention_fact(publisher, tombstone, primary)).edge is not None,
+        and (await mention_fact(publisher, ids, primary)).edge is not None,
         private_singleton_present=await graph.get_node(singleton) is not None,
         private_singleton_indexed=bool(
             await vector.retrieve("Entity_name", [singleton])

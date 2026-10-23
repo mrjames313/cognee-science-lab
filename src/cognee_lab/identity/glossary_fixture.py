@@ -198,19 +198,16 @@ async def prepare(root):
 
 
 async def current_sources(root, publisher):
+    from .multisource import saved_or_file
+
     manifest = json.loads((root / INFO).read_text())
-    rows = {r.source: r for r in await publisher.records.rows()}
-    found = {}
-    for label, path in manifest["sources"].items():
-        source = IdentitySource.model_validate_json((root / path).read_text())
-        row = rows.get(str(source.identity_data_id))
-        # A tombstone keeps no description: a forgotten source reads its file.
-        found[label] = (
-            source
-            if row is None or row.state == "forgotten"
-            else IdentitySource.model_validate_json(row.description)
-        )
-    return found
+    return await saved_or_file(
+        publisher,
+        {
+            label: IdentitySource.model_validate_json((root / path).read_text())
+            for label, path in manifest["sources"].items()
+        },
+    )
 
 
 async def change_glossary(
@@ -320,7 +317,7 @@ async def review(
     # The reviewer attests committed text: no document doc01 reads may have
     # an edit that is still pending or failed.
     for edit in unfinished_edits(rows):
-        edited = IdentitySource.model_validate_json(edit.description)
+        edited = edit.description
         if document_inputs(doc01, edited):
             raise IntentError(
                 "edit_unfinished",
@@ -474,7 +471,7 @@ async def snapshot(publisher, root, query):
     found = {}
     for label, source in sources.items():
         row = by_source[str(source.identity_data_id)]
-        if row.state == "forgotten":
+        if row.tombstone is not None:
             found[label] = dict(
                 identity_data_id=row.source,
                 state=row.state,
@@ -571,6 +568,10 @@ async def run(args, root):
                 "source_missing", "Selected source is not in this fixture"
             )
         selected = sources[args.source]
+        if args.command == "forget" and args.dry_run:
+            from .forget_fixture import forget_dry_run
+
+            return await forget_dry_run(publisher, root, args, args.source, selected)
         refreshing = args.fault_stage == REFRESH_FAULT
         # The refresh fault fails each refresh revision at replace_registered.
         refresh_fault = "replace_registered" if refreshing else None
@@ -610,21 +611,15 @@ async def run(args, root):
                 no_refresh(),
                 **await forget_command(publisher, root, args, args.source, selected),
             )
-            if args.dry_run:
-                return refresh
         elif args.command == "readd":
             from .forget_fixture import readd
 
-            manifest = json.loads((root / INFO).read_text())
             await readd(
                 publisher,
                 root,
                 args.source,
-                root / ("glossary.txt" if args.source == "glossary" else "source.txt"),
-                root / manifest["sources"][args.source],
                 expected_revision=args.expected_revision,
                 fault_stage=args.fault_stage,
-                semantics=args.source != "glossary",
             )
         elif args.command == "refresh-dependents":
             refresh = await refresh_dependents(publisher, refresh_fault)

@@ -107,7 +107,7 @@ async def live_held(
     for row in rows:
         if not is_served(row):
             continue
-        source = IdentitySource.model_validate_json(row.description)
+        source = row.description
         try:
             drift = await live_drift(publisher, source)
         except IntentError as exc:
@@ -268,10 +268,8 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     mention_ids = {
         str(g.entity_id)
         for row in rows
-        if row.state != "forgotten"
-        for g in IdentitySource.model_validate_json(
-            row.description
-        ).mention_groups.values()
+        if row.description is not None
+        for g in row.description.mention_groups.values()
     }
     if not await publisher.vector.has_collection("Entity_name"):
         return dict(

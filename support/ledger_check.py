@@ -48,6 +48,7 @@ from ledger_model import (
     description,
     completion,
     source_id,
+    saved_json,
     variant_of,
     view_of,
 )
@@ -76,7 +77,8 @@ async def call(awaitable):
 
 
 class Unreadable(Exception):
-    """rows() refused the store after a step: a forgotten row kept content."""
+    """rows() refused the store after a step: a forgotten row kept content,
+    or another row holds no description."""
 
 
 class Harness:
@@ -108,7 +110,8 @@ class Harness:
         try:
             rows = {index[r.source]: r for r in await self.store.rows(DATASET)}
         except IntentError as exc:
-            # rows() refuses a forgotten row that is not a tombstone.
+            # rows() refuses a forgotten row that is not a tombstone, and any
+            # other row whose description does not parse.
             raise Unreadable(exc.code, str(exc)) from exc
         events = {s: [] for s in range(sources)}
         for e in await self.store.events(DATASET):
@@ -438,7 +441,7 @@ def render(world, obs):
         )
         lines.append(
             f"S{s + 1}: r{row.revision}"
-            + ("alt" if variant_of(s, json.loads(row.description)) else "")
+            + ("alt" if variant_of(s, saved_json(row)) else "")
             + f"/{row.state}/verified={row.verified_revision}"
             f"/plan={Plan.of(s, row.plan).tag}/attempt={names.get(row.attempt, '?')}"
             f" events={len(events)} unresolved={len(unresolved(events))}"
@@ -493,8 +496,10 @@ async def check_ledger(config: Config) -> Result:
                 try:
                     after = await harness.observe(config.sources)
                 except Unreadable as exc:
+                    # A forgotten row that is not a tombstone breaks P7; any
+                    # other row that holds no description breaks P1.
                     result.failure = Failure(
-                        "P7",
+                        "P7" if exc.args[0] == "forgotten_format" else "P1",
                         f"rows() refused the store: {exc.args[1]}",
                         [*path, op.label],
                         render(world, before),

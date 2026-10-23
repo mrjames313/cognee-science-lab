@@ -78,7 +78,7 @@ MUTANTS = {
         "P3",
     ),
     "assert-pending-ignores-description": Mutant(
-        "            or IdentitySource.model_validate_json(row.description) != source\n",
+        "            or row.description != source\n",
         "",
         "P3",
     ),
@@ -224,8 +224,8 @@ MUTANTS = {
     ),
     # An erasure retry supersedes a description it does not name.
     "supersede-any-description": Mutant(
-        "(kept if same else [*kept, row.description])",
-        '(kept if same else plan.get("erased_from", []))',
+        '        kept.append(row.description.model_dump(mode="json"))\n',
+        "        return True\n",
         "P5",
     ),
     # A first publication may skip revisions.
@@ -330,7 +330,7 @@ DEEP_MUTANTS = {
     # Caught at depth 6: a failed erasure retry, resumed with its saved
     # arguments, is refused because the retry forgets what it superseded.
     "supersede-drops-chain": Mutant(
-        '    kept = row.plan.get("erased_from", [])\n',
+        '    kept = [json.loads(d) for d in row.plan.get("erased_from", [])]\n',
         "    kept = []\n",
         "P6",
     ),

@@ -96,7 +96,7 @@ async def maintain_one(
         for row in await publisher.records.rows(source.dataset_id):
             if row.source == str(source.identity_data_id) or row.state != "current":
                 continue
-            other = IdentitySource.model_validate_json(row.description)
+            other = row.description
             other_ctx = await original_context(other, generated)
             other_chunks = await load_chunks(other, other_ctx)
             await verify_semantics(publisher, other, other_chunks, other_ctx)
@@ -203,7 +203,7 @@ async def transition_summary(publisher, row):
     from .native import mention_fact
 
     old = IdentitySource.model_validate_json(row.plan["previous_description"])
-    source = IdentitySource.model_validate_json(row.description)
+    source = row.description
     change = TextChange.from_plan(row.plan)
     key = source.original_input_ref
     old_ids = {

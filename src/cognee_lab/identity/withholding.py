@@ -23,8 +23,8 @@ from typing import NamedTuple
 from sqlalchemy import Integer, String, delete, select, tuple_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from .models import ChunkInput, IdentitySource, SourceTextInput, TextSpanInput
-from .retirement import consumes
+from .models import IdentitySource, SourceTextInput, TextSpanInput
+from .erasure_rules import Erasure, citations
 from .validation import (
     Reason,
     decision_inputs,
@@ -183,27 +183,16 @@ class WithholdingStore:
 
 
 def document_inputs(reader: IdentitySource, target: IdentitySource) -> set[str]:
-    """The reader's inputs that read the target's document: the text inputs
-    through which it consumes that document (retirement.consumes) and every
-    span or chunk of them."""
-    texts = {
-        d["input_ref"] for d in consumes(reader, target) if d["kind"] == "source_text"
-    }
-    return texts | {
-        k
-        for k, i in reader.inputs.items()
-        if isinstance(i, (ChunkInput, TextSpanInput)) and i.document_ref in texts
-    }
+    """The reader's inputs that read the target's document: its text and
+    every span or chunk of it (erasure_rules.citations)."""
+    doc = target.inputs[target.original_input_ref]
+    return set(citations(reader, Erasure(doc.data_id, frozenset())))
 
 
 def current_readers(rows) -> dict[str, IdentitySource]:
     """The saved description of every source that is not retired: withdrawn
     and forgotten sources read nothing."""
-    return {
-        r.source: IdentitySource.model_validate_json(r.description)
-        for r in rows
-        if not r.is_retired
-    }
+    return {r.source: r.description for r in rows if not r.is_retired}
 
 
 def citing(reader: IdentitySource, keys) -> set[str]:
@@ -362,7 +351,7 @@ def withheld_decisions(rows, table) -> WithheldSet:
         entry = Withheld(w.reason, w.status, frozenset([w.input_ref]))
         merge(held, w.source, w.assignment, entry)
     for edit in unfinished_edits(rows):
-        edited = IdentitySource.model_validate_json(edit.description)
+        edited = edit.description
         for source, reader in readers.items():
             if source == edit.source:
                 continue

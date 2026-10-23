@@ -195,17 +195,7 @@ class Publisher:
             if (r.dataset, r.source)
             != (str(source.dataset_id), str(source.identity_data_id))
         ]
-        validate_uses(
-            [
-                *(
-                    IdentitySource.model_validate_json(r.description)
-                    for r in others
-                    if r.state != "forgotten"
-                ),
-                source,
-            ],
-            [r.tombstone for r in others if r.state == "forgotten"],
-        )
+        validate_uses([*(r.description or r.tombstone for r in others), source])
         refuse_retiring_inputs(source, rows)
         previous = await self.records.row(source)
         if previous and previous.revision != (saved_revision or source.revision):
@@ -329,7 +319,7 @@ class Publisher:
 
     async def forgotten_row(self, source):
         row = await self.records.row(source)
-        if row is None or row.state != "forgotten":
+        if row is None or row.tombstone is None:
             raise IntentError("forget_state", "Re-add needs a forgotten source")
         return row
 

@@ -18,7 +18,7 @@ is the sibling orchestration; `retirement.py` holds what both use.
 
 from uuid import UUID
 
-from .models import ChunkInput, IdentitySource, Tombstone
+from .models import ChunkInput, Tombstone
 from .native import require_graph_methods
 from .retirement import (
     contribution_triples,
@@ -322,7 +322,7 @@ async def plan_for(publisher, source, row):
     return plan
 
 
-async def preview(publisher, source, *, expected_revision, caller_files=()):
+async def preview(publisher, source, *, expected_revision):
     """The dry run: what `forget` would do, with the token it would need.
     Writes nothing. On a forgotten source, the dependents it has not revised
     yet."""
@@ -333,21 +333,19 @@ async def preview(publisher, source, *, expected_revision, caller_files=()):
     if row.revision != expected_revision:
         raise IntentError(*STALE_REVISION)
     rows = await records.rows()
-    if row.state == "forgotten":
+    if row.tombstone is not None:
         return dict(
             dry_run=True,
             forgotten=True,
             unfinished=[r.source for r in unfinished(row.tombstone, rows)],
-            caller_files=[str(f) for f in caller_files],
         )
-    description = IdentitySource.model_validate_json(row.description)
+    description = row.description
     plan = await plan_for(publisher, description, row)
     return report(
         impact(description, plan, rows),
         plan=plan,
         description=description,
         events=await records.events(description.dataset_id),
-        caller_files=caller_files,
     )
 
 
@@ -368,19 +366,20 @@ async def forget(
     *,
     expected_revision,
     confirm=None,
-    caller_files=(),
     origin="runtime",
     fault_stage=None,
+    dependents_fault=None,
 ):
     """Erase the source under one reservation, then write each dependent's
-    removal revision under its own. On a forgotten source, finish the
-    dependents a completed forget did not revise; refuse when none is left.
-    Returns the attempt and the dependents' outcome; a dependent failure is
-    reported beside the completed forget, not raised."""
+    removal revision under its own (`erasure.finish_dependents`, which
+    `dependents_fault` fails). On a forgotten source, finish the dependents
+    a completed forget did not revise; refuse when none is left. Returns the
+    attempt and the dependents' outcome; a dependent failure is reported
+    beside the completed forget, not raised."""
     from cognee import forget as native_forget
     from cognee.modules.users.methods import get_default_user
 
-    from .erasure import impact, remove_dependents, report, unfinished
+    from .erasure import finish_dependents, impact, report
 
     graph, records = publisher.graph, publisher.records
     require_graph_methods(
@@ -397,9 +396,6 @@ async def forget(
             "add_edges",
         ],
     )
-    dependents_fault = DEPENDENT_FAULTS.get(fault_stage)
-    if dependents_fault:
-        fault_stage = None
     row = await saved_row(
         records,
         source,
@@ -408,13 +404,10 @@ async def forget(
     )
     if row.revision != expected_revision:
         raise IntentError(*STALE_REVISION)
-    if row.state == "forgotten":
-        if not unfinished(row.tombstone, await records.rows()):
-            raise IntentError(*FORGOTTEN_SOURCE)
-        removal = await remove_dependents(
-            publisher, row.tombstone, fault_stage=dependents_fault
+    if row.tombstone is not None:
+        return dict(
+            attempt_id=None, **await resume_dependents(publisher, row, dependents_fault)
         )
-        return dict(attempt_id=None, state="forgotten", **removal)
     retry = resumes(row)
     plan = await plan_for(publisher, source, row)
     found = impact(source, plan, await records.rows())
@@ -435,7 +428,6 @@ async def forget(
                 plan=plan,
                 description=source,
                 events=await records.events(source.dataset_id),
-                caller_files=caller_files,
             ),
         )
     plan.update(
@@ -505,7 +497,18 @@ async def forget(
         fault_stage=fault_stage,
     )
     row = await records.row(source)
-    removal = await remove_dependents(
-        publisher, row.tombstone, fault_stage=dependents_fault
-    )
+    removal = await finish_dependents(publisher, row.tombstone, dependents_fault)
     return dict(attempt_id=attempt, state="forgotten", **removal)
+
+
+async def resume_dependents(publisher, row, fault=None) -> dict:
+    """On a forgotten row, finish the dependents its completed forget did not
+    revise; refuse when none is left."""
+    from .erasure import finish_dependents, unfinished
+
+    if not unfinished(row.tombstone, await publisher.records.rows()):
+        raise IntentError(*FORGOTTEN_SOURCE)
+    return dict(
+        state="forgotten",
+        **await finish_dependents(publisher, row.tombstone, fault),
+    )
