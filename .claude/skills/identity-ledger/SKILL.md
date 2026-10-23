@@ -22,25 +22,26 @@ Run the check when your diff touches any of these.
 
 | File | Function | What the checker depends on |
 | --- | --- | --- |
-| `storage.py` | `RecordStore.begin`, `fail`, `complete`, `assert_pending`, `rows`, `events`, and the three tables | All of it. The checker calls these and nothing else. |
+| `storage.py` | `RecordStore.begin`, `fail`, `complete`, `assert_pending`, `rows`, `events`, the three tables, `TRANSITIONS`, `REQUIRED_PLANS`, `admissible` and `PublicationRow` | All of it. The checker calls these and nothing else. `begin` consults `admissible`, which reads the transition table. |
+| `stages.py` | `run_attempt`, `saved_row` | The frame of replace, withdraw and forget: `begin`, the stages, `complete(state=...)` and the `fail` with its stage. |
 | `retrieve.py` | `valid_sources` | The eligibility condition, copied as `served()`. Also the `fail()` call on a row that fails validation (the `reject` step). |
 | `publish.py` | `Publisher.publish`, `Publisher.reconcile`, `Publisher.readd`, `Publisher._publish`, `Publisher._apply_pending` | The three entry points and the method and expected revision each passes to `begin()`, `assert_pending()` before the `try` block, and the `complete()` or `fail()` that ends the attempt. |
-| `replace.py` | `replace` | The replacement arguments, the retry with the saved plan, `plan["text_change"]`, and the failure stages. |
-| `withdraw.py` | `withdraw` | The withdrawal arguments, the reuse of a saved withdrawal plan, and `complete(state="withdrawn")`. |
-| `forget.py` | `forget` | The forget arguments, the reuse of a saved forget plan, and `complete(state="forgotten")`. |
+| `replace.py` | `replace`, `REPLACE` | The replacement arguments, the retry with the saved plan, `plan["text_change"]`, and the stages. |
+| `withdraw.py` | `withdraw`, `WITHDRAW` | The withdrawal arguments, the reuse of a saved withdrawal plan, and the completion state `withdrawn`. |
+| `forget.py` | `forget`, `FORGET` | The forget arguments, the reuse of a saved forget plan, and the completion state `forgotten`. |
 | `text_fixture.py` | `maintain_one` | It calls `replace` with a `text_change`. The checker sends that plan shape. |
 | `text_changes.py` | `TextChange` | Its fields, saved by `asdict()`. `TEXT_CHANGE` in the checker copies them. |
 | `revisions.py` | `replace_one` | It calls `replace` without a `text_change`. |
 
 All paths are under `src/cognee_lab/identity/`. The test `test_served_copies_the_retrieval_eligibility_test` fails if the eligibility condition in `valid_sources` changes.
 
-**Sync commit:** `7c82af2`. On 2026-10-22 the checker described the covered code at this commit, after the forget review fixes: the explicit `Publisher.publish`, `reconcile` and `readd` entry points, `RecordStore.row`, the shared guard messages, the forget on a missing row and the event outcome check. To see whether the check needs another look, run this command:
+**Sync commit:** `b0e30be`. On 2026-10-22 the checker described the covered code at this commit, after the no-behavior-change ledger refactor: the transition table and `admissible()` in `begin`, the typed `PublicationRow`, and the stage runner in `stages.py`. To see whether the check needs another look, run this command:
 
 ```bash
-git diff 7c82af2 -- src/cognee_lab/identity/{storage,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
+git diff b0e30be -- src/cognee_lab/identity/{storage,stages,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
 ```
 
-If the diff touches a function in the table, read the changed lines against `METHODS` and the intents functions in `support/ledger_model.py`. Move the sync commit only after you read that the checker still describes the code. A passing check is not enough, because a passing check can describe old code.
+If the diff touches a function in the table, read the changed lines against `METHODS` and the intents functions in `support/ledger_model.py`. `METHODS` restates the transition table in the checker's own terms on purpose: the check must not read `TRANSITIONS`, or it would check the table against itself. Move the sync commit only after you read that the checker still describes the code. A passing check is not enough, because a passing check can describe old code.
 
 ## Run it
 
@@ -49,7 +50,7 @@ uv run python support/ledger_check.py                    # depth 5, about 5.5 s
 uv run python support/ledger_check.py --depth 6          # about 30 s
 uv run python support/ledger_check.py --depth 7          # about 3 minutes; depth 8 takes about 15
 uv run python support/ledger_check.py --mutants          # every scratch break, about 8 s
-uv run python support/ledger_check.py --mutant withdrawn-guard-admits-replace --depth 7   # a deep break, FAIL P5, about 7 s
+uv run python support/ledger_check.py --mutant withdrawn-guard-admits-replace --depth 7   # a deep break, FAIL P5, about 13 s
 uv run pytest -q tests/test_identity_ledger_check.py     # default bound and every break, about 10 s
 ```
 
@@ -87,9 +88,9 @@ For any other operation, follow every step. Steps 1 to 3 change `support/ledger_
 2. Add a `Method` to `METHODS`. Set every field, with a comment that names the caller.
 3. If the plan has a new shape, extend `Plan`. Change `operation`, `tag`, `as_dict` and `of`.
 4. `Harness.apply` reads the table. Add a `case` only if the caller's calls differ from begin, optional `assert_pending`, then `complete` or `fail`.
-5. P5 (`begin_rules`) reads `advances_from`, `owns_failed_plan`, `owns_withdrawn`, `requires_plan` and `preserved_on_retry`. P6 reads `recovers`. `REACHABLE` adds the new method.
+5. P5 (`begin_rules`) reads `begins`, `recovers`, `owns_recovery`, `owns_terminal` (through `Method.owns`), `requires_plan` and `preserved_on_retry`. P6 reads `recovers`. `REACHABLE` adds the new method.
 6. If the operation writes more than one source, read the paragraph above the steps.
-7. For each new guard in storage.py, add a break to `MUTANTS` in `support/ledger_mutants.py`. Run `--mutants`. If only a deeper search catches the break, add it to `DEEP_MUTANTS` and its sequence to `DEEP_SEQUENCES` in the test file.
+7. In storage.py, add the method to the `TRANSITIONS` entries that admit it, with its revision step, and to `REQUIRED_PLANS` if it needs a plan of its own. For each new entry or guard, add a break to `MUTANTS` in `support/ledger_mutants.py`. Run `--mutants`. If only a deeper search catches the break, add it to `DEEP_MUTANTS` and its sequence to `DEEP_SEQUENCES` in the test file.
 8. Update the coverage table, `PINNED`, reference.md and the sync commit.
 
 ## Scope
