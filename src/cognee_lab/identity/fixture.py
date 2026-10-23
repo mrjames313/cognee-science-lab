@@ -330,7 +330,7 @@ async def run(args, root):
     dataset_id = source.dataset_id
     args._fixture_publisher = publisher
     if args.command == "status":
-        from .withholding import withholding_status
+        from .retrieve import withholding_status
 
         rows = await publisher.records.rows(dataset_id)
         return dict(

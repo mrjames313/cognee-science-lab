@@ -453,8 +453,8 @@ async def reconcile(publisher, label, selected):
 
 async def snapshot(publisher, root, query):
     from .registered import read_registered, read_texts
-    from .retrieve import retrieve
-    from .withholding import document_inputs, withholding_status
+    from .retrieve import retrieve, withholding_status
+    from .withholding import document_inputs
 
     sources = await current_sources(root, publisher)
     rows = await publisher.records.rows()

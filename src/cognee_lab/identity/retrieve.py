@@ -1,6 +1,7 @@
 """Small fixture retriever; native requests/registration follow in the next milestone."""
 
 import re
+from dataclasses import asdict
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -14,13 +15,22 @@ from .validation import (
     validate_inputs,
     withheld_by,
 )
+from .withholding import (
+    Status,
+    Withheld,
+    WithheldSet,
+    combine,
+    current_readers,
+    recorded_rows,
+    withheld_decisions,
+)
 
 
-async def live_drift(publisher, source, withheld=frozenset()) -> dict[str, str]:
+async def live_drift(publisher, source) -> dict[str, str]:
     """Validate one current source as retrieval does: its registered snapshot,
-    its own chunks in the graph and every input `validate_inputs` checks,
-    skipping the inputs of the decisions in `withheld`. An own failure
-    raises; a foreign input that fails is returned with its reason."""
+    its own chunks in the graph and every input of every decision. An own
+    failure raises; a foreign input that fails is returned with its
+    reason."""
     from .registered import read_registered, read_texts
 
     if await read_registered(source) != source:
@@ -50,7 +60,7 @@ async def live_drift(publisher, source, withheld=frozenset()) -> dict[str, str]:
                 is_part_of=SimpleNamespace(id=parent.data_id),
             )
     return await validate_inputs(
-        source, texts=texts, chunks=chunks, graph=publisher.graph, withheld=withheld
+        source, texts=texts, chunks=chunks, graph=publisher.graph
     )
 
 
@@ -61,8 +71,6 @@ def held_by(source, recorded, drift):
     for a reason no stronger, adds nothing: a recorded move still waits for
     its refresh. Anything else no edit classified, so a reviewer answers it
     (`refresh_needed`)."""
-    from .withholding import Status, Withheld, combine
-
     held = dict(recorded)
     cited = decision_inputs(source)
     for key, reason in withheld_by(source, drift).items():
@@ -78,31 +86,67 @@ def held_by(source, recorded, drift):
     return held
 
 
-async def withheld_now(publisher, rows, table=None):
-    """The withheld-decision set retrieval applies: the rows and the derived
-    rule (withholding.withheld_decisions), combined with what live
-    validation finds in every decision of a served source, recorded ones
-    included, so the strongest reason shows. `status` and the reviewer
-    commands read it, so they see what retrieval withholds. A source whose
-    own input fails is left as it is: retrieval fails it whole. `table` is
-    the withholding table, read here when not given."""
-    from .withholding import withheld_decisions
+def is_served(row) -> bool:
+    """The retrieval eligibility test. support/ledger_check.py copies it as
+    served()."""
+    return row.state == "current" and row.revision == row.verified_revision
 
+
+async def live_held(publisher, rows, withheld: WithheldSet):
+    """The one live-validation pass that retrieval and status share. For each
+    served row, yield (source, row, held): its withheld decisions, `withheld`
+    combined with what live validation finds in every decision, or the
+    IntentError of an own input that failed."""
+    for row in rows:
+        if not is_served(row):
+            continue
+        source = IdentitySource.model_validate_json(row.description)
+        try:
+            drift = await live_drift(publisher, source)
+        except IntentError as exc:
+            yield source, row, exc
+            continue
+        yield source, row, held_by(source, withheld.get(row.source, {}), drift)
+
+
+async def withheld_now(publisher, rows, table=None) -> WithheldSet:
+    """The withheld-decision set retrieval applies: the rows and the derived
+    rule (withholding.withheld_decisions) with the live-validation pass.
+    `status` and the reviewer commands read it, so they see what retrieval
+    withholds. A source whose own input fails is left as it is: retrieval
+    fails it whole. `table` is the withholding table, read here when not
+    given."""
     if table is None:
         table = await publisher.withholdings.rows()
     held = withheld_decisions(rows, table)
-    for row in rows:
-        if row.state != "current" or row.revision != row.verified_revision:
-            continue
-        source = IdentitySource.model_validate_json(row.description)
-        recorded = held.get(row.source, {})
-        try:
-            drift = await live_drift(publisher, source)
-        except IntentError:
-            continue
-        if decided := held_by(source, recorded, drift):
-            held[row.source] = decided
+    async for _, row, found in live_held(publisher, rows, held):
+        if found and not isinstance(found, IntentError):
+            held[row.source] = found
     return held
+
+
+async def withholding_status(publisher, rows):
+    """What `status` lists: the recorded rows that still apply, and the
+    withheld-decision set retrieval applies (live validation included, so
+    this reads the graph) with the decisions a reviewer answers."""
+    table = await publisher.withholdings.rows()
+    held = await withheld_now(publisher, rows, table)
+    decisions = [
+        dict(
+            identity_data_id=source,
+            assignment_id=key,
+            reason=w.reason,
+            status=w.status,
+            input_refs=sorted(w.inputs),
+        )
+        for source, entries in sorted(held.items())
+        for key, w in sorted(entries.items())
+    ]
+    return dict(
+        withholdings=[asdict(w) for w in recorded_rows(current_readers(rows), table)],
+        withheld_decisions=decisions,
+        refresh_needed=[d for d in decisions if d["status"] == Status.REFRESH_NEEDED],
+    )
 
 
 async def valid_sources(publisher, dataset_id, rows, withheld):
@@ -110,13 +154,17 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
 
     A served entry is (source, row, held): `held` maps each withheld decision
     of that source to its entry. `withheld` is the withheld-decision set
-    (withholding.withheld_decisions); a foreign input that fails validation
-    here withholds the decisions citing it as well. An unavailable entry names
-    a whole source (assignment_id None) or one withheld decision."""
+    (withholding.withheld_decisions); the live-validation pass adds what it
+    finds. An own input that fails fails the source. An unavailable entry
+    names a whole source (assignment_id None) or one withheld decision."""
     valid, unavailable = [], []
     events = await publisher.records.events(dataset_id)
+    live = {
+        row.source: (source, found)
+        async for source, row, found in live_held(publisher, rows, withheld)
+    }
     for row in rows:
-        if row.state != "current" or row.revision != row.verified_revision:
+        if row.source not in live:
             # A deliberate retirement is not unavailable: nothing is withheld.
             if not row.is_retired:
                 incident = next(
@@ -139,24 +187,20 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
                     )
                 )
             continue
-        source = IdentitySource.model_validate_json(row.description)
-        recorded = withheld.get(row.source, {})
-        try:
-            drift = await live_drift(publisher, source, set(recorded))
-        except IntentError as exc:
+        source, found = live[row.source]
+        if isinstance(found, IntentError):
             event = await publisher.records.fail(
-                source, row.attempt, "retrieval_validation", exc
+                source, row.attempt, "retrieval_validation", found
             )
             unavailable.append(
                 dict(
                     identity_data_id=row.source,
                     assignment_id=None,
-                    reason=exc.code,
+                    reason=found.code,
                     recovery_event_id=event,
                 )
             )
             continue
-        held = held_by(source, recorded, drift)
         unavailable += [
             dict(
                 identity_data_id=row.source,
@@ -164,9 +208,9 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
                 reason=entry.reason,
                 recovery_event_id=None,
             )
-            for key, entry in sorted(held.items())
+            for key, entry in sorted(found.items())
         ]
-        valid.append((source, row, held))
+        valid.append((source, row, found))
     return valid, unavailable
 
 
@@ -207,8 +251,6 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
-
-    from .withholding import withheld_decisions
 
     rows = await publisher.records.rows(dataset_id)
     withheld = withheld_decisions(rows, await publisher.withholdings.rows())

@@ -501,29 +501,3 @@ def reconfirmed(reader, assignment, replacements, producer_key, producer):
         payload["producers"][producer_key] = producer
 
     return next_revision(reader, change)
-
-
-async def withholding_status(publisher, rows):
-    """What `status` lists: the recorded rows that still apply, and the
-    withheld-decision set retrieval applies (live validation included, so
-    this reads the graph) with the decisions a reviewer answers."""
-    from .retrieve import withheld_now
-
-    table = await publisher.withholdings.rows()
-    held = await withheld_now(publisher, rows, table)
-    decisions = [
-        dict(
-            identity_data_id=source,
-            assignment_id=key,
-            reason=w.reason,
-            status=w.status,
-            input_refs=sorted(w.inputs),
-        )
-        for source, entries in sorted(held.items())
-        for key, w in sorted(entries.items())
-    ]
-    return dict(
-        withholdings=[asdict(w) for w in recorded_rows(current_readers(rows), table)],
-        withheld_decisions=decisions,
-        refresh_needed=[d for d in decisions if d["status"] == Status.REFRESH_NEEDED],
-    )
