@@ -205,4 +205,12 @@ Run by the assistant on the user's Mac on 2026-10-23 with loopback embeddings, o
 - Journeys D1 to D6 in `.claude/skills/verify/features/dependencies.md`: 127 PASS and 0 FAIL in 10 runs (D5 runs five fault stages). Each count includes three lab-store guard rows.
 - Every other loopback journey, run one ID at a time (P1 to P4, W1 to W3, R1, R2, E1 to E4, O1 to O8, G1 to G4, I1 to I4, K1 to K5, F1 to F4): 1159 PASS and 0 FAIL in 58 runs, the same totals as the last `journey all` before this checkpoint. `journey all` itself was not run.
 
+Fix round 1, run by the assistant on the user's Mac on 2026-10-23 with loopback embeddings, every source file as at `3814515`:
+
+- `uv run pytest -q -m 'not integration'`: 396 passed, 67 deselected.
+- `uv run python support/occurrence_check.py`: PASS (103 s), with four more `DECISIONS` rows for unattested foreign-input changes. `--mutants`: PASS, all 29 breaks caught, including `reconfirm_by_own_refs`.
+- `uv run python support/ledger_check.py`: PASS, verified within bound at depth 5, `PINNED` unchanged at 5889 nodes and 5770 sequences. `--mutants`: all 40 breaks caught.
+- `uv run pytest -q -m integration tests/test_identity_dependencies_native.py tests/test_identity_native.py`: 19 passed in 416 s, including three new tests: the re-add after an interrupted refresh, a review waiting for an unfinished edit, and the generic `edit-text` path withholding a dependent's decision.
+- Journeys D1 to D6: 127 PASS and 0 FAIL in 10 runs. R1, R2, O1, O2 and E1 to E4, for the refresh now run by `maintain_one`: 290 PASS and 0 FAIL in 16 runs. `journey all` was not run.
+
 The values in this guide come from these runs: the spans and digests from D1 to D4, the glossary chunk from D1's `glossary_identity.json`, and the Hybrid coil UUID from D4's `identity_doc01_revision2.json`.
