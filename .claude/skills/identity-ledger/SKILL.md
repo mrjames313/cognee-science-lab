@@ -22,7 +22,7 @@ Run the check when your diff touches any of these.
 
 | File | Function | What the checker depends on |
 | --- | --- | --- |
-| `storage.py` | `RecordStore.begin`, `fail`, `complete`, `assert_pending`, `rows`, `events`, the three tables, `TRANSITIONS`, `REQUIRED_PLANS`, `admissible` and `PublicationRow` | All of it. The checker calls these and nothing else. `begin` consults `admissible`, which reads the transition table. |
+| `storage.py` | `RecordStore.begin`, `fail`, `complete`, `assert_pending`, `rows`, `events`, the three tables, `TRANSITIONS`, `REQUIRED_PLANS`, `cell_for`, `admissible` and `PublicationRow` | All of it. The checker calls the six `RecordStore` methods and nothing else. It exercises the transition table only through `begin`, which consults `admissible` and `cell_for`, and it does not import the table. |
 | `stages.py` | `run_attempt`, `saved_row` | The frame of replace, withdraw and forget: `begin`, the stages, `complete(state=...)` and the `fail` with its stage. |
 | `retrieve.py` | `valid_sources` | The eligibility condition, copied as `served()`. Also the `fail()` call on a row that fails validation (the `reject` step). |
 | `publish.py` | `Publisher.publish`, `Publisher.reconcile`, `Publisher.readd`, `Publisher._publish`, `Publisher._apply_pending` | The three entry points and the method and expected revision each passes to `begin()`, `assert_pending()` before the `try` block, and the `complete()` or `fail()` that ends the attempt. |
@@ -35,10 +35,10 @@ Run the check when your diff touches any of these.
 
 All paths are under `src/cognee_lab/identity/`. The test `test_served_copies_the_retrieval_eligibility_test` fails if the eligibility condition in `valid_sources` changes.
 
-**Sync commit:** `b0e30be`. On 2026-10-22 the checker described the covered code at this commit, after the no-behavior-change ledger refactor: the transition table and `admissible()` in `begin`, the typed `PublicationRow`, and the stage runner in `stages.py`. To see whether the check needs another look, run this command:
+**Sync commit:** `82b954e`. On 2026-10-22 the checker described the covered code at this commit, after the no-behavior-change ledger refactor and its review fixes: the transition table, `cell_for()` and `admissible()` in `begin`, `begin`'s final check that a new revision is exactly the next one, the typed `PublicationRow`, and the stage runner in `stages.py`. To see whether the check needs another look, run this command:
 
 ```bash
-git diff b0e30be -- src/cognee_lab/identity/{storage,stages,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
+git diff 82b954e -- src/cognee_lab/identity/{storage,stages,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
 ```
 
 If the diff touches a function in the table, read the changed lines against `METHODS` and the intents functions in `support/ledger_model.py`. `METHODS` restates the transition table in the checker's own terms on purpose: the check must not read `TRANSITIONS`, or it would check the table against itself. Move the sync commit only after you read that the checker still describes the code. A passing check is not enough, because a passing check can describe old code.
@@ -90,7 +90,7 @@ For any other operation, follow every step. Steps 1 to 3 change `support/ledger_
 4. `Harness.apply` reads the table. Add a `case` only if the caller's calls differ from begin, optional `assert_pending`, then `complete` or `fail`.
 5. P5 (`begin_rules`) reads `begins`, `recovers`, `owns_recovery`, `owns_terminal` (through `Method.owns`), `requires_plan` and `preserved_on_retry`. P6 reads `recovers`. `REACHABLE` adds the new method.
 6. If the operation writes more than one source, read the paragraph above the steps.
-7. In storage.py, add the method to the `TRANSITIONS` entries that admit it, with its revision step, and to `REQUIRED_PLANS` if it needs a plan of its own. For each new entry or guard, add a break to `MUTANTS` in `support/ledger_mutants.py`. Run `--mutants`. If only a deeper search catches the break, add it to `DEEP_MUTANTS` and its sequence to `DEEP_SEQUENCES` in the test file.
+7. In storage.py, add the method to the `TRANSITIONS` entries that admit it, with its revision step, and to `REQUIRED_PLANS` if it needs a plan of its own, with the plan fields a retry keeps in `preserved`. An entry for a saved row that admits a method at the next revision needs a `sequence` refusal; `tests/test_identity_storage.py` checks this and that every entry answers every method. For each new entry or guard, add a break to `MUTANTS` in `support/ledger_mutants.py`. Run `--mutants`. If only a deeper search catches the break, add it to `DEEP_MUTANTS` and its sequence to `DEEP_SEQUENCES` in the test file.
 8. Update the coverage table, `PINNED`, reference.md and the sync commit.
 
 ## Scope
