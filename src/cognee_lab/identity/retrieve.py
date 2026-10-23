@@ -1,6 +1,7 @@
 """Small fixture retriever; native requests/registration follow in the next milestone."""
 
 import re
+from collections.abc import AsyncIterator
 from dataclasses import asdict
 from types import SimpleNamespace
 from uuid import UUID
@@ -8,6 +9,7 @@ from uuid import UUID
 from .models import Accepted, ChunkInput, IdentitySource
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
+from .storage import PublicationRow
 from .validation import (
     IntentError,
     Reason,
@@ -80,7 +82,7 @@ def held_by(source, recorded, drift):
         if (
             entry
             and inputs <= entry.inputs
-            and stronger(reason, entry.reason) == (entry.reason)
+            and stronger(reason, entry.reason) == entry.reason
         ):
             continue
         held[key] = combine(entry, Withheld(reason, Status.REFRESH_NEEDED, inputs))
@@ -93,7 +95,11 @@ def is_served(row) -> bool:
     return row.state == "current" and row.revision == row.verified_revision
 
 
-async def live_held(publisher, rows, withheld: WithheldSet):
+async def live_held(
+    publisher, rows, withheld: WithheldSet
+) -> AsyncIterator[
+    tuple[IdentitySource, PublicationRow, dict[str, Withheld] | IntentError]
+]:
     """The one live-validation pass that retrieval and status share. For each
     served row, yield (source, row, held): its withheld decisions, `withheld`
     combined with what live validation finds in every decision, or the

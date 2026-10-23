@@ -7,9 +7,12 @@ from .registered import read_registered, write_registered
 from .stages import Operation, run_attempt, saved_row
 from .validation import IntentError
 
-REPLACE = Operation(
-    "replace", "Replacement", ("withhold_dependents", "replace_registered"), None
-)
+# Text changes only: the dependents' withholding, then the text change's
+# boundaries.
+WITHHOLD = "withhold_dependents"
+TEXT_BOUNDARIES = ("text_removed", "text_registered", "text_chunks")
+TEXT_FAULT_STAGES = (WITHHOLD, *TEXT_BOUNDARIES)
+REPLACE = Operation("replace", "Replacement", (WITHHOLD, "replace_registered"), None)
 # replace_saved fails before the snapshot recheck, then the stages above
 # (withhold_dependents only runs for a text change), then the points inside
 # the shared publisher (after its writes, after retirement, before
@@ -20,16 +23,7 @@ FAULT_STAGES = (
     "replace_published",
     "replace_retired",
     "replace_verification",
-    "text_removed",
-    "text_registered",
-    "text_chunks",
-)
-# The stages that run only for a text change.
-TEXT_FAULT_STAGES = (
-    "withhold_dependents",
-    "text_removed",
-    "text_registered",
-    "text_chunks",
+    *TEXT_BOUNDARIES,
 )
 
 
@@ -418,7 +412,7 @@ async def replace(
         [
             ("replace_saved", recheck),
             *(
-                [("withhold_dependents", withhold), ("text_removal", remove_text)]
+                [(WITHHOLD, withhold), ("text_removal", remove_text)]
                 if text_change is not None
                 else []
             ),

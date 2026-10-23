@@ -38,7 +38,11 @@ COMMANDS = (
     "refresh-dependents",
 )
 DOC01_REVIEW = "stage6-captured-glossary-review"
-NO_REFRESH = dict(refreshed=[], refresh_failed=None)
+
+
+def no_refresh():
+    """A command result with no refresh, fresh for each command."""
+    return dict(refreshed=[], refresh_failed=None)
 
 
 def hc_entry(text):
@@ -449,7 +453,7 @@ async def reconcile(publisher, label, selected):
             operation="reconcile",
             semantics=label != "glossary",
         )
-    return NO_REFRESH
+    return no_refresh()
 
 
 async def snapshot(publisher, root, query):
@@ -535,7 +539,7 @@ async def run(args, root):
                 fault_stage=args.fault_stage if label == args.source else None,
                 semantics=label != "glossary",
             )
-        refresh = NO_REFRESH
+        refresh = no_refresh()
     else:
         publisher = await Publisher.configured()
         args._fixture_publisher = publisher
@@ -548,7 +552,7 @@ async def run(args, root):
         refreshing = args.fault_stage == REFRESH_FAULT
         # The refresh fault fails each refresh revision at replace_registered.
         refresh_fault = "replace_registered" if refreshing else None
-        refresh = NO_REFRESH
+        refresh = no_refresh()
         if args.command == "edit-glossary":
             if args.source != "glossary":
                 raise IntentError("fixture_scope", "edit-glossary edits the glossary")

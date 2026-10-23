@@ -145,29 +145,22 @@ async def refresh_dependents(publisher, fault_stage=None) -> dict:
     the refresh (`refresh_failed`), not raised: the edit before it already
     completed, and `refresh-dependents` reruns the refresh."""
     refreshed = []
+
+    async def write(revised, row, moved):
+        await replace_one(
+            publisher, revised, expected_revision=row.revision, fault_stage=fault_stage
+        )
+        refreshed.append(written_ranges(revised, moved))
+
     try:
         for source, (row, moved) in (await pending_moves(publisher)).items():
             if row.state != "current" and row.resumed_by == "replace":
                 saved = IdentitySource.model_validate_json(row.description)
-                await replace_one(
-                    publisher,
-                    saved,
-                    expected_revision=row.revision,
-                    fault_stage=fault_stage,
-                )
-                refreshed.append(written_ranges(saved, moved))
+                await write(saved, row, moved)
                 row, moved = (await pending_moves(publisher)).get(source, (row, []))
             if row.state == "current" and moved:
-                revised = remapped(
-                    IdentitySource.model_validate_json(row.description), moved
-                )
-                await replace_one(
-                    publisher,
-                    revised,
-                    expected_revision=row.revision,
-                    fault_stage=fault_stage,
-                )
-                refreshed.append(written_ranges(revised, moved))
+                current = IdentitySource.model_validate_json(row.description)
+                await write(remapped(current, moved), row, moved)
     except IntentError as exc:
         failed = dict(code=exc.code, message=str(exc))
         return dict(refreshed=refreshed, refresh_failed=failed)

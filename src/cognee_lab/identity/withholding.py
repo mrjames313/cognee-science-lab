@@ -135,21 +135,12 @@ class WithholdingStore:
             if dataset is not None:
                 statement = statement.where(Withholding.dataset == str(dataset))
             found = (await session.execute(statement)).scalars().all()
-            return sorted(
-                (
-                    WithholdingRow(
-                        **{
-                            **{
-                                f: getattr(r, f) for f in WithholdingRow.__annotations__
-                            },
-                            "reason": Reason(r.reason),
-                            "status": Status(r.status),
-                        }
-                    )
-                    for r in found
-                ),
-                key=lambda r: (r.source, r.assignment, r.input_ref),
-            )
+        rows = []
+        for r in found:
+            fields = {f: getattr(r, f) for f in WithholdingRow.__annotations__}
+            fields.update(reason=Reason(r.reason), status=Status(r.status))
+            rows.append(WithholdingRow(**fields))
+        return sorted(rows, key=lambda r: (r.source, r.assignment, r.input_ref))
 
     async def replace(self, cleared, rows):
         """Delete the rows of each (dataset, source, input_ref) in `cleared`,
