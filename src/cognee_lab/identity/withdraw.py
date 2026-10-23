@@ -3,7 +3,6 @@
 `forget` is the sibling orchestration; `retirement.py` holds what both use.
 """
 
-from .models import IdentitySource
 from .native import require_graph_methods
 from .retirement import (
     contribution_triples,
@@ -15,7 +14,12 @@ from .retirement import (
     verify_survivors,
     withdraw_contributions,
 )
+from .stages import Operation, run_attempt, saved_row
 from .validation import IntentError
+
+STAGES = ("withdraw_contributions", "withdraw_owners", "withdraw_verification")
+WITHDRAW = Operation("withdraw", "Withdrawal", STAGES, "withdrawn")
+FAULT_STAGES = STAGES
 
 
 async def withdraw(
@@ -43,11 +47,12 @@ async def withdraw(
             "add_edges",
         ],
     )
-    row = await records.row(source)
-    if row is None:
-        raise IntentError("source_missing", "No saved publication to withdraw")
-    if IdentitySource.model_validate_json(row.description) != source:
-        raise IntentError("revision_reuse", "Withdraw the exact saved description")
+    row = await saved_row(
+        records,
+        source,
+        "No saved publication to withdraw",
+        "Withdraw the exact saved description",
+    )
     owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
     # Keep the original retirement keys across interrupted retries, even after
     # native deletion has detached references or removed graph objects.
@@ -67,31 +72,17 @@ async def withdraw(
             identity_edges=[list(e[:3]) for e in identity_edges(source)],
             **ownership_snapshot(nodes, edges),
         )
-    attempt = await records.begin(
-        source,
-        expected_revision=expected_revision,
-        plan=plan,
-        method="withdraw",
-        origin=origin,
-    )
-    stage = "withdraw_contributions"
-    try:
-        triples = contribution_triples(plan)
-        await withdraw_contributions(graph, source, triples)
-        if fault_stage == stage:
-            raise IntentError(
-                "injected_failure", "Injected failure after contribution withdrawal"
-            )
-        stage = "withdraw_owners"
+
+    async def contributions(_):
+        await withdraw_contributions(graph, source, contribution_triples(plan))
+
+    async def owners(_):
         unified = UnifiedStoreEngine(
             graph, vector, EngineCapability.GRAPH | EngineCapability.VECTOR
         )
-        deleted = await unified.delete_by_source_ref(owner)
-        if fault_stage == stage:
-            raise IntentError(
-                "injected_failure", "Injected failure after native owner removal"
-            )
-        stage = "withdraw_verification"
+        return await unified.delete_by_source_ref(owner)
+
+    async def verification(_):
         retired = retired_sources(await records.rows())
         if await graph.find_nodes_by_source_ref(
             owner
@@ -99,7 +90,7 @@ async def withdraw(
             raise IntentError(
                 "verify_owner", "Retired generated source still owns graph objects"
             )
-        await verify_no_contributions(graph, source, triples)
+        await verify_no_contributions(graph, source, contribution_triples(plan))
         await verify_survivors(
             graph,
             vector,
@@ -108,25 +99,19 @@ async def withdraw(
             released(owned_by(source, document=False), retired),
             retired,
         )
-        if fault_stage == stage:
-            raise IntentError(
-                "injected_failure", "Injected failure before withdrawal acknowledgement"
-            )
-        await records.complete(source, attempt, state="withdrawn")
-        return dict(
-            attempt_id=attempt,
-            state="withdrawn",
-            deleted_node_ids=deleted.deleted_node_ids,
-        )
-    except Exception as exc:
-        try:
-            event = await records.fail(source, attempt, stage, exc, origin=origin)
-        except Exception as diagnostic_error:
-            raise IntentError(
-                "recovery_record_failed",
-                f"Withdrawal unavailable: attempt={attempt}, stage={stage}, error={exc}; "
-                f"recovery-event write also failed: {diagnostic_error}",
-            ) from diagnostic_error
-        raise IntentError(
-            "recovery_required", f"{exc}; recovery_event_id={event}"
-        ) from exc
+
+    attempt, results = await run_attempt(
+        WITHDRAW,
+        records,
+        source,
+        plan,
+        zip(STAGES, (contributions, owners, verification), strict=True),
+        expected_revision=expected_revision,
+        origin=origin,
+        fault_stage=fault_stage,
+    )
+    return dict(
+        attempt_id=attempt,
+        state="withdrawn",
+        deleted_node_ids=results["withdraw_owners"].deleted_node_ids,
+    )

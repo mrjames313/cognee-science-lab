@@ -12,7 +12,7 @@ survives with that source's refs and contributions. The ledger row ends as
 
 from uuid import UUID
 
-from .models import ChunkInput, IdentitySource
+from .models import ChunkInput
 from .native import require_graph_methods
 from .retirement import (
     contribution_triples,
@@ -26,6 +26,7 @@ from .retirement import (
     verify_survivors,
     withdraw_contributions,
 )
+from .stages import Operation, run_attempt, saved_row
 from .storage import FORGET_STATE, FORGOTTEN_SOURCE, STALE_REVISION
 from .validation import IntentError
 
@@ -42,6 +43,7 @@ COMMITTED_FAULTS = {
     "forget_identity_committed": "forget_identity",
     "forget_document_committed": "forget_document",
 }
+FORGET = Operation("forget", "Forget", STAGES, "forgotten")
 FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS)
 
 
@@ -293,11 +295,12 @@ async def forget(
             "add_edges",
         ],
     )
-    row = await records.row(source)
-    if row is None:
-        raise IntentError("source_missing", "No saved publication to forget")
-    if IdentitySource.model_validate_json(row.description) != source:
-        raise IntentError("revision_reuse", "Forget the exact saved description")
+    row = await saved_row(
+        records,
+        source,
+        "No saved publication to forget",
+        "Forget the exact saved description",
+    )
     if row.revision != expected_revision:
         raise IntentError(*STALE_REVISION)
     retry = row.resumed_by == "forget"
@@ -317,56 +320,51 @@ async def forget(
             raise IntentError(*FORGET_STATE)
         plan = await forget_plan(publisher, source)
     refuse_dependents(source, plan, await records.rows())
-    attempt = await records.begin(
-        source,
-        expected_revision=expected_revision,
-        plan=plan,
-        method="forget",
-        origin=origin,
-    )
-    contributions_stage, identity_stage, document_stage, verification_stage = STAGES
-    stage = contributions_stage
+    user = None
 
-    def injected(name):
-        if fault_stage == name:
-            raise IntentError("injected_failure", f"Injected failure at {name}")
-
-    try:
+    async def contributions(_):
+        nonlocal user
         # Repeat under the writer reservation: a consumer may have published
         # between the check above and begin.
         refuse_dependents(source, plan, await records.rows())
         await withdraw_contributions(graph, source, contribution_triples(plan))
-        injected(stage)
         user = await get_default_user()
-        doc = source.inputs[source.original_input_ref]
-        # Native deletion of a Data item removes every graph and vector object
-        # that only its refs own, then its Data row, stored files and evidence
-        # rows. On a missing item it finds nothing to delete and sweeps
-        # nothing, so the sweep runs here too and a retry converges.
-        for stage, data_id in (
-            (identity_stage, source.identity_data_id),
-            (document_stage, doc.data_id),
-        ):
-            with dying_after_commit(stage, fault_stage):
+
+    # Native deletion of a Data item removes every graph and vector object
+    # that only its refs own, then its Data row, stored files and evidence
+    # rows. On a missing item it finds nothing to delete and sweeps nothing,
+    # so the sweep runs here too and a retry converges.
+    def native_delete(data_id):
+        async def stage(run):
+            with dying_after_commit(run.stage, fault_stage):
                 await native_forget(
                     data_id=data_id, dataset_id=source.dataset_id, user=user
                 )
             await sweep(source.dataset_id, data_id, plan["stored_files"][str(data_id)])
-            injected(stage)
-        stage = verification_stage
+
+        return stage
+
+    async def verification(_):
         await verify_forgotten(publisher, source, plan)
-        injected(stage)
-        await records.complete(source, attempt, state="forgotten")
-        return dict(attempt_id=attempt, state="forgotten")
-    except Exception as exc:
-        try:
-            event = await records.fail(source, attempt, stage, exc, origin=origin)
-        except Exception as diagnostic_error:
-            raise IntentError(
-                "recovery_record_failed",
-                f"Forget unavailable: attempt={attempt}, stage={stage}, error={exc}; "
-                f"recovery-event write also failed: {diagnostic_error}",
-            ) from diagnostic_error
-        raise IntentError(
-            "recovery_required", f"{exc}; recovery_event_id={event}"
-        ) from exc
+
+    doc = source.inputs[source.original_input_ref]
+    attempt, _ = await run_attempt(
+        FORGET,
+        records,
+        source,
+        plan,
+        zip(
+            STAGES,
+            (
+                contributions,
+                native_delete(source.identity_data_id),
+                native_delete(doc.data_id),
+                verification,
+            ),
+            strict=True,
+        ),
+        expected_revision=expected_revision,
+        origin=origin,
+        fault_stage=fault_stage,
+    )
+    return dict(attempt_id=attempt, state="forgotten")

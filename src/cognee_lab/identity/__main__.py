@@ -16,6 +16,8 @@ from .environment import (
 )
 from .forget import FAULT_STAGES as FORGET_STAGES
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
+from .replace import FAULT_STAGES as REPLACE_STAGES
+from .withdraw import FAULT_STAGES as WITHDRAW_STAGES
 
 TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
 
@@ -71,18 +73,9 @@ def main():
             "nodes",
             "identity_edges",
             "verification",
-            "withdraw_contributions",
-            "withdraw_owners",
-            "withdraw_verification",
+            *WITHDRAW_STAGES,
             *FORGET_STAGES,
-            "replace_saved",
-            "replace_registered",
-            "replace_published",
-            "replace_retired",
-            "replace_verification",
-            "text_removed",
-            "text_registered",
-            "text_chunks",
+            *REPLACE_STAGES,
         ],
     )
     parser.add_argument(

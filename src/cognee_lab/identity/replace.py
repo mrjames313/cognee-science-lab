@@ -4,7 +4,24 @@ from .admission import admit, check_absent_from_graph, identity_map
 from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
+from .stages import Operation, run_attempt, saved_row
 from .validation import IntentError
+
+REPLACE = Operation(
+    "replace", "Replacement", ("replace_saved", "replace_registered"), None
+)
+# The stages above, then the points inside the shared publisher (after its
+# writes, after retirement, before acknowledgement) and the text change's
+# boundaries.
+FAULT_STAGES = (
+    *REPLACE.faults,
+    "replace_published",
+    "replace_retired",
+    "replace_verification",
+    "text_removed",
+    "text_registered",
+    "text_chunks",
+)
 
 
 def transition(old, texts, text_change):
@@ -92,9 +109,7 @@ async def replace(
             "delete_edge_triples",
         ],
     )
-    row = await records.row(source)
-    if row is None:
-        raise IntentError("source_missing", "Replacement requires a saved publication")
+    row = await saved_row(records, source, "Replacement requires a saved publication")
     if row.revision != expected_revision:
         raise IntentError(*STALE_REVISION)
     saved = IdentitySource.model_validate_json(row.description)
@@ -208,21 +223,9 @@ async def replace(
             )
             for e, data in edges.items()
         ]
-    attempt = await records.begin(
-        source,
-        expected_revision=expected_revision,
-        plan=plan,
-        method="replace",
-        origin=origin,
-    )
-    stage = "replace_saved"
 
-    def injected(name):
-        if fault_stage == name:
-            raise IntentError("injected_failure", f"Injected failure at {name}")
-
-    async def retire_and_verify():
-        injected("replace_published")
+    async def retire_and_verify(run):
+        run.inject("replace_published")
         wanted = {}
         for a, b, relation, c in identity_edges(source):
             wanted.setdefault((a, b, relation), []).append(c)
@@ -259,7 +262,7 @@ async def replace(
             refs_by_node={key: [owner] for key in nodes},
             refs_by_edge={key: [owner] for key in edges},
         )
-        injected("replace_retired")
+        run.inject("replace_retired")
         # New ownership/contributions are verified by the common publisher.
         # Here check that this source has no stale ownership or payloads.
         for triple in {tuple(e) for e in plan["old_edges"]}:
@@ -337,52 +340,49 @@ async def replace(
         if text_change is not None:
             await text_change.verify(publisher, old, source, chunks)
 
-    try:
-        injected(stage)
+    async def recheck(_):
         # Recheck after taking the writer reservation and before native I/O.
         actual = await read_registered(source)
         if actual not in (old, source):
             raise IntentError(
                 "generated_source_changed", "Registered identity snapshot changed"
             )
-        if text_change is not None:
 
-            async def boundary(name):
-                nonlocal stage
-                stage = name
-                injected(name)
+    async def remove_text(run):
+        await text_change.apply(publisher, old, source, chunks, ctx, run.boundary)
 
-            stage = "text_removal"
-            await text_change.apply(publisher, old, source, chunks, ctx, boundary)
-        stage = "replace_registered"
+    async def register(_):
         await write_registered(source, ctx)
-        injected(stage)
-        stage = "replacement_publish"
+
+    async def publish(run):
         return await publisher._apply_pending(
             source,
             texts=texts,
             chunks=chunks,
             ctx=ctx,
-            attempt=attempt,
+            attempt=run.attempt,
             origin=origin,
             verify_semantics=verify_semantics,
             semantic_writer=semantic_writer,
-            after_write=retire_and_verify,
+            after_write=lambda: retire_and_verify(run),
             fault_stage=(
                 "verification" if fault_stage == "replace_verification" else fault_stage
             ),
         )
-    except Exception as exc:
-        if getattr(exc, "code", None) == "recovery_required":
-            raise
-        try:
-            event = await records.fail(source, attempt, stage, exc, origin=origin)
-        except Exception as diagnostic_error:
-            raise IntentError(
-                "recovery_record_failed",
-                f"Replacement unavailable: attempt={attempt}, stage={stage}, error={exc}; "
-                f"recovery-event write also failed: {diagnostic_error}",
-            ) from diagnostic_error
-        raise IntentError(
-            "recovery_required", f"{exc}; recovery_event_id={event}"
-        ) from exc
+
+    _, results = await run_attempt(
+        REPLACE,
+        records,
+        source,
+        plan,
+        [
+            ("replace_saved", recheck),
+            *([("text_removal", remove_text)] if text_change is not None else []),
+            ("replace_registered", register),
+            ("replacement_publish", publish),
+        ],
+        expected_revision=expected_revision,
+        origin=origin,
+        fault_stage=fault_stage,
+    )
+    return results["replacement_publish"]
