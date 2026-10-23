@@ -553,13 +553,52 @@ def reconfirm(record, *, producer):
         glossary_span(new, "gloss_hc_r2", entry="HC: Helios regulator.")
         cite(new, rid, "gloss_hc_r2")
         if producer:
-            new["producers"]["reconfirm"] = dict(
-                new["producers"]["fixture"], implementation="re-confirmed"
-            )
-            target = (
-                new["variant_assignments"].get(rid) or new["mention_resolutions"][rid]
-            )
-            target["producer_ref"] = "reconfirm"
+            attest(new, rid)
+
+    return change
+
+
+def attest(payload, rid):
+    """The decision names a producer new in this revision: a re-confirm."""
+    payload["producers"]["reconfirm"] = dict(
+        payload["producers"]["fixture"], implementation="re-confirmed"
+    )
+    target = (
+        payload["variant_assignments"].get(rid) or payload["mention_resolutions"][rid]
+    )
+    target["producer_ref"] = "reconfirm"
+
+
+def drop_foreign_input(*, producer):
+    """The continuing resolution and its group read the glossary entry; the
+    new revision drops that input from both, reviewed fields unchanged."""
+
+    def change(old, new, ctx):
+        rid, group = continuing_rid(ctx), ctx["continuing"]
+        add_glossary(old)
+        glossary_span(old)
+        old["mention_resolutions"][rid]["input_refs"].append("gloss_hc")
+        old["mention_groups"][group]["input_refs"].append("gloss_hc")
+        if producer:
+            attest(new, rid)
+
+    return change
+
+
+def move_group_to_new_input(*, producer):
+    """Only the continuing group reads the glossary entry; the new revision
+    points the group at a new input key, the resolution unchanged."""
+
+    def change(old, new, ctx):
+        group = ctx["continuing"]
+        for payload in (old, new):
+            add_glossary(payload)
+        glossary_span(old)
+        old["mention_groups"][group]["input_refs"].append("gloss_hc")
+        glossary_span(new, "gloss_hc_r2", entry="HC: Helios regulator.")
+        new["mention_groups"][group]["input_refs"].append("gloss_hc_r2")
+        if producer:
+            attest(new, continuing_rid(ctx))
 
     return change
 
@@ -874,6 +913,38 @@ DECISIONS = [
         reconfirm(continuing_rid, producer=False),
         text_edit=refuse("reconfirm_unattested"),
         same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "continuing resolution drops a foreign input under its old producer",
+        "rule 5",
+        [CONTINUING],
+        drop_foreign_input(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "continuing resolution drops a foreign input under a new producer",
+        "rule 5",
+        [CONTINUING],
+        drop_foreign_input(producer=True),
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "continuing group moves to a new foreign input under its old producer",
+        "rule 5",
+        [CONTINUING],
+        move_group_to_new_input(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "continuing group moves to a new foreign input under a new producer",
+        "rule 5",
+        [CONTINUING],
+        move_group_to_new_input(producer=True),
+        text_edit=ADMIT,
+        same_text=ADMIT,
     ),
     decision(
         "new variant reads a new span",

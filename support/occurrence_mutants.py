@@ -11,6 +11,17 @@ def skip(*_):
     return None
 
 
+def own_foreign_refs(description):
+    """Each decision's own foreign input_refs, without its group's."""
+    return {
+        key: frozenset(k for k in d.input_refs if admission.is_foreign(description, k))
+        for key, d in [
+            *description.mention_resolutions.items(),
+            *description.variant_assignments.items(),
+        ]
+    }
+
+
 MUTANTS = {
     "continue_with_any_uuid": ("same_identity", lambda *_: True),
     "continue_after_merge": (
@@ -46,5 +57,6 @@ MUTANTS = {
     "allow_any_input_kinds": ("check_input_kinds", skip),
     "allow_changed_foreign_inputs": ("check_foreign_inputs", skip),
     "allow_unattested_reconfirms": ("check_reconfirmations", skip),
+    "reconfirm_by_own_refs": ("foreign_citations", own_foreign_refs),
 }
 assert all(hasattr(admission, attribute) for attribute, _ in MUTANTS.values())

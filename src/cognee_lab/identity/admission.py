@@ -27,6 +27,7 @@ from .models import (
 )
 from .validation import (
     IntentError,
+    decision_inputs,
     fresh_entity_id,
     fresh_mention_id,
     is_foreign,
@@ -547,25 +548,31 @@ def check_foreign_inputs(old, source):
             )
 
 
-def check_reconfirmations(old, source):
-    """A decision that keeps its reviewed fields and cites a foreign input
-    key new in this revision is a re-confirm: it names a producer new in
-    this revision, which records who attested it."""
-    new_foreign = {
-        k for k in set(source.inputs) - set(old.inputs) if is_foreign(source, k)
+def foreign_citations(description):
+    """The foreign input keys each decision cites, its group's included."""
+    return {
+        key: frozenset(k for k in inputs if is_foreign(description, k))
+        for key, inputs in decision_inputs(description).items()
     }
+
+
+def check_reconfirmations(old, source):
+    """A decision that keeps its reviewed fields but cites other foreign
+    inputs, by losing, replacing or adding a key, is a re-confirm: it names
+    a producer new in this revision, which records who attested it."""
+    before, after = foreign_citations(old), foreign_citations(source)
     for kind in ("mention_resolutions", "variant_assignments"):
-        before, after = getattr(old, kind), getattr(source, kind)
-        for key in set(before) & set(after):
+        was, now = getattr(old, kind), getattr(source, kind)
+        for key in set(was) & set(now):
             if (
-                new_foreign & set(after[key].input_refs)
-                and reviewed_decisions({key: after[key]})
-                == reviewed_decisions({key: before[key]})
-                and after[key].producer_ref in old.producers
+                before[key] != after[key]
+                and reviewed_decisions({key: now[key]})
+                == reviewed_decisions({key: was[key]})
+                and now[key].producer_ref in old.producers
             ):
                 raise IntentError(
                     "reconfirm_unattested",
-                    "A decision re-confirmed on a new input names a producer new in this revision",
+                    "A decision that cites other foreign inputs names a producer new in this revision",
                 )
 
 
