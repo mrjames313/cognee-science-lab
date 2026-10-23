@@ -717,3 +717,72 @@ async def test_a_third_life_reuses_an_earlier_life_entity_still_in_the_graph(
     life3 = describe_readd(life1, second, set(), TEXT, chunks_of(life1, TEXT))
     assert HC in life3.entity_constructions
     await admit_readd(OccupiedGraph([HC]), second, life3, set())
+
+
+@pytest.mark.asyncio
+async def test_a_second_forget_keeps_the_first_life_uuids(source_payload, monkeypatch):
+    """forget writes a tombstone that carries the one its last forget left:
+    forgotten, re-added and forgotten again, the second tombstone still
+    holds the first life's mention UUID. The stores are stand-ins; the
+    ledger is a real RecordStore."""
+    from types import SimpleNamespace
+
+    import cognee
+    import cognee.modules.users.methods as users
+    from cognee_lab.identity import forget as forgetting
+    from test_identity_storage import memory_store
+
+    async def nothing(*_, **__):
+        return None
+
+    async def plan_of(_, source):
+        doc = source.inputs[source.original_input_ref]
+        files = {str(doc.data_id): [], str(source.identity_data_id): []}
+        return dict(
+            owned_plan(source, uuid4(), []),
+            revision=source.revision,
+            original_data_id=str(doc.data_id),
+            stored_files=files,
+        )
+
+    for name in (
+        "withdraw_contributions",
+        "clear_withholdings",
+        "sweep",
+        "verify_forgotten",
+    ):
+        monkeypatch.setattr(forgetting, name, nothing)
+    monkeypatch.setattr(forgetting, "forget_plan", plan_of)
+    monkeypatch.setattr(forgetting, "contribution_triples", lambda _: [])
+    monkeypatch.setattr(cognee, "forget", nothing)
+    monkeypatch.setattr(users, "get_default_user", nothing)
+
+    records = memory_store()
+    await records.initialize()
+    graph = type(
+        "Graph", (), {name: lambda *_: None for name in FORGET_GRAPH_METHODS}
+    )()
+    publisher = SimpleNamespace(graph=graph, records=records)
+    life1 = source_of(source_payload)
+    attempt = await records.begin(
+        life1, expected_revision=0, plan={"operation": "identity_publish"}
+    )
+    await records.complete(life1, attempt)
+    await forgetting.forget(publisher, life1, expected_revision=1)
+    first = (await records.row(life1)).tombstone
+
+    life2 = describe_readd(life1, first, set(), TEXT, chunks_of(life1, TEXT))
+    attempt = await records.begin(
+        life2, expected_revision=1, plan={"operation": "identity_publish"}
+    )
+    await records.complete(life2, attempt)
+    await forgetting.forget(publisher, life2, expected_revision=2)
+    second = (await records.row(life2)).tombstone
+
+    assert second.revision == 2
+    assert set(second.mention_ids.values()) == {
+        g.entity_id for g in life2.mention_groups.values()
+    }
+    assert set(second.all_mention_ids) == set(first.mention_ids.values()) | set(
+        second.mention_ids.values()
+    )
