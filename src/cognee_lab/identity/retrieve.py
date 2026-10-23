@@ -14,8 +14,8 @@ async def valid_sources(publisher, dataset_id, rows, withheld=None):
     """Split the rows into served sources and unavailable entries.
 
     A served entry is (source, row, held): `held` maps each withheld decision
-    of that source to its reason. `withheld` gives the recorded withholdings
-    (source -> assignment -> reason); a foreign input that fails validation
+    of that source to its reason. `withheld` is the withheld-decision set
+    (withholding.withheld_decisions); a foreign input that fails validation
     here withholds the decisions citing it as well. An unavailable entry names
     a whole source (assignment_id None) or one withheld decision."""
     from .registered import read_registered, read_texts
@@ -48,7 +48,7 @@ async def valid_sources(publisher, dataset_id, rows, withheld=None):
                 )
             continue
         source = IdentitySource.model_validate_json(row.description)
-        recorded = withheld.get(row.source, {})
+        recorded = {k: w.reason for k, w in withheld.get(row.source, {}).items()}
         try:
             if await read_registered(source) != source:
                 raise IntentError(
@@ -151,8 +151,11 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
 
+    from .withholding import withheld_decisions
+
     rows = await publisher.records.rows(dataset_id)
-    current, unavailable = await valid_sources(publisher, dataset_id, rows)
+    withheld = await withheld_decisions(rows, publisher.withholdings)
+    current, unavailable = await valid_sources(publisher, dataset_id, rows, withheld)
     # Original-owned markers can outlive generated-source withdrawal/failure.
     # Their local labels must never become reusable vector query aliases.
     mention_ids = {
@@ -346,14 +349,13 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
                     )
                 facts.append(entry)
                 seen.add(str(edge_id))
-    # Recheck ledger to avoid delivering a source superseded during this read.
-    after = {
-        r.source: (r.state, r.revision, r.attempt)
-        for r in await publisher.records.rows(dataset_id)
-    }
+    # Recheck ledger and withholdings to avoid delivering a source superseded,
+    # or a decision withheld, during this read.
+    rows_after = await publisher.records.rows(dataset_id)
+    after = {r.source: (r.state, r.revision, r.attempt) for r in rows_after}
     if any(
         after.get(r.source) != ("current", r.revision, r.attempt) for _, r, _ in current
-    ):
+    ) or (await withheld_decisions(rows_after, publisher.withholdings) != withheld):
         raise IntentError(
             "retrieval_changed", "Publication changed during retrieval; retry query"
         )

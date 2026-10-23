@@ -84,6 +84,22 @@ class Publisher:
         self.graph, self.vector, self.records = graph, vector, records
         self.runtime_profile = runtime_profile or {}
 
+    @property
+    def withholdings(self):
+        """The withholding table beside the ledger (withholding.py)."""
+        from .withholding import WithholdingStore
+
+        return WithholdingStore(self.records.session_factory)
+
+    async def withheld_for(self, source, rows=None) -> set[str]:
+        """The source's decisions that are withheld now: validation skips
+        their inputs."""
+        from .withholding import withheld_decisions
+
+        rows = await self.records.rows() if rows is None else rows
+        held = await withheld_decisions(rows, self.withholdings)
+        return set(held.get(str(source.identity_data_id), {}))
+
     async def withdraw(
         self, source, *, expected_revision, origin="runtime", fault_stage=None
     ):
@@ -153,6 +169,9 @@ class Publisher:
 
         records = RecordStore()
         await records.initialize()
+        from .withholding import WithholdingStore
+
+        await WithholdingStore(records.session_factory).initialize()
         return cls(
             await get_graph_engine(),
             await get_vector_engine_async(),
@@ -170,8 +189,15 @@ class Publisher:
         supplied texts and chunks, the UUID uses across saved descriptions,
         the fence on retiring sources, the saved revision and the Entity
         types. A re-add runs them before it writes anything."""
-        await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
         rows = await self.records.rows()
+        # Another document's drift withholds decisions, never the source.
+        await validate_inputs(
+            source,
+            texts=texts,
+            chunks=chunks,
+            graph=self.graph,
+            withheld=await self.withheld_for(source, rows),
+        )
         descriptions = [
             IdentitySource.model_validate_json(r.description)
             for r in rows
@@ -328,6 +354,8 @@ class Publisher:
         row = await self.admit_readd(source, texts, chunks)
         if row.revision != expected_revision:
             raise IntentError(*STALE_REVISION)
+        # A re-added source starts with no withholding of its own.
+        await self.withholdings.keep(source.dataset_id, source.identity_data_id, set())
         return await self._publish(
             source,
             texts,
@@ -557,7 +585,13 @@ class Publisher:
                     raise IntentError(
                         "verify_owner", "Original-chunk marker owner missing"
                     )
-            await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
+            await validate_inputs(
+                source,
+                texts=texts,
+                chunks=chunks,
+                graph=self.graph,
+                withheld=await self.withheld_for(source),
+            )
             if verify_semantics is not None:
                 await verify_semantics()
             from .registered import read_registered

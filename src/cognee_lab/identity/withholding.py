@@ -1,0 +1,354 @@
+"""Decisions withheld from retrieval because an input they read changed.
+
+A text edit of a consumed document records, in its own attempt, which
+decisions of its dependents read what changed: `classify` compares each input
+a dependent read from that document with the new text, and
+`withhold_dependents` writes one row per affected (dependent, decision,
+input). An unchanged span is valid automatically. A span whose text is found
+exactly once elsewhere moved (`remap`): `refresh_dependents` writes its new
+range. Anything else needs review (`refresh_needed`): a reviewer re-confirms
+or replaces the decision.
+
+The rows live in their own table beside the ledger, not in RecordStore.
+`withheld_decisions` merges them with a rule derived from the ledger: while a
+consumed source's text change is pending or failed, every decision citing
+that document is withheld, so a crash before the rows are written never
+serves a dependent stale. Withholding writes no recovery events.
+"""
+
+from dataclasses import asdict, dataclass
+from typing import NamedTuple
+
+from sqlalchemy import Integer, String, delete, select, tuple_
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from .models import ChunkInput, IdentitySource, SourceTextInput, TextSpanInput
+from .validation import INPUT_CHANGED, INPUT_REMOVED, decision_inputs, text_digest
+
+REMAP = "remap"
+REFRESH_NEEDED = "refresh_needed"
+EDIT_UNFINISHED = "edit_unfinished"
+# When several inputs withhold one decision, it shows the strongest status.
+STATUS_ORDER = (REMAP, EDIT_UNFINISHED, REFRESH_NEEDED)
+UNCHANGED, MOVED, CHANGED = "unchanged", "moved", "changed"
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Withholding(Base):
+    __tablename__ = "lab_identity_withholdings"
+    dataset: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source: Mapped[str] = mapped_column(String(36), primary_key=True)
+    assignment: Mapped[str] = mapped_column(String(255), primary_key=True)
+    input_ref: Mapped[str] = mapped_column(String(255), primary_key=True)
+    consumed: Mapped[str] = mapped_column(String(36))
+    edit_revision: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))
+    old_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    new_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+@dataclass(frozen=True)
+class WithholdingRow:
+    """One decision of a dependent withheld because one input it read
+    changed. `consumed` is the edited source and `edit_revision` the revision
+    whose text was classified. A moved span carries its new range."""
+
+    dataset: str
+    source: str
+    assignment: str
+    input_ref: str
+    consumed: str
+    edit_revision: int
+    reason: str
+    status: str
+    old_digest: str | None
+    new_digest: str | None
+    new_start: int | None = None
+    new_end: int | None = None
+
+
+@dataclass(frozen=True)
+class Classified:
+    """What an edit did to one input a dependent read from the document."""
+
+    input_ref: str
+    outcome: str  # UNCHANGED, MOVED or CHANGED
+    old_digest: str | None
+    new_digest: str | None
+    new_range: tuple[int, int] | None = None
+
+
+class Withheld(NamedTuple):
+    """One entry of the withheld-decision set."""
+
+    reason: str
+    status: str
+
+
+WithheldSet = dict[str, dict[str, Withheld]]  # source -> assignment -> entry
+
+
+class WithholdingStore:
+    """The withholding table, through the ledger's relational sessions. Each
+    call creates the table if it is missing, so a store made before this
+    table opens unchanged."""
+
+    def __init__(self, session_factory):
+        self.session_factory = session_factory
+
+    async def initialize(self):
+        async with self.session_factory() as session:
+            connection = await session.connection()
+            await connection.run_sync(Base.metadata.create_all)
+            await session.commit()
+
+    async def rows(self, dataset=None) -> list[WithholdingRow]:
+        await self.initialize()
+        async with self.session_factory() as session:
+            statement = select(Withholding)
+            if dataset is not None:
+                statement = statement.where(Withholding.dataset == str(dataset))
+            found = (await session.execute(statement)).scalars().all()
+            return sorted(
+                (
+                    WithholdingRow(
+                        **{f: getattr(r, f) for f in WithholdingRow.__annotations__}
+                    )
+                    for r in found
+                ),
+                key=lambda r: (r.source, r.assignment, r.input_ref),
+            )
+
+    async def replace(self, cleared, rows):
+        """Delete the rows of each (dataset, source, input_ref) in `cleared`,
+        then write `rows`, in one transaction."""
+        await self.initialize()
+        async with self.session_factory() as session:
+            if cleared:
+                await session.execute(
+                    delete(Withholding).where(
+                        tuple_(
+                            Withholding.dataset,
+                            Withholding.source,
+                            Withholding.input_ref,
+                        ).in_(sorted(set(cleared)))
+                    )
+                )
+            for row in rows:
+                await session.merge(Withholding(**asdict(row)))
+            await session.commit()
+
+    async def keep(self, dataset, source, kept):
+        """Delete the source's rows whose (assignment, input_ref) is not in
+        `kept`."""
+        await self.initialize()
+        async with self.session_factory() as session:
+            found = (
+                (
+                    await session.execute(
+                        select(Withholding).where(
+                            Withholding.dataset == str(dataset),
+                            Withholding.source == str(source),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for row in found:
+                if (row.assignment, row.input_ref) not in kept:
+                    await session.delete(row)
+            await session.commit()
+
+
+def document_inputs(reader: IdentitySource, data_id) -> set[str]:
+    """The reader's inputs that read a document: its text inputs and every
+    span or chunk of them."""
+    texts = {
+        k
+        for k, i in reader.inputs.items()
+        if isinstance(i, SourceTextInput) and str(i.data_id) == str(data_id)
+    }
+    return texts | {
+        k
+        for k, i in reader.inputs.items()
+        if isinstance(i, (ChunkInput, TextSpanInput)) and i.document_ref in texts
+    }
+
+
+def citing(reader: IdentitySource, keys) -> set[str]:
+    """The decisions that cite any of `keys` directly."""
+    return {a for a, inputs in decision_inputs(reader).items() if inputs & set(keys)}
+
+
+def occurs_once(text: str, part: str) -> int | None:
+    first = text.find(part)
+    if first < 0 or text.find(part, first + 1) >= 0:
+        return None
+    return first
+
+
+def classify_span(key, item, previous_text, text, earlier=()):
+    """An unchanged span validates in place. One whose old text is found
+    exactly once in the new text moved. Anything else changed. `earlier`
+    gives ranges a former edit recorded for this span in `previous_text`."""
+    here = text[item.start : item.end] if item.end <= len(text) else None
+    if here is not None and text_digest(here) == item.text_sha256:
+        return Classified(key, UNCHANGED, item.text_sha256, item.text_sha256)
+    for start, end in [(item.start, item.end), *earlier]:
+        old = previous_text[start:end] if end <= len(previous_text) else None
+        if old and text_digest(old) == item.text_sha256:
+            found = occurs_once(text, old)
+            if found is not None:
+                return Classified(
+                    key,
+                    MOVED,
+                    item.text_sha256,
+                    item.text_sha256,
+                    (found, found + len(old)),
+                )
+            break
+    return Classified(
+        key, CHANGED, item.text_sha256, text_digest(here) if here else None
+    )
+
+
+def classify(reader, data_id, previous_text, text, earlier=None) -> list[Classified]:
+    """What changing a document's text from `previous_text` to `text` did to
+    each input the reader read from it. A text input is classified only when
+    a decision cites it directly; a chunk has no fingerprint and is renumbered,
+    so any change needs review."""
+    earlier = earlier or {}
+    keys = document_inputs(reader, data_id)
+    direct = set().union(*decision_inputs(reader).values())
+    found = []
+    for key in sorted(keys):
+        item = reader.inputs[key]
+        if isinstance(item, SourceTextInput):
+            if key in direct:
+                new = text_digest(text)
+                outcome = UNCHANGED if new == item.text_sha256 else CHANGED
+                found.append(Classified(key, outcome, item.text_sha256, new))
+        elif isinstance(item, TextSpanInput):
+            found.append(
+                classify_span(key, item, previous_text, text, earlier.get(key, ()))
+            )
+        else:
+            outcome = UNCHANGED if previous_text == text else CHANGED
+            found.append(Classified(key, outcome, None, None))
+    return found
+
+
+async def withhold_dependents(publisher, edited, previous_text, text, revision):
+    """Record, before the edit completes, which decisions of every current
+    dependent read what the edit changed. Idempotent: each run recomputes the
+    rows of every input of the document and replaces them, so a retry or a
+    later edit converges."""
+    store = publisher.withholdings
+    doc = edited.inputs[edited.original_input_ref].data_id
+    own = (str(edited.dataset_id), str(edited.identity_data_id))
+    prior = await store.rows()
+    cleared, written = [], []
+    for row in await publisher.records.rows():
+        if (row.dataset, row.source) == own or row.is_retired:
+            continue
+        reader = IdentitySource.model_validate_json(row.description)
+        earlier = {}
+        for w in prior:
+            if w.source == row.source and w.new_start is not None:
+                earlier.setdefault(w.input_ref, []).append((w.new_start, w.new_end))
+        for c in classify(reader, doc, previous_text, text, earlier):
+            cleared.append((row.dataset, row.source, c.input_ref))
+            if c.outcome == UNCHANGED:
+                continue
+            for assignment in sorted(citing(reader, [c.input_ref])):
+                written.append(
+                    WithholdingRow(
+                        dataset=row.dataset,
+                        source=row.source,
+                        assignment=assignment,
+                        input_ref=c.input_ref,
+                        consumed=own[1],
+                        edit_revision=revision,
+                        reason=INPUT_CHANGED,
+                        status=REMAP if c.outcome == MOVED else REFRESH_NEEDED,
+                        old_digest=c.old_digest,
+                        new_digest=c.new_digest,
+                        new_start=c.new_range[0] if c.new_range else None,
+                        new_end=c.new_range[1] if c.new_range else None,
+                    )
+                )
+    await store.replace(cleared, written)
+    return [asdict(r) for r in written]
+
+
+def merge(held: WithheldSet, source, assignment, entry: Withheld):
+    previous = held.setdefault(source, {}).get(assignment)
+    if previous is not None:
+        entry = Withheld(
+            (
+                INPUT_REMOVED
+                if INPUT_REMOVED in (previous.reason, entry.reason)
+                else entry.reason
+            ),
+            max(previous.status, entry.status, key=STATUS_ORDER.index),
+        )
+    held[source][assignment] = entry
+
+
+def unfinished_edits(rows):
+    """Sources whose latest text change is pending or failed."""
+    return [
+        r
+        for r in rows
+        if r.state in ("pending", "failed")
+        and r.operation == "identity_replace"
+        and r.plan.get("text_change")
+    ]
+
+
+def recorded_rows(rows, table) -> list[WithholdingRow]:
+    """The table rows that still apply: the dependent is not retired, and its
+    saved description still has the decision citing that input."""
+    readers = {
+        r.source: IdentitySource.model_validate_json(r.description)
+        for r in rows
+        if not r.is_retired
+    }
+    return [
+        w
+        for w in table
+        if w.source in readers
+        and w.input_ref in decision_inputs(readers[w.source]).get(w.assignment, ())
+    ]
+
+
+async def withheld_decisions(rows, store) -> WithheldSet:
+    """The withheld-decision set: the recorded rows that still apply, and
+    every decision citing a document whose text change is pending or failed
+    (`input_changed`, status `edit_unfinished`)."""
+    held: WithheldSet = {}
+    for w in recorded_rows(rows, await store.rows()):
+        merge(held, w.source, w.assignment, Withheld(w.reason, w.status))
+    readers = {
+        r.source: IdentitySource.model_validate_json(r.description)
+        for r in rows
+        if not r.is_retired
+    }
+    for edit in unfinished_edits(rows):
+        edited = IdentitySource.model_validate_json(edit.description)
+        doc = edited.inputs[edited.original_input_ref].data_id
+        for source, reader in readers.items():
+            if source == edit.source:
+                continue
+            for assignment in citing(reader, document_inputs(reader, doc)):
+                merge(
+                    held, source, assignment, Withheld(INPUT_CHANGED, EDIT_UNFINISHED)
+                )
+    return held

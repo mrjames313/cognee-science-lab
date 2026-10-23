@@ -154,3 +154,173 @@ async def test_an_own_input_still_fails_the_source(source_payload):
             graph=Graph(),
         )
     assert refused.value.code == "source_changed"
+
+
+# The withholding table and the withheld-decision set.
+
+from dataclasses import replace as replaced  # noqa: E402
+from uuid import uuid4  # noqa: E402
+
+from cognee_lab.identity.storage import PublicationRow  # noqa: E402
+from cognee_lab.identity.withholding import (  # noqa: E402
+    WithholdingStore,
+    classify,
+    withheld_decisions,
+    withhold_dependents,
+)
+
+INSERTED = GLOSSARY.replace("HC:", "ECRH: electron cyclotron heating.\nHC:")
+COSMETIC = GLOSSARY.replace("plasma heating", "plasma-heating")
+ELSEWHERE = GLOSSARY.replace("radio frequency", "radio-frequency heating")
+
+
+def glossary_source(payload):
+    """The glossary as an identity source with no groups or decisions."""
+    payload = json.loads(json.dumps(payload))
+    payload["identity_data_id"] = str(uuid5(NAMESPACE_URL, "test:glossary:identity"))
+    payload["original_input_ref"] = "glossary"
+    payload["inputs"] = {
+        "glossary": dict(
+            kind="source_text",
+            dataset_id=payload["dataset_id"],
+            data_id=GLOSSARY_ID,
+            text_sha256=text_digest(GLOSSARY),
+        )
+    }
+    for key in ("entity_constructions", "mention_groups"):
+        payload[key] = {}
+    payload["mention_resolutions"], payload["variant_assignments"] = {}, {}
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+def row_of(source, state="current", plan=None):
+    return PublicationRow(
+        dataset=str(source.dataset_id),
+        source=str(source.identity_data_id),
+        revision=source.revision,
+        verified_revision=source.revision if state == "current" else 0,
+        state=state,
+        attempt=str(uuid4()),
+        description=source.model_dump_json(),
+        plan=plan or {},
+    )
+
+
+def memory_publisher(rows):
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    class Records:
+        session_factory = factory
+
+        async def rows(self, dataset=None):
+            return list(rows)
+
+    publisher = SimpleNamespace(records=Records())
+    publisher.withholdings = WithholdingStore(factory)
+    return publisher
+
+
+def test_each_glossary_edit_is_classified_as_the_user_decided(source_payload):
+    source = citing(strip_corpus(source_payload))
+    entry = GLOSSARY.index(ENTRY)
+    outcomes = {
+        name: [
+            (c.input_ref, c.outcome, c.new_range)
+            for c in classify(source, GLOSSARY_ID, GLOSSARY, edited)
+        ]
+        for name, edited in [
+            ("elsewhere", ELSEWHERE),
+            ("inserted", INSERTED),
+            ("cosmetic", COSMETIC),
+        ]
+    }
+    shift = len("ECRH: electron cyclotron heating.\n")
+    assert outcomes == {
+        "elsewhere": [("glossary_hc", "unchanged", None)],
+        "inserted": [
+            ("glossary_hc", "moved", (entry + shift, entry + shift + len(ENTRY)))
+        ],
+        "cosmetic": [("glossary_hc", "changed", None)],
+    }
+    # A span whose text now appears twice needs review, not a guess.
+    doubled = INSERTED.replace("RF:", ENTRY + "\nRF:")
+    assert [c.outcome for c in classify(source, GLOSSARY_ID, GLOSSARY, doubled)] == [
+        "changed"
+    ]
+    # A directly cited text is classified too; any change needs review.
+    direct = citing(strip_corpus(source_payload), cite_text=True)
+    assert [
+        (c.input_ref, c.outcome)
+        for c in classify(direct, GLOSSARY_ID, GLOSSARY, ELSEWHERE)
+    ] == [("glossary", "changed"), ("glossary_hc", "unchanged")]
+
+
+async def test_the_edit_writes_rows_per_decision_and_a_retry_converges(
+    source_payload,
+):
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    publisher = memory_publisher([row_of(glossary), row_of(doc01)])
+    written = await withhold_dependents(publisher, glossary, GLOSSARY, COSMETIC, 2)
+    assert [(w["assignment"], w["status"], w["reason"]) for w in written] == [
+        ("r01", "refresh_needed", "input_changed"),
+        ("v01", "refresh_needed", "input_changed"),
+    ]
+    assert written[0]["old_digest"] == text_digest(ENTRY)
+    again = await withhold_dependents(publisher, glossary, GLOSSARY, COSMETIC, 2)
+    assert again == written and len(await publisher.withholdings.rows()) == 2
+    moved = await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+    assert {w["status"] for w in moved} == {"remap"}
+    assert len(await publisher.withholdings.rows()) == 2
+    # An edit that leaves the span in place clears its rows.
+    assert await withhold_dependents(publisher, glossary, GLOSSARY, GLOSSARY, 3) == []
+    assert await publisher.withholdings.rows() == []
+
+
+async def test_an_unfinished_edit_withholds_every_decision_citing_the_document(
+    source_payload,
+):
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    rows = [row_of(glossary), row_of(doc01)]
+    publisher = memory_publisher(rows)
+    assert await withheld_decisions(rows, publisher.withholdings) == {}
+    for state in ("pending", "failed"):
+        editing = row_of(
+            glossary,
+            state,
+            dict(operation="identity_replace", text_change={"text": "x"}),
+        )
+        held = await withheld_decisions([editing, rows[1]], publisher.withholdings)
+        assert held == {
+            str(doc01.identity_data_id): {
+                "r01": ("input_changed", "edit_unfinished"),
+                "v01": ("input_changed", "edit_unfinished"),
+            }
+        }
+    # A failed replacement with unchanged text changes no input.
+    unchanged = row_of(glossary, "failed", dict(operation="identity_replace"))
+    assert await withheld_decisions([unchanged, rows[1]], publisher.withholdings) == {}
+
+
+async def test_rows_apply_only_while_the_decision_still_cites_the_input(
+    source_payload,
+):
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    rows = [row_of(glossary), row_of(doc01)]
+    publisher = memory_publisher(rows)
+    await withhold_dependents(publisher, glossary, GLOSSARY, COSMETIC, 2)
+    held = await withheld_decisions(rows, publisher.withholdings)
+    assert set(held[str(doc01.identity_data_id)]) == {"r01", "v01"}
+    payload = doc01.model_dump(mode="json")
+    payload["variant_assignments"]["v01"]["input_refs"] = ["doc01"]
+    revised = IdentitySource.model_validate_json(json.dumps(payload))
+    held = await withheld_decisions([rows[0], row_of(revised)], publisher.withholdings)
+    assert set(held[str(doc01.identity_data_id)]) == {"r01"}
+    retired = replaced(rows[1], state="withdrawn")
+    assert await withheld_decisions([rows[0], retired], publisher.withholdings) == {}
