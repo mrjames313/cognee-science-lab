@@ -18,6 +18,7 @@ an Entity that exists (`check_corpus_inputs_exist`, run by every admission
 of a publication), whether a decision or a group cites it.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import NamedTuple
 
@@ -561,27 +562,42 @@ def foreign_citations(description):
     }
 
 
+def attested_inputs(description):
+    """The foreign input keys each producer's decisions cite."""
+    cited = foreign_citations(description)
+    seen = defaultdict(set)
+    for kind in ("mention_resolutions", "variant_assignments"):
+        for key, decision in getattr(description, kind).items():
+            seen[decision.producer_ref] |= cited[key]
+    return seen
+
+
 def check_reconfirmations(old, source):
-    """A producer attests what its decisions read. So a decision under any
-    key, continuing, changed or new, that cites a foreign input key the old
-    revision lacks names a producer new in this revision. So does a
+    """Attestation is per producer and foreign input key. A foreign input
+    keeps its content under its key (`check_foreign_inputs`), so a producer
+    whose old decisions cited a key saw that content. A decision under a
+    producer of the old revision, whatever its key and whether or not it
+    changed, cites only foreign keys that producer's old decisions cited. A
     continuing decision that keeps its reviewed fields but cites other
-    foreign inputs, by losing, replacing or adding a key. A pure move keeps
-    its key and needs neither."""
+    foreign inputs, by losing or replacing a key, also names a producer new
+    in this revision: a dropped input releases a withholding. A producer new
+    in this revision is unconstrained, and a pure move keeps its key and
+    passes both."""
     before, after = foreign_citations(old), foreign_citations(source)
+    seen = attested_inputs(old)
     for kind in ("mention_resolutions", "variant_assignments"):
         was, now = getattr(old, kind), getattr(source, kind)
         for key, decision in now.items():
             if decision.producer_ref not in old.producers:
                 continue
-            unseen = after[key] - set(old.inputs)
+            unattested = after[key] - seen[decision.producer_ref]
             recited = (
                 key in was
                 and before[key] != after[key]
                 and reviewed_decisions({key: decision})
                 == reviewed_decisions({key: was[key]})
             )
-            if unseen or recited:
+            if unattested or recited:
                 raise IntentError(
                     "reconfirm_unattested",
                     "A decision that cites other foreign inputs names a producer new in this revision",

@@ -468,6 +468,32 @@ def test_renaming_a_variant_onto_a_new_span_is_still_a_reconfirm(source_payload)
     admit_same_text(old, IdentitySource.model_validate_json(json.dumps(payload)))
 
 
+def test_a_rename_cannot_borrow_an_input_a_sibling_reconfirmed(source_payload):
+    old = glossary_doc01(source_payload)
+    span = span_for(CASES["cosmetic"](GLOSSARY_TEXT))
+    first = reconfirmed(
+        old,
+        "r01",
+        {"glossary_hc": ("glossary_hc_r2", span)},
+        "review_r01_r2",
+        producer("re-confirmed"),
+    )
+    payload = first.model_dump(mode="json")
+    payload["revision"] += 1
+    payload["inputs"].pop("glossary_hc")
+    v01 = payload["variant_assignments"].pop("v01")
+    payload["variant_assignments"]["v01b"] = dict(
+        v01, input_refs=[v01["input_refs"][0], "glossary_hc_r2"]
+    )
+    # v01's producer never read the entry r01's reviewer re-confirmed.
+    with pytest.raises(IntentError) as refused:
+        admit_same_text(first, IdentitySource.model_validate_json(json.dumps(payload)))
+    assert refused.value.code == "reconfirm_unattested"
+    payload["producers"]["review_v01b"] = producer("re-confirmed")
+    payload["variant_assignments"]["v01b"]["producer_ref"] = "review_v01b"
+    admit_same_text(first, IdentitySource.model_validate_json(json.dumps(payload)))
+
+
 def test_a_substantive_change_replaces_v01_with_a_derived_variant(source_payload):
     old = glossary_doc01(source_payload)
     span = span_for(CASES["substantive"](GLOSSARY_TEXT))

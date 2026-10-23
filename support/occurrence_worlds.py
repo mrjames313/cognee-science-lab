@@ -559,15 +559,15 @@ def reconfirm(record, *, producer):
     return change
 
 
-def attest(payload, rid):
+def attest(payload, rid, name="reconfirm"):
     """The decision names a producer new in this revision: a re-confirm."""
-    payload["producers"]["reconfirm"] = dict(
+    payload["producers"][name] = dict(
         payload["producers"]["fixture"], implementation="re-confirmed"
     )
     target = (
         payload["variant_assignments"].get(rid) or payload["mention_resolutions"][rid]
     )
-    target["producer_ref"] = "reconfirm"
+    target["producer_ref"] = name
 
 
 def drop_foreign_input(*, producer):
@@ -638,6 +638,41 @@ def retarget_resolution_onto_new_span(*, producer):
         retarget_continuing_to_hc(old, new, ctx)
 
     return change
+
+
+def sibling_reconfirmed(old, new, ctx):
+    """The old revision's continuing resolution was re-confirmed on the
+    changed glossary entry under its own producer; v01 still reads the old
+    entry, and the corpus input a fresh resolution cites, under the
+    fixture's."""
+    rid = continuing_rid(ctx)
+    for payload in (old, new):
+        add_glossary(payload)
+        glossary_span(payload, "gloss_hc_r2", entry="HC: Helios regulator.")
+        cite(payload, rid, "gloss_hc_r2")
+        attest(payload, rid)
+    glossary_span(old)
+    old["variant_assignments"]["v01"]["input_refs"].append("gloss_hc")
+
+
+def rename_variant_onto_siblings_input(*, producer):
+    """The new revision renames v01 v01b and points it at the entry the
+    continuing resolution's producer re-confirmed."""
+
+    def change(old, new, ctx):
+        sibling_reconfirmed(old, new, ctx)
+        new["variant_assignments"]["v01b"] = new["variant_assignments"].pop("v01")
+        cite(new, "v01b", "gloss_hc_r2")
+        if producer:
+            attest(new, "v01b", "reconfirm_v01b")
+
+    return change
+
+
+def retarget_variant_onto_siblings_input(old, new, ctx):
+    sibling_reconfirmed(old, new, ctx)
+    retarget_document_variant(old, new, ctx)
+    cite(new, "v01", "gloss_hc_r2")
 
 
 def add_text_of_another_dataset(old, new, ctx):
@@ -1023,6 +1058,30 @@ DECISIONS = [
         retarget_resolution_onto_new_span(producer=True),
         text_edit=refuse("continuing_decision_changed"),
         same_text=ADMIT,
+    ),
+    decision(
+        "document variant renamed onto a sibling's re-confirmed span under its old producer",
+        "rule 5",
+        [CONTINUING],
+        rename_variant_onto_siblings_input(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "document variant renamed onto a sibling's re-confirmed span under a new producer",
+        "rule 5",
+        [CONTINUING],
+        rename_variant_onto_siblings_input(producer=True),
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "document variant retargeted onto a sibling's re-confirmed span under its old producer",
+        "rule 5",
+        [CONTINUING],
+        retarget_variant_onto_siblings_input,
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
     ),
     decision(
         "text of another dataset",

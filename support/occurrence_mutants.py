@@ -39,6 +39,28 @@ def attest_continuing_keys_only(old, source):
                 raise admission.IntentError("reconfirm_unattested", "")
 
 
+def attest_any_old_input(old, source):
+    """The round-3 re-confirm rule let an old producer cite any foreign key
+    the old revision held, so a renamed or changed decision could borrow a
+    key a sibling's producer re-confirmed."""
+    before = admission.foreign_citations(old)
+    after = admission.foreign_citations(source)
+    for kind in ("mention_resolutions", "variant_assignments"):
+        was, now = getattr(old, kind), getattr(source, kind)
+        for key, decision in now.items():
+            if decision.producer_ref not in old.producers:
+                continue
+            unseen = after[key] - set(old.inputs)
+            recited = (
+                key in was
+                and before[key] != after[key]
+                and admission.reviewed_decisions({key: decision})
+                == admission.reviewed_decisions({key: was[key]})
+            )
+            if unseen or recited:
+                raise admission.IntentError("reconfirm_unattested", "")
+
+
 MUTANTS = {
     "continue_with_any_uuid": ("same_identity", lambda *_: True),
     "continue_after_merge": (
@@ -79,5 +101,6 @@ MUTANTS = {
         "check_reconfirmations",
         attest_continuing_keys_only,
     ),
+    "attest_any_old_input": ("check_reconfirmations", attest_any_old_input),
 }
 assert all(hasattr(admission, attribute) for attribute, _ in MUTANTS.values())
