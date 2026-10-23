@@ -96,9 +96,9 @@ async def replace(
     if row is None:
         raise IntentError("source_missing", "Replacement requires a saved publication")
     if row.revision != expected_revision:
-        raise IntentError("stale_revision", STALE_REVISION)
+        raise IntentError(*STALE_REVISION)
     saved = IdentitySource.model_validate_json(row.description)
-    retry = row.state == "failed" and row.operation == "identity_replace"
+    retry = row.resumed_by == "replace"
     if retry:
         if source != saved:
             raise IntentError(

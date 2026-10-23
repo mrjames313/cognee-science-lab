@@ -7,13 +7,7 @@ from dataclasses import dataclass
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
 from .retirement import refuse_retiring_inputs
-from .storage import (
-    FAILED_FORGET,
-    FAILED_REPLACEMENT,
-    STALE_REVISION,
-    RecordStore,
-    encode,
-)
+from .storage import STALE_REVISION, RecordStore, encode, transition
 from .validation import IntentError, validate_inputs, validate_uses
 
 
@@ -271,14 +265,17 @@ class Publisher:
                 )
         await self.admit_inputs(source, texts, chunks, saved_revision=saved_revision)
 
+    async def refuse_owned_retry(self, source):
+        """A failed replacement or forget resumes only through its own method.
+        begin() refuses the rest of the transition table under the writer
+        reservation."""
+        row = await self.records.row(source)
+        if row and row.resumed_by in ("replace", "forget"):
+            raise IntentError(*transition(row).otherwise)
+
     async def publish(self, source: IdentitySource, *, texts, chunks, ctx, **run):
         """A first publication: the source has no row yet."""
-        row = await self.records.row(source)
-        if row and row.state == "failed":
-            if row.operation == "identity_replace":
-                raise IntentError("recovery_choice", FAILED_REPLACEMENT)
-            if row.operation == "identity_forget":
-                raise IntentError("recovery_choice", FAILED_FORGET)
+        await self.refuse_owned_retry(source)
         return await self._publish(
             source, texts, chunks, ctx, expected_revision=0, method="publish", **run
         )
@@ -286,12 +283,7 @@ class Publisher:
     async def reconcile(self, source: IdentitySource, *, texts, chunks, ctx, **run):
         """Complete the saved revision again: a healthy row is verified, a
         failed publication is finished."""
-        row = await self.records.row(source)
-        if row and row.state == "failed":
-            if row.operation == "identity_replace":
-                raise IntentError("recovery_choice", FAILED_REPLACEMENT)
-            if row.operation == "identity_forget":
-                raise IntentError("recovery_choice", FAILED_FORGET)
+        await self.refuse_owned_retry(source)
         return await self._publish(
             source,
             texts,
@@ -329,7 +321,7 @@ class Publisher:
         """Publish a forgotten source again at the next revision."""
         row = await self.admit_readd(source, texts, chunks)
         if row.revision != expected_revision:
-            raise IntentError("stale_revision", STALE_REVISION)
+            raise IntentError(*STALE_REVISION)
         return await self._publish(
             source,
             texts,

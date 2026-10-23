@@ -317,7 +317,7 @@ async def run(args, root):
     if row.revision != args.expected_revision:
         from .storage import STALE_REVISION
 
-        raise IntentError("stale_revision", STALE_REVISION)
+        raise IntentError(*STALE_REVISION)
     if row.state != "current":
         raise IntentError(
             "recovery_choice", "Reconcile the exact saved text replacement explicitly"

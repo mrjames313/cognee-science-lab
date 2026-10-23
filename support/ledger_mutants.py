@@ -62,7 +62,7 @@ MUTANTS = {
     ),
     "no-stale-revision-guard": Mutant(
         "            if actual_revision != expected_revision:\n"
-        '                raise IntentError("stale_revision", STALE_REVISION)\n',
+        "                raise IntentError(*STALE_REVISION)\n",
         "",
         "P3",
     ),
@@ -113,63 +113,54 @@ MUTANTS = {
         "P5",
     ),
     "no-replace-recovery-choice": Mutant(
-        '                and json.loads(row.plan).get("operation") == "identity_replace"\n'
-        '                and method != "replace"\n',
-        '                and json.loads(row.plan).get("operation") == "identity_replace"\n'
-        '                and method not in {"replace", "reconcile"}\n',
+        'saved({"replace": 0}, FAILED_REPLACEMENT)',
+        'saved({"replace": 0, "reconcile": 0}, FAILED_REPLACEMENT)',
         "P5",
     ),
+    # The failed withdrawal row falls back to the plain failed row's entry.
     "no-withdraw-recovery-choice": Mutant(
-        '                and json.loads(row.plan).get("operation") == "identity_withdraw"\n'
-        '                and method != "withdraw"\n',
-        '                and json.loads(row.plan).get("operation") == "identity_withdraw"\n'
-        "                and False\n",
+        '    ("failed", "identity_withdraw"): saved({"withdraw": 0}, FAILED_WITHDRAWAL),\n',
+        "",
         "P5",
     ),
+    # Without the guard a withdrawn row took reconcile and a replace retry.
     "no-withdrawn-guard": Mutant(
-        '            if row and row.state == "withdrawn" and method != "withdraw":',
-        "            if False:",
+        'Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE)',
+        'saved({"withdraw": 0, "reconcile": 0, "replace": 0})',
         "P5",
     ),
     "no-forgotten-guard": Mutant(
-        '            if row and row.state == "forgotten" and method != "publish":',
-        "            if False:",
+        '{"publish": 1}, otherwise=FORGOTTEN_SOURCE, sequence=READD_REVISION',
+        '{"publish": 1, "reconcile": 0, "withdraw": 0, "replace": 0, "forget": 0},'
+        " sequence=READD_REVISION",
         "P5",
     ),
+    # Publish admitted on every saved row that no method owns.
     "publish-restarts-saved-row": Mutant(
-        '                if row.state != "forgotten":\n'
-        "                    raise IntentError(\n"
-        '                        "recovery_choice",\n',
-        "                if False:\n"
-        "                    raise IntentError(\n"
-        '                        "recovery_choice",\n',
+        '    return Transition(admits, {"publish": SAVED_LINEAGE}, otherwise, sequence)\n',
+        '    return Transition({"publish": 1, **admits} if otherwise is None else admits,'
+        " {}, otherwise, sequence)\n",
         "P5",
     ),
     "readd-at-forgotten-revision": Mutant(
-        "                if source.revision != actual_revision + 1:\n"
-        '                    raise IntentError("revision_sequence", READD_REVISION)\n',
-        "                if False:\n"
-        '                    raise IntentError("revision_sequence", READD_REVISION)\n',
+        "otherwise=FORGOTTEN_SOURCE, sequence=READD_REVISION",
+        "otherwise=FORGOTTEN_SOURCE, sequence=None",
         "P5",
     ),
+    # The failed forget row loses its owner but keeps admitting forget.
     "no-forget-recovery-choice": Mutant(
-        '                and json.loads(row.plan).get("operation") == "identity_forget"\n'
-        '                and method != "forget"\n',
-        '                and json.loads(row.plan).get("operation") == "identity_forget"\n'
-        "                and False\n",
+        'saved({"forget": 0}, FAILED_FORGET)',
+        'saved({"forget": 0, "reconcile": 0, "withdraw": 0})',
         "P5",
     ),
     "forget-from-any-failed-row": Mutant(
-        "                if not (\n"
-        '                    row.state == "current"\n'
-        '                    or json.loads(row.plan).get("operation") == "identity_forget"\n'
-        "                ):",
-        "                if False:",
+        'RequiredPlan("identity_forget", FORGET_PLAN, FORGET_STATE)',
+        'RequiredPlan("identity_forget", FORGET_PLAN, None)',
         "P5",
     ),
     "forget-takes-any-plan": Mutant(
-        '                if plan.get("operation") != "identity_forget":\n',
-        "                if False:\n",
+        '    if required and plan.get("operation") != required.operation:\n',
+        '    if required and method != "forget" and plan.get("operation") != required.operation:\n',
         "P5",
     ),
     "complete-forgotten-as-withdrawn": Mutant(
@@ -178,51 +169,52 @@ MUTANTS = {
         "P1",
     ),
     "no-advance-guard": Mutant(
-        "            if row and source.revision != actual_revision:\n"
-        "                if not (\n"
-        '                    (method == "replace" and row.state == "current")\n'
-        '                    or method == "publish"\n'
-        "                ):\n"
-        "                    raise IntentError(\n"
-        '                        "recovery_choice",\n'
-        '                        "Advance a current revision through replacement",\n'
-        "                    )\n",
+        "    if row and step != 1 and revision != actual:\n"
+        "        return ADVANCE_THROUGH_REPLACEMENT\n",
         "",
         "P5",
     ),
+    # Every method on a current row skips the advance guard, not only replace.
     "advance-guard-ignores-method": Mutant(
-        '                    (method == "replace" and row.state == "current")\n',
-        '                    (row.state == "current")\n',
+        "    if row and step != 1 and revision != actual:\n",
+        '    if row and step != 1 and row.state != "current" and revision != actual:\n',
         "P5",
     ),
     "no-revision-reuse": Mutant(
         "                if json.loads(payload) != json.loads(row.description):\n"
-        "                    raise IntentError(\n"
-        '                        "revision_reuse", "Changed description requires a new revision"\n'
-        "                    )\n",
+        "                    raise IntentError(*REVISION_REUSE)\n",
         "                pass\n",
         "P5",
     ),
+    # A first publication may skip revisions.
     "no-plus-one": Mutant(
-        "            elif source.revision != actual_revision + 1:",
-        "            elif source.revision <= actual_revision:",
+        "        sequence=NEW_REVISION,\n",
+        "        sequence=None,\n",
         "P5",
     ),
     "no-replace-plan-check": Mutant(
-        '                if plan.get("operation") != "identity_replace":\n',
-        "                if False:\n",
+        '    if required and plan.get("operation") != required.operation:\n',
+        '    if required and method != "replace" and plan.get("operation") != required.operation:\n',
         "P5",
     ),
+    # A replace on a failed row is never held to the saved replacement plan.
     "no-replace-plan-preservation": Mutant(
-        '                if row.state == "failed" and (\n'
-        '                    prior_plan.get("operation") != "identity_replace"\n',
-        "                if False and (\n"
-        '                    prior_plan.get("operation") != "identity_replace"\n',
+        "    if step is None:\n"
+        "        return required.off_row\n"
+        "    if step == 1 and revision != actual + 1:\n"
+        "        return cell.sequence\n"
+        '    if method == "replace" and row.state == "failed":\n'
+        "        if any(plan.get(f) != row.plan.get(f) for f in PRESERVED_ON_RETRY):\n"
+        "            return PRESERVE_REPLACEMENT\n",
+        '    if step is None and method != "replace":\n'
+        "        return required.off_row\n"
+        "    if step == 1 and revision != actual + 1:\n"
+        "        return cell.sequence\n",
         "P5",
     ),
     "no-text-change-preservation": Mutant(
-        '                    or plan.get("text_change") != prior_plan.get("text_change")\n',
-        "",
+        'PRESERVED_ON_RETRY = ("previous_description", "text_change")',
+        'PRESERVED_ON_RETRY = ("previous_description",)',
         "P5",
     ),
     "begin-resolves-open-event": Mutant(
@@ -260,35 +252,23 @@ MUTANTS = {
         "            if True:",
         "P6",
     ),
+    # Every failed row is refused as a pending one.
     "failed-row-never-recoverable": Mutant(
-        '            if row and row.state == "pending":',
-        '            if row and row.state in ("pending", "failed"):',
+        "    return TRANSITIONS.get((row.state, row.operation)) or TRANSITIONS[row.state, None]\n",
+        '    return TRANSITIONS["pending" if row.state == "failed" else row.state, None]\n',
         "P6",
     ),
     "advance-guard-refuses-readd": Mutant(
-        '                    or method == "publish"\n',
-        "                    or False\n",
+        "    if row and step != 1 and revision != actual:\n",
+        '    if row and (step != 1 or method == "publish") and revision != actual:\n',
         "INCONCLUSIVE",
     ),
-    # The guard removed, with the state check below it guarded against the
-    # missing row instead of crashing on it.
+    # A missing row admits forget like the other first steps.
     "forget-without-a-row": Mutant(
-        "                if row is None:\n"
-        "                    raise IntentError(\n"
-        '                        "source_missing", "Forget requires an existing publication"\n'
-        "                    )\n"
-        '                if plan.get("operation") != "identity_forget":\n'
-        "                    raise IntentError(\n"
-        '                        "recovery_plan", "Forget requires a durable forget plan"\n'
-        "                    )\n"
-        "                if not (\n"
-        '                    row.state == "current"\n',
-        '                if plan.get("operation") != "identity_forget":\n'
-        "                    raise IntentError(\n"
-        '                        "recovery_plan", "Forget requires a durable forget plan"\n'
-        "                    )\n"
-        "                if row is not None and not (\n"
-        '                    row.state == "current"\n',
+        '        {"publish": 1, "reconcile": 1, "withdraw": 1},\n'
+        '        {"replace": REPLACEMENT_MISSING, "forget": FORGET_MISSING},\n',
+        '        {"publish": 1, "reconcile": 1, "withdraw": 1, "forget": 1},\n'
+        '        {"replace": REPLACEMENT_MISSING},\n',
         "P5",
     ),
     "complete-misnames-outcome": Mutant(
@@ -310,8 +290,8 @@ DEEP_MUTANTS = {
     # Caught at depth 7: a replace retry built from a stale read of the
     # current replacement row, sent after the row was withdrawn.
     "withdrawn-guard-admits-replace": Mutant(
-        '            if row and row.state == "withdrawn" and method != "withdraw":',
-        '            if row and row.state == "withdrawn" and method not in ("withdraw", "replace"):',
+        'Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE)',
+        'Transition({"withdraw": 0, "replace": 0}, otherwise=WITHDRAWN_SOURCE)',
         "P5",
     ),
 }

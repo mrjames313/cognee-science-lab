@@ -3,6 +3,7 @@
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import NamedTuple
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import Integer, String, Text, select, update
@@ -82,15 +83,160 @@ class PublicationRow:
     def is_retired(self) -> bool:
         return self.state in RETIRED_STATES
 
+    @property
+    def resumed_by(self) -> str | None:
+        """The method that alone resumes this row's saved plan, if it failed."""
+        return OWNERS.get(self.operation) if self.state == "failed" else None
 
-FORGOTTEN_SOURCE = (
-    "Forgotten source accepts only a new publication at the next revision"
+
+class Refusal(NamedTuple):
+    """A guard's diagnostic code and message: raise IntentError(*refusal)."""
+
+    code: str
+    message: str
+
+
+STALE_REVISION = Refusal("stale_revision", "Saved revision changed")
+PENDING = Refusal("pending_attempt", "Inspect abandoned pending publication explicitly")
+WITHDRAWN_SOURCE = Refusal(
+    "withdrawn_source", "Withdrawn source requires explicit new publication intent"
 )
-FAILED_FORGET = "Retry the failed forget explicitly"
-FAILED_REPLACEMENT = "Reconcile the saved replacement plan explicitly"
-FORGET_STATE = "Forget a current source, or retry its failed forget"
-READD_REVISION = "Re-add a forgotten source at exactly the next revision"
-STALE_REVISION = "Saved revision changed"
+FORGOTTEN_SOURCE = Refusal(
+    "forgotten_source",
+    "Forgotten source accepts only a new publication at the next revision",
+)
+SAVED_LINEAGE = Refusal(
+    "recovery_choice", "Reconcile a saved revision, or advance it through replacement"
+)
+FAILED_WITHDRAWAL = Refusal("recovery_choice", "Retry the failed withdrawal explicitly")
+FAILED_FORGET = Refusal("recovery_choice", "Retry the failed forget explicitly")
+FAILED_REPLACEMENT = Refusal(
+    "recovery_choice", "Reconcile the saved replacement plan explicitly"
+)
+ADVANCE_THROUGH_REPLACEMENT = Refusal(
+    "recovery_choice", "Advance a current revision through replacement"
+)
+REPLACEMENT_MISSING = Refusal(
+    "source_missing", "Replacement requires an existing publication"
+)
+FORGET_MISSING = Refusal("source_missing", "Forget requires an existing publication")
+REPLACEMENT_PLAN = Refusal(
+    "recovery_plan", "Replacement requires a durable replacement plan"
+)
+FORGET_PLAN = Refusal("recovery_plan", "Forget requires a durable forget plan")
+PRESERVE_REPLACEMENT = Refusal(
+    "recovery_plan", "Preserve the saved replacement retirement plan"
+)
+FORGET_STATE = Refusal(
+    "forget_state", "Forget a current source, or retry its failed forget"
+)
+NEW_REVISION = Refusal(
+    "revision_sequence", "New description must advance exactly one revision"
+)
+READD_REVISION = Refusal(
+    "revision_sequence", "Re-add a forgotten source at exactly the next revision"
+)
+REPLACEMENT_REVISION = Refusal(
+    "revision_sequence", "Replacement must advance exactly one revision"
+)
+REVISION_REUSE = Refusal(
+    "revision_reuse", "Changed description requires a new revision"
+)
+
+
+class Transition(NamedTuple):
+    """What one saved row lets each method begin.
+
+    `admits` maps a method to its revision step: 0 resumes the saved revision,
+    1 takes the next. `refuses` turns a method away before any argument is
+    read, and `otherwise` turns away every other method that `admits` lacks.
+    A method in none of them meets its own row refusal (REQUIRED_PLANS) after
+    its plan check. `sequence` refuses an advance to any revision but the next.
+    """
+
+    admits: dict[str, int]
+    refuses: dict[str, Refusal] = {}
+    otherwise: Refusal | None = None
+    sequence: Refusal | None = None
+
+
+def saved(admits, otherwise=None, sequence=None):
+    """A saved row other than a forgotten one: a publish would restart it."""
+    return Transition(admits, {"publish": SAVED_LINEAGE}, otherwise, sequence)
+
+
+# Keyed by (row state, saved plan operation); a row with no entry for its
+# plan operation takes its state's entry with None.
+TRANSITIONS = {
+    (None, None): Transition(
+        {"publish": 1, "reconcile": 1, "withdraw": 1},
+        {"replace": REPLACEMENT_MISSING, "forget": FORGET_MISSING},
+        sequence=NEW_REVISION,
+    ),
+    ("pending", None): Transition({}, otherwise=PENDING),
+    ("current", None): saved(
+        {"reconcile": 0, "replace": 1, "withdraw": 0, "forget": 0},
+        sequence=REPLACEMENT_REVISION,
+    ),
+    ("failed", None): saved({"reconcile": 0, "withdraw": 0}),
+    # A failed row whose saved plan one method owns resumes only through it.
+    ("failed", "identity_withdraw"): saved({"withdraw": 0}, FAILED_WITHDRAWAL),
+    ("failed", "identity_forget"): saved({"forget": 0}, FAILED_FORGET),
+    ("failed", "identity_replace"): saved({"replace": 0}, FAILED_REPLACEMENT),
+    ("withdrawn", None): Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE),
+    ("forgotten", None): Transition(
+        {"publish": 1}, otherwise=FORGOTTEN_SOURCE, sequence=READD_REVISION
+    ),
+}
+
+
+class RequiredPlan(NamedTuple):
+    operation: str  # the plan operation begin() requires
+    refusal: Refusal  # for a plan of any other operation
+    off_row: Refusal  # on a row the table neither admits nor refuses it on
+
+
+REQUIRED_PLANS = {
+    "replace": RequiredPlan("identity_replace", REPLACEMENT_PLAN, PRESERVE_REPLACEMENT),
+    "forget": RequiredPlan("identity_forget", FORGET_PLAN, FORGET_STATE),
+}
+# A replacement retry keeps what the failed attempt planned to retire.
+PRESERVED_ON_RETRY = ("previous_description", "text_change")
+
+
+def transition(row: PublicationRow | None) -> Transition:
+    if row is None:
+        return TRANSITIONS[None, None]
+    return TRANSITIONS.get((row.state, row.operation)) or TRANSITIONS[row.state, None]
+
+
+# The method that alone resumes a failed row's saved plan, by plan operation.
+OWNERS = {op: next(iter(t.admits)) for (_, op), t in TRANSITIONS.items() if op}
+
+
+def admissible(row, method, plan, revision) -> Refusal | None:
+    """The refusal begin() gives `method` with this plan and description
+    revision on this saved row (None: no row), or None when it may begin.
+    begin() checks the expected revision before and, at the saved revision,
+    the description after."""
+    cell = transition(row)
+    actual = row.revision if row else 0
+    step = cell.admits.get(method)
+    if step is None and (refusal := cell.refuses.get(method, cell.otherwise)):
+        return refusal
+    if row and step != 1 and revision != actual:
+        return ADVANCE_THROUGH_REPLACEMENT
+    required = REQUIRED_PLANS.get(method)
+    if required and plan.get("operation") != required.operation:
+        return required.refusal
+    if step is None:
+        return required.off_row
+    if step == 1 and revision != actual + 1:
+        return cell.sequence
+    if method == "replace" and row.state == "failed":
+        if any(plan.get(f) != row.plan.get(f) for f in PRESERVED_ON_RETRY):
+            return PRESERVE_REPLACEMENT
+    return None
 
 
 def now() -> str:
@@ -189,111 +335,14 @@ class RecordStore:
             row = await session.get(Publication, (dataset, sid))
             actual_revision = row.revision if row else 0
             if actual_revision != expected_revision:
-                raise IntentError("stale_revision", STALE_REVISION)
-            if row and row.state == "pending":
-                raise IntentError(
-                    "pending_attempt",
-                    "Inspect abandoned pending publication explicitly",
-                )
-            if row and row.state == "withdrawn" and method != "withdraw":
-                raise IntentError(
-                    "withdrawn_source",
-                    "Withdrawn source requires explicit new publication intent",
-                )
-            if row and row.state == "forgotten" and method != "publish":
-                raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
-            if method == "publish" and row:
-                # A publication starts a lineage: from no row, or again after forget.
-                if row.state != "forgotten":
-                    raise IntentError(
-                        "recovery_choice",
-                        "Reconcile a saved revision, or advance it through replacement",
-                    )
-                if source.revision != actual_revision + 1:
-                    raise IntentError("revision_sequence", READD_REVISION)
-            if (
-                row
-                and row.state == "failed"
-                and json.loads(row.plan).get("operation") == "identity_withdraw"
-                and method != "withdraw"
-            ):
-                raise IntentError(
-                    "recovery_choice", "Retry the failed withdrawal explicitly"
-                )
-            if (
-                row
-                and row.state == "failed"
-                and json.loads(row.plan).get("operation") == "identity_forget"
-                and method != "forget"
-            ):
-                raise IntentError("recovery_choice", FAILED_FORGET)
-            if (
-                row
-                and row.state == "failed"
-                and json.loads(row.plan).get("operation") == "identity_replace"
-                and method != "replace"
-            ):
-                raise IntentError("recovery_choice", FAILED_REPLACEMENT)
-            if row and source.revision != actual_revision:
-                if not (
-                    (method == "replace" and row.state == "current")
-                    or method == "publish"
-                ):
-                    raise IntentError(
-                        "recovery_choice",
-                        "Advance a current revision through replacement",
-                    )
-            if method == "replace" and row is None:
-                raise IntentError(
-                    "source_missing", "Replacement requires an existing publication"
-                )
-            if method == "forget":
-                if row is None:
-                    raise IntentError(
-                        "source_missing", "Forget requires an existing publication"
-                    )
-                if plan.get("operation") != "identity_forget":
-                    raise IntentError(
-                        "recovery_plan", "Forget requires a durable forget plan"
-                    )
-                if not (
-                    row.state == "current"
-                    or json.loads(row.plan).get("operation") == "identity_forget"
-                ):
-                    raise IntentError("forget_state", FORGET_STATE)
-            if method == "replace" and row is not None:
-                prior_plan = json.loads(row.plan)
-                if plan.get("operation") != "identity_replace":
-                    raise IntentError(
-                        "recovery_plan",
-                        "Replacement requires a durable replacement plan",
-                    )
-                if row.state == "current" and source.revision != actual_revision + 1:
-                    raise IntentError(
-                        "revision_sequence",
-                        "Replacement must advance exactly one revision",
-                    )
-                if row.state == "failed" and (
-                    prior_plan.get("operation") != "identity_replace"
-                    or plan.get("previous_description")
-                    != prior_plan.get("previous_description")
-                    or plan.get("text_change") != prior_plan.get("text_change")
-                ):
-                    raise IntentError(
-                        "recovery_plan",
-                        "Preserve the saved replacement retirement plan",
-                    )
+                raise IntentError(*STALE_REVISION)
+            saved = PublicationRow.of(row) if row else None
+            if refusal := admissible(saved, method, plan, source.revision):
+                raise IntentError(*refusal)
             payload = source.model_dump_json()
             if row and source.revision == actual_revision:
                 if json.loads(payload) != json.loads(row.description):
-                    raise IntentError(
-                        "revision_reuse", "Changed description requires a new revision"
-                    )
-            elif source.revision != actual_revision + 1:
-                raise IntentError(
-                    "revision_sequence",
-                    "New description must advance exactly one revision",
-                )
+                    raise IntentError(*REVISION_REUSE)
             if row is None:
                 row = Publication(dataset=dataset, source=sid, verified_revision=0)
                 session.add(row)

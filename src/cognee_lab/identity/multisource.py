@@ -501,12 +501,12 @@ async def run(args, root):
             if row.state == "forgotten":
                 from .storage import FORGOTTEN_SOURCE
 
-                raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
-            if row.state == "failed" and row.operation == "identity_forget":
+                raise IntentError(*FORGOTTEN_SOURCE)
+            if row.resumed_by == "forget":
                 await publisher.forget(
                     selected, expected_revision=selected.revision, origin="test"
                 )
-            elif row.state == "failed" and row.operation == "identity_replace":
+            elif row.resumed_by == "replace":
                 if row.plan.get("text_change"):
                     from .text_fixture import maintain_one
                     from .text_changes import TextChange

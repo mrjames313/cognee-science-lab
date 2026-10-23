@@ -608,7 +608,7 @@ async def admit_readd(graph, forgotten, source, removed):
             "source_changed", "Re-add the forgotten identity source and its document"
         )
     if source.revision != forgotten.revision + 1:
-        raise IntentError("revision_sequence", READD_REVISION)
+        raise IntentError(*READD_REVISION)
     fresh = frozenset(source.mention_groups)
     check_unused_entity_ids(forgotten, source, fresh)
     check_revision_scoped_ids(forgotten, source, fresh)

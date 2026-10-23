@@ -299,8 +299,8 @@ async def forget(
     if IdentitySource.model_validate_json(row.description) != source:
         raise IntentError("revision_reuse", "Forget the exact saved description")
     if row.revision != expected_revision:
-        raise IntentError("stale_revision", STALE_REVISION)
-    retry = row.state == "failed" and row.operation == "identity_forget"
+        raise IntentError(*STALE_REVISION)
+    retry = row.resumed_by == "forget"
     if retry:
         # The saved plan keeps the ownership the first attempt found, which
         # native deletion has since detached or removed.
@@ -312,9 +312,9 @@ async def forget(
             )
     else:
         if row.state == "forgotten":
-            raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
+            raise IntentError(*FORGOTTEN_SOURCE)
         if row.state != "current":
-            raise IntentError("forget_state", FORGET_STATE)
+            raise IntentError(*FORGET_STATE)
         plan = await forget_plan(publisher, source)
     refuse_dependents(source, plan, await records.rows())
     attempt = await records.begin(
