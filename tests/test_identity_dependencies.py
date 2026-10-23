@@ -499,6 +499,23 @@ async def test_admission_refuses_a_corpus_input_whose_entity_is_missing(
     )
 
 
+async def test_admission_refuses_a_missing_corpus_input_cited_only_by_a_group(
+    source_payload,
+):
+    """A resolution cites its group's inputs, so a corpus input that only a
+    group lists must exist too."""
+    payload = strip_corpus(source_payload)
+    payload["inputs"]["existing_A"] = source_payload["inputs"]["existing_A"]
+    for group in payload["mention_groups"].values():
+        group["input_refs"] = [*group["input_refs"], "existing_A"]
+    source = IdentitySource.model_validate_json(json.dumps(payload))
+    with pytest.raises(IntentError) as refused:
+        await (await admitting_publisher({})).admit_inputs(
+            source, {"doc01": TEXT}, own_chunks(source)
+        )
+    assert refused.value.code == "missing_reasoning_input"
+
+
 async def test_a_retried_second_edit_classifies_as_its_first_attempt_did(
     source_payload,
 ):

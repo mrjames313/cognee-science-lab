@@ -15,7 +15,7 @@ Two rules read the graph, so their callers run them apart from `admit`. On
 a first attempt no UUID the revision introduces may be a node yet
 (`check_absent_from_graph`), and every corpus input a decision lists names
 an Entity that exists (`check_corpus_inputs_exist`, run by every admission
-of a publication).
+of a publication), whether a decision or a group cites it.
 """
 
 from dataclasses import dataclass
@@ -29,6 +29,7 @@ from .models import (
 )
 from .validation import (
     IntentError,
+    cited_inputs,
     decision_inputs,
     fresh_entity_id,
     fresh_mention_id,
@@ -614,12 +615,18 @@ async def check_absent_from_graph(graph, old, source, fate):
 
 
 async def check_corpus_inputs_exist(graph, source):
-    """Every corpus input a decision lists names an Entity in the graph.
-    `referenced_corpus_ids` relies on this, so a listed input cannot exempt
-    an Entity this revision constructs from the derived-UUID rule. Only
-    admission refuses; retrieval and publication verification withhold the
-    decisions that read a removed Entity instead."""
-    for entity_id in sorted(referenced_corpus_ids(source), key=str):
+    """Every corpus input the description cites, a group's included, names
+    an Entity in the graph. `referenced_corpus_ids` relies on this, so a
+    listed input cannot exempt an Entity this revision constructs from the
+    derived-UUID rule. Only admission refuses; retrieval and publication
+    verification withhold the decisions that read a removed Entity
+    instead."""
+    cited = {
+        source.inputs[key].entity_id
+        for key in cited_inputs(source)
+        if isinstance(source.inputs[key], CorpusObjectInput)
+    }
+    for entity_id in sorted(cited, key=str):
         if await graph.get_node(str(entity_id)) is None:
             raise IntentError(
                 "missing_reasoning_input", f"Corpus input missing: {entity_id}"
