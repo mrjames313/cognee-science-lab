@@ -10,7 +10,7 @@ from cognee_lab.identity.group_regrouping import SPLIT_MAP
 
 # The default-bound search size. A change to the step list, the symmetry rule
 # or the no-op rule changes it; update it on purpose and say so in the commit.
-PINNED = dict(nodes=6287, sequences=6156)
+PINNED = dict(nodes=6431, sequences=6300)
 
 
 @pytest.fixture(scope="module")
@@ -70,6 +70,14 @@ DEEP_SEQUENCES = {
         "W1 withdraw S1 rev=2 expect=2 plan=withdraw",
         "W1 complete",
         "W1 replace S1 rev=2 expect=2 plan=replace<r1",
+    ),
+    "supersede-drops-chain": (
+        "W1 publish S1 rev=1 expect=0 plan=publish",
+        "W1 complete",
+        "W1 replace S1 rev=2 expect=1 plan=replace<r1",
+        "W1 fail@replace_saved",
+        "W1 replace S1 rev=2 expect=2 plan=replace<r1+e0 desc=alt",
+        "W1 fail@replace_saved",
     ),
 }
 

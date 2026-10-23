@@ -89,12 +89,13 @@ async def replace_one(publisher, source, *, expected_revision, fault_stage=None)
         pass
 
 
-def next_revision(reader: IdentitySource, change) -> IdentitySource:
-    """The reader's next revision after `change(payload)`, with every input
-    nothing cites any more dropped. Uncited inputs are known only once the
-    changed payload validates, so a drop validates it a second time."""
+def next_revision(reader: IdentitySource, change, *, revision=None) -> IdentitySource:
+    """The reader's next revision, or `revision`, after `change(payload)`,
+    with every input nothing cites any more dropped. Uncited inputs are known
+    only once the changed payload validates, so a drop validates it a second
+    time."""
     payload = reader.model_dump(mode="json")
-    payload["revision"] += 1
+    payload["revision"] = reader.revision + 1 if revision is None else revision
     change(payload)
     revised = IdentitySource.model_validate_json(json.dumps(payload))
     uncited = set(revised.inputs) - cited_inputs(revised)

@@ -605,6 +605,49 @@ def test_native_forget_of_the_glossary_removes_what_doc01_read(tmp_path):
 
 
 @pytest.mark.integration
+def test_native_a_failed_refresh_takes_the_removal_in_its_saved_revision(tmp_path):
+    """After a glossary edit, doc01's refresh failed: its saved revision 2
+    reads the glossary at the new range, and only replace resumes it, which
+    can never register the forgotten glossary again. Forgetting the glossary
+    applies the removal to that saved revision and the replacement finishes
+    with it, so nothing is left unfinished and the glossary comes back."""
+    root = tmp_path / "glossary"
+    command(root, "glossary-fixture")
+    command(
+        root,
+        "edit-glossary",
+        "--source",
+        "glossary",
+        "--case",
+        "insert",
+        "--expected-revision",
+        "1",
+        "--fault-stage",
+        "refresh_interrupted",
+    )
+    forget = ("forget", "--source", "glossary", "--expected-revision", "2")
+    report = json.loads(command(root, *forget, "--dry-run").stdout)
+    (dependent,) = report["dependents"]
+    assert (dependent["state"], dependent["revision"]) == ("failed", 2)
+    assert not dependent["blocked"]
+    command(root, *forget, "--confirm", report["token"])
+    final = json.loads((root / "glossary_result.json").read_text())
+    assert final["dependents_failed"] is None
+    doc01 = final["sources"]["doc01"]
+    assert doc01["state"] == "current" and doc01["saved_revision"] == 2
+    assert list(doc01["decisions"]) == ["r01"]
+    assert doc01["decisions"]["r01"]["producer_ref"].startswith("forget_")
+    assert doc01["glossary_spans"] == {}
+    assert final["result"]["unavailable_sources"] == []
+    refused = command(root, "reconcile", "--source", "glossary", expect=1)
+    assert "Forgotten source" in error_of(refused)["message"]
+    command(root, "readd", "--source", "glossary", "--expected-revision", "2")
+    back = json.loads((root / "glossary_result.json").read_text())
+    assert back["sources"]["glossary"]["state"] == "current"
+    assert list(back["sources"]["doc01"]["decisions"]) == ["r01"]
+
+
+@pytest.mark.integration
 def test_native_readd_of_a_consumer_waits_for_the_unfinished_forget(tmp_path):
     """doc02 consumed doc01. With doc02 forgotten, doc01's forget fails at its
     first stage. Re-adding doc02 would make it a dependent again and leave

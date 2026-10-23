@@ -313,6 +313,14 @@ def admissible(row, method, plan, revision) -> Refusal | None:
     return None
 
 
+def supersedes(row: PublicationRow, plan: dict, same: bool) -> bool:
+    """A replacement retry keeps the saved revisions it superseded,
+    `erased_from`, and adds the saved description exactly when it begins
+    with another one: an erasure retry (replace.py)."""
+    kept = row.plan.get("erased_from", [])
+    return plan.get("erased_from", []) == (kept if same else [*kept, row.description])
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -415,7 +423,12 @@ class RecordStore:
                 raise IntentError(*refusal)
             payload = source.model_dump_json()
             if row and source.revision == actual_revision:
-                if json.loads(payload) != json.loads(row.description):
+                same = json.loads(payload) == json.loads(row.description)
+                if saved.resumed_by == "replace":
+                    if not supersedes(saved, plan, same):
+                        refusal = PRESERVE_REPLACEMENT if same else REVISION_REUSE
+                        raise IntentError(*refusal)
+                elif not same:
                     raise IntentError(*REVISION_REUSE)
             elif source.revision != actual_revision + 1:
                 raise IntentError(*NEW_REVISION)

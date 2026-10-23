@@ -707,6 +707,17 @@ def check_erasure_removals(old, source):
     check_erasure_confined(old, source, erasure)
 
 
+def check_erasure_retry(saved, source):
+    """A retry replaces a failed replacement's saved revision only by its
+    erasure removal: the same revision, one removal producer new, and the
+    removal rules."""
+    if source.revision != saved.revision or erasure_of(saved, source) is None:
+        raise IntentError(
+            "revision_reuse", "Recovery must use the exact saved replacement intent"
+        )
+    check_erasure_removals(saved, source)
+
+
 def check_erasure_complete(old, source, erasure):
     """Every old decision citing what the forget removed is removed: a
     resolution becomes unresolved in place under the removal producer, with

@@ -147,12 +147,16 @@ def producer_key(ids: SourceIds, revision: int) -> str:
     return f"forget_{ids.identity_data_id}_r{revision}"
 
 
-def removal_revision(reader, ids: SourceIds, removed, readers=(), token=None):
+def removal_revision(
+    reader, ids: SourceIds, removed, readers=(), token=None, *, in_place=False
+):
     """The dependent's next revision without what the forget removed, and
     what it removes. A recipe that a removed decision named and no remaining
     decision names goes, unless a saved source, this one included, still
     cites that Entity as a corpus input: dropping the last declaration would
-    take the Entity out of the graph under a reader."""
+    take the Entity out of the graph under a reader. `in_place` keeps the
+    reader's revision: the removal applied to a failed replacement's saved
+    revision, which that replacement then finishes with."""
     from .revisions import next_revision
 
     erasure = erasure_for(ids, removed)
@@ -170,7 +174,8 @@ def removal_revision(reader, ids: SourceIds, removed, readers=(), token=None):
         - set().union(*(naming(reader, k) for k in remaining))
         - mentions
     ) & set(reader.entity_constructions)
-    key = producer_key(ids, reader.revision + 1)
+    revision = reader.revision if in_place else reader.revision + 1
+    key = producer_key(ids, revision)
 
     def change(payload):
         for k, d in resolutions.items():
@@ -186,7 +191,7 @@ def removal_revision(reader, ids: SourceIds, removed, readers=(), token=None):
             group["input_refs"] = without_erased(group["input_refs"], erased, own)
         payload["producers"][key] = removal_producer(ids, removed, token)
 
-    stripped = next_revision(reader, change)
+    stripped = next_revision(reader, change, revision=revision)
     read = {
         i.entity_id
         for i in stripped.inputs.values()
@@ -263,6 +268,7 @@ def impact(source, plan, rows) -> Impact:
             ids,
             removed,
             readers_of(rows, row.source, str(ids.identity_data_id)),
+            in_place=row.state != "current",
         )
         dependents.append(
             DependentImpact(
@@ -270,7 +276,7 @@ def impact(source, plan, rows) -> Impact:
                 identity_data_id=row.source,
                 revision=row.revision,
                 state=row.state,
-                blocked=row.state != "current",
+                blocked=blocked(row),
                 **parts,
             )
         )
@@ -280,6 +286,13 @@ def impact(source, plan, rows) -> Impact:
         tuple(sorted(str(e) for e in removed)),
         tuple(dependents),
     )
+
+
+def blocked(row) -> bool:
+    """A dependent whose removal waits for its own attempt: a pending row, or
+    a failed one that replace does not resume. A failed replacement takes
+    the removal in its saved revision instead."""
+    return row.state != "current" and row.resumed_by != "replace"
 
 
 def removal_of(row, ids: SourceIds) -> bool:
@@ -372,8 +385,10 @@ def report(impact: Impact, *, plan, description, events, caller_files=()) -> dic
 async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
     """Write each unfinished dependent's removal revision after the forget
     completed, each under its own writer reservation through `replace_one`.
-    A failed removal revision resumes with its saved description. A
-    dependent whose own attempt is pending or failed waits
+    A failed removal revision resumes with its saved description, and a
+    failed replacement finishes with the removal applied to its saved
+    revision. A dependent whose own attempt is otherwise pending or failed
+    waits
     (`dependent_unfinished`) until that attempt finishes and a rerun of
     forget or reconcile removes it. Stops at the first failure and reports
     it, not raised: the forget before it already completed. `fault_stage`
@@ -395,7 +410,7 @@ async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
         for row in todo:
             if removal_of(row, ids):
                 description = IdentitySource.model_validate_json(row.description)
-            elif row.state != "current":
+            elif blocked(row):
                 waiting.append(
                     dict(
                         identity_data_id=row.source,
@@ -412,6 +427,7 @@ async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
                     removed,
                     readers_of(rows, row.source, str(ids.identity_data_id)),
                     tombstone.impact_token,
+                    in_place=row.state != "current",
                 )
             await replace_one(
                 publisher,

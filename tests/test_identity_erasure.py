@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee_lab.identity.admission import admit, identity_map
+from cognee_lab.identity.admission import admit, check_erasure_retry, identity_map
 from cognee_lab.identity.erasure import (
     impact,
     producer_key,
@@ -218,6 +218,34 @@ def test_the_token_names_the_affected_decision_set(source_payload):
     assert impact(gloss, plan, [row_of(gloss), row_of(doc01, "withdrawn")]).token == (
         alone.token
     )
+
+
+def test_a_failed_replacement_takes_the_removal_in_its_saved_revision(
+    source_payload,
+):
+    """The removal applied in place keeps the saved revision, so a retry of
+    the failed replacement can finish with it. Any other description at that
+    revision is not a retry."""
+    gloss = glossary(source_payload)
+    saved = reader_of(source_payload, gloss)
+    ids = source_ids(gloss)
+    found = impact(
+        gloss,
+        forgotten_plan(gloss),
+        [row_of(gloss), row_of(saved, "failed", {"operation": "identity_replace"})],
+    )
+    assert not found.dependents[0].blocked
+    revised, _ = removal_revision(saved, ids, set(), in_place=True)
+    assert revised.revision == saved.revision
+    assert revised.mention_resolutions["r01"].producer_ref == producer_key(
+        ids, saved.revision
+    )
+    check_erasure_retry(saved, revised)
+    changed = json.loads(saved.model_dump_json())
+    changed["mention_resolutions"]["r01"]["explanation"] = "changed"
+    with pytest.raises(IntentError) as refused:
+        check_erasure_retry(saved, source_of(changed))
+    assert refused.value.code == "revision_reuse"
 
 
 def test_unfinished_is_derived_from_the_rows(source_payload):

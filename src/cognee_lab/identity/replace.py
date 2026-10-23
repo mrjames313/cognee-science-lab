@@ -1,6 +1,11 @@
 """Identity revision replacement with explicit, durable forward recovery."""
 
-from .admission import admit, check_absent_from_graph, identity_map
+from .admission import (
+    admit,
+    check_absent_from_graph,
+    check_erasure_retry,
+    identity_map,
+)
 from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
@@ -55,6 +60,45 @@ async def admit_replacement(graph, old, source, texts, text_change, *, retry):
             "Retiring or adding a group or an occurrence requires a text change and its rebuild",
         )
     return fate
+
+
+async def plan_retirement(graph, plan, olds, source):
+    """Record what replacing `olds` by `source` retires: the recipes they
+    declared and `source` does not, and their identity edges with the refs
+    and contributions each holds now. An erasure retry adds what the saved
+    revision it supersedes declared or wrote; what the plan already holds
+    keeps the values its first attempt read."""
+    from cognee.infrastructure.databases.provenance import EdgeIdentity
+    from .publish import identity_edges
+
+    retired = plan.setdefault("retired_entities", {})
+    keep = {str(i) for i in source.entity_constructions}
+    gone = {str(i) for o in olds for i in o.entity_constructions} - keep - set(retired)
+    for key, n in (await graph.get_node_delete_data(sorted(gone))).items():
+        retired[key] = dict(
+            refs=n.source_ref_keys, type=n.node_type, indexed_fields=n.indexed_fields
+        )
+    old_edges = plan.setdefault("old_edges", [])
+    known = {tuple(e) for e in old_edges}
+    added = []
+    for o in olds:
+        for edge in identity_edges(o):
+            if tuple(edge[:3]) not in known:
+                known.add(tuple(edge[:3]))
+                added.append(list(edge[:3]))
+    old_edges += added
+    plan["new_edges"] = [list(e[:3]) for e in identity_edges(source)]
+    edges = await graph.get_edge_delete_data([EdgeIdentity(*e) for e in added])
+    plan.setdefault("previous_edges", []).extend(
+        dict(
+            source=e.source_id,
+            target=e.target_id,
+            relation=e.relationship_name,
+            refs=data.source_ref_keys,
+            properties=data.edge_properties,
+        )
+        for e, data in edges.items()
+    )
 
 
 def retained_contributions(source, previous, wanted, source_refs):
@@ -117,12 +161,15 @@ async def replace(
         raise IntentError(*STALE_REVISION)
     saved = IdentitySource.model_validate_json(row.description)
     retry = row.resumed_by == "replace"
+    erased_from = []
     if retry:
-        if source != saved:
-            raise IntentError(
-                "revision_reuse", "Recovery must use the exact saved replacement intent"
-            )
         plan = dict(row.plan)
+        erased_from = list(plan.get("erased_from", []))
+        if source != saved:
+            # Only an erasure retry: the removal of what a forget took away,
+            # applied to the saved revision, which it supersedes.
+            erased_from.append(row.description)
+            plan["erased_from"] = erased_from
         try:
             old = IdentitySource.model_validate_json(plan["previous_description"])
             if (
@@ -165,13 +212,18 @@ async def replace(
             "semantic_rebuild",
             "Text replacement requires explicit semantic writer and verifier",
         )
-    await admit_replacement(graph, old, source, texts, text_change, retry=retry)
+    bases = [IdentitySource.model_validate_json(d) for d in erased_from]
+    await admit_replacement(
+        graph, old, bases[0] if bases else source, texts, text_change, retry=retry
+    )
+    for base, erased in zip(bases, [*bases[1:], source]):
+        check_erasure_retry(base, erased)
     if text_change is not None:
         await text_change.preflight(
             publisher, old, source, texts, chunks, ctx, retry=retry
         )
     registered = await read_registered(source)
-    if registered not in (old, source):
+    if registered not in (old, *bases, source):
         raise IntentError(
             "generated_source_changed",
             "Registered snapshot matches neither the previous nor intended revision",
@@ -193,41 +245,12 @@ async def replace(
     if verify_semantics is not None and text_change is None:
         await verify_semantics()
     owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
-    if not retry:
-        if text_change is not None:
-            from dataclasses import asdict
+    if not retry and text_change is not None:
+        from dataclasses import asdict
 
-            plan["text_change"] = asdict(text_change)
-        retired_ids = [
-            str(i)
-            for i in set(old.entity_constructions) - set(source.entity_constructions)
-        ]
-        node_data = await graph.get_node_delete_data(retired_ids)
-        plan.update(
-            retired_entities={
-                key: dict(
-                    refs=n.source_ref_keys,
-                    type=n.node_type,
-                    indexed_fields=n.indexed_fields,
-                )
-                for key, n in node_data.items()
-            },
-            old_edges=[list(e[:3]) for e in identity_edges(old)],
-            new_edges=[list(e[:3]) for e in identity_edges(source)],
-        )
-        edges = await graph.get_edge_delete_data(
-            [EdgeIdentity(*e) for e in plan["old_edges"]]
-        )
-        plan["previous_edges"] = [
-            dict(
-                source=e.source_id,
-                target=e.target_id,
-                relation=e.relationship_name,
-                refs=data.source_ref_keys,
-                properties=data.edge_properties,
-            )
-            for e, data in edges.items()
-        ]
+        plan["text_change"] = asdict(text_change)
+    if not retry or source != saved:
+        await plan_retirement(graph, plan, [old, *bases], source)
 
     async def retire_and_verify(run):
         run.inject("replace_published")
@@ -349,7 +372,7 @@ async def replace(
         run.inject("replace_saved")
         # Recheck after taking the writer reservation and before native I/O.
         actual = await read_registered(source)
-        if actual not in (old, source):
+        if actual not in (old, *bases, source):
             raise IntentError(
                 "generated_source_changed", "Registered identity snapshot changed"
             )

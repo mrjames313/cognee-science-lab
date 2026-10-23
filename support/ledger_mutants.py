@@ -217,9 +217,15 @@ MUTANTS = {
         "P5",
     ),
     "no-revision-reuse": Mutant(
-        "                if json.loads(payload) != json.loads(row.description):\n"
+        "                elif not same:\n"
         "                    raise IntentError(*REVISION_REUSE)\n",
-        "                pass\n",
+        "",
+        "P5",
+    ),
+    # An erasure retry supersedes a description it does not name.
+    "supersede-any-description": Mutant(
+        "(kept if same else [*kept, row.description])",
+        '(kept if same else plan.get("erased_from", []))',
         "P5",
     ),
     # A first publication may skip revisions.
@@ -320,6 +326,13 @@ DEEP_MUTANTS = {
         '{"withdraw": 0, "forget": 0}, otherwise=WITHDRAWN_SOURCE',
         '{"withdraw": 0, "forget": 0, "replace": 0}, otherwise=WITHDRAWN_SOURCE',
         "P5",
+    ),
+    # Caught at depth 6: a failed erasure retry, resumed with its saved
+    # arguments, is refused because the retry forgets what it superseded.
+    "supersede-drops-chain": Mutant(
+        '    kept = row.plan.get("erased_from", [])\n',
+        "    kept = []\n",
+        "P6",
     ),
 }
 assert (

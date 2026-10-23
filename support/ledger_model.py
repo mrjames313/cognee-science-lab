@@ -101,6 +101,9 @@ class Plan:
     revision: int
     previous: tuple[int, int] | None = None  # (revision, variant) it replaces
     change: Literal["text", "regroup"] | None = None
+    # The variants of the saved descriptions at this revision that erasure
+    # retries superseded, in order (replace.py's plan["erased_from"]).
+    erased: tuple[int, ...] = ()
 
     @property
     def tag(self):
@@ -108,7 +111,8 @@ class Plan:
             return self.operation
         revision, variant = self.previous
         kind = self.change or "replace"
-        return f"{kind}<r{revision}" + ("alt" if variant else "")
+        erased = "".join(f"+e{v}" for v in self.erased)
+        return f"{kind}<r{revision}" + ("alt" if variant else "") + erased
 
     def as_dict(self, s):
         plan = dict(
@@ -122,6 +126,10 @@ class Plan:
             ).model_dump_json()
         if self.change:
             plan["text_change"] = dict(TEXT_CHANGES[self.change])
+        if self.erased:
+            plan["erased_from"] = [
+                description(s, self.revision, v).model_dump_json() for v in self.erased
+            ]
         return plan
 
     @classmethod
@@ -136,11 +144,15 @@ class Plan:
             kind = next((k for k, v in TEXT_CHANGES.items() if v == change), None)
             if kind is None:
                 raise ValueError(f"S{s + 1} saved a text_change the checker never sent")
+        erased = tuple(
+            variant_of(s, json.loads(d)) for d in saved.get("erased_from", [])
+        )
         return cls(
             saved["operation"].removeprefix("identity_"),
             saved["revision"],
             previous,
             kind,
+            erased,
         )
 
 
@@ -296,8 +308,20 @@ def replace_intents(w, s, view):
                 replace(saved, previous=(prior, 1 - prior_variant)),
                 v,
             ),
+            # An erasure retry supersedes the saved description with another
+            # one at the same revision, and names the one it supersedes.
+            Begin(w, s, "replace", r, r, superseding(saved, v), 1 - v),
+            Begin(w, s, "replace", r, r, superseding(saved, 1 - v), 1 - v),
+            Begin(w, s, "replace", r, r, superseding(saved, v), v),
         ]
+        if saved.erased:
+            ops.append(Begin(w, s, "replace", r, r, replace(saved, erased=()), v))
     return ops
+
+
+def superseding(saved: Plan, variant: int) -> Plan:
+    """The saved plan with one more superseded description."""
+    return replace(saved, erased=(*saved.erased, variant))
 
 
 def withdraw_intents(w, s, view):
@@ -368,6 +392,10 @@ class Method:
     terminals: frozenset[str]
     requires_plan: bool  # begin() must carry a plan of the `recovers` operation
     preserved_on_retry: tuple[str, ...]  # Plan fields a retry keeps
+    # A retry of a row it owns may begin with another description at the
+    # saved revision when its plan adds the saved one to `erased`; otherwise
+    # a retry keeps `erased`.
+    supersedes: bool = False
 
     def __post_init__(self):
         assert self.recovers or not self.requires_plan, (
@@ -430,6 +458,7 @@ METHODS = {
             terminals=frozenset(),
             requires_plan=True,
             preserved_on_retry=("previous", "change"),
+            supersedes=True,
         ),
         Method(  # withdraw()
             name="withdraw",
