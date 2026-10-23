@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import Literal, NamedTuple
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from sqlalchemy import Integer, String, Text, select, update
+from sqlalchemy import Integer, String, Text, inspect, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -121,10 +121,7 @@ class PublicationRow:
     def of(cls, record: Publication) -> "PublicationRow":
         description = tombstone = None
         if record.state == "forgotten":
-            try:
-                tombstone = Tombstone.model_validate_json(record.description)
-            except ValueError:
-                raise IntentError(*OLD_FORGOTTEN_ROW) from None
+            tombstone = saved_tombstone(record.description)
         else:
             try:
                 description = IdentitySource.model_validate_json(record.description)
@@ -141,7 +138,7 @@ class PublicationRow:
             tombstone=tombstone,
             plan=json.loads(record.plan),
             last_tombstone=(
-                Tombstone.model_validate_json(record.last_tombstone)
+                saved_tombstone(record.last_tombstone)
                 if record.last_tombstone
                 else None
             ),
@@ -243,7 +240,11 @@ DESCRIPTION_FORMAT = Refusal(
 )
 OLD_FORGOTTEN_ROW = Refusal(
     "forgotten_format",
-    "A forgotten row from before tombstones is not read; regenerate this development root",
+    "A forgotten row in an older format is not read; regenerate this development root",
+)
+OLD_LEDGER = Refusal(
+    "ledger_format",
+    "This root's ledger lacks columns this version reads; regenerate this development root",
 )
 NEW_REVISION = Refusal(
     "revision_sequence", "New description must advance exactly one revision"
@@ -438,6 +439,25 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def saved_tombstone(text: str) -> Tombstone:
+    """A saved tombstone; one from before tombstones or in an older format
+    is refused."""
+    try:
+        return Tombstone.model_validate_json(text)
+    except ValueError:
+        raise IntentError(*OLD_FORGOTTEN_ROW) from None
+
+
+def saved_columns(connection) -> dict[str, set[str]]:
+    """The columns each ledger table has in the store, which create_all
+    does not add to a table made by an older version."""
+    found = inspect(connection)
+    return {
+        t.name: {c["name"] for c in found.get_columns(t.name)}
+        for t in Base.metadata.sorted_tables
+    }
+
+
 def encode(value) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
 
@@ -454,7 +474,12 @@ class RecordStore:
         async with self.session_factory() as session:
             connection = await session.connection()
             await connection.run_sync(Base.metadata.create_all)
+            saved = await connection.run_sync(saved_columns)
             await session.commit()
+        if any(
+            set(t.columns.keys()) - saved[t.name] for t in Base.metadata.sorted_tables
+        ):
+            raise IntentError(*OLD_LEDGER)
 
     async def rows(self, dataset=None) -> list[PublicationRow]:
         async with self.session_factory() as session:

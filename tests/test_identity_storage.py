@@ -568,3 +568,47 @@ def test_unknown_row_state_is_refused_clearly(source_payload):
     source = IdentitySource.model_validate_json(json.dumps(source_payload))
     with pytest.raises(IntentError, match="unknown"):
         admissible(dataclasses.replace(row, state="archived"), "reconcile", {}, source)
+
+
+@pytest.mark.asyncio
+async def test_a_ledger_from_before_the_readd_follow_ups_is_refused(source_payload):
+    """A root made before `last_tombstone` existed has no such column, and
+    its forgotten rows hold tombstones without the fields added with it.
+    Both are refused by name, saying to regenerate the root."""
+    from sqlalchemy import text, update
+
+    from cognee_lab.identity.storage import Publication
+
+    store = memory_store()
+    async with store.session_factory() as session:
+        await session.execute(
+            text(
+                "CREATE TABLE lab_identity_publications (dataset VARCHAR(36), "
+                "source VARCHAR(36), revision INTEGER, verified_revision INTEGER, "
+                "state VARCHAR(16), attempt VARCHAR(36), description TEXT, "
+                "plan TEXT, PRIMARY KEY (dataset, source))"
+            )
+        )
+        await session.commit()
+    with pytest.raises(IntentError) as refused:
+        await store.initialize()
+    assert refused.value.code == "ledger_format"
+    assert "regenerate" in str(refused.value)
+
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    old = tombstone_of(source).model_dump(mode="json")
+    for field in ("decisions_sha256", "earlier_mention_ids", "earlier_entity_ids"):
+        del old[field]
+    store = memory_store()
+    await store.initialize()
+    attempt = await store.begin(source, expected_revision=0, plan={})
+    await store.complete(source, attempt)
+    async with store.session_factory() as session:
+        await session.execute(
+            update(Publication).values(state="forgotten", description=json.dumps(old))
+        )
+        await session.commit()
+    with pytest.raises(IntentError) as refused:
+        await store.rows()
+    assert refused.value.code == "forgotten_format"
+    assert "older format" in str(refused.value)
