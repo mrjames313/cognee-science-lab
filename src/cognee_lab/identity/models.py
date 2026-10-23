@@ -10,6 +10,9 @@ from .decisions import decisions_digest
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Key = Annotated[str, Field(min_length=1)]
+# The record types another source may cite (records.REGISTRY has one entry
+# for each).
+RecordType = Literal["mention_resolution", "variant_assignment"]
 
 
 class Strict(BaseModel):
@@ -59,9 +62,15 @@ class CorpusObjectInput(Strict):
 
 
 class SavedRecordInput(Strict):
+    """A record of another source of the dataset, by type and key, pinned by
+    its fingerprint (records.record_digest). `representation_revision` is
+    the cited source's revision when the citation was made: provenance, not
+    a validity test."""
+
     kind: Literal["saved_record"]
     dataset_id: UUID
     identity_data_id: UUID
+    record_type: RecordType
     record_id: Key
     representation_revision: int = Field(ge=1)
     content_sha256: Digest

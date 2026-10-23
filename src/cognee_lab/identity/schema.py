@@ -36,9 +36,11 @@ def schema():
     definitions["CorpusObjectInput"]["properties"]["content_sha256"][
         "description"
     ] = "SHA-256 lowercase hex of RFC 8785 JCS UTF-8 of selected supplied field/value object; missing fields fail."
-    definitions["SavedRecordInput"]["properties"]["content_sha256"][
-        "description"
-    ] = "SHA-256 lowercase hex of JCS UTF-8 complete supplied record, excluding enclosing source/revision."
+    definitions["SavedRecordInput"]["properties"]["content_sha256"]["description"] = (
+        "SHA-256 lowercase hex of RFC 8785 JCS UTF-8 of the record's fingerprint: its "
+        "record_type and reviewed fields, without producer_ref, input_refs and "
+        "explanation; a mention resolution adds its group's entity_id."
+    )
     return result
 
 

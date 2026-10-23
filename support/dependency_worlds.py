@@ -221,6 +221,7 @@ def add_saved_record(old, new, ctx):
         kind="saved_record",
         dataset_id=new["dataset_id"],
         identity_data_id=new["identity_data_id"],
+        record_type="mention_resolution",
         record_id="r1",
         representation_revision=1,
         content_sha256=text_digest("record"),

@@ -414,6 +414,7 @@
     },
     "SavedRecordInput": {
       "additionalProperties": false,
+      "description": "A record of another source of the dataset, by type and key, pinned by\nits fingerprint (records.record_digest). `representation_revision` is\nthe cited source's revision when the citation was made: provenance, not\na validity test.",
       "properties": {
         "kind": {
           "const": "saved_record",
@@ -430,6 +431,14 @@
           "title": "Identity Data Id",
           "type": "string"
         },
+        "record_type": {
+          "enum": [
+            "mention_resolution",
+            "variant_assignment"
+          ],
+          "title": "Record Type",
+          "type": "string"
+        },
         "record_id": {
           "minLength": 1,
           "title": "Record Id",
@@ -444,13 +453,14 @@
           "pattern": "^[0-9a-f]{64}$",
           "title": "Content Sha256",
           "type": "string",
-          "description": "SHA-256 lowercase hex of JCS UTF-8 complete supplied record, excluding enclosing source/revision."
+          "description": "SHA-256 lowercase hex of RFC 8785 JCS UTF-8 of the record's fingerprint: its record_type and reviewed fields, without producer_ref, input_refs and explanation; a mention resolution adds its group's entity_id."
         }
       },
       "required": [
         "kind",
         "dataset_id",
         "identity_data_id",
+        "record_type",
         "record_id",
         "representation_revision",
         "content_sha256"

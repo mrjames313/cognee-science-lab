@@ -28,6 +28,7 @@ from .models import (
     SourceTextInput,
 )
 from .decisions import naming_keys
+from .records import reviewed_decisions
 from .erasure_rules import (
     NO_ERASURES,
     check_erasure_removals,
@@ -358,20 +359,6 @@ def check_revision_scoped_ids(old, source, fresh):
                 "fresh_uuid_not_derived",
                 "A fresh group's Entity UUID derives from its source, revision and group key",
             )
-
-
-ATTRIBUTION_FIELDS = frozenset({"producer_ref", "input_refs", "explanation"})
-
-
-def reviewed_decisions(values):
-    return {
-        k: {
-            f: v
-            for f, v in item.model_dump(mode="json").items()
-            if f not in ATTRIBUTION_FIELDS
-        }
-        for k, item in values.items()
-    }
 
 
 def resolutions_of(description, groups):
