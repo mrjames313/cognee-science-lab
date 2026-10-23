@@ -81,15 +81,12 @@ class PublishResult:
 
 class Publisher:
     def __init__(self, graph, vector, records: RecordStore, runtime_profile=None):
-        self.graph, self.vector, self.records = graph, vector, records
-        self.runtime_profile = runtime_profile or {}
-
-    @property
-    def withholdings(self):
-        """The withholding table beside the ledger (withholding.py)."""
         from .withholding import WithholdingStore
 
-        return WithholdingStore(self.records.session_factory)
+        self.graph, self.vector, self.records = graph, vector, records
+        self.runtime_profile = runtime_profile or {}
+        # The withholding table beside the ledger (withholding.py).
+        self.withholdings = WithholdingStore(records.session_factory)
 
     async def withheld_for(self, source, rows=None) -> set[str]:
         """The source's decisions that are withheld now: validation skips
@@ -97,7 +94,7 @@ class Publisher:
         from .withholding import withheld_decisions
 
         rows = await self.records.rows() if rows is None else rows
-        held = await withheld_decisions(rows, self.withholdings)
+        held = withheld_decisions(rows, await self.withholdings.rows())
         return set(held.get(str(source.identity_data_id), {}))
 
     async def withdraw(
@@ -169,10 +166,7 @@ class Publisher:
 
         records = RecordStore()
         await records.initialize()
-        from .withholding import WithholdingStore
-
-        await WithholdingStore(records.session_factory).initialize()
-        return cls(
+        publisher = cls(
             await get_graph_engine(),
             await get_vector_engine_async(),
             records,
@@ -183,6 +177,8 @@ class Publisher:
                 relational_provider=get_relational_config().db_provider,
             ),
         )
+        await publisher.withholdings.initialize()
+        return publisher
 
     async def admit_inputs(self, source, texts, chunks, *, saved_revision=None):
         """The checks that need no registered Data: the inputs against the

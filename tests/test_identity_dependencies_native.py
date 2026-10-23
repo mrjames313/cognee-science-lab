@@ -178,7 +178,7 @@ def test_native_glossary_edits_withhold_refresh_and_reconfirm(tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "stage", ["replace_saved", "replace_dependents", "text_chunks"]
+    "stage", ["replace_saved", "withhold_dependents", "text_chunks"]
 )
 def test_native_failed_glossary_edit_withholds_until_reconciled(tmp_path, stage):
     root = tmp_path / stage

@@ -185,15 +185,14 @@ async def run(args, root):
     publisher = await Publisher.configured()
     args._fixture_publisher = publisher
     old = (await current_sources(root, publisher))["doc01"]
-    row = await publisher.records.row(old)
-    if row.revision != args.expected_revision:
-        from .storage import STALE_REVISION
+    from .fixture import expect_current
 
-        raise IntentError(*STALE_REVISION)
-    if row.state != "current":
-        raise IntentError(
-            "recovery_choice", "Reconcile the exact saved replacement explicitly"
-        )
+    await expect_current(
+        publisher,
+        old,
+        args.expected_revision,
+        "Reconcile the exact saved replacement explicitly",
+    )
     ctx = await context_for(old.identity_data_id)
     before = await read_original(old, ctx)
     change = TextChange(

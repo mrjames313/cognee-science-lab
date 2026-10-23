@@ -210,6 +210,20 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
             raise IntentError("verify_index", "Original chunk vector missing")
 
 
+async def expect_current(publisher, source, expected_revision, recovery):
+    """A fixture command starts from the source's current row at the
+    expected revision. `recovery` tells the user what to reconcile when the
+    row is pending or failed."""
+    from .storage import STALE_REVISION
+
+    row = await publisher.records.row(source)
+    if row.revision != expected_revision:
+        raise IntentError(*STALE_REVISION)
+    if row.state != "current":
+        raise IntentError("recovery_choice", recovery)
+    return row
+
+
 async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amend=None):
     """Register doc01 and its description. `amend(payload)` edits the
     description before it is registered."""

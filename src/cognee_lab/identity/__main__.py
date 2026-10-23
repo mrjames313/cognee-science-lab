@@ -23,6 +23,8 @@ from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
 from .withdraw import FAULT_STAGES as WITHDRAW_STAGES
 
+# The replacement stage that withholds a dependent's decisions: text changes only.
+WITHHOLD_STAGE = "withhold_dependents"
 TEXT_COMMANDS = {"edit-text", "edit-glossary", *OCCURRENCE_COMMANDS}
 REVISION_COMMANDS = {
     "revise",
@@ -128,13 +130,15 @@ def main():
             parser.error(
                 f"{REFRESH_FAULT} applies to edit-glossary and refresh-dependents"
             )
-    elif args.fault_stage == "replace_dependents" and args.command not in TEXT_COMMANDS:
+    elif args.fault_stage == WITHHOLD_STAGE and args.command not in TEXT_COMMANDS:
         parser.error(
-            "replace_dependents runs only in a command that makes a text change"
+            "withhold_dependents runs only in a command that makes a text change"
         )
     elif args.fault_stage:
         if args.command in TEXT_COMMANDS:
-            if not args.fault_stage.startswith(("text_", "replace_")):
+            if args.fault_stage != WITHHOLD_STAGE and not args.fault_stage.startswith(
+                ("text_", "replace_")
+            ):
                 parser.error("Fault stage does not match the selected operation")
         elif args.fault_stage.startswith("text_"):
             parser.error("Text failure boundaries require a text-changing command")

@@ -1,5 +1,6 @@
 """Exact input checks. No identity judgments or approximate substring matching."""
 
+from enum import StrEnum
 from hashlib import sha256
 from typing import Any, NamedTuple
 from uuid import UUID, uuid5
@@ -67,8 +68,18 @@ def map_chunks(document_text: str, chunks: list) -> dict[str, tuple[int, int]]:
     return {str(c.id): span for c, span in zip(ordered, offsets, strict=True)}
 
 
-# Why a decision is withheld: an input it read no longer validates, or is gone.
-INPUT_CHANGED, INPUT_REMOVED = "input_changed", "input_removed"
+class Reason(StrEnum):
+    """Why a decision is withheld, as users see it: an input it read no
+    longer validates, or is gone. Members are in increasing precedence."""
+
+    CHANGED = "input_changed"
+    REMOVED = "input_removed"
+
+
+def stronger(a: StrEnum, b: StrEnum) -> StrEnum:
+    """The member of the two that comes later in its enum's order."""
+    order = list(type(a))
+    return max(a, b, key=order.index)
 
 
 def is_foreign(source: IdentitySource, key: str) -> bool:
@@ -103,13 +114,13 @@ def withheld_by(source: IdentitySource, drift: dict[str, str]) -> dict[str, str]
     citing several inputs is valid only when all of them are."""
     withheld = {}
     for key, inputs in decision_inputs(source).items():
-        reasons = {drift[i] for i in inputs if i in drift}
+        reasons = [Reason(drift[i]) for i in sorted(inputs) if i in drift]
         if reasons:
-            withheld[key] = INPUT_REMOVED if INPUT_REMOVED in reasons else INPUT_CHANGED
+            withheld[key] = max(reasons, key=list(Reason).index)
     return withheld
 
 
-def checked_inputs(source: IdentitySource, withheld) -> set[str]:
+def checked_inputs(source: IdentitySource, withheld=frozenset()) -> set[str]:
     """The inputs to validate: the original text and the groups' own structure
     always, and every input a decision outside `withheld` cites. A text reached
     only as a span's or chunk's document is read, not digest-checked."""
@@ -123,6 +134,18 @@ def checked_inputs(source: IdentitySource, withheld) -> set[str]:
         if key not in withheld:
             used.update(inputs)
     return used
+
+
+def cited_inputs(source: IdentitySource) -> set[str]:
+    """Every input key the description cites: what `checked_inputs` checks
+    with nothing withheld, and the documents of cited spans and chunks. An
+    input outside it may be dropped."""
+    cited = checked_inputs(source)
+    for key in list(cited):
+        document = getattr(source.inputs[key], "document_ref", None)
+        if document:
+            cited.add(document)
+    return cited
 
 
 class Failure(NamedTuple):
@@ -143,30 +166,32 @@ async def input_failure(
     document = getattr(item, "document_ref", None)
     text = texts.get(document if document else key)
     if isinstance(item, (SourceTextInput, ChunkInput, TextSpanInput)) and text is None:
-        return Failure("source_changed", INPUT_REMOVED, f"Text missing: {key}")
+        return Failure("source_changed", Reason.REMOVED, f"Text missing: {key}")
     if isinstance(item, SourceTextInput):
         if text_digest(text) != item.text_sha256:
-            return Failure("source_changed", INPUT_CHANGED, f"Text changed: {key}")
+            return Failure("source_changed", Reason.CHANGED, f"Text changed: {key}")
     elif isinstance(item, TextSpanInput):
         if (
             item.end > len(text)
             or text_digest(text[item.start : item.end]) != item.text_sha256
         ):
             return Failure(
-                "input_changed", INPUT_CHANGED, f"Span missing/changed: {key}"
+                "input_changed", Reason.CHANGED, f"Span missing/changed: {key}"
             )
     elif isinstance(item, CorpusObjectInput):
         node = await graph.get_node(str(item.entity_id))
         if node is None:
             return Failure(
-                "missing_reasoning_input", INPUT_REMOVED, f"Corpus input missing: {key}"
+                "missing_reasoning_input",
+                Reason.REMOVED,
+                f"Corpus input missing: {key}",
             )
         if any(field not in node for field in item.selected_fields) or (
             object_digest({field: node[field] for field in item.selected_fields})
             != item.content_sha256
         ):
             return Failure(
-                "input_changed", INPUT_CHANGED, f"Corpus fields changed: {key}"
+                "input_changed", Reason.CHANGED, f"Corpus fields changed: {key}"
             )
     elif isinstance(item, SavedRecordInput):
         if saved_record_reader is None:
@@ -177,7 +202,7 @@ async def input_failure(
             or object_digest(value) != item.content_sha256
         ):
             return Failure(
-                "input_changed", INPUT_CHANGED, f"Saved record changed: {key}"
+                "input_changed", Reason.CHANGED, f"Saved record changed: {key}"
             )
     elif isinstance(item, ChunkInput):
         chunk = chunks.get(str(item.chunk_id))
@@ -190,7 +215,7 @@ async def input_failure(
         ):
             return Failure(
                 "chunk_mapping",
-                INPUT_CHANGED,
+                Reason.CHANGED,
                 f"Chunk missing or mapping changed: {key}",
             )
         # Only the own document's chunks are all supplied, so only they are
@@ -201,7 +226,7 @@ async def input_failure(
         ):
             return Failure(
                 "chunk_mapping",
-                INPUT_CHANGED,
+                Reason.CHANGED,
                 f"Chunk range differs from ordered native mapping: {key}",
             )
     return None

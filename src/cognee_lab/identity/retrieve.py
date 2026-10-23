@@ -58,25 +58,28 @@ def held_by(source, recorded, drift):
     withheld-decision set, and every decision citing an input that failed
     live validation. No edit classified such an input, so a reviewer
     answers it (`refresh_needed`)."""
-    from .withholding import REFRESH_NEEDED, Withheld, combine
+    from .withholding import Status, Withheld, combine
 
     held = dict(recorded)
     cited = decision_inputs(source)
     for key, reason in withheld_by(source, drift).items():
-        found = Withheld(reason, REFRESH_NEEDED, cited[key] & set(drift))
+        found = Withheld(reason, Status.REFRESH_NEEDED, cited[key] & set(drift))
         held[key] = combine(held.get(key), found)
     return held
 
 
-async def withheld_now(publisher, rows):
+async def withheld_now(publisher, rows, table=None):
     """The withheld-decision set retrieval applies: the rows and the derived
     rule (withholding.withheld_decisions), and every decision of a served
     source whose foreign input fails live validation. `status` and the
     reviewer commands read it, so they see what retrieval withholds. A source
-    whose own input fails is left as it is: retrieval fails it whole."""
+    whose own input fails is left as it is: retrieval fails it whole.
+    `table` is the withholding table, read here when not given."""
     from .withholding import withheld_decisions
 
-    held = await withheld_decisions(rows, publisher.withholdings)
+    if table is None:
+        table = await publisher.withholdings.rows()
+    held = withheld_decisions(rows, table)
     for row in rows:
         if row.state != "current" or row.revision != row.verified_revision:
             continue
@@ -91,7 +94,7 @@ async def withheld_now(publisher, rows):
     return held
 
 
-async def valid_sources(publisher, dataset_id, rows, withheld=None):
+async def valid_sources(publisher, dataset_id, rows, withheld):
     """Split the rows into served sources and unavailable entries.
 
     A served entry is (source, row, held): `held` maps each withheld decision
@@ -99,7 +102,6 @@ async def valid_sources(publisher, dataset_id, rows, withheld=None):
     (withholding.withheld_decisions); a foreign input that fails validation
     here withholds the decisions citing it as well. An unavailable entry names
     a whole source (assignment_id None) or one withheld decision."""
-    withheld = withheld or {}
     valid, unavailable = [], []
     events = await publisher.records.events(dataset_id)
     for row in rows:
@@ -198,7 +200,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     from .withholding import withheld_decisions
 
     rows = await publisher.records.rows(dataset_id)
-    withheld = await withheld_decisions(rows, publisher.withholdings)
+    withheld = withheld_decisions(rows, await publisher.withholdings.rows())
     current, unavailable = await valid_sources(publisher, dataset_id, rows, withheld)
     # Original-owned markers can outlive generated-source withdrawal/failure.
     # Their local labels must never become reusable vector query aliases.
@@ -397,9 +399,14 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     # or a decision withheld, during this read.
     rows_after = await publisher.records.rows(dataset_id)
     after = {r.source: (r.state, r.revision, r.attempt) for r in rows_after}
-    if any(
-        after.get(r.source) != ("current", r.revision, r.attempt) for _, r, _ in current
-    ) or (await withheld_decisions(rows_after, publisher.withholdings) != withheld):
+    if (
+        any(
+            after.get(r.source) != ("current", r.revision, r.attempt)
+            for _, r, _ in current
+        )
+        or withheld_decisions(rows_after, await publisher.withholdings.rows())
+        != withheld
+    ):
         raise IntentError(
             "retrieval_changed", "Publication changed during retrieval; retry query"
         )

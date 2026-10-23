@@ -37,7 +37,7 @@ The table lives beside the ledger, not in `RecordStore`. `RecordStore`, the ledg
 
 ## How an edit withholds
 
-1. **The edit's own attempt.** A text change runs the stage `replace_dependents` after `replace_saved` and before `text_removal`. It reads every current dependent of the edited document, classifies each input the dependent read from it against the new text, and replaces the rows of each such input in one transaction. An unchanged input has its rows deleted. The stage is idempotent: a retry, or a later edit, recomputes the rows.
+1. **The edit's own attempt.** A text change runs the stage `withhold_dependents` after `replace_saved` and before `text_removal`. It reads every current dependent of the edited document, classifies each input the dependent read from it against the new text, and replaces the rows of each such input in one transaction. An unchanged input has its rows deleted. The stage is idempotent: a retry, or a later edit, recomputes the rows.
 2. **Durability.** From `begin` to completion the edited source's row is pending or failed with a saved text change, and the derived rule withholds every decision citing its document. So a crash before the rows are written never serves a dependent stale, and a failed edit keeps its dependents withheld until `reconcile` finishes it. After completion only the rows apply.
 3. **The refresh.** After the edit completes, the same command runs `refresh_dependents`. Every text-change command does: `edit-glossary`, `edit-text`, the occurrence commands and a `reconcile` that completes a text change (through `text_fixture.maintain_one` and `glossary_fixture.change_glossary`). Each current dependent with a moved span gets an ordinary unchanged-text replacement: the next revision, with the span's new range, the same digest and no decision or producer change. The writer reservation forbids nesting this inside the edit. A moved decision stays withheld until that revision completes. A dependent whose refresh revision failed is resumed by the next run of `refresh-dependents` (or by `reconcile`). Recovery is forward only: while `remap` rows apply to a dependent, `refresh_dependents` completes whatever replacement of that dependent failed, a reviewer's re-confirm included, with its saved revision, not only a refresh revision. A span moved by an edit that is still unfinished waits for that edit.
 4. **Cleanup.** Every replacement runs the stage `withholding_cleanup` before publication. A row carries forward across a dependent's revisions until its input validates, or the decision no longer cites the input, or the decision is gone. Rows of a withdrawn or forgotten source are ignored, and a re-add clears them.
@@ -135,7 +135,7 @@ A `human_review` producer method is a later schema change; until then a re-confi
 
 ## A failed edit
 
-`edit-glossary ... --fault-stage <stage>` fails the edit with a recovery event. While the glossary is failed, `retrieve` lists the glossary (`publication_failed`, `assignment_id` `null`) and r01 and v01 (`input_changed`) as unavailable, and `status` shows both decisions as `edit_unfinished`. Before `replace_dependents` has run there are no rows; the derived rule alone withholds them. `reconcile --source glossary` completes the edit, refreshes doc01 to revision 2 and resolves the incident as `restored`.
+`edit-glossary ... --fault-stage <stage>` fails the edit with a recovery event. While the glossary is failed, `retrieve` lists the glossary (`publication_failed`, `assignment_id` `null`) and r01 and v01 (`input_changed`) as unavailable, and `status` shows both decisions as `edit_unfinished`. Before `withhold_dependents` has run there are no rows; the derived rule alone withholds them. `reconcile --source glossary` completes the edit, refreshes doc01 to revision 2 and resolves the incident as `restored`.
 
 ## An interrupted refresh
 
@@ -166,7 +166,7 @@ Expected: after the edit, `status` lists two `refresh_needed` items (r01, v01) a
 - A changed or missing corpus field that a decision read withholds that decision, not the source. Before, retrieval failed the whole source and wrote a recovery event (`input_changed`, `missing_reasoning_input`); now no event is written and the reason is `input_changed` or `input_removed`.
 - `unavailable_sources` entries gain `assignment_id`; `status` gains three lists.
 - Admission accepts other documents' texts and spans under rule 5.
-- Replacement has two more stages, `replace_dependents` (text changes only, a fault stage) and `withholding_cleanup`.
+- Replacement has two more stages, `withhold_dependents` (text changes only, a fault stage) and `withholding_cleanup`.
 
 ## Not in this checkpoint
 
@@ -201,7 +201,7 @@ Run by the assistant on the user's Mac on 2026-10-23 with loopback embeddings, o
 - `uv run pytest -q -m 'not integration'`: 389 passed, 64 deselected.
 - `uv run python support/occurrence_check.py`: PASS on all 540,045 fate worlds, with the 13 new `DECISIONS` rows each checked on every admitted world that allows it (116 s). `--mutants`: PASS, all 28 breaks caught, including `allow_any_input_kinds`, `allow_changed_foreign_inputs` and `allow_unattested_reconfirms`.
 - `uv run python support/ledger_check.py`: PASS, verified within bound at depth 5, with `PINNED` unchanged at 5889 nodes and 5770 sequences. `--mutants`: all 40 breaks caught as before.
-- `uv run pytest -q -m integration`: 64 passed in 1366 s, including the five tests in `tests/test_identity_dependencies_native.py` (the four cases in sequence with both re-confirms and the replaced variant, a failed edit at `replace_saved`, `replace_dependents` and `text_chunks`, and an interrupted refresh) and the changed corpus-field test in `tests/test_identity_native.py`.
+- `uv run pytest -q -m integration`: 64 passed in 1366 s, including the five tests in `tests/test_identity_dependencies_native.py` (the four cases in sequence with both re-confirms and the replaced variant, a failed edit at `replace_saved`, `withhold_dependents` and `text_chunks`, and an interrupted refresh) and the changed corpus-field test in `tests/test_identity_native.py`.
 - Journeys D1 to D6 in `.claude/skills/verify/features/dependencies.md`: 127 PASS and 0 FAIL in 10 runs (D5 runs five fault stages). Each count includes three lab-store guard rows.
 - Every other loopback journey, run one ID at a time (P1 to P4, W1 to W3, R1, R2, E1 to E4, O1 to O8, G1 to G4, I1 to I4, K1 to K5, F1 to F4): 1159 PASS and 0 FAIL in 58 runs, the same totals as the last `journey all` before this checkpoint. `journey all` itself was not run.
 

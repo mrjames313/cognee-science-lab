@@ -8,10 +8,10 @@ from .stages import Operation, run_attempt, saved_row
 from .validation import IntentError
 
 REPLACE = Operation(
-    "replace", "Replacement", ("replace_dependents", "replace_registered"), None
+    "replace", "Replacement", ("withhold_dependents", "replace_registered"), None
 )
 # replace_saved fails before the snapshot recheck, then the stages above
-# (replace_dependents only runs for a text change), then the points inside
+# (withhold_dependents only runs for a text change), then the points inside
 # the shared publisher (after its writes, after retirement, before
 # acknowledgement) and the text change's boundaries.
 FAULT_STAGES = (
@@ -411,7 +411,7 @@ async def replace(
         [
             ("replace_saved", recheck),
             *(
-                [("replace_dependents", withhold), ("text_removal", remove_text)]
+                [("withhold_dependents", withhold), ("text_removal", remove_text)]
                 if text_change is not None
                 else []
             ),

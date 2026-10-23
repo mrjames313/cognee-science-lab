@@ -443,9 +443,11 @@ def check_reusable_recipes(old, source):
 
 
 def referenced_corpus_ids(source):
-    """Existing Entities that a resolution or variant reads through a corpus
-    input. Only an input listed in some input_refs reaches validate_inputs,
-    which proves the Entity exists in the graph with the recorded hash."""
+    """Existing Entities that a resolution or variant lists as a corpus input
+    in its own input_refs. A group's input_refs do not count: only a decision
+    that names the Entity may exempt it from derivation, so this is not
+    `decision_inputs`. `check_corpus_inputs_exist` proves each one is in the
+    graph."""
     listed = set()
     for record in [
         *source.mention_resolutions.values(),
@@ -528,11 +530,11 @@ def check_new_variant_keys(old, source):
         )
 
 
+RANGE = frozenset({"start", "end"})
+
+
 def without_range(item):
     return {k: v for k, v in item.model_dump(mode="json").items() if k not in RANGE}
-
-
-RANGE = frozenset({"start", "end"})
 
 
 def check_foreign_inputs(old, source):

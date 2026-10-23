@@ -42,6 +42,8 @@ ENTRY = hc_entry(GLOSSARY).group()
 INSERTED = CASES["insert"](GLOSSARY)
 COSMETIC = CASES["cosmetic"](GLOSSARY)
 ELSEWHERE = CASES["elsewhere"](GLOSSARY)
+# doc01's inputs of the glossary document.
+KEYS = {"glossary", "glossary_hc"}
 GLOSSARY_ID = str(uuid5(NAMESPACE_URL, "test:glossary"))
 TEXT = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
 
@@ -230,7 +232,7 @@ def test_each_glossary_edit_is_classified_as_the_user_decided(source_payload):
     outcomes = {
         name: [
             (c.input_ref, c.outcome, c.new_range)
-            for c in classify(source, GLOSSARY_ID, GLOSSARY, edited)
+            for c in classify(source, KEYS, GLOSSARY, edited)
         ]
         for name, edited in [
             ("elsewhere", ELSEWHERE),
@@ -248,14 +250,11 @@ def test_each_glossary_edit_is_classified_as_the_user_decided(source_payload):
     }
     # A span whose text now appears twice needs review, not a guess.
     doubled = INSERTED.replace("RF:", ENTRY + "\nRF:")
-    assert [c.outcome for c in classify(source, GLOSSARY_ID, GLOSSARY, doubled)] == [
-        "changed"
-    ]
+    assert [c.outcome for c in classify(source, KEYS, GLOSSARY, doubled)] == ["changed"]
     # A directly cited text is classified too; any change needs review.
     direct = citing(strip_corpus(source_payload), cite_text=True)
     assert [
-        (c.input_ref, c.outcome)
-        for c in classify(direct, GLOSSARY_ID, GLOSSARY, ELSEWHERE)
+        (c.input_ref, c.outcome) for c in classify(direct, KEYS, GLOSSARY, ELSEWHERE)
     ] == [("glossary", "changed"), ("glossary_hc", "unchanged")]
 
 
@@ -288,14 +287,16 @@ async def test_an_unfinished_edit_withholds_every_decision_citing_the_document(
     doc01 = citing(strip_corpus(source_payload))
     rows = [row_of(glossary), row_of(doc01)]
     publisher = await memory_publisher(rows)
-    assert await withheld_decisions(rows, publisher.withholdings) == {}
+    assert withheld_decisions(rows, await publisher.withholdings.rows()) == {}
     for state in ("pending", "failed"):
         editing = row_of(
             glossary,
             state,
             dict(operation="identity_replace", text_change={"text": "x"}),
         )
-        held = await withheld_decisions([editing, rows[1]], publisher.withholdings)
+        held = withheld_decisions(
+            [editing, rows[1]], await publisher.withholdings.rows()
+        )
         assert held == {
             str(doc01.identity_data_id): {
                 "r01": ("input_changed", "edit_unfinished", {"glossary_hc"}),
@@ -304,7 +305,10 @@ async def test_an_unfinished_edit_withholds_every_decision_citing_the_document(
         }
     # A failed replacement with unchanged text changes no input.
     unchanged = row_of(glossary, "failed", dict(operation="identity_replace"))
-    assert await withheld_decisions([unchanged, rows[1]], publisher.withholdings) == {}
+    assert (
+        withheld_decisions([unchanged, rows[1]], await publisher.withholdings.rows())
+        == {}
+    )
 
 
 async def test_rows_apply_only_while_the_decision_still_cites_the_input(
@@ -315,15 +319,20 @@ async def test_rows_apply_only_while_the_decision_still_cites_the_input(
     rows = [row_of(glossary), row_of(doc01)]
     publisher = await memory_publisher(rows)
     await withhold_dependents(publisher, glossary, GLOSSARY, COSMETIC, 2)
-    held = await withheld_decisions(rows, publisher.withholdings)
+    held = withheld_decisions(rows, await publisher.withholdings.rows())
     assert set(held[str(doc01.identity_data_id)]) == {"r01", "v01"}
     payload = doc01.model_dump(mode="json")
     payload["variant_assignments"]["v01"]["input_refs"] = ["doc01"]
     revised = IdentitySource.model_validate_json(json.dumps(payload))
-    held = await withheld_decisions([rows[0], row_of(revised)], publisher.withholdings)
+    held = withheld_decisions(
+        [rows[0], row_of(revised)], await publisher.withholdings.rows()
+    )
     assert set(held[str(doc01.identity_data_id)]) == {"r01"}
     retired = replaced(rows[1], state="withdrawn")
-    assert await withheld_decisions([rows[0], retired], publisher.withholdings) == {}
+    assert (
+        withheld_decisions([rows[0], retired], await publisher.withholdings.rows())
+        == {}
+    )
 
 
 # The glossary fixture's revisions of doc01, through the one admission.
@@ -529,7 +538,7 @@ def test_a_command_without_a_text_change_refuses_the_dependents_fault(
             "--expected-revision",
             "1",
             "--fault-stage",
-            "replace_dependents",
+            "withhold_dependents",
             *command[1:],
         ],
     )
@@ -537,7 +546,7 @@ def test_a_command_without_a_text_change_refuses_the_dependents_fault(
         main()
     assert refused.value.code == 2
     error = capsys.readouterr().err.strip().splitlines()[-1]
-    assert "replace_dependents" in error and "text change" in error
+    assert "withhold_dependents" in error and "text change" in error
     assert not root.exists()
 
 
@@ -546,10 +555,13 @@ def test_live_drift_that_no_row_records_needs_review(source_payload):
     stale after a re-add) withholds its decisions for a reviewer, beside
     what the rows already withhold."""
     from cognee_lab.identity.retrieve import held_by
-    from cognee_lab.identity.withholding import Withheld
+    from cognee_lab.identity.validation import Reason
+    from cognee_lab.identity.withholding import Status, Withheld
 
     source = citing(source_payload)
-    recorded = {"v01": Withheld("input_changed", "remap", frozenset(["glossary_hc"]))}
+    recorded = {
+        "v01": Withheld(Reason.CHANGED, Status.REMAP, frozenset(["glossary_hc"]))
+    }
     assert held_by(source, recorded, {}) == recorded
     held = held_by(source, recorded, {"glossary_hc": "input_removed"})
     assert held == {

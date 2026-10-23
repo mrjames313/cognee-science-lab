@@ -257,18 +257,15 @@ async def change_glossary(
 async def edit(
     publisher, root, glossary, case, *, expected_revision, fault_stage, refresh_fault
 ):
-    from .fixture import context_for
+    from .fixture import context_for, expect_current
     from .text_changes import TextChange, chunk_text, original_context, read_original
 
-    row = await publisher.records.row(glossary)
-    if row.revision != expected_revision:
-        from .storage import STALE_REVISION
-
-        raise IntentError(*STALE_REVISION)
-    if row.state != "current":
-        raise IntentError(
-            "recovery_choice", "Reconcile the exact saved glossary edit explicitly"
-        )
+    await expect_current(
+        publisher,
+        glossary,
+        expected_revision,
+        "Reconcile the exact saved glossary edit explicitly",
+    )
     ctx = await context_for(glossary.identity_data_id)
     before = await read_original(glossary, ctx)
     change = TextChange(
@@ -301,28 +298,21 @@ async def review(
     """A reviewer's answer to one withheld decision of doc01: re-confirm it on
     the glossary's current HC entry, or, for v01, replace it with a variant
     for the entry's new meaning."""
-    from .fixture import context_for
+    from .fixture import context_for, expect_current
     from .retrieve import withheld_now
     from .text_changes import read_original
-    from .validation import INPUT_REMOVED
-    from .withholding import (
-        REFRESH_NEEDED,
-        document_inputs,
-        reconfirmed,
-        unfinished_edits,
+    from .validation import Reason
+    from .withholding import Status, document_inputs, reconfirmed, unfinished_edits
+
+    await expect_current(
+        publisher, doc01, expected_revision, "Reconcile doc01 before a review"
     )
-
-    row = await publisher.records.row(doc01)
-    if row.revision != expected_revision:
-        from .storage import STALE_REVISION
-
-        raise IntentError(*STALE_REVISION)
     rows = await publisher.records.rows()
     # The reviewer attests committed text: no document doc01 reads may have
     # an edit that is still pending or failed.
     for edit in unfinished_edits(rows):
         edited = IdentitySource.model_validate_json(edit.description)
-        if document_inputs(doc01, edited.inputs[edited.original_input_ref].data_id):
+        if document_inputs(doc01, edited):
             raise IntentError(
                 "edit_unfinished",
                 "Reconcile the edit of a document doc01 reads before a review",
@@ -332,11 +322,11 @@ async def review(
         .get(str(doc01.identity_data_id), {})
         .get(decision)
     )
-    if entry is None or entry.status != REFRESH_NEEDED:
+    if entry is None or entry.status != Status.REFRESH_NEEDED:
         raise IntentError(
             "not_withheld", f"{decision} is not withheld for review in doc01"
         )
-    if command == "reconfirm" and entry.reason == INPUT_REMOVED:
+    if command == "reconfirm" and entry.reason == Reason.REMOVED:
         raise IntentError(
             "input_removed",
             "A removed input is never re-confirmed; replace the decision",
@@ -404,31 +394,28 @@ def replaced_variant(doc01, decision, span_key, span, producer_key, producer):
     """v01 said HC is the Helios controller. The glossary now gives HC
     another meaning, so the reviewer drops v01 and adds v02: HC is a new
     "Hybrid coil" Entity, whose UUID derives from v02 and the new revision."""
-    from .withholding import cited_inputs
+    from .withholding import next_revision
 
     if decision != "v01" or decision not in doc01.variant_assignments:
         raise IntentError("fixture_scope", "Only v01 has a captured replacement")
-    payload = doc01.model_dump(mode="json")
-    payload["revision"] += 1
-    old = payload["variant_assignments"].pop("v01")
-    coil = str(fresh_entity_id(doc01.identity_data_id, payload["revision"], "v02"))
-    payload["entity_constructions"][coil] = dict(
-        name="Hybrid coil", description="HC as the glossary now defines it."
-    )
-    payload["inputs"][span_key] = span
-    payload["producers"][producer_key] = producer
-    payload["variant_assignments"]["v02"] = dict(
-        old,
-        target_entity_id=coil,
-        input_refs=[old["input_refs"][0], span_key],
-        producer_ref=producer_key,
-        explanation="The glossary entry for HC changed meaning.",
-    )
-    revised = IdentitySource.model_validate_json(json.dumps(payload))
-    for key in set(doc01.inputs) - cited_inputs(revised):
-        if key != doc01.original_input_ref:
-            payload["inputs"].pop(key)
-    return IdentitySource.model_validate_json(json.dumps(payload))
+
+    def change(payload):
+        old = payload["variant_assignments"].pop("v01")
+        coil = str(fresh_entity_id(doc01.identity_data_id, payload["revision"], "v02"))
+        payload["entity_constructions"][coil] = dict(
+            name="Hybrid coil", description="HC as the glossary now defines it."
+        )
+        payload["inputs"][span_key] = span
+        payload["producers"][producer_key] = producer
+        payload["variant_assignments"]["v02"] = dict(
+            old,
+            target_entity_id=coil,
+            input_refs=[old["input_refs"][0], span_key],
+            producer_ref=producer_key,
+            explanation="The glossary entry for HC changed meaning.",
+        )
+
+    return next_revision(doc01, change)
 
 
 async def reconcile(publisher, label, selected):
@@ -479,7 +466,7 @@ async def snapshot(publisher, root, query):
         reads = (
             set()
             if label == "glossary"
-            else document_inputs(source, GLOSSARY_DATA_ID) - {"glossary"}
+            else document_inputs(source, sources["glossary"]) - {"glossary"}
         )
         found[label] = dict(
             identity_data_id=str(source.identity_data_id),
@@ -573,7 +560,7 @@ async def run(args, root):
                 refresh_fault=refresh_fault,
             )
         elif args.command in ("reconfirm", "replace-decision"):
-            if args.source != "doc01" or not args.decision:
+            if args.source != "doc01":
                 raise IntentError(
                     "fixture_scope", f"{args.command} reviews one decision of doc01"
                 )

@@ -20,7 +20,7 @@ Guide: `docs/stage6_identity_dependencies.md`.
 - Run `uv run python -m cognee_lab.identity glossary-fixture --root <new dir>`.
 - Run `edit-glossary --root <dir> --source glossary --case elsewhere|insert|cosmetic|substantive --expected-revision N`.
 - Run `reconfirm --root <dir> --decision r01|v01 --expected-revision N` or `replace-decision --root <dir> --decision v01 --expected-revision N` for a decision that needs review.
-- Add `--fault-stage replace_saved|replace_dependents|text_removed|text_registered|text_chunks|replace_registered|replace_published|replace_retired|replace_verification` to `edit-glossary` to fail the edit, then run `reconcile --source glossary`.
+- Add `--fault-stage replace_saved|withhold_dependents|text_removed|text_registered|text_chunks|replace_registered|replace_published|replace_retired|replace_verification` to `edit-glossary` to fail the edit, then run `reconcile --source glossary`.
 - Add `--fault-stage refresh_interrupted` to `edit-glossary` to fail doc01's refresh revision after the edit completed, then run `refresh-dependents`.
 - Run `retrieve` and `status` against the same root.
 
@@ -127,7 +127,7 @@ $V check "$RUN" confirm '.recovery_events == []' 'no incident'
 
 **D5 a failed edit withholds every citing decision until reconcile.** Proves `failed-edit`. Guide: "A failed edit". The fence lists five stages, before and after the rows are written and before and after the text changes. Each fails the insertion with a recovery event. While the glossary is failed, `retrieve` lists it and both of doc01's decisions as unavailable, and `status` shows both as `edit_unfinished`. `reconcile --source glossary` completes the edit, refreshes doc01 to revision 2 and resolves the incident as `restored`.
 
-```bash journey D5 stages=replace_saved,replace_dependents,text_removed,text_chunks,replace_published
+```bash journey D5 stages=replace_saved,withhold_dependents,text_removed,text_chunks,replace_published
 $V drive "$RUN" main fixture -- glossary-fixture
 
 $V drive "$RUN" main fail -- edit-glossary --source glossary --case insert --expected-revision 1 --fault-stage "$STAGE"

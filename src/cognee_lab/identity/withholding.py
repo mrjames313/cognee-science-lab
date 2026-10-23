@@ -18,21 +18,40 @@ serves a dependent stale. Withholding writes no recovery events.
 
 import json
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from typing import NamedTuple
 
 from sqlalchemy import Integer, String, delete, select, tuple_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .models import ChunkInput, IdentitySource, SourceTextInput, TextSpanInput
-from .validation import INPUT_CHANGED, INPUT_REMOVED, decision_inputs, text_digest
+from .retirement import consumes
+from .validation import (
+    Reason,
+    cited_inputs,
+    decision_inputs,
+    stronger,
+    text_digest,
+)
 
-REMAP = "remap"
-REFRESH_NEEDED = "refresh_needed"
-EDIT_UNFINISHED = "edit_unfinished"
-# When several inputs withhold one decision, it shows the strongest status:
-# an unfinished edit blocks a review, and a review blocks a refresh.
-STATUS_ORDER = (REMAP, REFRESH_NEEDED, EDIT_UNFINISHED)
-UNCHANGED, MOVED, CHANGED = "unchanged", "moved", "changed"
+
+class Status(StrEnum):
+    """What answers a withheld decision. Members are in increasing
+    precedence: when several inputs withhold one decision it shows the
+    strongest, since an unfinished edit blocks a review and a review blocks
+    a refresh."""
+
+    REMAP = "remap"
+    REFRESH_NEEDED = "refresh_needed"
+    EDIT_UNFINISHED = "edit_unfinished"
+
+
+class Outcome(StrEnum):
+    """What an edit did to one input a dependent read from the document."""
+
+    UNCHANGED = "unchanged"
+    MOVED = "moved"
+    CHANGED = "changed"
 
 
 class Base(DeclarativeBase):
@@ -80,7 +99,7 @@ class Classified:
     """What an edit did to one input a dependent read from the document."""
 
     input_ref: str
-    outcome: str  # UNCHANGED, MOVED or CHANGED
+    outcome: Outcome
     old_digest: str | None
     new_digest: str | None
     new_range: tuple[int, int] | None = None
@@ -90,8 +109,8 @@ class Withheld(NamedTuple):
     """One entry of the withheld-decision set: why, what answers it, and the
     input keys of the decision that withhold it."""
 
-    reason: str
-    status: str
+    reason: Reason
+    status: Status
     inputs: frozenset[str] = frozenset()
 
 
@@ -99,9 +118,9 @@ WithheldSet = dict[str, dict[str, Withheld]]  # source -> assignment -> entry
 
 
 class WithholdingStore:
-    """The withholding table, through the ledger's relational sessions. Each
-    call creates the table if it is missing, so a store made before this
-    table opens unchanged."""
+    """The withholding table, through the ledger's relational sessions.
+    `Publisher.configured` creates the table if it is missing, so a store
+    made before this table opens unchanged."""
 
     def __init__(self, session_factory):
         self.session_factory = session_factory
@@ -113,7 +132,6 @@ class WithholdingStore:
             await session.commit()
 
     async def rows(self, dataset=None) -> list[WithholdingRow]:
-        await self.initialize()
         async with self.session_factory() as session:
             statement = select(Withholding)
             if dataset is not None:
@@ -132,7 +150,6 @@ class WithholdingStore:
     async def replace(self, cleared, rows):
         """Delete the rows of each (dataset, source, input_ref) in `cleared`,
         then write `rows`, in one transaction."""
-        await self.initialize()
         async with self.session_factory() as session:
             if cleared:
                 await session.execute(
@@ -151,7 +168,6 @@ class WithholdingStore:
     async def keep(self, dataset, source, kept):
         """Delete the source's rows whose (assignment, input_ref) is not in
         `kept`."""
-        await self.initialize()
         async with self.session_factory() as session:
             found = (
                 (
@@ -171,18 +187,27 @@ class WithholdingStore:
             await session.commit()
 
 
-def document_inputs(reader: IdentitySource, data_id) -> set[str]:
-    """The reader's inputs that read a document: its text inputs and every
+def document_inputs(reader: IdentitySource, target: IdentitySource) -> set[str]:
+    """The reader's inputs that read the target's document: the text inputs
+    through which it consumes that document (retirement.consumes) and every
     span or chunk of them."""
     texts = {
-        k
-        for k, i in reader.inputs.items()
-        if isinstance(i, SourceTextInput) and str(i.data_id) == str(data_id)
+        d["input_ref"] for d in consumes(reader, target) if d["kind"] == "source_text"
     }
     return texts | {
         k
         for k, i in reader.inputs.items()
         if isinstance(i, (ChunkInput, TextSpanInput)) and i.document_ref in texts
+    }
+
+
+def current_readers(rows) -> dict[str, IdentitySource]:
+    """The saved description of every source that is not retired: withdrawn
+    and forgotten sources read nothing."""
+    return {
+        r.source: IdentitySource.model_validate_json(r.description)
+        for r in rows
+        if not r.is_retired
     }
 
 
@@ -210,24 +235,27 @@ def classify_span(key, item, text):
     retry, or an edit after an unrefreshed move, classifies the same way."""
     here = text[item.start : item.end] if item.end <= len(text) else None
     if here is not None and text_digest(here) == item.text_sha256:
-        return Classified(key, UNCHANGED, item.text_sha256, item.text_sha256)
+        return Classified(key, Outcome.UNCHANGED, item.text_sha256, item.text_sha256)
     length = item.end - item.start
     found = found_once(text, length, item.text_sha256)
     if found is not None:
         return Classified(
-            key, MOVED, item.text_sha256, item.text_sha256, (found, found + length)
+            key,
+            Outcome.MOVED,
+            item.text_sha256,
+            item.text_sha256,
+            (found, found + length),
         )
     return Classified(
-        key, CHANGED, item.text_sha256, text_digest(here) if here else None
+        key, Outcome.CHANGED, item.text_sha256, text_digest(here) if here else None
     )
 
 
-def classify(reader, data_id, previous_text, text) -> list[Classified]:
+def classify(reader, keys, previous_text, text) -> list[Classified]:
     """What changing a document's text from `previous_text` to `text` did to
-    each input the reader read from it. A text input is classified only when
-    a decision cites it directly; a chunk has no fingerprint and is renumbered,
-    so any change needs review."""
-    keys = document_inputs(reader, data_id)
+    each of `keys`, the reader's inputs of that document. A text input is
+    classified only when a decision cites it directly; a chunk has no
+    fingerprint and is renumbered, so any change needs review."""
     direct = set().union(*decision_inputs(reader).values())
     found = []
     for key in sorted(keys):
@@ -235,12 +263,14 @@ def classify(reader, data_id, previous_text, text) -> list[Classified]:
         if isinstance(item, SourceTextInput):
             if key in direct:
                 new = text_digest(text)
-                outcome = UNCHANGED if new == item.text_sha256 else CHANGED
+                outcome = (
+                    Outcome.UNCHANGED if new == item.text_sha256 else Outcome.CHANGED
+                )
                 found.append(Classified(key, outcome, item.text_sha256, new))
         elif isinstance(item, TextSpanInput):
             found.append(classify_span(key, item, text))
         else:
-            outcome = UNCHANGED if previous_text == text else CHANGED
+            outcome = Outcome.UNCHANGED if previous_text == text else Outcome.CHANGED
             found.append(Classified(key, outcome, None, None))
     return found
 
@@ -250,51 +280,50 @@ async def withhold_dependents(publisher, edited, previous_text, text, revision):
     dependent read what the edit changed. Idempotent: each run recomputes the
     rows of every input of the document and replaces them, so a retry or a
     later edit converges."""
-    store = publisher.withholdings
-    doc = edited.inputs[edited.original_input_ref].data_id
-    own = (str(edited.dataset_id), str(edited.identity_data_id))
+    own = str(edited.identity_data_id)
     cleared, written = [], []
-    for row in await publisher.records.rows():
-        if (row.dataset, row.source) == own or row.is_retired:
+    for source, reader in current_readers(await publisher.records.rows()).items():
+        if source == own:
             continue
-        reader = IdentitySource.model_validate_json(row.description)
-        for c in classify(reader, doc, previous_text, text):
-            cleared.append((row.dataset, row.source, c.input_ref))
-            if c.outcome == UNCHANGED:
+        dataset = str(reader.dataset_id)
+        keys = document_inputs(reader, edited)
+        for c in classify(reader, keys, previous_text, text):
+            cleared.append((dataset, source, c.input_ref))
+            if c.outcome == Outcome.UNCHANGED:
                 continue
             for assignment in sorted(citing(reader, [c.input_ref])):
                 written.append(
                     WithholdingRow(
-                        dataset=row.dataset,
-                        source=row.source,
+                        dataset=dataset,
+                        source=source,
                         assignment=assignment,
                         input_ref=c.input_ref,
-                        consumed=own[1],
+                        consumed=own,
                         edit_revision=revision,
-                        reason=INPUT_CHANGED,
-                        status=REMAP if c.outcome == MOVED else REFRESH_NEEDED,
+                        reason=Reason.CHANGED,
+                        status=(
+                            Status.REMAP
+                            if c.outcome == Outcome.MOVED
+                            else Status.REFRESH_NEEDED
+                        ),
                         old_digest=c.old_digest,
                         new_digest=c.new_digest,
                         new_start=c.new_range[0] if c.new_range else None,
                         new_end=c.new_range[1] if c.new_range else None,
                     )
                 )
-    await store.replace(cleared, written)
+    await publisher.withholdings.replace(cleared, written)
     return [asdict(r) for r in written]
 
 
 def combine(previous: Withheld | None, entry: Withheld) -> Withheld:
-    """One entry for a decision withheld more than once: `input_removed` over
-    `input_changed`, the strongest status, and every withholding input."""
+    """One entry for a decision withheld more than once: the stronger reason
+    and status, and every withholding input."""
     if previous is None:
         return entry
     return Withheld(
-        (
-            INPUT_REMOVED
-            if INPUT_REMOVED in (previous.reason, entry.reason)
-            else entry.reason
-        ),
-        max(previous.status, entry.status, key=STATUS_ORDER.index),
+        stronger(previous.reason, entry.reason),
+        stronger(previous.status, entry.status),
         previous.inputs | entry.inputs,
     )
 
@@ -315,14 +344,10 @@ def unfinished_edits(rows):
     ]
 
 
-def recorded_rows(rows, table) -> list[WithholdingRow]:
-    """The table rows that still apply: the dependent is not retired, and its
-    saved description still has the decision citing that input."""
-    readers = {
-        r.source: IdentitySource.model_validate_json(r.description)
-        for r in rows
-        if not r.is_retired
-    }
+def recorded_rows(readers, table) -> list[WithholdingRow]:
+    """The table rows that still apply: the dependent is one of the current
+    `readers`, and its saved description still has the decision citing that
+    input."""
     return [
         w
         for w in table
@@ -331,38 +356,28 @@ def recorded_rows(rows, table) -> list[WithholdingRow]:
     ]
 
 
-async def withheld_decisions(rows, store) -> WithheldSet:
-    """The withheld-decision set: the recorded rows that still apply, and
-    every decision citing a document whose text change is pending or failed
-    (`input_changed`, status `edit_unfinished`)."""
+def withheld_decisions(rows, table) -> WithheldSet:
+    """The withheld-decision set of the ledger rows and the withholding
+    table: the recorded rows that still apply, and every decision citing a
+    document whose text change is pending or failed (`input_changed`, status
+    `edit_unfinished`)."""
+    readers = current_readers(rows)
     held: WithheldSet = {}
-    for w in recorded_rows(rows, await store.rows()):
-        merge(
-            held,
-            w.source,
-            w.assignment,
-            Withheld(w.reason, w.status, frozenset([w.input_ref])),
-        )
-    readers = {
-        r.source: IdentitySource.model_validate_json(r.description)
-        for r in rows
-        if not r.is_retired
-    }
+    for w in recorded_rows(readers, table):
+        entry = Withheld(Reason(w.reason), Status(w.status), frozenset([w.input_ref]))
+        merge(held, w.source, w.assignment, entry)
     for edit in unfinished_edits(rows):
         edited = IdentitySource.model_validate_json(edit.description)
-        doc = edited.inputs[edited.original_input_ref].data_id
         for source, reader in readers.items():
             if source == edit.source:
                 continue
-            keys = document_inputs(reader, doc)
+            keys = document_inputs(reader, edited)
             for assignment, inputs in decision_inputs(reader).items():
                 if inputs & keys:
-                    merge(
-                        held,
-                        source,
-                        assignment,
-                        Withheld(INPUT_CHANGED, EDIT_UNFINISHED, inputs & keys),
+                    entry = Withheld(
+                        Reason.CHANGED, Status.EDIT_UNFINISHED, inputs & keys
                     )
+                    merge(held, source, assignment, entry)
     return held
 
 
@@ -385,7 +400,7 @@ async def refresh_dependents(publisher, replace):
     revision. A span moved by an edit that is still pending or failed waits
     for that edit."""
     rows = await publisher.records.rows()
-    table = recorded_rows(rows, await publisher.withholdings.rows())
+    table = recorded_rows(current_readers(rows), await publisher.withholdings.rows())
     waiting = {r.source for r in unfinished_edits(rows)}
     refreshed = []
     for row in rows:
@@ -393,7 +408,7 @@ async def refresh_dependents(publisher, replace):
             w
             for w in table
             if w.source == row.source
-            and w.status == REMAP
+            and w.status == Status.REMAP
             and w.consumed not in waiting
         ]
         if not moved:
@@ -418,19 +433,20 @@ async def refresh_dependents(publisher, replace):
     return refreshed
 
 
-def cited_inputs(source: IdentitySource) -> set[str]:
-    """Every input key a record or scope cites, with the documents of cited
-    spans and chunks."""
-    cited = {source.original_input_ref}
-    for group in source.mention_groups.values():
-        cited.update([group.document_ref, *group.chunk_refs, *group.input_refs])
-    for inputs in decision_inputs(source).values():
-        cited.update(inputs)
-    for key in list(cited):
-        document = getattr(source.inputs[key], "document_ref", None)
-        if document:
-            cited.add(document)
-    return cited
+def next_revision(reader: IdentitySource, change) -> IdentitySource:
+    """The reader's next revision after `change(payload)`, with every input
+    nothing cites any more dropped. Uncited inputs are known only once the
+    changed payload validates, so a drop validates it a second time."""
+    payload = reader.model_dump(mode="json")
+    payload["revision"] += 1
+    change(payload)
+    revised = IdentitySource.model_validate_json(json.dumps(payload))
+    uncited = set(revised.inputs) - cited_inputs(revised)
+    if not uncited:
+        return revised
+    for key in uncited:
+        payload["inputs"].pop(key)
+    return IdentitySource.model_validate_json(json.dumps(payload))
 
 
 def reconfirmed(reader, assignment, replacements, producer_key, producer):
@@ -439,27 +455,24 @@ def reconfirmed(reader, assignment, replacements, producer_key, producer):
     this revision. Other decisions keep citing the old input, so they stay
     withheld until each is re-confirmed; an old input nothing cites any more
     is dropped. `replacements` maps an old input key to (new key, input)."""
-    payload = reader.model_dump(mode="json")
-    payload["revision"] += 1
-    records = [
-        payload["mention_resolutions"].get(assignment)
-        or payload["variant_assignments"][assignment]
-    ]
-    if assignment in payload["mention_resolutions"]:
-        records.append(payload["mention_groups"][records[0]["group_ref"]])
-    for old, (new, item) in replacements.items():
-        payload["inputs"][new] = item
-        for record in records:
-            record["input_refs"] = [
-                new if k == old else k for k in record["input_refs"]
-            ]
-    records[0]["producer_ref"] = producer_key
-    payload["producers"][producer_key] = producer
-    revised = IdentitySource.model_validate_json(json.dumps(payload))
-    uncited = set(replacements) - cited_inputs(revised)
-    for key in uncited:
-        payload["inputs"].pop(key)
-    return IdentitySource.model_validate_json(json.dumps(payload))
+
+    def change(payload):
+        records = [
+            payload["mention_resolutions"].get(assignment)
+            or payload["variant_assignments"][assignment]
+        ]
+        if assignment in payload["mention_resolutions"]:
+            records.append(payload["mention_groups"][records[0]["group_ref"]])
+        for old, (new, item) in replacements.items():
+            payload["inputs"][new] = item
+            for record in records:
+                record["input_refs"] = [
+                    new if k == old else k for k in record["input_refs"]
+                ]
+        records[0]["producer_ref"] = producer_key
+        payload["producers"][producer_key] = producer
+
+    return next_revision(reader, change)
 
 
 async def withholding_status(publisher, rows):
@@ -468,7 +481,8 @@ async def withholding_status(publisher, rows):
     this reads the graph) with the decisions a reviewer answers."""
     from .retrieve import withheld_now
 
-    held = await withheld_now(publisher, rows)
+    table = await publisher.withholdings.rows()
+    held = await withheld_now(publisher, rows, table)
     decisions = [
         dict(
             identity_data_id=source,
@@ -481,9 +495,7 @@ async def withholding_status(publisher, rows):
         for key, w in sorted(entries.items())
     ]
     return dict(
-        withholdings=[
-            asdict(w) for w in recorded_rows(rows, await publisher.withholdings.rows())
-        ],
+        withholdings=[asdict(w) for w in recorded_rows(current_readers(rows), table)],
         withheld_decisions=decisions,
-        refresh_needed=[d for d in decisions if d["status"] == REFRESH_NEEDED],
+        refresh_needed=[d for d in decisions if d["status"] == Status.REFRESH_NEEDED],
     )
