@@ -1,10 +1,18 @@
+import dataclasses
+import itertools
 import json
 from uuid import uuid4
 
 import pytest
 
 from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.storage import RecordStore
+from cognee_lab.identity.storage import (
+    TRANSITIONS,
+    PublicationRow,
+    RecordStore,
+    Refusal,
+    admissible,
+)
 from cognee_lab.identity.validation import IntentError
 
 
@@ -185,16 +193,16 @@ async def free_reservation(store):
         await session.commit()
 
 
-PUBLISH = {"operation": "identity_publish"}
-WITHDRAW = {"operation": "identity_withdraw"}
-FORGET = {"operation": "identity_forget"}
+PUBLISH_INTENT = {"operation": "identity_publish"}
+WITHDRAW_INTENT = {"operation": "identity_withdraw"}
+FORGET_INTENT = {"operation": "identity_forget"}
 
 
 async def reach(store, source, row):
     """Drive a fresh store to one row state through the calls that make it."""
     if row == "none":
         return
-    attempt = await store.begin(source, expected_revision=0, plan=dict(PUBLISH))
+    attempt = await store.begin(source, expected_revision=0, plan=dict(PUBLISH_INTENT))
     if row == "pending":
         return await free_reservation(store)
     if row == "failed publish":
@@ -212,10 +220,10 @@ async def reach(store, source, row):
         )
         return await store.fail(nxt, attempt, "replace_saved", IntentError("x", "x"))
     method, plan, done = {
-        "withdrawn": ("withdraw", WITHDRAW, "withdrawn"),
-        "failed withdraw": ("withdraw", WITHDRAW, None),
-        "forgotten": ("forget", FORGET, "forgotten"),
-        "failed forget": ("forget", FORGET, None),
+        "withdrawn": ("withdraw", WITHDRAW_INTENT, "withdrawn"),
+        "failed withdraw": ("withdraw", WITHDRAW_INTENT, None),
+        "forgotten": ("forget", FORGET_INTENT, "forgotten"),
+        "failed forget": ("forget", FORGET_INTENT, None),
     }[row]
     attempt = await store.begin(
         source, expected_revision=1, plan=dict(plan), method=method
@@ -228,62 +236,131 @@ async def reach(store, source, row):
 def caller_arguments(method, row):
     """The begin() arguments that the method's caller builds from one read of
     the row: a re-add or a new replacement takes the next revision, the rest
-    the saved one, and a retry keeps the saved plan."""
+    the saved one, and a retry keeps the saved plan. It restates the callers'
+    retry choice on its own on purpose, rather than reading resumed_by."""
     if row is None:
         return 1, 0, {"operation": f"identity_{method}"}
     operation = row.operation
     if method == "publish":
-        return row.revision + 1, row.revision, dict(PUBLISH)
+        return row.revision + 1, row.revision, dict(PUBLISH_INTENT)
     retry = row.state == "failed" and operation == "identity_replace"
     if method == "replace" and not retry:
         plan = dict(operation="identity_replace", previous_description=row.description)
         return row.revision + 1, row.revision, plan
     keep = {
-        "reconcile": PUBLISH,
+        "reconcile": PUBLISH_INTENT,
         "replace": row.plan,
         "withdraw": (
             row.plan
             if row.state != "withdrawn" and operation == "identity_withdraw"
-            else WITHDRAW
+            else WITHDRAW_INTENT
         ),
         "forget": (
             row.plan
             if row.state == "failed" and operation == "identity_forget"
-            else FORGET
+            else FORGET_INTENT
         ),
     }[method]
     return row.revision, row.revision, dict(keep)
 
 
-METHODS = ("publish", "reconcile", "replace", "withdraw", "forget")
+# Each answer is written out rather than read from storage.py, so a changed
+# refusal message fails here. None: begin() accepts the call.
+LINEAGE = (
+    "recovery_choice",
+    "Reconcile a saved revision, or advance it through replacement",
+)
+PENDING_ROW = ("pending_attempt", "Inspect abandoned pending publication explicitly")
+WITHDRAWN_ROW = (
+    "withdrawn_source",
+    "Withdrawn source requires explicit new publication intent",
+)
+FORGOTTEN_ROW = (
+    "forgotten_source",
+    "Forgotten source accepts only a new publication at the next revision",
+)
+RETRY_WITHDRAWAL = ("recovery_choice", "Retry the failed withdrawal explicitly")
+RETRY_FORGET = ("recovery_choice", "Retry the failed forget explicitly")
+RETRY_REPLACEMENT = (
+    "recovery_choice",
+    "Reconcile the saved replacement plan explicitly",
+)
 # Row state and saved plan -> what begin() answers each method's caller.
-TRANSITIONS = {
-    "none": ("accepted", "accepted", "source_missing", "accepted", "source_missing"),
-    "pending": ("pending_attempt",) * 5,
-    "current": ("recovery_choice", "accepted", "accepted", "accepted", "accepted"),
-    "withdrawn": ("withdrawn_source",) * 3 + ("accepted", "withdrawn_source"),
-    "forgotten": ("accepted",) + ("forgotten_source",) * 4,
-    "failed publish": (
-        "recovery_choice",
-        "accepted",
-        "recovery_choice",
-        "accepted",
-        "forget_state",
+BEGIN_MATRIX = {
+    "none": {
+        "publish": None,
+        "reconcile": None,
+        "replace": ("source_missing", "Replacement requires an existing publication"),
+        "withdraw": None,
+        "forget": ("source_missing", "Forget requires an existing publication"),
+    },
+    "pending": dict.fromkeys(
+        ("publish", "reconcile", "replace", "withdraw", "forget"), PENDING_ROW
     ),
-    "failed replace": ("recovery_choice",) * 2
-    + ("accepted",)
-    + ("recovery_choice",) * 2,
-    "failed withdraw": ("recovery_choice",) * 3 + ("accepted", "recovery_choice"),
-    "failed forget": ("recovery_choice",) * 4 + ("accepted",),
+    "current": {
+        "publish": LINEAGE,
+        "reconcile": None,
+        "replace": None,
+        "withdraw": None,
+        "forget": None,
+    },
+    "withdrawn": {
+        "publish": WITHDRAWN_ROW,
+        "reconcile": WITHDRAWN_ROW,
+        "replace": WITHDRAWN_ROW,
+        "withdraw": None,
+        "forget": WITHDRAWN_ROW,
+    },
+    "forgotten": {
+        "publish": None,
+        "reconcile": FORGOTTEN_ROW,
+        "replace": FORGOTTEN_ROW,
+        "withdraw": FORGOTTEN_ROW,
+        "forget": FORGOTTEN_ROW,
+    },
+    "failed publish": {
+        "publish": LINEAGE,
+        "reconcile": None,
+        "replace": (
+            "recovery_choice",
+            "Advance a current revision through replacement",
+        ),
+        "withdraw": None,
+        "forget": (
+            "forget_state",
+            "Forget a current source, or retry its failed forget",
+        ),
+    },
+    "failed replace": {
+        "publish": LINEAGE,
+        "reconcile": RETRY_REPLACEMENT,
+        "replace": None,
+        "withdraw": RETRY_REPLACEMENT,
+        "forget": RETRY_REPLACEMENT,
+    },
+    "failed withdraw": {
+        "publish": LINEAGE,
+        "reconcile": RETRY_WITHDRAWAL,
+        "replace": RETRY_WITHDRAWAL,
+        "withdraw": None,
+        "forget": RETRY_WITHDRAWAL,
+    },
+    "failed forget": {
+        "publish": LINEAGE,
+        "reconcile": RETRY_FORGET,
+        "replace": RETRY_FORGET,
+        "withdraw": RETRY_FORGET,
+        "forget": None,
+    },
 }
 
 
 @pytest.mark.parametrize(
     "row,method,expected",
     [
-        (row, method, code)
-        for row, codes in TRANSITIONS.items()
-        for method, code in zip(METHODS, codes, strict=True)
+        (row, method, answer)
+        for row, answers in BEGIN_MATRIX.items()
+        for method, answer in answers.items()
     ],
 )
 async def test_begin_transition_matrix(source_payload, row, method, expected):
@@ -302,7 +379,59 @@ async def test_begin_transition_matrix(source_payload, row, method, expected):
             plan=plan,
             method=method,
         )
-        answer = "accepted"
+        answer = None
     except IntentError as refused:
-        answer = refused.code
+        answer = (refused.code, str(refused))
     assert answer == expected
+
+
+def table_rows():
+    """A saved row for each TRANSITIONS entry (None: no row), at revision 2."""
+    for state, operation in TRANSITIONS:
+        if state is None:
+            yield None
+            continue
+        yield PublicationRow(
+            dataset="d",
+            source="s",
+            revision=2,
+            verified_revision=2,
+            state=state,
+            attempt="a",
+            description="{}",
+            plan={"operation": operation} if operation else {},
+        )
+
+
+@pytest.mark.parametrize("row", list(table_rows()))
+def test_every_table_entry_answers_every_method(row):
+    """admissible() answers each (entry, method) pair with a Refusal or None,
+    whatever the plan and revision, so no pair falls through the table."""
+    methods = ("publish", "reconcile", "replace", "withdraw", "forget")
+    plans = [{}, *({"operation": f"identity_{m}"} for m in methods)]
+    for method, plan, revision in itertools.product(methods, plans, range(5)):
+        answer = admissible(row, method, plan, revision)
+        assert answer is None or isinstance(answer, Refusal), (method, plan)
+
+
+def test_step_one_entries_hold_the_next_revision():
+    """Every entry for a saved row that admits a method at the next revision
+    names the refusal for any other revision. The missing-row entry takes
+    begin()'s final check, which refuses every revision but 1."""
+    for (state, _), cell in TRANSITIONS.items():
+        if state is not None and 1 in cell.admits.values():
+            assert cell.sequence is not None, state
+    assert set(TRANSITIONS[None, None].admits.values()) == {1}
+
+
+def test_owned_entries_admit_only_their_owner():
+    for (state, operation), cell in TRANSITIONS.items():
+        if cell.owner:
+            assert state == "failed" and operation
+            assert dict(cell.admits) == {cell.owner: 0}
+
+
+def test_unknown_row_state_is_refused_clearly():
+    row = next(r for r in table_rows() if r and r.state == "current")
+    with pytest.raises(IntentError, match="unknown"):
+        admissible(dataclasses.replace(row, state="archived"), "reconcile", {}, 2)
