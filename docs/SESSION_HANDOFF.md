@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules, Checkpoint E added four changed-interpretation and kind-change fixtures, and Checkpoint F added `forget` and `readd` for a source nothing depends on. A no-behavior-change refactor of the ledger and the retiring operations followed. **Next task:** dependencies (step-4 item 3), starting with the user's decisions. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-23 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules, Checkpoint E added four changed-interpretation and kind-change fixtures, and Checkpoint F added `forget` and `readd` for a source nothing depends on. A no-behavior-change refactor of the ledger and the retiring operations followed. On 2026-10-23 Checkpoint H, the first dependencies checkpoint (step-4 item 3), made a text edit of a consumed document withhold from retrieval only the dependents' decisions that read what changed, until they are refreshed or re-confirmed. **Next task:** erasure's effect on dependents (user decision 2), starting with the user's decisions. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -11,14 +11,14 @@ Read this document first, then:
 1. [ROADMAP.md](../ROADMAP.md): project stages and current scope.
 2. [Stage-6 architecture/contract](../results/cognee_identity_stage6_handoff.md): physical representation, ownership, continuity, recovery and original six-step build order. Its dated implementation subsections are checkpoint history.
 3. [R1–R6 requirements](../results/cognee_stage5_4_5_requirements_review.md): outcome constraints, not a claim of complete coverage.
-4. [Latest fixture guide](stage6_identity_forget.md), followed by the earlier guides linked below for individual commands.
+4. [Latest fixture guide](stage6_identity_dependencies.md), followed by the earlier guides linked below for individual commands.
 5. [Integration playbook](../results/cognee_knowledge_integration_playbook.md): findings tagged with Describe/Publish/Maintain/Retrieve and transfer questions for other integrations.
 
 The [representation decision record](../results/cognee_stage5_4_5_identity_representation_proposal.md) and [pinned native extension reference](../results/cognee_extension_architecture_reference_v1.6.2.md) explain rationale and native behavior. Do not treat their early dated “next” or “not implemented at that checkpoint” statements as current implementation status. The roadmap and this handoff identify current work; later explicit approved scope changes supersede earlier proposals.
 
 ## Code baseline and delivery status
 
-Runtime code is in `src/cognee_lab/identity/`. The implementation admits every text change through one **general occurrence map** (`admit` in `admission.py`), which covers the captured prefix edits, removals, additions, split, combination and one mixed edit. Since 2026-10-22 the unchanged-text correction goes through the same `admit`, by way of `admit_replacement` in `replace.py`. The map refuses a changed resolution or meaning, a change of representation kind, a move to another document, span-scoped variants and dependent sources. The implementation does not include automatic Describe, dependent-source reconsideration or a standard-entry-point extension. The general-map update changed admission, the saved text-change plan, result JSON, the captured describers, a CLI command, the ledger model, verify journeys and tests. The saved-source schema and dependencies are unchanged.
+Runtime code is in `src/cognee_lab/identity/`. The implementation admits every text change through one **general occurrence map** (`admit` in `admission.py`), which covers the captured prefix edits, removals, additions, split, combination and one mixed edit. Since 2026-10-22 the unchanged-text correction goes through the same `admit`, by way of `admit_replacement` in `replace.py`. The map refuses a changed resolution or meaning, a change of representation kind, a move to another document and span-scoped variants. Since 2026-10-23 a text edit of a document that another source read is admitted: it withholds the dependents' decisions that read what changed (see [Checkpoint H](#dependencies-decided-and-built-2026-10-23)). The implementation does not include automatic Describe, saved-record inputs, transitive withholding, erasure of a source with dependents or a standard-entry-point extension. The general-map update changed admission, the saved text-change plan, result JSON, the captured describers, a CLI command, the ledger model, verify journeys and tests. The saved-source schema and dependencies are unchanged.
 
 The user's Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery outputs have been reviewed. The user approved the split and combination case and the general occurrence map on 2026-10-21, and the mixed case on the same day. The assistant and its subagents verified their implementation on the user's Mac with loopback embeddings. This handoff records no user-reviewed fixture roots for them. [Next task](#next-task) gives the next task.
 
@@ -33,6 +33,8 @@ Before branch `docs/handoff-2026-10-21`, `main` was at `c3becf2` and in sync wit
 - The unit-test workflow and the landing playbook.
 
 Branch `stage6-group-combine` (2026-10-21) adds the captured group split and combination, the fresh-ID rule and the revised verification routine. It lands through the same playbook.
+
+Branch `stage6-dependencies` (2026-10-23) adds Checkpoint H on top of `main` at `a1e781c`: the withholding table, per-decision validation, admission rule 5 for other documents' inputs, the refresh after an edit, the reviewer commands and the glossary fixture. It lands through the same playbook. After its `--ff-only` merge, `main` is the baseline for the next task.
 
 [Verification and landing](#verification-and-landing) describes the tools and the landing steps.
 
@@ -71,6 +73,8 @@ At session start, inspect `git status --short`, `git log -1 --oneline`, the file
 | Changed interpretation and kind change | Text edits that retire g01 for a fresh group resolved to a new derived Entity or unresolved; unchanged-text edits that turn doc01's HC variant into a local mention and back, referencing doc02's existing HC Entity; reopen/reconcile and explicit recovery | [Reinterpretation](stage6_identity_reinterpretation.md) |
 | Mixed occurrence revision | One edit keeps `it`, removes `the controller`, adds a startup `the controller` to continuing g01 and retires g02, through the general occurrence map with no admission change; reopen/reconcile and explicit recovery | [Mixed occurrences](stage6_identity_mixed_occurrences.md) |
 | Group split and combination | Explicit `occurrence_regrouping` map (since replaced by the general map); g01 splits into fresh g04 and g05, then g04 and g05 combine into fresh g06; retired groups, links, facts, evidence and triplets physically removed; facts generated again from the fresh groups, never transferred; fresh IDs from source, new revision and key; reopen/reconcile and explicit recovery | [Group split](stage6_identity_group_split.md) |
+| Forget and re-add | `forget` removes a source nothing depends on through Cognee's native document deletion; `readd` publishes it again at the next revision with new IDs; six fault stages and explicit recovery | [Forget](stage6_identity_forget.md) |
+| Dependencies (glossary) | A glossary edit withholds only doc01's decisions that read the changed entry: unchanged in place stays valid, a moved entry is refreshed with its new range, a changed entry needs a reviewer who re-confirms or replaces the decision; a failed edit withholds every citing decision until reconcile; an interrupted refresh resumes | [Dependencies](stage6_identity_dependencies.md) |
 
 ### Tests run in the generation environment
 
@@ -158,7 +162,7 @@ The assistant measured these results on the user's Mac after the fix:
 
 The project verification skill (`.claude/skills/verify/`) found this issue, and the fix removed its blocker. Its grounding-run evidence is in `outputs/verify/20261020T201147Z-grounding/evidence/`. The 24 lab data files that the probe and grounding runs of that session wrote are listed in `outputs/verify/lab-data-leaked-files-2026-10-20.txt`. The lab relational store does not reference them.
 
-Proof history, 2026-10-20 to 2026-10-22:
+Proof history, 2026-10-20 to 2026-10-23:
 
 - 2026-10-20. The 20 journey blocks ran as 31 runs on the Mac against Cognee 1.6.2, with 500 assertions and 0 failures. The tokenizer fix was applied.
 - 2026-10-21. A fix round added the `journey` runner, `probe`, the lab-store guard and `reopen_problem`. The rerun passed all 31 runs with 567 assertions and 0 failures. `journey all` ran the 30 loopback runs, and `journey P5 --include-env` ran the env run.
@@ -167,6 +171,8 @@ Proof history, 2026-10-20 to 2026-10-22:
 - 2026-10-21, checkpoint run for group split and combination. The assistant ran `journey all` on the Mac on the final branch head, serially. The 23 loopback blocks ran as 34 runs, with 695 PASS rows and 0 FAIL rows, in 15 min 17 s. P5 needs `--include-env` and did not run.
 - 2026-10-22, checkpoint run for the mixed revision. The assistant ran `journey all` on the Mac with 4 jobs. The 25 loopback blocks ran as 37 runs, with 735 PASS rows and 2 FAIL rows, in 308 s. Both FAIL rows were new O7 checks with wrong expectations, not code faults. The O7 expectations in the feature map were corrected, and an O7 rerun gave 17 PASS rows and 0 FAIL rows. No file under `src/` changed after the full run.
 - 2026-10-22, clean checkpoint rerun. The assistant ran `journey all` again on the Mac with 4 jobs, on `main` at `5603310` plus documentation changes only. The 25 loopback blocks ran as 37 runs, with 736 PASS rows and 0 FAIL rows, in 307 s.
+- 2026-10-23, dependencies (Checkpoint H). The assistant added journeys D1 to D6 in `features/dependencies.md` and ran them on the Mac with loopback embeddings: 127 PASS rows and 0 FAIL rows in 10 runs at first, 128 after fix round 2. The map now has 45 journey blocks, and `journey all` runs the 44 loopback blocks as 68 runs.
+- 2026-10-23, checkpoint runs for dependencies. The assistant ran `journey all` on the Mac with loopback embeddings: 1286 PASS rows and 0 FAIL rows in 68 runs on `5c50a6f` and again on `b04ffde`, and 1287 PASS rows and 0 FAIL rows in 68 runs on `2fcf78c`. Later commits change only documentation and one docstring. P5 needs `--include-env` and did not run.
 - Not exercised against an env root. The warning path for a missing tokenizer fix, and the doctor failure path for an operator file that lacks a key.
 - Exercised. The doctor failure path for a pre-profile marker, a malformed marker, and an env root whose operator file names another model.
 
@@ -179,7 +185,7 @@ This is **step 4 within Stage 6**, not project Stage 4.
 | 1 / M0 | Runtime forms/schema, exact chunk mapping, portable bookkeeping and capability checks implemented for the initial profile |
 | 2 / M1 | Captured Task → native publication → useful fact/evidence retrieval → reconcile demonstrated |
 | 3 / M2 | Multi-source ownership/withdrawal demonstrated; general exact-ID semantic conversion remains broader than the captured writer |
-| 4 / M3 | Partly complete: corrections, prefix/rechunk edits, partial occurrence removal, empty unresolved and resolved fact-bearing group retirement, captured additions/new group, captured group split and combination, one general occurrence map for every text change, a captured mixed addition/removal edit, and explicit caught-failure recovery |
+| 4 / M3 | Partly complete: corrections, prefix/rechunk edits, partial occurrence removal, empty unresolved and resolved fact-bearing group retirement, captured additions/new group, captured group split and combination, one general occurrence map for every text change, a captured mixed addition/removal edit, explicit caught-failure recovery, forget and re-add of a source nothing depends on, and per-decision withholding of dependents after a text edit (glossary fixture) |
 | 5 / M4 | Standard Cognify/Remember/full Update B Task-transform wiring, source-removal entry-point hooks, public Retriever/SearchType, broader traversal/delivery/diagnostics not implemented |
 | 6 / M5 | Seeded rules/model Describe and separate quality/consistency evaluation not implemented |
 
@@ -187,7 +193,7 @@ This is **step 4 within Stage 6**, not project Stage 4.
 
 1. **Occurrence/group changes:** representation-kind changes using separate suitable Entities. One general occurrence map now admits any mix of kept, removed, added and regrouped occurrences that satisfies the approved rules (2026-10-21), with captured fixtures for removal, retirement, addition, split, combination and one mixed edit. Those fixtures do not establish automatic matching or Describe.
 2. **Changed interpretation and semantic refresh:** edits changing a referent/definition/scope, with coordinated saved decisions and regenerated facts/evidence. Existing unchanged-text retargeting and captured same-binding edits do not establish this generally.
-3. **Dependencies:** identify and reconsider affected sources that consumed another document, corpus fields or saved records; support admitted span/record remapping. Current code rejects known dependent-document text edits rather than silently propagating them. New-corpus opportunity selection is not solved by positive dependencies alone.
+3. **Dependencies:** identify and reconsider affected sources that consumed another document, corpus fields or saved records; support admitted span/record remapping. Current code rejects known dependent-document text edits rather than silently propagating them. New-corpus opportunity selection is not solved by positive dependencies alone. *Since 2026-10-23 (Checkpoint H):* a text edit of a consumed document no longer refuses. It withholds the decisions that read what changed, remaps a moved span and leaves the rest for a reviewer. Saved-record inputs, the transitive case, erasure's effect on dependents and a trigger for native Entity edits remain.
 4. **Full source lifecycle:** coordinate original removal with generated-source retirement, generated-source rebuild and authorized endpoint reconstruction; preserve remaining owners and distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal alone keeps Data/description and original facts; it is not full source Forget.
 5. **Verification/recovery coverage:** extend current revision/attempt/currentness, ownership/index/evidence and retirement checks across those operations, including incomplete/missing-plan diagnostics. Do not make a general crash-recovery framework a new prerequisite.
 
@@ -360,9 +366,66 @@ A refactor with no behavior change, from the Checkpoint F code review.
 
 Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: an equivalence harness ran 26,240 begin calls against `main` with 0 differences in code, message or written row. The ledger check passed with `PINNED` unchanged at 5889 nodes and 5770 sequences, and the `--mutants` output is byte-identical to main's. A scope comparison showed each revision break admits exactly the calls main's break admits. 372 unit tests passed, including a 45-case begin matrix that pins each code and message and a completeness test over every table entry. The occurrence check and its mutants passed. The full native suite passed (59 tests). `verify.py journey all` gave 1159 PASS and 0 FAIL in 58 runs on `7ffd87a`, the same totals as before the refactor. Two thermo reviews found no behavior change beyond two the author admitted (withdrawal fault messages and the `replace_saved` fault point); both were restored. The second round's changes were restorations checked against main, so no further review ran.
 
+### Dependencies, decided and built 2026-10-23
+
+The user decided on 2026-10-22 and 2026-10-23, for step-4 item 3:
+
+1. When a consumed input changes, the affected dependents are withheld from retrieval until refreshed. They are not blocked, as before, and they are not served with a stale flag. The unit is one decision: only decisions whose inputs cite the changed input are withheld, with the facts generated from their groups. Refresh starts at once. The edit records the withholding before it completes, mechanical re-checks run at once, and anything that needs judgment becomes a "refresh needed" item. Today a reviewer clears it. Once Describe exists (step 6), the same trigger runs Describe.
+2. Erasure's effect on dependents is not in this checkpoint. The user leans toward "withhold by default, with an explicit option to remove too", with removal per decision: the decisions that cite the erased input, and what only they produced. `forget` still refuses a source with dependents.
+3. A reviewer may re-confirm a withheld decision. A re-confirm records the new fingerprint and who confirmed it. No IDs change.
+4. The first example is a glossary. A second example, outside identity, comes in a later checkpoint.
+5. Users see the reasons "input changed" (`input_changed`) and "input removed" (`input_removed`), never "input forgotten".
+
+These decisions supersede the design handoff's "callers select whole documents": the unit of withholding is one decision, not one document. A reviewer model (Sonnet) checked the spec against these decisions and the code before implementation, gave the verdict "proceed" and added 15 resolutions. The [dependencies guide](stage6_identity_dependencies.md) records them as the data shapes, rules, fixture and choices below.
+
+**Checkpoint H, completed 2026-10-23.**
+
+What changes for users:
+
+- A text edit of a document that another source read is admitted. Before, it was refused with `dependent_source`. One refusal stays: an edit that drops a reusable recipe only the edited source owns, while another source reads that Entity as a corpus input (`reject_sole_owned_readers`).
+- The edit withholds only the dependents' decisions that read what changed. A span unchanged in place stays valid. A span whose text is found exactly once elsewhere has moved: it is withheld until the refresh writes its new range. A changed span, a chunk or a whole text needs review. A changed or missing corpus field that a decision read withholds that decision at retrieval, not the whole source, and writes no recovery event.
+- `retrieve` lists each withheld decision in `unavailable_sources`, with `assignment_id` and the reason. `status` gains `withholdings`, `withheld_decisions` and `refresh_needed`.
+- New commands: `glossary-fixture`, `edit-glossary`, `reconfirm`, `replace-decision` and `refresh-dependents`. `reconcile`, `forget` and `readd` work on glossary roots.
+
+The data shape:
+
+- **The withholding table** (`lab_identity_withholdings`, module `withholding.py`) holds one row per withheld decision and input: key (dataset, dependent source, assignment, input key), with the edited source and its revision, the reason, the status (`remap` or `refresh_needed`), the old and new digests and, for a moved span, the new range. Keying by input lets a later checkpoint chain withholdings through saved records. The table lives beside the ledger, so `RecordStore`, `TRANSITIONS` and the ledger check's `PINNED` counts are unchanged, and withholding writes no recovery events.
+- **The withheld-decision set** maps source to assignment to (reason, status, the input keys that withhold it). `withheld_decisions(rows, table)` merges the rows that still apply with one rule derived from the ledger: while a consumed source's text change is pending or failed, every decision citing that document is withheld with `input_changed` and status `edit_unfinished`. So a crash before the rows are written never serves a dependent stale. Retrieval and `status` share one live-validation pass (`live_held` in `retrieve.py`), so a decision withheld only by live drift, such as a changed corpus field, shows in `status` and can be reviewed.
+
+The attestation rule (`check_reconfirmations`, code `reconfirm_unattested`) is per producer and foreign input key. A decision under a producer the old revision has may cite only foreign input keys, its group's included, that this producer's decisions cited in the old revision. A continuing decision that keeps its reviewed fields but changes its foreign inputs in any way also names a producer new in this revision. A producer new in this revision is unconstrained, and a pure range move keeps its key and passes. The rule rests on a second one: `check_foreign_inputs` keeps the content under an existing foreign key immutable (same kind, document and digest; only a span's range may move), so a producer that cited a key saw that key's content. The session owner set this rule in the fourth fix round, after three reviews each found one more shape of the same bypass (the same key, a new key, a key a sibling decision's re-confirm had added). It is reversible.
+
+Refresh after the edit: every text-change command (`edit-glossary`, `edit-text`, the occurrence commands, and a `reconcile` that completes a text change) runs `refresh_dependents` after the edit completes. The writer reservation forbids running it inside the edit. Each dependent with a moved span gets an unchanged-text replacement with the new range and no decision change; in the fixture, the insertion takes doc01 from revision 1 to 2. A refresh that fails, from any exception, does not fail the completed edit: the command reports `refresh_failed` beside it, and `refresh-dependents` or `reconcile` finishes the rest.
+
+Process, run by the assistant and its subagents on 2026-10-23. Opus at high effort wrote the implementation. Four fix rounds followed `/pstack:thermos` reviews:
+
+1. Nineteen items. Among them, a re-confirm that dropped or replaced a foreign key without a new producer, corpus inputs that no longer had to exist at admission, live withholding that `status` and the reviewers could not see, and a refresh that ran only from the glossary commands.
+2. A regression in the corpus-existence rule for inputs cited only by a group, a refresh that resumed a stale saved revision, one live-validation pass shared by retrieval and `status`, and a table of each command's fault stages.
+3. A new producer for any decision that cites a foreign key the old revision lacked. The implementer stopped because one oracle row it had written contradicted the brief. The session owner chose option (a), the stricter rule, and the row flipped.
+4. The per-producer attestation invariant above, after a third bypass shape; the rule-5 oracle rows moved to `support/dependency_worlds.py`; `refresh_dependents` reports any exception after a completed edit.
+
+A final targeted review found the branch merge-ready and listed the follow-ups recorded below.
+
+Evidence, run by the assistant on the user's Mac on 2026-10-23 with loopback embeddings:
+
+- `verify.py journey all` on `2fcf78c`: 1287 PASS and 0 FAIL in 68 runs. Later commits change only documentation and the `check_reconfirmations` docstring. P5 calls the embedding API and was skipped. Earlier full runs gave 1286 PASS and 0 FAIL on `5c50a6f` and on `b04ffde`. The one extra row is in D1 to D6, which grew from 127 to 128 PASS rows in fix round 2; the other journeys' totals are unchanged at 1159.
+- Journeys D1 to D6 in `.claude/skills/verify/features/dependencies.md`: 128 PASS and 0 FAIL in 10 runs (D5 runs five fault stages).
+- Unit suite on `12c8d30`: 405 passed, 67 deselected.
+- `support/occurrence_check.py`: PASS on all 540,045 fate worlds, with 50 decision rows (25 for rule 5). `--mutants`: all 31 breaks caught.
+- `support/ledger_check.py`: PASS, `PINNED` unchanged at 5889 nodes and 5770 sequences. `--mutants`: the 40 breaks as expected.
+- Integration: the full suite gave 64 passed in 1366 s on `5c50a6f`. `tests/test_identity_native.py` with `tests/test_identity_dependencies_native.py` gave 19 passed on `7181689`. `tests/test_identity_dependencies_native.py` gave 8 passed on `12c8d30`.
+
+No user-reviewed glossary root exists yet. The [dependencies guide](stage6_identity_dependencies.md#evidence) has each round's evidence.
+
 ### Next task
 
-Dependencies (step-4 item 3). The assistant lays out the context and the decisions it needs for the user; implementation waits for the user's choices.
+Erasure's effect on dependents (user decision 2 above), starting with the user's decisions. The assistant proposes it before saved-record inputs because it builds on what Checkpoint H made: the withholding table, the `input_removed` reason and `replace-decision`. It lays out the context and the decisions it needs; implementation waits for the user's choices. The assistant's proposal, to confirm or change:
+
+- **Default.** Erasure withholds each decision that cites an input of the erased source, with `input_removed`. `reconfirm` already refuses `input_removed`, so a reviewer replaces the decision.
+- **Explicit removal option.** A per-decision removal of the decisions citing the erased input and of what only they produced, such as a fresh Entity only that decision named and the facts generated from its group. The user needs to decide how this option is chosen (per erasure, per dependent or per decision) and whether it writes a new revision of each dependent.
+- **Erasure versus cleanup.** Cleanup keeps today's refusal with dependents; erasure is never blocked by them. The two existing follow-ups on withdrawn, failed and forgotten sources apply here.
+- **Residue.** The [forget guide](stage6_identity_forget.md) lists the copies a forget leaves. Erasure needs a decision on each: the kept description, the forget plan, recovery events, fixture files and the stores' soft-deleted bytes.
+
+The transitive case (a decision that depends on another source's withheld decision) needs saved-record inputs first, which no source can declare yet. The assistant proposes it as the checkpoint after erasure, with the second, non-identity example the user asked for (decision 4).
 
 ### Tracked follow-ups
 
@@ -374,6 +437,16 @@ None blocks the next task.
 - `check_readd_entity_ids` accepts `replaces:<uuid>` for any removed UUID, not only the Entity's own. The results are still fresh and probed, so this is looser than the guide's wording, not unsafe.
 - `remains()` reads `stored_files` without the guard `forget()` has, so a development root with a forget plan saved before that field crashes the snapshot. No kept root has one.
 - The oracle's worlds do not cover more than one addition or reordering. A unit test pins reordering, and the captured addition fixture's general map pins two additions. Widen the bound if a later rule depends on either.
+
+Added by Checkpoint H on 2026-10-23, from its final review and the dependencies guide's "Not in this checkpoint":
+
+- Attestation is per producer, not per decision. A renamed or new decision may name a sibling's re-confirm producer and cite the key that producer attested, so one decision's re-confirm can cover another decision's interpretation. The record stays true about which content was seen. A per-decision attestation would close it.
+- A producer's identity is its key, not its content. A revision may rewrite an old producer's configuration without changing a decision. The attestation rule still constrains it and nothing is released, but recorded provenance is not immutable.
+- `describe_prefix_edit` (`text_fixture.py`) stamps every record with the fixed producer key `text_review`. A second prefix edit after a re-confirm on the same source would be refused by the attestation rule. No CLI path reaches it today. A per-revision key would remove the hazard.
+- `refresh-dependents` re-raises a refresh failure that is not an `IntentError` as an `IntentError` whose code is the original class name. The exit code is still 1, but the exception class and traceback are lost.
+- `classify` finds a moved span by hashing every window of the new text with the span's length: O(n·len) for a text of n code points. That is fine for a glossary. A long consumed document with many spans needs a substring search first, confirmed by digest.
+- The CLI picks the glossary driver for `reconcile`, `forget` and `readd` by the root's `glossary-fixture-info.json` file. A fixture-kind field in the root marker would replace that check.
+- A chunk of another document has no refusal rule and always needs review; no fixture has one. Moves across documents and span-scoped variant ranges count as a change, not a remap.
 
 ## Code map
 
@@ -387,15 +460,17 @@ Paths below are relative to `src/cognee_lab/identity/`.
 | `stages.py` | `run_attempt`, the one attempt frame for replace, withdraw and forget |
 | `registered.py` | Real Data JSON/raw-text ingestion/readback and registered snapshot checks |
 | `publish.py` | Missing-node creation, safe existing-node retention, original markers, aggregated generated-source identity contributions and verification |
-| `replace.py`, `withdraw.py`, `forget.py` | Guarded replacement, withdrawal and forget, `admit_replacement` (the one admission call site), durable old/new intent, selective retirement and explicit forward recovery |
+| `replace.py`, `withdraw.py`, `forget.py` | Guarded replacement, withdrawal and forget, `admit_replacement` (the one admission call site), the replace stages `withhold_dependents` (text changes) and `withholding_cleanup`, durable old/new intent, selective retirement and explicit forward recovery |
 | `retirement.py`, `forget_fixture.py` | Shared retirement primitives (ownership snapshots, contributions, `dependents`, removed Entities, survivor checks) and the forget, re-add and dependent-fixture drivers |
 | `admission.py` | What a reviewed replacement may claim: `parse_occurrence_map`, `identity_map`, `admit` and its rules in the order it applies them, returning a `GroupFate`, and the graph probe `check_absent_from_graph` |
-| `text_changes.py` | `TextChange` with its typed `occurrence_map`, `from_plan` (which refuses a plan without `occurrence_map`) and `prefix_shift`; `preflight` calls `admit` with `first_attempt=not retry`; dependency/cascade guards, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
-| `retrieve.py` | Bounded fixture retrieval, saved-source eligibility, scoped identity links/local mention facts and native current evidence; not a public corpus-wide retriever |
+| `text_changes.py` | `TextChange` with its typed `occurrence_map`, `from_plan` (which refuses a plan without `occurrence_map`) and `prefix_shift`; `preflight` calls `admit` with `first_attempt=not retry`; the cascade guard and `reject_sole_owned_readers`, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
+| `retrieve.py` | Bounded fixture retrieval, saved-source eligibility, the live-validation pass `live_held` shared with `status` (`withheld_now`), withheld decisions skipped, scoped identity links/local mention facts and native current evidence; not a public corpus-wide retriever |
+| `withholding.py` | The withholding table (`WithholdingStore`), `classify` for one input against an edited text, the edit stage `withhold_dependents` and `withheld_decisions`, which merges the rows with the rule derived from the ledger |
 | `native.py` | Normalizers over graph/provenance/neighborhood interfaces |
 | `fixture.py`, `multisource.py`, `captured_chunks.py` | Captured facts, source contexts, exact producing/evidence chunk binding, single/two-source setup and diagnostics. `CAPTURED_GROUPS` in `captured_chunks.py` names each captured group's creating revision, creating producer and fact. A group has retired when its creating producer is in the source's lineage and the source no longer declares it |
 | `captured_text.py` | The original doc01 text `BEFORE`, shared by the captured edits |
-| `revisions.py`, `text_fixture.py` | Captured identity correction/prefix edit, shared maintenance callbacks and transition diagnostics |
+| `revisions.py`, `text_fixture.py` | Captured identity correction/prefix edit, shared maintenance callbacks, `refresh_dependents` (the refresh after an edit) and transition diagnostics |
+| `glossary_fixture.py` | The glossary root creator, the four glossary edits, `reconfirm`, `replace-decision` and the glossary result document |
 | `occurrence_fixture.py`, `occurrence_addition.py`, `resolved_retirement.py` | Captured addition/removal/mixed/retirement examples and physical absence/shared-survival checks. `COMMANDS` in `occurrence_fixture.py` maps each occurrence command to its text, describer, result file and occurrence map |
 | `group_regrouping.py` | Captured split and combination texts, regrouping maps and the `describe_split` and `describe_combination` intended descriptions |
 | `captured_revision.py` | Shared building blocks for captured describers: `require_root`, `begin_revision`, `retire_group`, `declare_group`, `occurrence` and `stamp_producer` |
@@ -416,7 +491,7 @@ uv run python -c "import cognee; print(cognee.__version__)"
 uv run pytest -q -m 'not integration'
 ```
 
-On `main` at `5603310` (2026-10-22) the unit suite gives 269 passed and 36 deselected. On branch `stage6-group-combine` (2026-10-21) it gave 207 passed and 34 deselected. On `c3becf2` it gave 143 passed and 29 deselected. The inspected native version must be **1.6.2**. If the version differs, inspect compatibility again. Do not identify another version as the tested profile. Run focused native tests for the changed path first. The full native suite is `uv run pytest -q -m integration`. It creates fresh stores and can take minutes.
+On branch `stage6-dependencies` at `12c8d30` (2026-10-23) the unit suite gives 405 passed and 67 deselected. On `main` at `5603310` (2026-10-22) it gave 269 passed and 36 deselected. On branch `stage6-group-combine` (2026-10-21) it gave 207 passed and 34 deselected. On `c3becf2` it gave 143 passed and 29 deselected. The inspected native version must be **1.6.2**. If the version differs, inspect compatibility again. Do not identify another version as the tested profile. Run focused native tests for the changed path first. The full native suite is `uv run pytest -q -m integration`. It creates fresh stores and can take minutes.
 
 The latest happy path, with a **new** root, is:
 
@@ -429,7 +504,7 @@ uv run python -m cognee_lab.identity reconcile --root outputs/stage6_resume_chec
 
 This sequence uses loopback embeddings. Without `--embedding loopback`, `chunked-fixture` uses the default `--embedding env` profile. That profile needs `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in the repository `.env`, and it calls that embedding endpoint. Later commands read the profile from the root marker, so they do not need the flag. pytest always uses loopback and does not need `.env`.
 
-Expected: two retrieved facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, continuing g01 with `it` at [46,48) and `the controller` at [86,100), g02 retired with no Entity, index entry or marker, and no recovery incident. The [mixed occurrences guide](stage6_identity_mixed_occurrences.md) has the expected values and the injected-failure recovery. The [group split guide](stage6_identity_group_split.md) has the split and combination sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
+Expected: two retrieved facts, doc01 current at 2/2/2, doc02 unchanged at 1/1/1, continuing g01 with `it` at [46,48) and `the controller` at [86,100), g02 retired with no Entity, index entry or marker, and no recovery incident. The [mixed occurrences guide](stage6_identity_mixed_occurrences.md) has the expected values and the injected-failure recovery. The [dependencies guide](stage6_identity_dependencies.md#commands) has the glossary sequence: an edit that needs review, `status` and two re-confirms. The [group split guide](stage6_identity_group_split.md) has the split and combination sequence. `status` and `retrieve` inspect existing marked roots; fixture creation refuses existing directories. A root made before the `.env` fix opens only for `status` and `retrieve`.
 
 ## Verification and landing
 
@@ -442,7 +517,7 @@ The user agreed this routine on 2026-10-21:
 
 The integration suite, `uv run pytest -q -m integration`, takes about 10 minutes and runs only on a local machine. Run the focused native tests for the changed path.
 
-**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 39 journey blocks. `journey all` runs the 38 loopback blocks as 58 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. [Verification skill](#verification-skill) lists each `journey all` run.
+**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 45 journey blocks. `journey all` runs the 44 loopback blocks as 68 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. [Verification skill](#verification-skill) lists each `journey all` run.
 
 An earlier full run on 2026-10-21 took about 2 hours. The step timings suggest that macOS idle throttling caused most of it. Every step took a flat 40 s or so until `caffeinate` started, and about 4 s after. This is an inference from the timings, not a proven cause. A warm step costs about 3.6 to 6.7 s, and about 2.4 s of that is imports. An unthrottled full run is estimated at about 11 minutes.
 
