@@ -14,7 +14,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-dependent-interrupted` stops after the forget completed and before or inside a dependent's removal revision; `reconcile` or `forget` on the forgotten source resumes it, and `readd` waits.
 - `forget-dependent-blocked` lists a dependent whose own withdrawal failed as blocked; its removal waits until that attempt finishes.
 - `forget-dependent-failed-replacement` applies the removal to a dependent's failed replacement in its saved revision, and the replacement finishes with it; nothing is left unfinished.
-- `forget-dependent-failed-publication` applies the removal to a dependent's failed first publication in its saved revision, and the publication finishes with it. Before that the dependent's own `reconcile` cannot finish, and nothing of it is served.
+- `forget-dependent-failed-publication` applies the removal to a dependent's failed first publication in its saved revision, and the publication finishes with it. Before that the dependent's own `reconcile` cannot finish, and nothing of it is served. What the failed attempt wrote for a decision the removal drops goes with it: a dropped Entity's node and name vector, and its identity-edge contribution.
 - `forget-any-source` forgets a withdrawn source and a source whose first publication failed.
 - `forget-fault` fails a forget at an injected stage, withholds the source, then finishes it with `reconcile`.
 - `readd` publishes a forgotten source again at the next revision with new UUIDs for its mentions and for every Entity the forget removed: a named one derives from a key that names it, an unnamed one from the removed UUID.
@@ -391,6 +391,23 @@ $V check "$RUN" rec '.sources.doc02.original_fact_present and .result.facts == [
 $V check "$RUN" rec '[.recovery_events[] | .resolved_at != null] | all' 'every incident is resolved'
 $V drive "$RUN" main again -- reconcile --source doc01
 $V check "$RUN" again '.error == "IntentError" and (.message | contains("Forgotten source"))' 'nothing is left for the forget'
+```
+
+**F14 a failed publication's erasure retry retires what it wrote.** Proves `forget-dependent-failed-publication`. Guide: "A dependent that is pending or failed". doc01's first publication fails at `identity_edges`, after HC's node, its name vector and the HC edge with v01's contribution are written, while v01 reads the glossary's HC entry. The glossary's dry run lists doc01 at revision 1, failed and not blocked, with HC as its one dropped Entity. With the token the glossary is forgotten and doc01's publication finishes with the removal: doc01 is current at revision 1 with r01 alone, under the removal producer. HC leaves the name index with the rest of what the failed attempt wrote for it, so the HC query seeds it neither in the forget's result nor in a fresh `retrieve`, and every incident is resolved. The native test `test_native_an_erasure_retry_of_a_failed_publication_retires_what_it_wrote` also reads HC's node and the edge's contributions.
+
+```bash journey F14
+$V drive "$RUN" main fixture -- glossary-fixture --source doc01 --fault-stage identity_edges
+$V check "$RUN" fixture '.error == "IntentError" and (.message | contains("after identity edges"))' 'doc01 first publication failed after its identity edges'
+$V drive "$RUN" main dry -- forget --source glossary --expected-revision 1 --dry-run
+T=$(val dry '.token')
+$V check "$RUN" dry '[.dependents[] | [.state, .revision, .blocked, .dropped_entities]] == [["failed", 1, false, ["9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"]]]' 'doc01 is listed failed at revision 1, not blocked, and HC would go'
+$V drive "$RUN" main forget -- forget --source glossary --expected-revision 1 --confirm "$T"
+$V check "$RUN" forget '.dependents_failed == null and [.sources.glossary.state, .sources.doc01.state, .sources.doc01.saved_revision] == ["forgotten", "current", 1]' 'the glossary is forgotten and doc01 finishes at revision 1'
+$V check "$RUN" forget '(.sources.doc01.decisions | keys) == ["r01"] and (.sources.doc01.decisions.r01.producer_ref | startswith("forget_"))' 'doc01 keeps only r01, under the removal producer'
+$V check "$RUN" forget '(.result.seed_entity_ids | index("9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88")) == null and .result.unavailable_sources == []' 'the HC query no longer seeds HC'
+$V check "$RUN" forget '[.recovery_events[] | .resolved_at != null] | all' 'every incident is resolved'
+$V drive "$RUN" main again -- retrieve
+$V check "$RUN" again '(.seed_entity_ids | index("9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88")) == null and .unavailable_sources == []' 'a fresh retrieve does not seed HC either'
 ```
 
 ## Gotchas

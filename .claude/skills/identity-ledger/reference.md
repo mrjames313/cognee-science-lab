@@ -90,7 +90,7 @@ On 2026-10-23 (checkpoint I) forget began on withdrawn and failed-publication ro
 
 Later on 2026-10-23 (checkpoint I fix round 1) the erasure retry joined the step list: a replace retry on a failed replacement that supersedes the saved description, a retry that names a description that is not saved, one that grows the list without changing the description, and one that drops the list. Depth 5 gives 6431 nodes and 6300 sequences in about 10.6 s, and `--mutants` runs its 46 breaks in about 32 s (measured by the assistant on the user's Mac). The properties moved from `ledger_check.py` to `ledger_properties.py` in the same change.
 
-On 2026-10-23 (checkpoint I fix round 2) the store began to check the erasure-retry chain itself, and reconcile began erasure retries of failed publications. The model gained the forgotten background source, variant 1 as a real removal, a replace first attempt that writes variant 1, a misnamed supersede, and reconcile's superseding, kept and dropped `erased_from` plans. Depth 5 gives 8504 nodes and 8349 sequences in about 15 s, and depth 6 about 48000 nodes in about 95 s, because `begin` now reads and parses every row under the reservation (measured by the assistant on the user's Mac). `--mutants` runs its 49 breaks.
+On 2026-10-23 (checkpoint I fix round 2) the store began to check the erasure-retry chain itself, and reconcile began erasure retries of failed publications. The model gained the forgotten background source, variant 1 as a real removal, a replace first attempt that writes variant 1, a misnamed supersede, and reconcile's superseding, kept and dropped `erased_from` plans. Depth 5 gives 8504 nodes and 8349 sequences in about 15 s, and depth 6 about 48000 nodes in about 95 s, because `begin` now reads and parses every row under the reservation (measured by the assistant on the user's Mac). `--mutants` runs its 49 breaks. On 2026-10-23 (checkpoint I fix round 3) `begin` reads the rows only for an erasure retry, the counts are unchanged, and `--mutants` runs 51 breaks, `supersede-drops-chain` among them, moved from the deep breaks.
 
 P5 later gained two checks: no step removes a recovery event, and no step changes a resolved one. After that change, depths 6, 7 and 8 passed again with the same counts. Those runs ran in parallel, so their times are not in the table.
 
@@ -147,9 +147,11 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `advance-guard-ignores-method` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=2` |
 | `no-revision-reuse` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1 desc=alt` |
 | `supersede-any-description` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1 desc=alt`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=replace<r1+e0 desc=alt` |
-| `erasure-chain-unchecked` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=replace<r1+e0` |
+| `erasure-chain-unchecked` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1 desc=alt`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=replace<r1+e1` (since fix round 3 a retry that names the saved description and begins with it unchanged is refused before the chain check, so the first break found is the reverse step, variant 1 superseded by 0) |
 | `erasure-outside-retry` | P5 | a reconcile of a current row with a plan that names `erased_from`, from a stale read of its failed publication |
 | `reconcile-never-supersedes` | INCONCLUSIVE | never reaches `erasure retry reconcile` |
+| `supersede-drops-chain` | P5 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 reconcile S1 rev=1 plan=publish+e0 desc=alt`, `W1 fail@nodes`, `W1 reconcile S1 rev=1 desc=alt` |
+| `begin-reads-no-rows` | INCONCLUSIVE | never reaches `erasure retry reconcile`: with no forgotten row to bind to, every erasure retry is refused (`erasure_unbound`) |
 | `no-plus-one` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 publish S2 rev=2` |
 | `no-replace-plan-check` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2` |
 | `no-replace-plan-preservation` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=text<r1` |
@@ -176,11 +178,10 @@ uv run python support/ledger_check.py --mutant withdrawn-guard-admits-replace --
 | Break | Depth | Property | Minimal sequence |
 | --- | --- | --- | --- |
 | `withdrawn-guard-admits-replace` | 7 | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete`, `W1 withdraw S1 rev=2`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1` |
-| `supersede-drops-chain` | 7 | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=replace<r1+e0 desc=alt`, `W1 complete desc=alt`, `W1 replace S1 rev=2 plan=replace<r1 desc=alt` |
 
 The withdrawn guard is the only guard that refuses the last step. That step is the retry branch of `replace`, built from a stale read of the current replacement row. Its plan is a replace plan, so the plan guard accepts it. The row is withdrawn, not failed, so the plan preservation guard does not apply. At depth 6 the search passes with the real node count (15763 nodes). At depth 7 it fails after 4032 nodes, in about 7 s. On 2026-10-22, after the forget steps joined the step list and the table refactor, the assistant measured on the user's Mac that it fails after 7938 nodes in about 13 s, with the same minimal sequence. On 2026-10-23, with forget admitted on a withdrawn row, the break's anchor is the withdrawn entry with forget in it; it fails after 8346 nodes in about 14.5 s, with the same minimal sequence.
 
-The erasure retry break `supersede-drops-chain` lets a retry of a failed erasure retry drop the descriptions it superseded from its plan. P5 catches the retry that drops them, at depth 7: two failed attempts and the retry. Before fix round 2 the break made the saved arguments of a failed erasure retry stop beginning, which P6 caught at depth 6; the fold of `erased_from` into the preserved fields moved it.
+The erasure retry break `supersede-drops-chain` lets a retry of a failed erasure retry drop the descriptions it superseded from its plan. Before fix round 2 the break made the saved arguments of a failed erasure retry stop beginning, which P6 caught at depth 6. Fix round 2 recorded it at depth 7 through replace, but its reconcile intents already let depth 5 catch it through reconcile: the assistant ran the break on the `cb5fd20` sources on 2026-10-23 and it failed at depth 5. Since fix round 3 it is in `MUTANTS` (see the table above).
 
 ### Breaks that are not caught
 
