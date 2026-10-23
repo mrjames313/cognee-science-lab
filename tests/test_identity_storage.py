@@ -229,6 +229,47 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
 
 
 @pytest.mark.asyncio
+async def test_a_second_forget_carries_the_first_tombstone_forward(source_payload):
+    """The re-added life keeps the first tombstone beside its description,
+    and the second forget's tombstone carries its mention UUID."""
+    source_payload["dataset_id"] = str(uuid4())
+    for item in source_payload["inputs"].values():
+        if "dataset_id" in item:
+            item["dataset_id"] = source_payload["dataset_id"]
+    life1 = IdentitySource.model_validate_json(json.dumps(source_payload))
+    old = str(life1.mention_groups["g01"].entity_id)
+    life2 = IdentitySource.model_validate_json(
+        json.dumps(source_payload).replace(old, str(uuid4()))
+    ).model_copy(update={"revision": 2})
+    forget = {"operation": "identity_forget"}
+    store = RecordStore()
+    await store.initialize()
+    attempt = await store.begin(life1, expected_revision=0, plan={})
+    await store.complete(life1, attempt)
+    attempt = await store.begin(
+        life1, expected_revision=1, plan=forget, method="forget"
+    )
+    await store.complete(
+        life1, attempt, state="forgotten", tombstone=tombstone_of(life1)
+    )
+    attempt = await store.begin(life2, expected_revision=1, plan={})
+    await store.complete(life2, attempt)
+    (row,) = await store.rows(life1.dataset_id)
+    assert row.description == life2 and row.last_tombstone == tombstone_of(life1)
+
+    attempt = await store.begin(
+        life2, expected_revision=2, plan=dict(forget), method="forget"
+    )
+    await store.complete(
+        life2, attempt, state="forgotten", tombstone=tombstone_of(life2)
+    )
+    (row,) = await store.rows(life1.dataset_id)
+    assert row.tombstone == tombstone_of(life2).carrying(tombstone_of(life1))
+    assert [str(e) for e in row.tombstone.earlier_mention_ids] == [old]
+    assert row.last_tombstone == row.tombstone
+
+
+@pytest.mark.asyncio
 async def test_a_forgotten_row_from_before_tombstones_is_refused(source_payload):
     """A forgotten row that still holds its description is an old format;
     rows() refuses it rather than read content a tombstone would drop."""

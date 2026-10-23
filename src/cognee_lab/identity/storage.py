@@ -31,6 +31,9 @@ class Publication(Base):
     attempt: Mapped[str] = mapped_column(String(36))
     description: Mapped[str] = mapped_column(Text)
     plan: Mapped[str] = mapped_column(Text)
+    # The tombstone the source's last forget left, kept through a re-added
+    # life so the next forget carries its UUIDs forward (Tombstone.carrying).
+    last_tombstone: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Writer(Base):
@@ -98,7 +101,9 @@ class PublicationRow:
     """One saved publication, as RecordStore.rows() and row() read it, parsed
     once: a forgotten row holds its tombstone and no description, every
     other row its description and no tombstone. A forgotten row from before
-    tombstones is refused here."""
+    tombstones is refused here. `last_tombstone` is the tombstone the
+    source's last forget left, on a forgotten row and on one re-added
+    since."""
 
     dataset: str
     source: str
@@ -109,6 +114,7 @@ class PublicationRow:
     description: IdentitySource | None
     tombstone: Tombstone | None
     plan: dict
+    last_tombstone: Tombstone | None = None
 
     @classmethod
     def of(cls, record: Publication) -> "PublicationRow":
@@ -133,6 +139,11 @@ class PublicationRow:
             description=description,
             tombstone=tombstone,
             plan=json.loads(record.plan),
+            last_tombstone=(
+                Tombstone.model_validate_json(record.last_tombstone)
+                if record.last_tombstone
+                else None
+            ),
         )
 
     def record(self) -> dict:
@@ -646,7 +657,8 @@ class RecordStore:
     async def complete(self, source, attempt, *, state="current", tombstone=None):
         """Acknowledge the pending attempt. A forget completes with the
         source's tombstone, which replaces its description in the same
-        transaction; its plan keeps only identifiers, and every recovery
+        transaction, carrying the UUIDs of the tombstone the source's last
+        forget left; its plan keeps only identifiers, and every recovery
         event of the source loses its message."""
         if state not in {"current", "withdrawn", "forgotten"}:
             raise ValueError("Unsupported completion state")
@@ -662,7 +674,6 @@ class RecordStore:
                 sid,
             ) or tombstone.revision != source.revision:
                 raise ValueError("The tombstone names another source or revision")
-            values["description"] = tombstone.model_dump_json()
         async with self.session_factory() as session:
             result = await session.execute(
                 update(Publication)
@@ -681,6 +692,11 @@ class RecordStore:
                 )
             if tombstone is not None:
                 row = await session.get(Publication, (dataset, sid))
+                earlier = row.last_tombstone
+                carried = tombstone.carrying(
+                    Tombstone.model_validate_json(earlier) if earlier else None
+                )
+                row.description = row.last_tombstone = carried.model_dump_json()
                 row.plan = encode(scrubbed_plan(json.loads(row.plan)))
             await session.execute(
                 update(Writer)

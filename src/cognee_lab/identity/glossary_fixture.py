@@ -602,12 +602,15 @@ async def run(args, root):
         elif args.command == "readd":
             from .forget_fixture import readd
 
-            await readd(
-                publisher,
-                root,
-                args.source,
-                expected_revision=args.expected_revision,
-                fault_stage=args.fault_stage,
+            refresh = dict(
+                no_refresh(),
+                **await readd(
+                    publisher,
+                    root,
+                    args.source,
+                    expected_revision=args.expected_revision,
+                    fault_stage=args.fault_stage,
+                ),
             )
         elif args.command == "refresh-dependents":
             refresh = await refresh_dependents(publisher, refresh_fault)

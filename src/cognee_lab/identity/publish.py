@@ -202,7 +202,14 @@ class Publisher:
             if (r.dataset, r.source)
             != (str(source.dataset_id), str(source.identity_data_id))
         ]
-        validate_uses([*(r.description or r.tombstone for r in others), source])
+        # A re-added source's earlier forgotten lives count as its tombstone.
+        validate_uses(
+            [
+                *(r.description or r.tombstone for r in others),
+                *(r.last_tombstone for r in others if r.last_tombstone),
+                source,
+            ]
+        )
         refuse_retiring_inputs(source, rows)
         previous = await self.records.row(source)
         if previous and previous.revision != (saved_revision or source.revision):

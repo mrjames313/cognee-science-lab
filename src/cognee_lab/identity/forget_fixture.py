@@ -202,14 +202,15 @@ def chunk_budget(root):
 async def readd(publisher, root, label, *, expected_revision, fault_stage):
     """Publish a forgotten source again from the caller's files
     (`CALLER_FILES`): its text and identity description, which may differ
-    from what was forgotten. The re-add is admitted on the in-memory text
-    and chunks before anything is written, so a refusal leaves the stores as
-    the forget left them."""
+    from what was forgotten, and report whether they do. The re-add is
+    admitted on the in-memory text and chunks before anything is written,
+    so a refusal leaves the stores as the forget left them."""
     import cognee
     from types import SimpleNamespace
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
     from .fixture import context_for, load_chunks
+    from .erasure_rules import differs_from_forgotten
     from .multisource import publish_one
     from .registered import read_texts
     from .retirement import readd_removed
@@ -271,6 +272,7 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
         fault_stage=fault_stage,
         semantics=files.facts,
     )
+    return dict(differs_from_forgotten=differs_from_forgotten(tombstone, source))
 
 
 async def forget_checks(publisher, ids, mentions, removed, plan, singleton):

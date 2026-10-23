@@ -153,6 +153,66 @@ def naming_keys(source, entity_id):
     }
 
 
+def decisions_digest(source: IdentitySource) -> str:
+    """A digest of a description's reviewed decisions that a re-add of the
+    same decisions repeats: each resolution by key with its group, status
+    and the Entities it names, each variant by key with its endpoints and
+    applicability, and each recipe under the name of its Entity. A re-add
+    renames the source's own Entities and moves to the next revision, so
+    an Entity is named by its group key, or by the keys of the resolutions
+    and variants that name it, never by its UUID. Producers, inputs,
+    explanations and occurrences are left out: they record how a decision
+    was made and where it reads, which other text or a removal changes."""
+    groups = {g.entity_id: k for k, g in source.mention_groups.items()}
+
+    def name(entity_id):
+        if entity_id in groups:
+            return ["group", groups[entity_id]]
+        if entity_id in source.entity_constructions:
+            return ["named_by", sorted(naming_keys(source, entity_id))]
+        return ["entity", str(entity_id)]
+
+    def names(entity_ids):
+        if entity_ids is None:
+            return None
+        return sorted((name(e) for e in entity_ids), key=rfc8785.dumps)
+
+    return object_digest(
+        dict(
+            resolutions={
+                k: dict(
+                    group=r.group_ref,
+                    status=r.status,
+                    target=(
+                        name(r.target_entity_id) if isinstance(r, Accepted) else None
+                    ),
+                    candidates=(
+                        None
+                        if isinstance(r, Accepted)
+                        else names(r.candidate_entity_ids)
+                    ),
+                )
+                for k, r in source.mention_resolutions.items()
+            },
+            variants={
+                k: dict(
+                    source=name(v.source_entity_id),
+                    target=name(v.target_entity_id),
+                    applicability=v.applicability.model_dump(mode="json"),
+                )
+                for k, v in source.variant_assignments.items()
+            },
+            recipes=sorted(
+                (
+                    [name(e), r.name, r.description]
+                    for e, r in source.entity_constructions.items()
+                ),
+                key=rfc8785.dumps,
+            ),
+        )
+    )
+
+
 def naming(description, key) -> set[UUID]:
     """The Entities one resolution or variant names."""
     decision = description.mention_resolutions.get(key)
@@ -352,27 +412,34 @@ async def validate_inputs(
     return drift
 
 
+def uses_of(saved) -> tuple[dict[UUID, tuple], set[UUID]]:
+    """One saved description's or tombstone's mention UUIDs, each with the
+    (identity source, group key) it belongs to, and its reusable UUIDs. A
+    mention UUID of an earlier forgotten life has no key of its own."""
+    if isinstance(saved, Tombstone):
+        mentions = {
+            e: (saved.identity_data_id, k) for k, e in saved.mention_ids.items()
+        }
+        mentions |= {
+            e: (saved.identity_data_id, None) for e in saved.earlier_mention_ids
+        }
+        return mentions, set(saved.entity_ids) | set(saved.earlier_entity_ids)
+    mentions = {
+        g.entity_id: (saved.identity_data_id, k)
+        for k, g in saved.mention_groups.items()
+    }
+    return mentions, set(saved.entity_constructions) - set(mentions)
+
+
 def validate_uses(saved: list) -> None:
     """Build a transient UUID-use view of saved descriptions and tombstones;
-    singleton declarations count as reusable. A forgotten source's tombstone
-    keeps its last revision's mention and reusable UUIDs, which count too."""
+    singleton declarations count as reusable. A tombstone keeps the mention
+    and reusable UUIDs of every forgotten life of its source, which count
+    too."""
     mentions, reusable = {}, set()
-    uses = [
-        (
-            (s.identity_data_id, dict(s.mention_ids), set(s.entity_ids))
-            if isinstance(s, Tombstone)
-            else (
-                s.identity_data_id,
-                {k: g.entity_id for k, g in s.mention_groups.items()},
-                set(s.entity_constructions),
-            )
-        )
-        for s in saved
-    ]
-    for identity_data_id, groups, declared in uses:
-        reusable.update(declared - set(groups.values()))
-        for key, entity_id in groups.items():
-            identity = (identity_data_id, key)
+    for groups, declared in map(uses_of, saved):
+        reusable.update(declared)
+        for entity_id, identity in groups.items():
             if entity_id in mentions and mentions[entity_id] != identity:
                 raise IntentError(
                     "incompatible_group", "Mention UUID belongs to another group"

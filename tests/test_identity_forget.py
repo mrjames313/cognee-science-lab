@@ -8,7 +8,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee_lab.identity.erasure_rules import admit_readd, replacement_entity_id
+from cognee_lab.identity.erasure_rules import (
+    admit_readd,
+    differs_from_forgotten,
+    replacement_entity_id,
+)
 from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.erasure import impact
 from cognee_lab.identity.forget_fixture import describe_readd
@@ -20,6 +24,8 @@ from cognee_lab.identity.validation import (
     fresh_entity_id,
     fresh_mention_id,
     object_digest,
+    text_digest,
+    validate_uses,
 )
 
 
@@ -484,3 +490,125 @@ async def test_a_readd_with_the_forgotten_uuids_or_revision_is_refused(
     with pytest.raises(IntentError) as refused:
         await admit_readd(occupied, tomb(forgotten), readded, set())
     assert refused.value.code == "fresh_uuid_in_graph"
+
+
+def test_a_readd_reports_whether_its_text_and_decisions_differ(source_payload):
+    """A re-add renames the source's own Entities and moves to the next
+    revision, which is no difference. Other text is; so are another outcome,
+    another variant endpoint and another recipe. How a decision was made
+    (its producer and explanation) is not. The report never refuses."""
+    forgotten = source_of(source_payload)
+    tombstone = tomb(forgotten, [HC])
+    readded = describe_readd(
+        forgotten, tombstone, {HC}, TEXT, chunks_of(forgotten, TEXT)
+    )
+    assert HC not in readded.entity_constructions
+    assert differs_from_forgotten(tombstone, readded) == dict(
+        text=False, decisions=False
+    )
+
+    def changed(edit):
+        payload = json.loads(readded.model_dump_json())
+        edit(payload)
+        return differs_from_forgotten(tombstone, source_of(payload))
+
+    def other_text(p):
+        p["inputs"]["doc01"]["text_sha256"] = text_digest(TEXT + " HC was serviced.")
+
+    def unresolved(p):
+        r01 = p["mention_resolutions"]["r01"]
+        r01.pop("target_entity_id")
+        r01["status"] = "unresolved"
+
+    def swapped(p):
+        v01 = p["variant_assignments"]["v01"]
+        v01["source_entity_id"], v01["target_entity_id"] = (
+            v01["target_entity_id"],
+            v01["source_entity_id"],
+        )
+
+    def recipe(p):
+        target = p["mention_resolutions"]["r01"]["target_entity_id"]
+        p["entity_constructions"][target]["description"] = "Another controller."
+
+    def provenance(p):
+        p["producers"]["fixture"]["version"] = "0.2"
+        p["mention_resolutions"]["r01"]["explanation"] = "Reviewed again."
+
+    assert changed(other_text) == dict(text=True, decisions=False)
+    for edit in (unresolved, swapped, recipe):
+        assert changed(edit) == dict(text=False, decisions=True), edit.__name__
+    assert changed(provenance) == dict(text=False, decisions=False)
+
+
+async def test_a_tombstone_carries_the_uuids_of_every_forgotten_life(
+    source_payload,
+):
+    """Forgotten, re-added and forgotten again, the source's second
+    tombstone keeps its first life's mention UUID. A third life may not use
+    it in any role, and validate_uses counts it."""
+    life1 = source_of(source_payload)
+    first = tomb(life1)
+    life2 = describe_readd(life1, first, set(), TEXT, chunks_of(life1, TEXT))
+    second = tomb(life2).carrying(first)
+    old = life1.mention_groups["g01"].entity_id
+    assert second.earlier_mention_ids == [old]
+    assert second.mention_ids == {"g01": life2.mention_groups["g01"].entity_id}
+    assert second.earlier_entity_ids == []
+    assert old in second.used_entity_ids
+    assert tomb(life2).carrying(None) == tomb(life2)
+
+    life3 = describe_readd(life1, second, set(), TEXT, chunks_of(life1, TEXT))
+    assert life3.revision == 3
+    await admit_readd(AbsentGraph(), second, life3, set())
+
+    payload = json.loads(life3.model_dump_json())
+    payload["inputs"]["back"] = dict(
+        kind="corpus_object",
+        dataset_id=payload["dataset_id"],
+        entity_id=str(old),
+        selected_fields=["name"],
+        content_sha256=object_digest({"name": "x"}),
+    )
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(AbsentGraph(), second, source_of(payload), set())
+    assert refused.value.code == "forgotten_uuid_reused"
+
+    new = life3.mention_groups["g01"].entity_id
+    payload = json.loads(life3.model_dump_json().replace(str(new), str(old)))
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(AbsentGraph(), second, source_of(payload), set())
+    assert refused.value.code == "fresh_uuid_reused"
+
+    other = json.loads(json.dumps(source_payload))
+    other["identity_data_id"] = str(uuid4())
+    with pytest.raises(IntentError) as refused:
+        validate_uses([second, source_of(other)])
+    assert refused.value.code == "incompatible_group"
+
+
+async def test_admission_counts_a_readded_source_earlier_forgotten_lives(
+    source_payload,
+):
+    """While a re-added source lives again, the UUIDs of its forgotten
+    lives stay its own: another source may not take one for a mention."""
+    from test_identity_dependencies import admitting_publisher, own_chunks
+
+    source = source_of(source_payload)
+    earlier = json.loads(json.dumps(source_payload))
+    earlier["identity_data_id"] = str(uuid4())
+    life1 = source_of(earlier)
+    life2 = describe_readd(life1, tomb(life1), set(), TEXT, chunks_of(life1, TEXT))
+    entity = str(source.inputs["existing_A"].entity_id)
+    publisher = await admitting_publisher({entity: dict(type="Entity", name="A")})
+    saved = [row_of(life2)]
+
+    async def rows(dataset=None):
+        return saved
+
+    publisher.records.rows = rows
+    await publisher.admit_inputs(source, {"doc01": TEXT}, own_chunks(source))
+    saved[0] = replace(saved[0], last_tombstone=tomb(life1))
+    with pytest.raises(IntentError) as refused:
+        await publisher.admit_inputs(source, {"doc01": TEXT}, own_chunks(source))
+    assert refused.value.code == "incompatible_group"

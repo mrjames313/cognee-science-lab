@@ -22,6 +22,7 @@ from .models import Accepted, CorpusObjectInput, Unresolved
 from .validation import (
     IntentError,
     decision_inputs,
+    decisions_digest,
     fresh_entity_id,
     fresh_mention_id,
     naming,
@@ -296,12 +297,12 @@ def entity_ids_named(source):
 
 
 def check_removed_entity_ids(tombstone, source, removed):
-    """A re-add names no Entity the forget removed and no mention UUID the
-    forgotten revision used, in any role: an old recipe does not authorize
+    """A re-add names no Entity the forget removed and no mention UUID of
+    any forgotten life, in any role: an old recipe does not authorize
     recreating a retired object under its UUID. A mention UUID is forbidden
     whether or not its node was ever written, since a publication that
     failed early leaves it out of the forget's plan."""
-    forbidden = set(removed) | set(tombstone.mention_ids.values())
+    forbidden = set(removed) | tombstone.forgotten_mention_ids
     if forbidden & entity_ids_named(source):
         raise IntentError(
             "forgotten_uuid_reused",
@@ -344,12 +345,23 @@ def check_readd_entity_ids(tombstone, source, removed):
             )
 
 
+def differs_from_forgotten(tombstone, source) -> dict[str, bool]:
+    """Whether a re-add's text and its reviewed decisions differ from the
+    forgotten revision's, by the tombstone's digests. A report, never a
+    refusal: a re-add may bring other text or other decisions."""
+    doc = source.inputs[source.original_input_ref]
+    return dict(
+        text=doc.text_sha256 != tombstone.text_sha256,
+        decisions=decisions_digest(source) != tombstone.decisions_sha256,
+    )
+
+
 async def admit_readd(graph, tombstone, source, removed):
     """A re-add after forget is a fresh publication of the same identity
     source and document at the next revision, from the caller's files, with
     any text and decisions. Every group is fresh: its UUID derives from the
-    new revision, repeats no mention or Entity UUID the forgotten revision
-    used, and is not in the graph. No Entity in `removed`, the ones the
+    new revision, repeats no mention or Entity UUID of any forgotten life,
+    and is not in the graph. No Entity in `removed`, the ones the
     forget took away, returns; a reusable one is replaced by a derived UUID:
     from a key that names it, or from the removed UUID when nothing names
     it."""

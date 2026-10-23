@@ -534,7 +534,7 @@ async def run(args, root):
         elif args.command == "readd":
             from .forget_fixture import readd
 
-            await readd(
+            refresh = await readd(
                 publisher,
                 root,
                 args.source,

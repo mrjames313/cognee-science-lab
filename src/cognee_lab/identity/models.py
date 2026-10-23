@@ -257,9 +257,14 @@ class Tombstone(Strict):
     """What a forgotten source's row keeps: identifiers, digests, its last
     revision and when it was forgotten, never content. `mention_ids` and
     `entity_ids` are the last revision's mention and reusable Entity UUIDs,
-    which a re-add may not use again. `removed_entity_ids` are the Entities
-    the forget removed; a dependent still citing one of them, or the
-    document, has not been revised yet. `impact_token` is the confirmed
+    which a re-add may not use again. `earlier_mention_ids` and
+    `earlier_entity_ids` are those of every earlier forgotten life of the
+    source that the last revision does not repeat (`carrying`).
+    `decisions_sha256` digests the reviewed decisions apart from what a
+    re-add must rename (`validation.decisions_digest`), so a re-add can
+    report whether its decisions differ. `removed_entity_ids` are the
+    Entities the forget removed; a dependent still citing one of them, or
+    the document, has not been revised yet. `impact_token` is the confirmed
     impact on other sources, None when the forget affected none."""
 
     kind: Literal["identity_source_tombstone"]
@@ -269,8 +274,11 @@ class Tombstone(Strict):
     revision: int = Field(ge=1)
     text_sha256: Digest
     description_sha256: Digest
+    decisions_sha256: Digest
     mention_ids: dict[Key, UUID]
     entity_ids: list[UUID]
+    earlier_mention_ids: list[UUID]
+    earlier_entity_ids: list[UUID]
     removed_entity_ids: list[UUID]
     impact_token: Digest | None
     forgotten_at: str
@@ -286,6 +294,8 @@ class Tombstone(Strict):
     ) -> Tombstone:
         from hashlib import sha256
 
+        from .validation import decisions_digest
+
         doc = source.inputs[source.original_input_ref]
         mentions = {k: g.entity_id for k, g in source.mention_groups.items()}
         return cls(
@@ -298,15 +308,53 @@ class Tombstone(Strict):
             description_sha256=sha256(
                 source.model_dump_json().encode("utf-8")
             ).hexdigest(),
+            decisions_sha256=decisions_digest(source),
             mention_ids=mentions,
             entity_ids=sorted(
                 set(source.entity_constructions) - set(mentions.values()), key=str
             ),
+            earlier_mention_ids=[],
+            earlier_entity_ids=[],
             removed_entity_ids=sorted(set(removed_entity_ids), key=str),
             impact_token=impact_token,
             forgotten_at=forgotten_at,
         )
 
+    def carrying(self, earlier: Tombstone | None) -> Tombstone:
+        """This tombstone with the mention and Entity UUIDs of the source's
+        earlier forgotten lives, from the tombstone its last forget left, so
+        that no UUID of any forgotten life can return."""
+        if earlier is None:
+            return self
+        mentions = frozenset(self.mention_ids.values())
+        return self.model_copy(
+            update=dict(
+                earlier_mention_ids=sorted(
+                    earlier.forgotten_mention_ids - mentions, key=str
+                ),
+                earlier_entity_ids=sorted(
+                    (
+                        frozenset(earlier.entity_ids)
+                        | frozenset(earlier.earlier_entity_ids)
+                    )
+                    - mentions
+                    - frozenset(self.entity_ids),
+                    key=str,
+                ),
+            )
+        )
+
+    @property
+    def forgotten_mention_ids(self) -> frozenset[UUID]:
+        """The mention UUIDs of every forgotten life of the source."""
+        return frozenset(self.mention_ids.values()) | frozenset(
+            self.earlier_mention_ids
+        )
+
     @property
     def used_entity_ids(self) -> frozenset[UUID]:
-        return frozenset(self.mention_ids.values()) | frozenset(self.entity_ids)
+        return (
+            self.forgotten_mention_ids
+            | frozenset(self.entity_ids)
+            | frozenset(self.earlier_entity_ids)
+        )

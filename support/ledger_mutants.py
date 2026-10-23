@@ -184,8 +184,8 @@ MUTANTS = {
     ),
     # A forgotten row keeps its description, its plan or its event messages.
     "complete-keeps-description": Mutant(
-        '            values["description"] = tombstone.model_dump_json()\n',
-        "",
+        "                row.description = row.last_tombstone = carried.model_dump_json()\n",
+        "                row.last_tombstone = carried.model_dump_json()\n",
         "P7",
     ),
     "complete-keeps-plan": Mutant(
