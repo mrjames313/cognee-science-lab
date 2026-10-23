@@ -210,7 +210,9 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
             raise IntentError("verify_index", "Original chunk vector missing")
 
 
-async def prepare(root, *, multi=False, chunk_budget=512, source_text=None):
+async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amend=None):
+    """Register doc01 and its description. `amend(payload)` edits the
+    description before it is registered."""
     import cognee
     from cognee.modules.engine.models import Entity
     from cognee.tasks.ingestion.data_item import DataItem
@@ -273,6 +275,8 @@ async def prepare(root, *, multi=False, chunk_budget=512, source_text=None):
         from .multisource import add_lifecycle_records
 
         add_lifecycle_records(template, "doc01", text)
+    if amend is not None:
+        amend(template)
     from .captured_chunks import bind_chunks
 
     bind_chunks(template, text, chunks)
@@ -312,11 +316,13 @@ async def run(args, root):
     dataset_id = source.dataset_id
     args._fixture_publisher = publisher
     if args.command == "status":
+        from .withholding import withholding_status
+
+        rows = await publisher.records.rows(dataset_id)
         return dict(
-            publications=[
-                asdict(row) for row in await publisher.records.rows(dataset_id)
-            ],
+            publications=[asdict(row) for row in rows],
             recovery_events=await publisher.records.events(dataset_id),
+            **await withholding_status(publisher, rows),
         )
     if args.command == "retrieve":
         return await retrieve(publisher, dataset_id, args.query)

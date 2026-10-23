@@ -324,3 +324,145 @@ async def test_rows_apply_only_while_the_decision_still_cites_the_input(
     assert set(held[str(doc01.identity_data_id)]) == {"r01"}
     retired = replaced(rows[1], state="withdrawn")
     assert await withheld_decisions([rows[0], retired], publisher.withholdings) == {}
+
+
+# The glossary fixture's revisions of doc01, through the one admission.
+
+from cognee_lab.identity.admission import admit, identity_map  # noqa: E402
+from cognee_lab.identity.glossary_fixture import (  # noqa: E402
+    CASES,
+    GLOSSARY_TEXT,
+    glossary_inputs,
+    hc_entry,
+    replaced_variant,
+)
+from cognee_lab.identity.withholding import (  # noqa: E402
+    WithholdingRow,
+    reconfirmed,
+    remapped,
+)
+
+
+def glossary_doc01(payload):
+    payload = json.loads(json.dumps(payload))
+    glossary_inputs(payload, GLOSSARY_TEXT)
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+def admit_same_text(old, new):
+    return admit(old, new, TEXT, TEXT, identity_map(old))
+
+
+def span_for(text):
+    entry = hc_entry(text)
+    return dict(
+        kind="text_span",
+        document_ref="glossary",
+        start=entry.start(),
+        end=entry.end(),
+        text_sha256=text_digest(entry.group()),
+    )
+
+
+def producer(name):
+    return dict(
+        method="captured_fixture",
+        implementation=name,
+        version="0.1",
+        configuration={"confirmed_by": "test"},
+        run_id=None,
+    )
+
+
+def test_the_glossary_cases_edit_the_text_as_the_guide_says():
+    inserted = CASES["insert"](GLOSSARY_TEXT)
+    assert hc_entry(inserted).group() == hc_entry(GLOSSARY_TEXT).group()
+    assert hc_entry(inserted).start() > hc_entry(GLOSSARY_TEXT).start()
+    assert hc_entry(CASES["elsewhere"](GLOSSARY_TEXT)).span() == (
+        hc_entry(GLOSSARY_TEXT).span()
+    )
+    assert "plasma-heating" in hc_entry(CASES["cosmetic"](GLOSSARY_TEXT)).group()
+    assert hc_entry(CASES["substantive"](GLOSSARY_TEXT)).group() == (
+        "HC: hybrid coil, the auxiliary magnet winding."
+    )
+    with pytest.raises(IntentError):
+        CASES["cosmetic"](CASES["substantive"](GLOSSARY_TEXT))
+
+
+def test_a_refresh_moves_the_span_and_changes_no_decision(source_payload):
+    old = glossary_doc01(source_payload)
+    inserted = CASES["insert"](GLOSSARY_TEXT)
+    start, end = hc_entry(inserted).span()
+    moved = [
+        WithholdingRow(
+            str(old.dataset_id),
+            str(old.identity_data_id),
+            key,
+            "glossary_hc",
+            "g",
+            2,
+            "input_changed",
+            "remap",
+            None,
+            None,
+            start,
+            end,
+        )
+        for key in ("r01", "v01")
+    ]
+    new = remapped(old, moved)
+    assert (new.inputs["glossary_hc"].start, new.inputs["glossary_hc"].end) == (
+        start,
+        end,
+    )
+    assert new.mention_resolutions == old.mention_resolutions
+    assert new.variant_assignments == old.variant_assignments
+    # The glossary text input keeps its old digest: only a span may move.
+    assert new.inputs["glossary"] == old.inputs["glossary"]
+    assert admit_same_text(old, new).retired == frozenset()
+
+
+def test_a_reconfirm_is_copy_on_write_under_a_new_producer(source_payload):
+    old = glossary_doc01(source_payload)
+    span = span_for(CASES["cosmetic"](GLOSSARY_TEXT))
+    first = reconfirmed(
+        old,
+        "r01",
+        {"glossary_hc": ("glossary_hc_r2", span)},
+        "review_r01_r2",
+        producer("re-confirmed"),
+    )
+    assert first.mention_resolutions["r01"].input_refs[-1] == "glossary_hc_r2"
+    assert first.variant_assignments["v01"].input_refs[-1] == "glossary_hc"
+    assert {"glossary_hc", "glossary_hc_r2"} <= set(first.inputs)
+    admit_same_text(old, first)
+    second = reconfirmed(
+        first,
+        "v01",
+        {"glossary_hc": ("glossary_hc_r3", span)},
+        "review_v01_r3",
+        producer("re-confirmed"),
+    )
+    assert "glossary_hc" not in second.inputs
+    admit_same_text(first, second)
+    # Pointing at the new input under the old producer is not a re-confirm.
+    payload = first.model_dump(mode="json")
+    payload["mention_resolutions"]["r01"]["producer_ref"] = "fixture"
+    payload["producers"].pop("review_r01_r2")
+    unattested = IdentitySource.model_validate_json(json.dumps(payload))
+    with pytest.raises(IntentError) as refused:
+        admit_same_text(old, unattested)
+    assert refused.value.code == "reconfirm_unattested"
+
+
+def test_a_substantive_change_replaces_v01_with_a_derived_variant(source_payload):
+    old = glossary_doc01(source_payload)
+    span = span_for(CASES["substantive"](GLOSSARY_TEXT))
+    new = replaced_variant(
+        old, "v01", "glossary_hc_r2", span, "review_v01_r2", producer("replaced")
+    )
+    assert set(new.variant_assignments) == {"v02"}
+    coil = new.variant_assignments["v02"].target_entity_id
+    assert new.entity_constructions[coil].name == "Hybrid coil"
+    assert new.mention_resolutions["r01"].input_refs[-1] == "glossary_hc"
+    admit_same_text(old, new)

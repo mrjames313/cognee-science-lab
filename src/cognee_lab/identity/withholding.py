@@ -16,6 +16,7 @@ that document is withheld, so a crash before the rows are written never
 serves a dependent stale. Withholding writes no recovery events.
 """
 
+import json
 from dataclasses import asdict, dataclass
 from typing import NamedTuple
 
@@ -352,3 +353,108 @@ async def withheld_decisions(rows, store) -> WithheldSet:
                     held, source, assignment, Withheld(INPUT_CHANGED, EDIT_UNFINISHED)
                 )
     return held
+
+
+def remapped(reader: IdentitySource, moved) -> IdentitySource:
+    """The dependent's next revision with each moved span at its new range.
+    Its decisions, producers and every other input are unchanged."""
+    payload = reader.model_dump(mode="json")
+    payload["revision"] += 1
+    for w in moved:
+        payload["inputs"][w.input_ref].update(start=w.new_start, end=w.new_end)
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+async def refresh_dependents(publisher, replace):
+    """After an edit completes, write each current dependent's next revision
+    with its moved spans' new ranges: an ordinary unchanged-text replacement,
+    `replace(description, expected_revision)`, whose withholding cleanup
+    releases the moved decisions once it completes. A dependent that is not
+    current is left for its own reconcile. A rerun finishes what an
+    interrupted refresh left."""
+    rows = await publisher.records.rows()
+    table = recorded_rows(rows, await publisher.withholdings.rows())
+    refreshed = []
+    for row in rows:
+        moved = [w for w in table if w.source == row.source and w.status == REMAP]
+        if not moved or row.state != "current":
+            continue
+        revised = remapped(IdentitySource.model_validate_json(row.description), moved)
+        await replace(revised, expected_revision=row.revision)
+        refreshed.append(
+            dict(
+                identity_data_id=row.source,
+                revision=revised.revision,
+                inputs={
+                    w.input_ref: dict(start=w.new_start, end=w.new_end) for w in moved
+                },
+            )
+        )
+    return refreshed
+
+
+def cited_inputs(source: IdentitySource) -> set[str]:
+    """Every input key a record or scope cites, with the documents of cited
+    spans and chunks."""
+    cited = {source.original_input_ref}
+    for group in source.mention_groups.values():
+        cited.update([group.document_ref, *group.chunk_refs, *group.input_refs])
+    for inputs in decision_inputs(source).values():
+        cited.update(inputs)
+    for key in list(cited):
+        document = getattr(source.inputs[key], "document_ref", None)
+        if document:
+            cited.add(document)
+    return cited
+
+
+def reconfirmed(reader, assignment, replacements, producer_key, producer):
+    """Copy-on-write re-confirm of one withheld decision: its next revision
+    cites each new input in place of the changed one under a producer new in
+    this revision. Other decisions keep citing the old input, so they stay
+    withheld until each is re-confirmed; an old input nothing cites any more
+    is dropped. `replacements` maps an old input key to (new key, input)."""
+    payload = reader.model_dump(mode="json")
+    payload["revision"] += 1
+    records = [
+        payload["mention_resolutions"].get(assignment)
+        or payload["variant_assignments"][assignment]
+    ]
+    if assignment in payload["mention_resolutions"]:
+        records.append(payload["mention_groups"][records[0]["group_ref"]])
+    for old, (new, item) in replacements.items():
+        payload["inputs"][new] = item
+        for record in records:
+            record["input_refs"] = [
+                new if k == old else k for k in record["input_refs"]
+            ]
+    records[0]["producer_ref"] = producer_key
+    payload["producers"][producer_key] = producer
+    revised = IdentitySource.model_validate_json(json.dumps(payload))
+    uncited = set(replacements) - cited_inputs(revised)
+    for key in uncited:
+        payload["inputs"].pop(key)
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+async def withholding_status(publisher, rows):
+    """What `status` lists: the recorded rows, and the withheld-decision set
+    with the decisions that need a reviewer (refresh items)."""
+    held = await withheld_decisions(rows, publisher.withholdings)
+    dataset = {r.dataset for r in rows}
+    decisions = [
+        dict(
+            identity_data_id=source, assignment_id=key, reason=w.reason, status=w.status
+        )
+        for source, entries in sorted(held.items())
+        for key, w in sorted(entries.items())
+    ]
+    return dict(
+        withholdings=[
+            asdict(w)
+            for w in await publisher.withholdings.rows()
+            if w.dataset in dataset
+        ],
+        withheld_decisions=decisions,
+        refresh_needed=[d for d in decisions if d["status"] == REFRESH_NEEDED],
+    )

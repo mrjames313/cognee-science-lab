@@ -15,11 +15,24 @@ from .environment import (
     read_embedding,
 )
 from .forget import FAULT_STAGES as FORGET_STAGES
+from .glossary_fixture import CASES as GLOSSARY_CASES
+from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
+from .glossary_fixture import INFO as GLOSSARY_INFO
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
 from .withdraw import FAULT_STAGES as WITHDRAW_STAGES
 
-TEXT_COMMANDS = {"edit-text", *OCCURRENCE_COMMANDS}
+TEXT_COMMANDS = {"edit-text", "edit-glossary", *OCCURRENCE_COMMANDS}
+REVISION_COMMANDS = {
+    "revise",
+    "edit-text",
+    "forget",
+    "readd",
+    "edit-glossary",
+    "reconfirm",
+    "replace-decision",
+    *OCCURRENCE_COMMANDS,
+}
 
 
 def _reopen_error(args, root: Path) -> str | None:
@@ -49,6 +62,7 @@ def main():
             "withdraw",
             "forget",
             "readd",
+            *GLOSSARY_COMMANDS,
             "retrieve",
             "status",
             "reconcile",
@@ -63,9 +77,18 @@ def main():
     )
     parser.add_argument(
         "--source",
-        choices=["doc01", "doc02"],
+        choices=["doc01", "doc02", "glossary"],
         default="doc01",
         help="Selected original document in the isolated fixture",
+    )
+    parser.add_argument(
+        "--case",
+        choices=sorted(GLOSSARY_CASES),
+        help="edit-glossary only: which captured glossary edit to make",
+    )
+    parser.add_argument(
+        "--decision",
+        help="reconfirm and replace-decision only: the withheld decision of doc01",
     )
     parser.add_argument(
         "--fault-stage",
@@ -92,11 +115,12 @@ def main():
     )
     args = parser.parse_args()
     root = args.root.resolve()
-    if (
-        args.command in {"revise", "edit-text", "forget", "readd", *OCCURRENCE_COMMANDS}
-        and args.expected_revision is None
-    ):
+    if args.command in REVISION_COMMANDS and args.expected_revision is None:
         parser.error(f"{args.command} requires --expected-revision")
+    if args.command == "edit-glossary" and args.case is None:
+        parser.error("edit-glossary requires --case")
+    if args.command in {"reconfirm", "replace-decision"} and args.decision is None:
+        parser.error(f"{args.command} requires --decision")
     if args.fault_stage:
         if args.command in TEXT_COMMANDS:
             if not args.fault_stage.startswith(("text_", "replace_")):
@@ -107,6 +131,8 @@ def main():
             "withdraw": "withdraw_",
             "forget": "forget_",
             "revise": "replace_",
+            "reconfirm": "replace_",
+            "replace-decision": "replace_",
         }.get(args.command)
         if (prefix and not args.fault_stage.startswith(prefix)) or (
             not prefix
@@ -136,7 +162,11 @@ def main():
             root.rmdir()
         parser.error(str(exc))
     with environment:
-        if args.command in OCCURRENCE_COMMANDS:
+        if args.command in GLOSSARY_COMMANDS or (
+            args.command == "reconcile" and (root / GLOSSARY_INFO).exists()
+        ):
+            from .glossary_fixture import run
+        elif args.command in OCCURRENCE_COMMANDS:
             from .occurrence_fixture import run
         elif args.command == "edit-text":
             from .text_fixture import run
