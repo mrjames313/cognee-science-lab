@@ -441,6 +441,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
 async def run(args, root):
     from .fixture import context_for, load_chunks
 
+    refresh = {}
     if args.command in {"multi-fixture", "chunked-fixture"}:
         publisher, prepared = await prepare(
             root,
@@ -516,7 +517,7 @@ async def run(args, root):
                     from .text_fixture import maintain_one
                     from .text_changes import TextChange
 
-                    await maintain_one(
+                    refresh = await maintain_one(
                         publisher,
                         selected,
                         TextChange.from_plan(row.plan),
@@ -551,5 +552,7 @@ async def run(args, root):
         )
     else:
         result = await snapshot(publisher, sources, args.query)
+    # A reconcile that completed a text change reports its refresh beside it.
+    result.update(refresh)
     (root / "multisource_result.json").write_text(json.dumps(result, indent=2))
     return result

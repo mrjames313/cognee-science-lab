@@ -27,6 +27,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from .models import ChunkInput, IdentitySource, SourceTextInput, TextSpanInput
 from .retirement import consumes
 from .validation import (
+    IntentError,
     Reason,
     cited_inputs,
     decision_inputs,
@@ -427,7 +428,7 @@ def written_ranges(revised: IdentitySource, moved) -> dict:
     )
 
 
-async def refresh_dependents(publisher, replace):
+async def refresh_dependents(publisher, replace) -> dict:
     """After an edit completes, write each current dependent's next revision
     with its moved spans' new ranges: an ordinary unchanged-text replacement,
     `replace(description, expected_revision)`, whose withholding cleanup
@@ -435,21 +436,29 @@ async def refresh_dependents(publisher, replace):
     interrupted refresh: a dependent whose replacement failed resumes its
     saved revision first. That revision may hold the range of an earlier
     edit, so when `remap` rows still apply after it, the refresh remaps
-    again. It reports each range it wrote."""
+    again.
+
+    Returns each range written (`refreshed`) and the failure that stopped
+    the refresh (`refresh_failed`), not raised: the edit before it already
+    completed, and `refresh-dependents` reruns the refresh."""
     refreshed = []
-    for source, (row, moved) in (await pending_moves(publisher)).items():
-        if row.state != "current" and row.resumed_by == "replace":
-            saved = IdentitySource.model_validate_json(row.description)
-            await replace(saved, expected_revision=row.revision)
-            refreshed.append(written_ranges(saved, moved))
-            row, moved = (await pending_moves(publisher)).get(source, (row, []))
-        if row.state == "current" and moved:
-            revised = remapped(
-                IdentitySource.model_validate_json(row.description), moved
-            )
-            await replace(revised, expected_revision=row.revision)
-            refreshed.append(written_ranges(revised, moved))
-    return refreshed
+    try:
+        for source, (row, moved) in (await pending_moves(publisher)).items():
+            if row.state != "current" and row.resumed_by == "replace":
+                saved = IdentitySource.model_validate_json(row.description)
+                await replace(saved, expected_revision=row.revision)
+                refreshed.append(written_ranges(saved, moved))
+                row, moved = (await pending_moves(publisher)).get(source, (row, []))
+            if row.state == "current" and moved:
+                revised = remapped(
+                    IdentitySource.model_validate_json(row.description), moved
+                )
+                await replace(revised, expected_revision=row.revision)
+                refreshed.append(written_ranges(revised, moved))
+    except IntentError as exc:
+        failed = dict(code=exc.code, message=str(exc))
+        return dict(refreshed=refreshed, refresh_failed=failed)
+    return dict(refreshed=refreshed, refresh_failed=None)
 
 
 def next_revision(reader: IdentitySource, change) -> IdentitySource:

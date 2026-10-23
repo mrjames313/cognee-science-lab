@@ -128,6 +128,7 @@ async def maintain_one(
     from .revisions import refresh_moved_spans
 
     # The edit completed: refresh its dependents at once (the user decided).
+    # A refresh failure is reported beside the completed edit.
     return await refresh_moved_spans(publisher)
 
 
@@ -351,7 +352,7 @@ async def run(args, root):
         intended.model_dump_json(indent=2) + "\n"
     )
     (root / f"source_doc01_revision{intended.revision}.txt").write_text(change.text)
-    await maintain_one(
+    refresh = await maintain_one(
         publisher,
         intended,
         change,
@@ -361,5 +362,6 @@ async def run(args, root):
     result = await snapshot(
         publisher, await current_sources(root, publisher), args.query
     )
+    result.update(refresh)
     (root / "text_revision_result.json").write_text(json.dumps(result, indent=2))
     return result

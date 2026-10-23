@@ -571,7 +571,9 @@ async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
             },
         )
 
-    refreshed = await refresh_dependents(publisher, replace)
+    refresh = await refresh_dependents(publisher, replace)
+    assert refresh["refresh_failed"] is None
+    refreshed = refresh["refreshed"]
     first, second = INSERTED.index(ENTRY), twice.index(ENTRY)
     assert [(i.start, i.end) for i in written] == [
         (first, first + len(ENTRY)),
@@ -582,6 +584,29 @@ async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
         (3, dict(start=second, end=second + len(ENTRY))),
     ]
     assert await publisher.withholdings.rows() == []
+
+
+async def test_a_failed_refresh_is_reported_beside_the_completed_edit(
+    source_payload,
+):
+    """The edit completed before its refresh ran, so a refresh that fails
+    does not raise as the edit's failure; refresh-dependents reruns it."""
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    publisher = await memory_publisher([row_of(glossary), row_of(doc01)])
+    await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+
+    async def replace(description, expected_revision):
+        raise IntentError("injected_failure", "Injected failure at replace_registered")
+
+    assert await refresh_dependents(publisher, replace) == dict(
+        refreshed=[],
+        refresh_failed=dict(
+            code="injected_failure",
+            message="Injected failure at replace_registered",
+        ),
+    )
+    assert len(await publisher.withholdings.rows()) == 2
 
 
 @pytest.mark.parametrize(

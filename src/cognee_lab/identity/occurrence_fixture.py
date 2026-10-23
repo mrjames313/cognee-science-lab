@@ -209,7 +209,7 @@ async def run(args, root):
         intended.model_dump_json(indent=2) + "\n"
     )
     (root / f"source_doc01_revision{intended.revision}.txt").write_text(command.after)
-    await maintain_one(
+    refresh = await maintain_one(
         publisher,
         intended,
         change,
@@ -218,6 +218,7 @@ async def run(args, root):
     )
     sources = await current_sources(root, publisher)
     result = await snapshot(publisher, sources, args.query)
+    result.update(refresh)
     if command.queries:
         dataset = sources["doc01"].dataset_id
         result["queries"] = {

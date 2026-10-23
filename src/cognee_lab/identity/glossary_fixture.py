@@ -38,6 +38,7 @@ COMMANDS = (
     "refresh-dependents",
 )
 DOC01_REVIEW = "stage6-captured-glossary-review"
+NO_REFRESH = dict(refreshed=[], refresh_failed=None)
 
 
 def hc_entry(text):
@@ -447,7 +448,7 @@ async def reconcile(publisher, label, selected):
             operation="reconcile",
             semantics=label != "glossary",
         )
-    return []
+    return NO_REFRESH
 
 
 async def snapshot(publisher, root, query):
@@ -533,7 +534,7 @@ async def run(args, root):
                 fault_stage=args.fault_stage if label == args.source else None,
                 semantics=label != "glossary",
             )
-        refreshed = []
+        refresh = NO_REFRESH
     else:
         publisher = await Publisher.configured()
         args._fixture_publisher = publisher
@@ -546,11 +547,11 @@ async def run(args, root):
         refreshing = args.fault_stage == REFRESH_FAULT
         # The refresh fault fails each refresh revision at replace_registered.
         refresh_fault = "replace_registered" if refreshing else None
-        refreshed = []
+        refresh = NO_REFRESH
         if args.command == "edit-glossary":
             if args.source != "glossary":
                 raise IntentError("fixture_scope", "edit-glossary edits the glossary")
-            refreshed = await edit(
+            refresh = await edit(
                 publisher,
                 root,
                 selected,
@@ -574,7 +575,7 @@ async def run(args, root):
                 command=args.command,
             )
         elif args.command == "reconcile":
-            refreshed = await reconcile(publisher, args.source, selected)
+            refresh = await reconcile(publisher, args.source, selected)
         elif args.command == "forget":
             await publisher.forget(
                 selected,
@@ -596,9 +597,12 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
             )
         elif args.command == "refresh-dependents":
-            refreshed = await refresh_moved_spans(publisher, refresh_fault)
+            refresh = await refresh_moved_spans(publisher, refresh_fault)
+            # The refresh is this command's own operation, so it fails here.
+            if failed := refresh["refresh_failed"]:
+                raise IntentError(failed["code"], failed["message"])
     result = await snapshot(publisher, root, args.query)
-    result["refreshed"] = refreshed
+    result.update(refresh)
     (root / "glossary_result.json").write_text(
         json.dumps(result, indent=2, default=str)
     )

@@ -85,7 +85,8 @@ async def replace_one(publisher, source, *, expected_revision, fault_stage=None)
 async def refresh_moved_spans(publisher, fault_stage=None):
     """After a text edit completes, give each dependent whose span the edit
     moved its next revision (withholding.refresh_dependents), each through
-    replace_one. `fault_stage` fails each refresh revision there."""
+    replace_one. `fault_stage` fails each refresh revision there. Returns
+    the ranges written and the failure that stopped the refresh, if any."""
     from .withholding import refresh_dependents
 
     async def replace(description, expected_revision):

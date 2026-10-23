@@ -148,13 +148,14 @@ $V check "$RUN" rec '[.result.facts[].identity.assignment_id] == ["r01"] and .re
 $V check "$RUN" rec '.recovery_events | length == 1 and .[0].outcome == "restored" and .[0].resolved_at != null' 'the incident is restored'
 ```
 
-**D6 an interrupted refresh finishes when it runs again.** Proves `interrupted-refresh`. Guide: "An interrupted refresh". The glossary edit completes, then doc01's refresh revision fails at `replace_registered`. doc01 is failed and unavailable as a whole source, and the two `remap` rows keep the new range. `refresh-dependents` resumes doc01's saved revision 2, which releases both decisions and resolves the incident as `restored`.
+**D6 an interrupted refresh finishes when it runs again.** Proves `interrupted-refresh`. Guide: "An interrupted refresh". The glossary edit completes, then doc01's refresh revision fails at `replace_registered`. The command exits 0: it reports the completed edit and, beside it, `refresh_failed`. doc01 is failed and unavailable as a whole source, and the two `remap` rows keep the new range. `refresh-dependents` resumes doc01's saved revision 2, which releases both decisions and resolves the incident as `restored`.
 
 ```bash journey D6
 $V drive "$RUN" main fixture -- glossary-fixture
 
 $V drive "$RUN" main fail -- edit-glossary --source glossary --case insert --expected-revision 1 --fault-stage refresh_interrupted
-$V check "$RUN" fail '.error == "IntentError" and (.message | contains("Injected failure at replace_registered"))' 'the refresh revision fails'
+$V check "$RUN" fail '.sources.glossary | .state == "current" and .verified_revision == 2' 'the glossary edit completes'
+$V check "$RUN" fail '.refreshed == [] and (.refresh_failed.message | contains("Injected failure at replace_registered"))' 'the refresh failure is reported beside the edit'
 
 $V drive "$RUN" main status -- status
 $V check "$RUN" status '[.publications[] | [.revision, .state]] | sort == [[2, "current"], [2, "failed"]]' 'the glossary is current at 2 and doc01 failed at 2'
@@ -171,7 +172,7 @@ $V check "$RUN" refresh '.recovery_events | length == 1 and .[0].outcome == "res
 ## Notes
 
 - The review decisions are captured fixture input. They prove the withholding, refresh and re-confirm mechanics, not Describe.
-- `drive` exits 1 for an injected failure. That is the expected result; check `.error`.
+- `drive` exits 1 for an injected failure. That is the expected result; check `.error`. The exception is `refresh_interrupted` on an edit command: the edit completed, so the command exits 0 and reports `refresh_failed`.
 - `status` reads the graph and the registered texts like `retrieve`, so it lists every decision retrieval withholds, live drift included (a changed corpus field, a gone foreign chunk, a span stale after a re-add). Such a decision has no row and shows `refresh_needed`, and `reconfirm` answers it. The native test `test_native_readd_after_an_interrupted_refresh_leaves_no_decision_stuck` covers the re-add case; no journey does yet.
 - A review refuses with `edit_unfinished` while any document doc01 reads has a pending or failed edit, and `reconfirm` refuses a decision withheld with `input_removed`.
 - Every text-change command refreshes moved spans after its edit completes, `edit-text` and the occurrence commands included.

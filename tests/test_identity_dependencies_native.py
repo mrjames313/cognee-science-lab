@@ -218,7 +218,7 @@ def test_native_failed_glossary_edit_withholds_until_reconciled(tmp_path, stage)
 def test_native_interrupted_refresh_is_finished_by_a_rerun(tmp_path):
     root = tmp_path / "refresh"
     run(root, "glossary-fixture")
-    command(
+    edited = run(
         root,
         "edit-glossary",
         "--source",
@@ -229,7 +229,12 @@ def test_native_interrupted_refresh_is_finished_by_a_rerun(tmp_path):
         "1",
         "--fault-stage",
         "refresh_interrupted",
-        expect=1,
+    )
+    # The edit completed; only the refresh after it failed.
+    assert revisions(edited, "glossary") == (2, 2, 2)
+    assert edited["refreshed"] == []
+    assert "Injected failure at replace_registered" in (
+        edited["refresh_failed"]["message"]
     )
     answer = printed(root, "retrieve")
     assert unavailable(answer) == [(None, "publication_failed")]
@@ -262,7 +267,6 @@ def test_native_readd_after_an_interrupted_refresh_leaves_no_decision_stuck(
         "1",
         "--fault-stage",
         "refresh_interrupted",
-        expect=1,
     )
     assert revisions(run(root, "refresh-dependents"), "doc01") == (2, 2, 2)
     command(root, "forget", "--source", "doc01", "--expected-revision", "2")
