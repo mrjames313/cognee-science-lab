@@ -19,6 +19,8 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-fault` fails a forget at an injected stage, withholds the source, then finishes it with `reconcile`.
 - `readd` publishes a forgotten source again at the next revision with new UUIDs for its mentions and for every Entity the forget removed: a named one derives from a key that names it, an unnamed one from the removed UUID.
 - `readd-changed-files` re-adds from the caller's text and identity files when they changed, and refuses when they disagree.
+- `readd-difference` reports, without refusing, whether the re-add's text and reviewed decisions differ from the forgotten revision's (`differs_from_forgotten`), by the tombstone's digests.
+- `forget-again` forgets a re-added source again: the new tombstone carries the mention UUIDs of the earlier forgotten life, and a later re-add that names one is refused.
 - `readd-fence` refuses a re-add that would consume a source whose forget is unfinished (native test `test_native_readd_of_a_consumer_waits_for_the_unfinished_forget`).
 - `readd-fault` fails a re-add at an injected stage, withholds the source, then finishes it with `reconcile`, which writes the captured facts the failure skipped.
 - `forget-glossary` forgets the glossary that doc01 read: doc01's r01 is unresolved, v01 and HC go, and the glossary comes back from its files without the decisions.
@@ -41,7 +43,7 @@ Preconditions:
 - Each journey uses a new run and a new root. Forget changes the root for good.
 - The fixture's two sources are current at revision 1 before the forget.
 
-**F1 forget doc01, then add it again.** Proves `forget-healthy`, `forget-status` and `readd`. Guide: "Forget doc01", "The tombstone" and "Re-add" give every value. Nothing depends on doc01, so the forget needs no token. After the forget, doc01's `forget` report is all absent, doc02's entry is unchanged, the shared variant edge keeps one contribution and one owner from doc02, the HC Entity keeps one owner, the shared singleton and the borrowed controller survive, and only doc02's fact returns. `status` shows doc01 `forgotten` at revision 1 whose description is a tombstone holding the revision 1 mention UUID and no occurrence text, and whose forget plan keeps no edge property and no runtime profile. `retrieve` lists no unavailable source. A second forget and a reconcile are refused. The re-add publishes doc01 at revision 2 with a mention UUID and a private singleton UUID that differ from revision 1 (the forget removed both, and no removed UUID returns). No resolution or variant names the private singleton, so its replacement is `uuid5(doc01 identity, "entity:r2:replaces:<removed UUID>")`, `9b7f8477-...`. The re-add restores both facts, both contributions and both HC owners, and a second re-add is refused.
+**F1 forget doc01, then add it again.** Proves `forget-healthy`, `forget-status`, `readd` and `readd-difference`. Guide: "Forget doc01", "The tombstone" and "Re-add" give every value. Nothing depends on doc01, so the forget needs no token. After the forget, doc01's `forget` report is all absent, doc02's entry is unchanged, the shared variant edge keeps one contribution and one owner from doc02, the HC Entity keeps one owner, the shared singleton and the borrowed controller survive, and only doc02's fact returns. `status` shows doc01 `forgotten` at revision 1 whose description is a tombstone holding the revision 1 mention UUID and no occurrence text, and whose forget plan keeps no edge property and no runtime profile. `retrieve` lists no unavailable source. A second forget and a reconcile are refused. The re-add reports neither other text nor other decisions, since the caller's files are the ones published at revision 1. It publishes doc01 at revision 2 with a mention UUID and a private singleton UUID that differ from revision 1 (the forget removed both, and no removed UUID returns). No resolution or variant names the private singleton, so its replacement is `uuid5(doc01 identity, "entity:r2:replaces:<removed UUID>")`, `9b7f8477-...`. The re-add restores both facts, both contributions and both HC owners, and a second re-add is refused.
 
 ```bash journey F1
 $V drive "$RUN" main fixture -- multi-fixture
@@ -90,6 +92,7 @@ $V check "$RUN" rec-blocked '.error == "IntentError" and (.message | contains("F
 
 $V drive "$RUN" main readd -- readd --source doc01 --expected-revision 1
 $V check "$RUN" readd '.sources.doc01 | .state == "current" and .saved_revision == 2 and .verified_revision == 2 and .registered_revision == 2 and .registered_matches_saved' 'doc01 is current again at revision 2'
+$V check "$RUN" readd '.differs_from_forgotten == {"text": false, "decisions": false}' 'the re-add reports the same text and decisions as the forgotten revision'
 $V check "$RUN" readd '.sources.doc01.mention_entity_id != "'"$M01"'" and (.sources.doc01.mention_entity_id | length) == 36' 'the re-added mention has a new UUID'
 $V check "$RUN" readd '.sources.doc01.private_singleton_entity_id != "'"$PS01"'" and (.sources.doc01.private_singleton_entity_id | length) == 36' 'the private singleton the forget removed returns under a new UUID'
 $V check "$RUN" readd '.sources.doc01.private_singleton_entity_id == "9b7f8477-b420-57e6-a343-ff73d921aa82"' 'nothing names the private singleton, so its UUID derives from the removed one'
@@ -301,7 +304,7 @@ $V check "$RUN" forget '.recovery_events | length == 1 and (.[0] | .outcome == "
 $V check "$RUN" forget '. as $r | [$r.result.facts[].source_id] == [$r.sources.doc01.mention_entity_id]' 'doc01 fact still returns'
 ```
 
-**F9 re-add from the caller's changed files.** Proves `readd-changed-files`. Guide: "Re-add". doc01 is forgotten. The user appends a sentence to `source.txt`; the re-add refuses, since the identity file still states the old digest. Once `identity.json` states the new digest, the re-add publishes doc01 at revision 2 with the new text, its fact and both facts in the result.
+**F9 re-add from the caller's changed files.** Proves `readd-changed-files` and `readd-difference`. Guide: "Re-add". doc01 is forgotten. The user appends a sentence to `source.txt`; the re-add refuses, since the identity file still states the old digest. Once `identity.json` states the new digest, the re-add publishes doc01 at revision 2 with the new text, its fact and both facts in the result, and reports other text with the same decisions.
 
 ```bash journey F9
 $V drive "$RUN" main fixture -- multi-fixture
@@ -312,10 +315,11 @@ $V check "$RUN" refused '.error == "IntentError" and (.message | contains("text 
 python3 -c 'import hashlib, json, pathlib, sys; r = pathlib.Path(sys.argv[1]); i = json.loads((r / "identity.json").read_text()); i["inputs"]["doc01"]["text_sha256"] = hashlib.sha256((r / "source.txt").read_bytes()).hexdigest(); (r / "identity.json").write_text(json.dumps(i))' "$RUN/roots/main"
 $V drive "$RUN" main readd -- readd --source doc01 --expected-revision 1
 $V check "$RUN" readd '.sources.doc01 | .state == "current" and .verified_revision == 2 and .registered_matches_saved and .original_fact_present' 'doc01 is current at revision 2 from the changed files'
+$V check "$RUN" readd '.differs_from_forgotten == {"text": true, "decisions": false}' 'the re-add reports other text and the same decisions'
 $V check "$RUN" readd '(.result.facts | length) == 2 and .recovery_events == []' 'both facts return and no incident'
 ```
 
-**F10 forget the glossary doc01 read.** Proves `forget-glossary`. Guide: "The glossary". doc01's r01 and v01 cite the glossary's HC entry. The dry run lists r01 unresolved and v01 dropped, both citing `glossary_hc`; HC goes, since only v01 named it, and the Helios controller stays, since doc01 still reads it as `existing_A`. With the token the glossary is forgotten and doc01 goes to revision 2 with r01 alone, unresolved; neither query returns a fact. The glossary comes back from its files at revision 2, and the removed decisions do not.
+**F10 forget the glossary doc01 read.** Proves `forget-glossary`. Guide: "The glossary". doc01's r01 and v01 cite the glossary's HC entry. The dry run lists r01 unresolved and v01 dropped, both citing `glossary_hc`; HC goes, since only v01 named it, and the Helios controller stays, since doc01 still reads it as `existing_A`. With the token the glossary is forgotten and doc01 goes to revision 2 with r01 alone, unresolved; neither query returns a fact. The glossary comes back from its files at revision 2, with the forgotten text and decisions, and doc01's removed decisions do not come back.
 
 ```bash journey F10
 $V drive "$RUN" main fixture -- glossary-fixture
@@ -332,6 +336,7 @@ $V check "$RUN" forget '.sources.doc01.glossary_spans == {} and .glossary.text =
 $V check "$RUN" forget '.result.facts == [] and .helios.facts == [] and .result.unavailable_sources == []' 'neither query returns a fact and nothing is unavailable'
 $V drive "$RUN" main readd -- readd --source glossary --expected-revision 1
 $V check "$RUN" readd '.sources.glossary.state == "current" and .sources.glossary.saved_revision == 2 and .glossary.hc_entry.start == 10' 'the glossary is back at revision 2 from its files'
+$V check "$RUN" readd '.differs_from_forgotten == {"text": false, "decisions": false}' 'the glossary files hold the forgotten text and decisions'
 $V check "$RUN" readd '(.sources.doc01.decisions | keys) == ["r01"] and .helios.facts == []' 'the removed decisions stay removed'
 ```
 
@@ -410,6 +415,40 @@ $V drive "$RUN" main again -- retrieve
 $V check "$RUN" again '(.seed_entity_ids | index("9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88")) == null and .unavailable_sources == []' 'a fresh retrieve does not seed HC either'
 ```
 
+**F15 forget a re-added source again.** Proves `forget-again` and `readd-difference`. Guide: "Re-add" and "The tombstone". doc01 is forgotten at revision 1 and re-added from changed text at revision 2, which reports other text and the same decisions. Forgotten again at revision 2, its tombstone holds the revision 2 mention UUIDs under `mention_ids`, the two revision 1 ones under `earlier_mention_ids`, and the revision 1 private singleton, which the first forget removed, under `earlier_entity_ids`. The user adds a corpus input naming the revision 1 mention UUID to `identity.json`: the re-add is refused as `forgotten_uuid_reused` and writes nothing. Without that input and with r01 unresolved, the re-add publishes doc01 at revision 3 under a third mention UUID and reports the same text as revision 2 and other decisions. `identity.json` still names the private singleton by its revision 1 UUID, which the graph no longer holds, so the re-add replaces it under a third UUID too ("What a re-add replaces").
+
+```bash journey F15
+$V drive "$RUN" main fixture -- multi-fixture
+M01=$(val fixture '.sources.doc01.mention_entity_id')
+PS01=$(val fixture '.sources.doc01.private_singleton_entity_id')
+$V drive "$RUN" main forget1 -- forget --source doc01 --expected-revision 1
+python3 -c 'import hashlib, json, pathlib, sys; r = pathlib.Path(sys.argv[1]); t = r / "source.txt"; t.write_text(t.read_text().rstrip("\n") + " HC was serviced.\n"); i = json.loads((r / "identity.json").read_text()); i["inputs"]["doc01"]["text_sha256"] = hashlib.sha256(t.read_bytes()).hexdigest(); (r / "identity.json").write_text(json.dumps(i))' "$RUN/roots/main"
+$V drive "$RUN" main readd1 -- readd --source doc01 --expected-revision 1
+$V check "$RUN" readd1 '.sources.doc01 | .state == "current" and .saved_revision == 2 and .verified_revision == 2' 'doc01 is current at revision 2 from the changed text'
+$V check "$RUN" readd1 '.differs_from_forgotten == {"text": true, "decisions": false}' 'the re-add reports other text and the same decisions'
+M02=$(val readd1 '.sources.doc01.mention_entity_id')
+PS02=$(val readd1 '.sources.doc01.private_singleton_entity_id')
+
+$V drive "$RUN" main forget2 -- forget --source doc01 --expected-revision 2
+$V check "$RUN" forget2 '.sources.doc01 | .state == "forgotten" and .saved_revision == 2' 'doc01 is forgotten again at revision 2'
+$V drive "$RUN" main status2 -- status
+$V check "$RUN" status2 '.publications[] | select(.state == "forgotten") | .description | fromjson | .revision == 2 and .mention_ids.g01 == "'"$M02"'" and (.earlier_mention_ids | length) == 2 and (.earlier_mention_ids | index("'"$M01"'")) != null and (.earlier_mention_ids | index("'"$M02"'")) == null' 'the second tombstone carries the revision 1 mention UUIDs and holds the revision 2 ones under mention_ids'
+$V check "$RUN" status2 '.publications[] | select(.state == "forgotten") | .description | fromjson | .earlier_entity_ids == ["'"$PS01"'"] and (.decisions_sha256 | length) == 64' 'the private singleton the first forget removed is carried, with the decisions digest'
+
+python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]) / "identity.json"; i = json.loads(p.read_text()); i["inputs"]["back"] = dict(kind="corpus_object", dataset_id=i["dataset_id"], entity_id=sys.argv[2], selected_fields=["name"], content_sha256="0" * 64); p.write_text(json.dumps(i))' "$RUN/roots/main" "$M01"
+$V drive "$RUN" main refused -- readd --source doc01 --expected-revision 2
+$V check "$RUN" refused '.error == "IntentError" and (.message | contains("does not recreate a mention or Entity UUID"))' 'a re-add naming the revision 1 mention UUID is refused'
+$V drive "$RUN" main status3 -- status
+$V check "$RUN" status3 '[.publications[] | select(.state == "forgotten") | .revision] == [2] and .recovery_events == []' 'the refused re-add wrote nothing'
+
+python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]) / "identity.json"; i = json.loads(p.read_text()); del i["inputs"]["back"]; r = i["mention_resolutions"]["r01"]; del r["target_entity_id"]; r["status"] = "unresolved"; p.write_text(json.dumps(i))' "$RUN/roots/main"
+$V drive "$RUN" main readd2 -- readd --source doc01 --expected-revision 2
+$V check "$RUN" readd2 '.sources.doc01 | .state == "current" and .saved_revision == 3 and .verified_revision == 3 and .decisions.r01.status == "unresolved"' 'doc01 is current at revision 3 with r01 unresolved'
+$V check "$RUN" readd2 '.sources.doc01.mention_entity_id as $m | ($m | length) == 36 and $m != "'"$M01"'" and $m != "'"$M02"'"' 'the third life has a third mention UUID'
+$V check "$RUN" readd2 '.sources.doc01 | .private_singleton_entity_id as $s | ($s | length) == 36 and $s != "'"$PS01"'" and $s != "'"$PS02"'" and .private_singleton_present' 'the private singleton returns under a third UUID'
+$V check "$RUN" readd2 '.differs_from_forgotten == {"text": false, "decisions": true}' 'the re-add reports the revision 2 text and other decisions'
+```
+
 ## Gotchas
 
 - Forget needs `--expected-revision`. Withdraw does not.
@@ -417,5 +456,6 @@ $V check "$RUN" again '(.seed_entity_ids | index("9b2b4cb5-1b07-5380-8aa5-cf0f11
 - Any source can be forgotten: current, withdrawn, or one whose first publication failed. A failed replacement or withdrawal is finished by its own method first. A dependent's failed replacement or publication is not blocked: the forget applies the removal to its saved revision.
 - A forget that removes another source's decisions needs `--confirm <token>` from its dry run. A dry run writes nothing and returns before any result file is written. The token changes when the set of affected decisions changes, including a dependent that becomes blocked, changes state or moves to another revision.
 - `drive` exits 1 for an injected failure, a refused forget, a refused `readd` and a forget whose dependent removal stopped. That is the expected result. Check `.error`, `.details` or `.dependents_failed`.
+- `readd` reports `differs_from_forgotten` with `text` and `decisions`, compared with the forgotten revision, not with the caller's earlier files. It never refuses for a difference.
 - `readd` works only on a forgotten source and publishes at the forgotten revision plus one. It reads `source.txt` and `identity.json` from the root (`source02.txt` and `identity02.json` for doc02, `glossary.txt` and `glossary_identity.json` for the glossary): the caller's own files, which a forget lists and never deletes.
 - Only one open forget incident per source is expected. Do not stack two faults in one root.

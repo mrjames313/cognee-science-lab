@@ -511,8 +511,14 @@ Added by Checkpoint I on 2026-10-23, from its final review:
 - A dependent whose text change finishes through the erasure retry leaves its own dependents' moved ranges for `refresh-dependents`.
 - `publish.py` has an unused `ChunkInput` import that predates this branch. Journey F9 edits root files with `python3` lines inside the journey.
 - The ledger check got slower, because `begin` parses every row under the reservation for an erasure retry: depth 5 takes about 15 s and depth 6 about 95 s.
-- A re-add publishes the caller's files as written. Follow-up F1 in [Next task](#next-task) adds the difference report.
-- The tombstone keeps only the last revision's mention and Entity UUIDs, so a source forgotten, re-added and forgotten again relies on the derivation rules for earlier revisions. Follow-up F2 in [Next task](#next-task) carries the lists forward.
+- Closed on branch `stage6-readd-followups` (2026-10-23, not yet merged): F1, a re-add reports `differs_from_forgotten` by text and by decisions from the tombstone's digests, and F2, each tombstone carries the mention and Entity UUIDs of the source's earlier forgotten lives. The same round fixed a second re-add from the original files, which was refused as `entity_uuid_not_derived` because the file still named an Entity by the UUID the first forget removed. See the [forget guide](stage6_identity_forget.md#re-add).
+
+Added by the re-add follow-ups on 2026-10-23:
+
+- No record keeps every UUID a source used at every revision. A tombstone holds the last revision's UUIDs and those of each earlier forgotten life, not the UUIDs an edit retired in the middle of a life; the derivation rules cover those. A per-source table of every UUID at every revision would close it.
+- The ledger model's descriptions share their UUIDs across revisions, so the tombstone carry is empty in every model sequence and P7 cannot see a dropped carry. A storage unit test covers it. Per-revision UUIDs in the model would let P7 check it, from depth 8.
+- The decisions digest names a reusable Entity by the keys of the decisions that name it, so a re-add that renames a decision key reports other decisions even when the outcomes match.
+- `describe_readd` renames a removed Entity's UUID in recipes, targets and variant endpoints but not in an unresolved or ambiguous resolution's `candidate_entity_ids`. No fixture has a candidate list; such a re-add would keep a removed UUID as a candidate and report other decisions.
 
 ## Code map
 

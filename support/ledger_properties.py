@@ -271,7 +271,9 @@ def p7_forgotten_rows_hold_no_content(step):
     """A forgotten row holds no description content: its description is the
     tombstone of the description its forget began, its plan keeps only
     identifiers, with no edge property, and no recovery event of the source
-    keeps a message."""
+    keeps a message. The model's descriptions share their UUIDs across
+    revisions, so the UUIDs a tombstone carries from an earlier forgotten
+    life are always empty here."""
     for s, ghost in enumerate(step.model_after.sources):
         row = step.obs_after.rows.get(s)
         if row is None or row.state != "forgotten":
