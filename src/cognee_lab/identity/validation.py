@@ -1,6 +1,7 @@
 """Exact input checks. No identity judgments or approximate substring matching."""
 
 from enum import StrEnum
+from functools import reduce
 from hashlib import sha256
 from typing import Any, NamedTuple
 from uuid import UUID, uuid5
@@ -109,14 +110,15 @@ def decision_inputs(source: IdentitySource) -> dict[str, frozenset[str]]:
     return cited
 
 
-def withheld_by(source: IdentitySource, drift: dict[str, str]) -> dict[str, str]:
-    """The decisions that cite a drifted input, each with its reason. A decision
-    citing several inputs is valid only when all of them are."""
+def withheld_by(source: IdentitySource, drift: dict[str, Reason]) -> dict[str, Reason]:
+    """The decisions that cite a drifted input, each with its strongest
+    reason. A decision citing several inputs is valid only when all of them
+    are."""
     withheld = {}
     for key, inputs in decision_inputs(source).items():
         reasons = [Reason(drift[i]) for i in sorted(inputs) if i in drift]
         if reasons:
-            withheld[key] = max(reasons, key=list(Reason).index)
+            withheld[key] = reduce(stronger, reasons)
     return withheld
 
 
@@ -153,7 +155,7 @@ class Failure(NamedTuple):
     its own, the reason that withholds decisions when it is foreign."""
 
     code: str
-    reason: str
+    reason: Reason
     message: str
 
 
@@ -240,7 +242,7 @@ async def validate_inputs(
     graph,
     saved_record_reader=None,
     withheld=frozenset(),
-) -> dict[str, str]:
+) -> dict[str, Reason]:
     """Validate the source's own inputs and the inputs its decisions outside
     `withheld` consume. An own input that fails raises. A foreign input that
     fails is returned with its reason (`input_changed` or `input_removed`),

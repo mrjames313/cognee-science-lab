@@ -10,6 +10,7 @@ from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
 from .validation import (
     IntentError,
+    Reason,
     decision_inputs,
     stronger,
     validate_inputs,
@@ -26,7 +27,7 @@ from .withholding import (
 )
 
 
-async def live_drift(publisher, source) -> dict[str, str]:
+async def live_drift(publisher, source) -> dict[str, Reason]:
     """Validate one current source as retrieval does: its registered snapshot,
     its own chunks in the graph and every input of every decision. An own
     failure raises; a foreign input that fails is returned with its

@@ -84,8 +84,8 @@ class WithholdingRow:
     input_ref: str
     consumed: str
     edit_revision: int
-    reason: str
-    status: str
+    reason: Reason
+    status: Status
     old_digest: str | None
     new_digest: str | None
     new_start: int | None = None
@@ -138,7 +138,13 @@ class WithholdingStore:
             return sorted(
                 (
                     WithholdingRow(
-                        **{f: getattr(r, f) for f in WithholdingRow.__annotations__}
+                        **{
+                            **{
+                                f: getattr(r, f) for f in WithholdingRow.__annotations__
+                            },
+                            "reason": Reason(r.reason),
+                            "status": Status(r.status),
+                        }
                     )
                     for r in found
                 ),
@@ -362,7 +368,7 @@ def withheld_decisions(rows, table) -> WithheldSet:
     readers = current_readers(rows)
     held: WithheldSet = {}
     for w in recorded_rows(readers, table):
-        entry = Withheld(Reason(w.reason), Status(w.status), frozenset([w.input_ref]))
+        entry = Withheld(w.reason, w.status, frozenset([w.input_ref]))
         merge(held, w.source, w.assignment, entry)
     for edit in unfinished_edits(rows):
         edited = IdentitySource.model_validate_json(edit.description)
