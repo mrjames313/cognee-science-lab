@@ -654,6 +654,24 @@ async def test_a_failed_refresh_is_reported_beside_the_completed_edit(
     assert len(await publisher.withholdings.rows()) == 2
 
 
+async def test_any_refresh_failure_is_reported_by_class_and_message(
+    source_payload, monkeypatch
+):
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    publisher = await memory_publisher([row_of(glossary), row_of(doc01)])
+    await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+
+    async def replace(_, description, *, expected_revision, fault_stage=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(revisions, "replace_one", replace)
+    assert await refresh_dependents(publisher) == dict(
+        refreshed=[], refresh_failed=dict(code="OSError", message="disk full")
+    )
+    assert len(await publisher.withholdings.rows()) == 2
+
+
 @pytest.mark.parametrize(
     "command", [["revise"], ["reconfirm", "--decision", "r01"], ["readd"]]
 )

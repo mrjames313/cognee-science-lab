@@ -142,8 +142,9 @@ async def refresh_dependents(publisher, fault_stage=None) -> dict:
     after it, the refresh remaps again.
 
     Returns each range written (`refreshed`) and the failure that stopped
-    the refresh (`refresh_failed`), not raised: the edit before it already
-    completed, and `refresh-dependents` reruns the refresh."""
+    the refresh (`refresh_failed`: an IntentError's code, or any other
+    exception's class, and its message), not raised: the edit before it
+    already completed, and `refresh-dependents` reruns the refresh."""
     refreshed = []
 
     async def write(revised, row, moved):
@@ -161,9 +162,11 @@ async def refresh_dependents(publisher, fault_stage=None) -> dict:
             if row.state == "current" and moved:
                 current = IdentitySource.model_validate_json(row.description)
                 await write(remapped(current, moved), row, moved)
-    except IntentError as exc:
-        failed = dict(code=exc.code, message=str(exc))
-        return dict(refreshed=refreshed, refresh_failed=failed)
+    except Exception as exc:
+        code = exc.code if isinstance(exc, IntentError) else type(exc).__name__
+        return dict(
+            refreshed=refreshed, refresh_failed=dict(code=code, message=str(exc))
+        )
     return dict(refreshed=refreshed, refresh_failed=None)
 
 
