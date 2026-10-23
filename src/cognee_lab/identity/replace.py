@@ -73,7 +73,9 @@ async def plan_retirement(graph, plan, olds, source):
     declared and `source` does not, and their identity edges with the refs
     and contributions each holds now. An erasure retry adds what the saved
     revision it supersedes declared or wrote; what the plan already holds
-    keeps the values its first attempt read."""
+    keeps the values its first attempt read. `new_edges` are the newest
+    description's alone, on purpose: a superseded revision is never
+    published, so only what it would retire carries over."""
     from cognee.infrastructure.databases.provenance import EdgeIdentity
     from .publish import identity_edges
 

@@ -131,7 +131,7 @@ async def prepare(root, *, chunked=False, dependent=False):
         sources={"doc01": "identity.json", "doc02": "identity02.json"},
         dependent=dependent,
     )
-    (root / "multi-fixture-info.json").write_text(json.dumps(info, indent=2))
+    (root / INFO).write_text(json.dumps(info, indent=2))
     if chunked:
         (root / "chunked-fixture-info.json").write_text(
             json.dumps(dict(chunk_budget=budget, prefix="Δ review: "), indent=2)
@@ -142,8 +142,12 @@ async def prepare(root, *, chunked=False, dependent=False):
     }
 
 
-def read_sources(root):
-    manifest = json.loads((root / "multi-fixture-info.json").read_text())
+INFO = "multi-fixture-info.json"
+
+
+def read_sources(root, info=INFO):
+    """The identity file of each source a fixture manifest names."""
+    manifest = json.loads((root / info).read_text())
     return {
         label: IdentitySource.model_validate_json((root / path).read_text())
         for label, path in manifest["sources"].items()
@@ -161,8 +165,11 @@ async def saved_or_file(publisher, files):
     }
 
 
-async def current_sources(root, publisher):
-    return await saved_or_file(publisher, read_sources(root))
+async def current_sources(root, publisher, info=INFO):
+    """Each source a fixture manifest names, as it is saved now
+    (`saved_or_file`): a two-source root's by default, or another fixture's
+    manifest."""
+    return await saved_or_file(publisher, read_sources(root, info))
 
 
 async def publish_one(
@@ -496,7 +503,7 @@ async def run(args, root):
         args._fixture_publisher = publisher
         sources = (
             await current_sources(root, publisher)
-            if (root / "multi-fixture-info.json").exists()
+            if (root / INFO).exists()
             else {
                 "doc01": IdentitySource.model_validate_json(
                     (root / "identity.json").read_text()

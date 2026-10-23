@@ -13,6 +13,7 @@ import re
 from uuid import NAMESPACE_URL, uuid5
 
 from .models import IdentitySource, TextSpanInput
+from .multisource import current_sources
 from .publish import Publisher
 from .validation import IntentError, fresh_entity_id, text_digest
 
@@ -197,19 +198,6 @@ async def prepare(root):
     }
 
 
-async def current_sources(root, publisher):
-    from .multisource import saved_or_file
-
-    manifest = json.loads((root / INFO).read_text())
-    return await saved_or_file(
-        publisher,
-        {
-            label: IdentitySource.model_validate_json((root / path).read_text())
-            for label, path in manifest["sources"].items()
-        },
-    )
-
-
 async def change_glossary(
     publisher,
     intended,
@@ -337,7 +325,7 @@ async def review(
             "input_removed",
             "A removed input is never re-confirmed; replace the decision",
         )
-    glossary = (await current_sources(root, publisher))["glossary"]
+    glossary = (await current_sources(root, publisher, INFO))["glossary"]
     text = await read_original(glossary, await context_for(glossary.identity_data_id))
     entry_line = hc_entry(text)
     revision = doc01.revision + 1
@@ -465,7 +453,7 @@ async def snapshot(publisher, root, query):
     from .retrieve import retrieve, withholding_status
     from .withholding import document_inputs
 
-    sources = await current_sources(root, publisher)
+    sources = await current_sources(root, publisher, INFO)
     rows = await publisher.records.rows()
     by_source = {r.source: r for r in rows}
     found = {}
@@ -562,7 +550,7 @@ async def run(args, root):
     else:
         publisher = await Publisher.configured()
         args._fixture_publisher = publisher
-        sources = await current_sources(root, publisher)
+        sources = await current_sources(root, publisher, INFO)
         if args.source not in sources:
             raise IntentError(
                 "source_missing", "Selected source is not in this fixture"

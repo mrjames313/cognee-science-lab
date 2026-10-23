@@ -11,7 +11,7 @@ kept its refs and contributions.
 from typing import NamedTuple, TypedDict
 from uuid import UUID
 
-from .erasure_rules import Erasure, citations
+from .dependency import Target, citations
 from .models import IdentitySource, Tombstone
 from .native import edge_metadata
 from .validation import IntentError
@@ -49,17 +49,18 @@ class Dependent(TypedDict):
 
 def consumes(reader, target, removed=frozenset()) -> list[Dependent]:
     """The inputs through which `reader` reads `target`'s document or an
-    Entity in `removed`, as `erasure_rules.citations` decides it, each named
+    Entity in `removed`, as `dependency.citations` decides it, each named
     with its reader for a refusal's details."""
     ids = source_ids(target)
-    erasure = Erasure(ids.original_data_id, frozenset(removed))
     return [
         Dependent(
             dataset_id=str(reader.dataset_id),
             identity_data_id=str(reader.identity_data_id),
             **c._asdict(),
         )
-        for c in citations(reader, erasure).values()
+        for c in citations(
+            reader, Target(ids.original_data_id, frozenset(removed))
+        ).values()
     ]
 
 

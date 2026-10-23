@@ -21,12 +21,10 @@ from uuid import UUID
 
 from .erasure_rules import (
     ERASURE_IMPLEMENTATION,
-    Citation,
-    Erasure,
-    citations,
     corpus_reads,
     without_erased,
 )
+from .dependency import Citation, Target, citations
 from .models import Accepted, CorpusObjectInput, IdentitySource
 from .retirement import SourceIds, removed_entities, source_ids
 from .validation import IntentError, decision_inputs, naming, object_digest
@@ -222,11 +220,11 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, token=None):
 def dependents_of(rows, ids: SourceIds, removed):
     """Each saved source other than the forgotten one that reads its
     document or a removed Entity, with the inputs through which it does."""
-    erasure = Erasure(ids.original_data_id, frozenset(UUID(str(e)) for e in removed))
+    target = Target(ids.original_data_id, frozenset(UUID(str(e)) for e in removed))
     for row in sorted(rows, key=lambda r: r.source):
         if row.is_retired or row.source == str(ids.identity_data_id):
             continue
-        if cited := citations(row.description, erasure):
+        if cited := citations(row.description, target):
             yield row, cited
 
 

@@ -17,14 +17,8 @@ from types import MappingProxyType
 from typing import NamedTuple
 from uuid import UUID
 
-from .models import (
-    Accepted,
-    ChunkInput,
-    CorpusObjectInput,
-    SourceTextInput,
-    TextSpanInput,
-    Unresolved,
-)
+from .dependency import Target, citations
+from .models import Accepted, CorpusObjectInput, Unresolved
 from .validation import (
     IntentError,
     decision_inputs,
@@ -37,14 +31,6 @@ from .validation import (
 )
 
 ERASURE_IMPLEMENTATION = "removed by forget"
-
-
-class Erasure(NamedTuple):
-    """What a forget erased: the forgotten document and the Entities its
-    forget removed."""
-
-    document: UUID
-    removed: frozenset[UUID]
 
 
 class Erasures(NamedTuple):
@@ -81,7 +67,7 @@ def corpus_reads(description) -> set[UUID]:
     }
 
 
-def erasure_of(old, source, erasures: Erasures) -> tuple[str, Erasure] | None:
+def erasure_of(old, source, erasures: Erasures) -> tuple[str, Target] | None:
     """The removal producer this revision introduces, with what it erases,
     or None. Its configuration names the forgotten document and the removed
     Entities, and the ledger must agree: the document is a forgotten
@@ -116,39 +102,7 @@ def erasure_of(old, source, erasures: Erasures) -> tuple[str, Erasure] | None:
             "erasure_unbound",
             "A removal producer names a forgotten source's document and exactly the Entities its forget removed",
         )
-    return key, Erasure(document, removed)
-
-
-class Citation(NamedTuple):
-    """One input through which a reader reads what a retirement takes away:
-    its key, its kind and the document or Entity UUID it consumes."""
-
-    input_ref: str
-    kind: str
-    consumed: str
-
-
-def citations(reader, erasure: Erasure) -> dict[str, Citation]:
-    """The one dependency predicate: the reader's inputs, by key, that read
-    the erased document (its text, or a span or chunk of it) or an erased
-    Entity. Forget, a text edit's withholding and the retiring-source fence
-    all decide dependency here. Text inputs of another dataset are not
-    admitted, so the reader's own dataset names the document's."""
-    texts = {
-        k
-        for k, i in reader.inputs.items()
-        if isinstance(i, SourceTextInput)
-        and (i.dataset_id, i.data_id) == (reader.dataset_id, erasure.document)
-    }
-    found = {}
-    for key, item in sorted(reader.inputs.items()):
-        if key in texts or (
-            isinstance(item, (ChunkInput, TextSpanInput)) and item.document_ref in texts
-        ):
-            found[key] = Citation(key, item.kind, str(erasure.document))
-        elif isinstance(item, CorpusObjectInput) and item.entity_id in erasure.removed:
-            found[key] = Citation(key, item.kind, str(item.entity_id))
-    return found
+    return key, Target(document, removed)
 
 
 def erased_decisions(old, erased) -> set[str]:

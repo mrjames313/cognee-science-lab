@@ -24,7 +24,7 @@ from sqlalchemy import Integer, String, delete, select, tuple_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .models import IdentitySource, SourceTextInput, TextSpanInput
-from .erasure_rules import Erasure, citations
+from .dependency import Target, citations
 from .validation import (
     Reason,
     decision_inputs,
@@ -184,9 +184,9 @@ class WithholdingStore:
 
 def document_inputs(reader: IdentitySource, target: IdentitySource) -> set[str]:
     """The reader's inputs that read the target's document: its text and
-    every span or chunk of it (erasure_rules.citations)."""
+    every span or chunk of it (dependency.citations)."""
     doc = target.inputs[target.original_input_ref]
-    return set(citations(reader, Erasure(doc.data_id, frozenset())))
+    return set(citations(reader, Target(doc.data_id)))
 
 
 def current_readers(rows) -> dict[str, IdentitySource]:
