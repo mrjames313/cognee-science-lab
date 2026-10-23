@@ -587,6 +587,47 @@ async def test_a_tombstone_carries_the_uuids_of_every_forgotten_life(
     assert refused.value.code == "incompatible_group"
 
 
+async def test_a_second_readd_replaces_what_the_first_forget_removed(source_payload):
+    """The caller's file still names the private singleton by its first
+    UUID, which the first forget removed and the first re-add replaced. The
+    second forget removes the replacement. The second re-add must replace
+    the first UUID too, since it is gone, and may not bring it back."""
+    from cognee_lab.identity.retirement import readd_removed
+
+    payload = json.loads(json.dumps(source_payload))
+    singleton = uuid4()
+    payload["entity_constructions"][str(singleton)] = dict(
+        name="doc01 instrument", description="Supported by this source only."
+    )
+    caller = source_of(payload)
+    first = tomb(caller, [singleton])
+    life2 = describe_readd(caller, first, {singleton}, TEXT, chunks_of(caller, TEXT))
+    second_singleton = replacement_entity_id(caller.identity_data_id, 2, singleton)
+    second = tomb(life2, [second_singleton]).carrying(first)
+    assert second.earlier_entity_ids == [singleton]
+    own = f"source_ref:v1:{caller.dataset_id}:{caller.identity_data_id}"
+    plan = dict(
+        entities={
+            str(second_singleton): dict(refs=[own], type="Entity", indexed_fields=[])
+        }
+    )
+    removed = await readd_removed(AbsentGraph(), second, plan, [])
+    assert removed == {second_singleton, singleton}
+    assert await readd_removed(OccupiedGraph([singleton]), second, plan, []) == {
+        second_singleton
+    }
+
+    life3 = describe_readd(caller, second, removed, TEXT, chunks_of(caller, TEXT))
+    third_singleton = replacement_entity_id(caller.identity_data_id, 3, singleton)
+    assert third_singleton in life3.entity_constructions
+    assert singleton not in life3.entity_constructions
+    await admit_readd(AbsentGraph(), second, life3, removed)
+    back = renamed_entity(life3, third_singleton, singleton)
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(AbsentGraph(), second, back, removed)
+    assert refused.value.code == "forgotten_uuid_reused"
+
+
 async def test_admission_counts_a_readded_source_earlier_forgotten_lives(
     source_payload,
 ):

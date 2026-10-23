@@ -110,12 +110,14 @@ async def readd_removed(graph, source, plan, rows):
     forget removed, and every Entity its plan recorded that the graph no
     longer holds. A co-owner's later forget can remove an Entity this forget
     left, and that co-owner's re-add makes the ledger show a live owner
-    again, so the rows alone cannot tell what is gone."""
-    absent = {
-        UUID(key)
-        for key, node in plan["entities"].items()
-        if node["type"] == "Entity" and await graph.get_node(key) is None
-    }
+    again, so the rows alone cannot tell what is gone. Also every reusable
+    Entity of an earlier forgotten life that the graph no longer holds: the
+    caller's file may still name it by the UUID an earlier forget removed."""
+    recorded = [
+        key for key, node in plan["entities"].items() if node["type"] == "Entity"
+    ]
+    recorded += [str(e) for e in source.earlier_entity_ids]
+    absent = {UUID(key) for key in recorded if await graph.get_node(key) is None}
     return removed_entities(source, plan, rows) | absent
 
 
