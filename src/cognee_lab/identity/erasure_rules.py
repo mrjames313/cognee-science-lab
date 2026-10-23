@@ -35,11 +35,14 @@ ERASURE_IMPLEMENTATION = "removed by forget"
 
 class Erasures(NamedTuple):
     """What the ledger says a removal revision may erase: the document of
-    each forgotten source with the Entities its forget removed, and the
-    Entities saved sources read as corpus inputs, which no removal drops."""
+    each forgotten source with the Entities its forget removed, the
+    Entities saved sources read as corpus inputs, which no removal drops,
+    and each forgotten document's identity source, whose saved records a
+    removal may erase too."""
 
     forgotten: Mapping[UUID, frozenset[UUID]] = MappingProxyType({})
     readers: frozenset[UUID] = frozenset()
+    sources: Mapping[UUID, UUID] = MappingProxyType({})
 
 
 NO_ERASURES = Erasures()
@@ -48,14 +51,19 @@ NO_ERASURES = Erasures()
 def erasures_of(rows, source) -> Erasures:
     """The forgotten sources and the corpus readers among saved rows other
     than this source's."""
-    forgotten, readers = {}, set()
+    forgotten, readers, sources = {}, set(), {}
     own = str(source.identity_data_id)
     for row in rows:
         if (tomb := row.tombstone) is not None:
             forgotten[tomb.original_data_id] = frozenset(tomb.removed_entity_ids)
+            sources[tomb.original_data_id] = tomb.identity_data_id
         elif not row.is_retired and row.source != own:
             readers |= corpus_reads(row.description)
-    return Erasures(MappingProxyType(forgotten), frozenset(readers))
+    return Erasures(
+        MappingProxyType(forgotten),
+        frozenset(readers),
+        MappingProxyType(sources),
+    )
 
 
 def corpus_reads(description) -> set[UUID]:
@@ -72,7 +80,9 @@ def erasure_of(old, source, erasures: Erasures) -> tuple[str, Target] | None:
     or None. Its configuration names the forgotten document and the removed
     Entities, and the ledger must agree: the document is a forgotten
     source's, and the Entities named are exactly the ones its forget
-    removed, so no step removes only part of what the forget took."""
+    removed, so no step removes only part of what the forget took. The
+    ledger also names that source, whose saved records the removal
+    erases with its document."""
     found = [
         (key, p)
         for key, p in source.producers.items()
@@ -102,7 +112,8 @@ def erasure_of(old, source, erasures: Erasures) -> tuple[str, Target] | None:
             "erasure_unbound",
             "A removal producer names a forgotten source's document and exactly the Entities its forget removed",
         )
-    return key, Target(document, removed)
+    identity = erasures.sources.get(document)
+    return key, Target(document, removed, frozenset([identity] if identity else []))
 
 
 def erased_decisions(old, erased) -> set[str]:

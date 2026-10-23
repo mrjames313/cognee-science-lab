@@ -437,7 +437,15 @@ async def replace(
         table = await publisher.withholdings.rows(source.dataset_id)
         if not any(w.source == own for w in table):
             return
-        drift = await validate_inputs(source, texts=texts, chunks=chunks, graph=graph)
+        from .chains import record_reader
+
+        drift = await validate_inputs(
+            source,
+            texts=texts,
+            chunks=chunks,
+            graph=graph,
+            saved_record_reader=record_reader(await records.rows()),
+        )
         kept = {
             (w.assignment, w.input_ref)
             for w in recorded_rows({own: source}, table)

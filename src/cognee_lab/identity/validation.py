@@ -86,16 +86,16 @@ def stronger(a: StrEnum, b: StrEnum) -> StrEnum:
 
 
 def is_foreign(source: IdentitySource, key: str) -> bool:
-    """Whether an input is another document's text, span or chunk, or a corpus
-    object. Its drift withholds the decisions that cite it; it does not fail
-    the source."""
+    """Whether an input is another document's text, span or chunk, a corpus
+    object or another source's saved record. Its drift withholds the
+    decisions that cite it; it does not fail the source."""
     item = source.inputs[key]
     own = source.inputs[source.original_input_ref].data_id
     if isinstance(item, SourceTextInput):
         return item.data_id != own
     if isinstance(item, (ChunkInput, TextSpanInput)):
         return source.inputs[item.document_ref].data_id != own
-    return isinstance(item, CorpusObjectInput)
+    return isinstance(item, (CorpusObjectInput, SavedRecordInput))
 
 
 def decision_inputs(source: IdentitySource) -> dict[str, frozenset[str]]:
@@ -235,15 +235,14 @@ async def input_failure(
                 "input_changed", Reason.CHANGED, f"Corpus fields changed: {key}"
             )
     elif isinstance(item, SavedRecordInput):
+        # chains.record_reader: the cited source's row, the record under its
+        # type and its fingerprint; the pinned revision is provenance only.
         if saved_record_reader is None:
             raise IntentError("unsupported_input", "A saved-record reader is required")
-        value, revision = await saved_record_reader(item)
-        if (
-            revision != item.representation_revision
-            or object_digest(value) != item.content_sha256
-        ):
+        reason = saved_record_reader(item)
+        if reason is not None:
             return Failure(
-                "input_changed", Reason.CHANGED, f"Saved record changed: {key}"
+                "input_changed", reason, f"Saved record changed or removed: {key}"
             )
     elif isinstance(item, ChunkInput):
         chunk = chunks.get(str(item.chunk_id))

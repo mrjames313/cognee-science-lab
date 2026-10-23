@@ -7,7 +7,9 @@ must find a small world that the broken admitter decides wrongly.
 
 from uuid import UUID
 
-from cognee_lab.identity import admission, erasure_rules
+from cognee_lab.identity import admission, erasure_rules, validation
+from cognee_lab.identity.models import SavedRecordInput
+from cognee_lab.identity.records import saved_records
 
 
 def skip(*_):
@@ -96,6 +98,21 @@ def trust_the_producer(old, source, erasures):
     return _bound_erasure_of(old, source, erasures._replace(forgotten=claimed))
 
 
+def saved_records_not_foreign(source, key):
+    """A saved record counts as the source's own input, so rule 5 never
+    sees it."""
+    if isinstance(source.inputs[key], SavedRecordInput):
+        return False
+    return validation.is_foreign(source, key)
+
+
+def allow_self_citation(description):
+    """Only the dataset of a cited record is checked."""
+    for item in saved_records(description).values():
+        if item.dataset_id != description.dataset_id:
+            raise validation.IntentError("not_admitted", "Another dataset")
+
+
 MUTANTS = {
     "continue_with_any_uuid": ("same_identity", lambda *_: True),
     "continue_after_merge": (
@@ -143,6 +160,8 @@ MUTANTS = {
     "erase_beyond_the_forgotten": ("check_erasure_confined", skip),
     "erase_unbound": ("erasure_of", trust_the_producer),
     "drop_read_recipes": ("check_dropped_unread", skip),
+    "saved_records_not_foreign": ("is_foreign", saved_records_not_foreign),
+    "allow_self_citation": ("check_citation_scope", allow_self_citation),
     "drop_scoped_variants_freely": (
         "check_scoped_variants",
         drop_scoped_variants_freely,

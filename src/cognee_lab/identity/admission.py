@@ -8,9 +8,9 @@ a correction with unchanged text and their mixtures are particular maps.
 Whether the text changed decides three rules: with unchanged text every mapped
 occurrence keeps its span and a continuing group may change its decision in
 place; with changed text span-scoped variants are refused. Another
-document's inputs and corpus objects keep their content under one key: a
-span may only move, and a decision re-confirmed on a new input names a new
-producer. Functions below follow the order in which `admit` applies them.
+document's inputs, corpus objects and other sources' saved records keep
+their content under one key: a span may only move, and a decision
+re-confirmed on a new input names a new producer. Functions below follow the order in which `admit` applies them.
 Two rules read the graph, so their callers run them apart from `admit`. On
 a first attempt no UUID the revision introduces may be a node yet
 (`check_absent_from_graph`), and every corpus input a decision lists names
@@ -22,9 +22,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import NamedTuple
 
+from .chains import check_citation_scope
 from .models import (
     CorpusObjectInput,
-    SavedRecordInput,
     SourceTextInput,
 )
 from .decisions import naming_keys
@@ -190,15 +190,13 @@ def check_source_identity(old, source, before, after):
 
 
 def check_input_kinds(description):
-    """Inputs are texts, spans, chunks and corpus objects. Every text but the
-    original is another document of the same dataset. Saved-record inputs
-    are not remapped yet."""
+    """Inputs are texts, spans, chunks, corpus objects and saved records.
+    Every text but the original is another document of the same dataset,
+    and every saved record another source's of the same dataset
+    (`check_citation_scope`)."""
+    check_citation_scope(description)
     own = description.inputs[description.original_input_ref]
     for key, item in description.inputs.items():
-        if isinstance(item, SavedRecordInput):
-            raise IntentError(
-                "not_admitted", "This revision does not remap saved-record inputs"
-            )
         if (
             isinstance(item, SourceTextInput)
             and key != description.original_input_ref
@@ -513,10 +511,11 @@ def without_range(item):
 
 
 def check_foreign_inputs(old, source):
-    """Another document's input, or a corpus object, that both descriptions
-    hold under one key keeps its kind, document and digest. Only a span's
-    range may change, with its digest unchanged: a pure move. A changed
-    input takes a new key; an uncited key may be dropped."""
+    """Another document's input, a corpus object or another source's saved
+    record that both descriptions hold under one key keeps its kind,
+    document and digest, and a saved record its pinned revision. Only a
+    span's range may change, with its digest unchanged: a pure move. A
+    changed input takes a new key; an uncited key may be dropped."""
     for key in set(old.inputs) & set(source.inputs):
         if not (is_foreign(old, key) or is_foreign(source, key)):
             continue

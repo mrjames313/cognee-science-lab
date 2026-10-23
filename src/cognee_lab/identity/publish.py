@@ -183,14 +183,27 @@ class Publisher:
         """The checks that need no registered Data: the inputs against the
         supplied texts and chunks, the UUID uses across saved descriptions,
         the fence on retiring sources, the saved revision and the Entity
-        types. A re-add runs them before it writes anything."""
+        types. A re-add runs them before it writes anything. Saved-record
+        citations stay in their dataset and off the citing source, a new
+        one pins its record as it is now, and none closes a cycle
+        (chains.py)."""
+        from .chains import (
+            check_citation_cycles,
+            check_citation_scope,
+            check_record_citations,
+            new_citations,
+            record_reader,
+        )
+
         rows = await self.records.rows()
+        check_citation_scope(source)
         # Another document's drift withholds decisions, never the source.
         await validate_inputs(
             source,
             texts=texts,
             chunks=chunks,
             graph=self.graph,
+            saved_record_reader=record_reader(rows),
             withheld=await self.withheld_for(source, rows),
         )
         from .admission import check_corpus_inputs_exist
@@ -217,6 +230,8 @@ class Publisher:
                 "not_admitted",
                 "Use the guarded replacement operation to advance a revision",
             )
+        check_record_citations(source, rows, new_citations(source, previous))
+        check_citation_cycles(source, rows)
         for entity_id in source.entity_constructions:
             node = await self.graph.get_node(str(entity_id))
             if node is not None and node.get("type") != "Entity":
@@ -625,12 +640,16 @@ class Publisher:
                     raise IntentError(
                         "verify_owner", "Original-chunk marker owner missing"
                     )
+            from .chains import record_reader
+
+            rows = await self.records.rows()
             await validate_inputs(
                 source,
                 texts=texts,
                 chunks=chunks,
                 graph=self.graph,
-                withheld=await self.withheld_for(source),
+                saved_record_reader=record_reader(rows),
+                withheld=await self.withheld_for(source, rows),
             )
             if verify_semantics is not None:
                 await verify_semantics()

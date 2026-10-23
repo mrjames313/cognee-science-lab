@@ -11,7 +11,7 @@ rows need a steady world, where every group continues and nothing is new.
 from uuid import UUID, uuid5
 
 from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION, Erasures
-from dependency_worlds import add_glossary, cite, glossary_span
+from dependency_worlds import add_glossary, cite, glossary_span, saved_record
 from occurrence_worlds import (
     ADMIT,
     CONTINUING,
@@ -48,7 +48,8 @@ def read_entity(identity):
 def forgotten(old) -> Erasures:
     """What the ledger lets every world's removal claim: the glossary is
     forgotten and its forget removed one Entity; another saved source reads
-    one Entity as a corpus input."""
+    one Entity as a corpus input. The glossary's identity source is
+    dependency_worlds.cited_source, whose resolution r1 a world may cite."""
     return Erasures(
         {
             uuid5(old.dataset_id, "gloss"): frozenset(
@@ -56,6 +57,7 @@ def forgotten(old) -> Erasures:
             )
         },
         frozenset({UUID(read_entity(old.identity_data_id))}),
+        {uuid5(old.dataset_id, "gloss"): uuid5(old.dataset_id, "cited-source")},
     )
 
 
@@ -226,9 +228,58 @@ def strip_the_group(*, keep):
     return change
 
 
+def unresolve_record_citer(old, new, ctx):
+    """The continuing resolution cites the forgotten source's saved record."""
+    rid = continuing_rid(ctx)
+    saved_record(old)
+    cite(old, rid, "rec")
+    unresolved(new, rid)
+    eraser(new)
+
+
+def keep_record_citer(old, new, ctx):
+    rid = continuing_rid(ctx)
+    for payload in (old, new):
+        saved_record(payload)
+        cite(payload, rid, "rec")
+    eraser(new)
+
+
+def drop_record_citing_variant(old, new, ctx):
+    saved_record(old)
+    cite(old, "v01", "rec")
+    new["variant_assignments"].pop("v01")
+    new["entity_constructions"].pop(HC)
+    eraser(new)
+
+
 # A removal is an unchanged-text revision: with changed text its groups
 # differ, so the rule refuses it before the text-edit rules would.
 ERASURE_DECISIONS = [
+    decision(
+        "erasure unresolves the continuing resolution citing the forgotten source's record",
+        "rule 6",
+        [CONTINUING, STEADY],
+        unresolve_record_citer,
+        text_edit=UNRELATED,
+        same_text=ADMIT,
+    ),
+    decision(
+        "erasure drops the document variant citing the forgotten source's record",
+        "rule 6",
+        [STEADY],
+        drop_record_citing_variant,
+        text_edit=UNRELATED,
+        same_text=ADMIT,
+    ),
+    decision(
+        "erasure keeps the resolution citing the forgotten source's record",
+        "rule 6",
+        [CONTINUING, STEADY],
+        keep_record_citer,
+        text_edit=INCOMPLETE,
+        same_text=INCOMPLETE,
+    ),
     decision(
         "erasure unresolves the continuing resolution citing the forgotten span",
         "rule 6",

@@ -25,6 +25,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .models import IdentitySource, SourceTextInput, TextSpanInput
 from .dependency import Target, citations
+from .records import saved_records
 from .validation import (
     Reason,
     decision_inputs,
@@ -37,10 +38,13 @@ class Status(StrEnum):
     """What answers a withheld decision. Members are in increasing
     precedence: when several inputs withhold one decision it shows the
     strongest, since an unfinished edit blocks a review and a review blocks
-    a refresh."""
+    a refresh. `upstream_withheld` (a cited record is withheld) waits for
+    the record above it, so no reviewer answers it; it is derived only and
+    never written to the table, whose status column it does not fit."""
 
     REMAP = "remap"
     REFRESH_NEEDED = "refresh_needed"
+    UPSTREAM_WITHHELD = "upstream_withheld"
     EDIT_UNFINISHED = "edit_unfinished"
 
 
@@ -328,6 +332,24 @@ def unfinished_edits(rows):
     ]
 
 
+def unfinished_sources(rows) -> set[str]:
+    """Sources whose latest attempt is pending or failed."""
+    return {r.source for r in rows if r.state in ("pending", "failed")}
+
+
+def citing_unfinished(held: WithheldSet, readers, unfinished):
+    """Withhold each decision of `readers` that cites a saved record of a
+    source in `unfinished`: `input_changed`, status `edit_unfinished`."""
+    for source, reader in readers.items():
+        for key, item in saved_records(reader).items():
+            if str(item.identity_data_id) in unfinished:
+                entry = Withheld(
+                    Reason.CHANGED, Status.EDIT_UNFINISHED, frozenset([key])
+                )
+                for assignment in citing(reader, [key]):
+                    merge(held, source, assignment, entry)
+
+
 def recorded_rows(readers, table) -> list[WithholdingRow]:
     """The table rows that still apply: the dependent is one of the current
     `readers`, and its saved description still has the decision citing that
@@ -342,9 +364,12 @@ def recorded_rows(readers, table) -> list[WithholdingRow]:
 
 def withheld_decisions(rows, table) -> WithheldSet:
     """The withheld-decision set of the ledger rows and the withholding
-    table: the recorded rows that still apply, and every decision citing a
-    document whose text change is pending or failed (`input_changed`, status
-    `edit_unfinished`)."""
+    table: the recorded rows that still apply, every decision citing a
+    document whose text change is pending or failed, and every decision
+    citing a saved record of a source with any attempt pending or failed
+    (both `input_changed`, status `edit_unfinished`). Withholding down a
+    chain needs live validation, so `chains.upstream_closure` adds it where
+    retrieval and `status` read this set."""
     readers = current_readers(rows)
     held: WithheldSet = {}
     for w in recorded_rows(readers, table):
@@ -362,6 +387,7 @@ def withheld_decisions(rows, table) -> WithheldSet:
                         Reason.CHANGED, Status.EDIT_UNFINISHED, inputs & keys
                     )
                     merge(held, source, assignment, entry)
+    citing_unfinished(held, readers, unfinished_sources(rows))
     return held
 
 

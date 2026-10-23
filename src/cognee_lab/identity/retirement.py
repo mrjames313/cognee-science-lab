@@ -47,11 +47,13 @@ class Dependent(TypedDict):
     consumed: str
 
 
-def consumes(reader, target, removed=frozenset()) -> list[Dependent]:
-    """The inputs through which `reader` reads `target`'s document or an
-    Entity in `removed`, as `dependency.citations` decides it, each named
-    with its reader for a refusal's details."""
+def consumes(reader, target, removed=frozenset(), *, records=False) -> list[Dependent]:
+    """The inputs through which `reader` reads `target`'s document, an
+    Entity in `removed` or, with `records`, a saved record of `target`, as
+    `dependency.citations` decides it, each named with its reader for a
+    refusal's details."""
     ids = source_ids(target)
+    sources = frozenset([ids.identity_data_id]) if records else frozenset()
     return [
         Dependent(
             dataset_id=str(reader.dataset_id),
@@ -59,7 +61,7 @@ def consumes(reader, target, removed=frozenset()) -> list[Dependent]:
             **c._asdict(),
         )
         for c in citations(
-            reader, Target(ids.original_data_id, frozenset(removed))
+            reader, Target(ids.original_data_id, frozenset(removed), sources)
         ).values()
     ]
 
@@ -127,14 +129,19 @@ def retiring_by_forget(row):
 
 def refuse_retiring_inputs(source, rows):
     """Refuse a description that consumes a source whose forget is pending or
-    failed. Admitting it would leave that forget refused by its dependent and
-    the source half-forgotten."""
+    failed, its saved records included. Admitting it would leave that forget
+    refused by its dependent and the source half-forgotten."""
     own = (str(source.dataset_id), str(source.identity_data_id))
     for row in rows:
         if (row.dataset, row.source) == own or not retiring_by_forget(row):
             continue
         retiring = row.description
-        found = consumes(source, retiring, removed_entities(retiring, row.plan, rows))
+        found = consumes(
+            source,
+            retiring,
+            removed_entities(retiring, row.plan, rows),
+            records=True,
+        )
         if found:
             raise IntentError(
                 "retiring_source",

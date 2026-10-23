@@ -329,7 +329,7 @@ async def preview(publisher, source, *, expected_revision):
     """The dry run: what `forget` would do, with the token it would need.
     Writes nothing. On a forgotten source, the dependents it has not revised
     yet."""
-    from .erasure import impact, report, unfinished
+    from .erasure import impact, refuse_chained, report, unfinished
 
     records = publisher.records
     row = await saved_row(records, source, "No saved publication to forget")
@@ -344,8 +344,10 @@ async def preview(publisher, source, *, expected_revision):
         )
     description = row.description
     plan = await plan_for(publisher, description, row)
+    found = impact(description, plan, rows)
+    refuse_chained(found, rows)
     return report(
-        impact(description, plan, rows),
+        found,
         plan=plan,
         description=description,
         events=await records.events(description.dataset_id),
@@ -381,7 +383,7 @@ async def forget(
     from cognee import forget as native_forget
     from cognee.modules.users.methods import get_default_user
 
-    from .erasure import finish_dependents, impact, report, unfinished
+    from .erasure import finish_dependents, impact, refuse_chained, report, unfinished
 
     graph, records = publisher.graph, publisher.records
     require_graph_methods(
@@ -417,7 +419,9 @@ async def forget(
         return dict(attempt_id=None, state="forgotten", **removal)
     retry = resumes(row)
     plan = await plan_for(publisher, source, row)
-    found = impact(source, plan, await records.rows())
+    rows = await records.rows()
+    found = impact(source, plan, rows)
+    refuse_chained(found, rows)
     if not confirmed(found, plan, confirm, retry):
         code, message = (
             (
@@ -447,7 +451,9 @@ async def forget(
         # Again under the writer reservation, from the saved plan: a source
         # may have published or changed between the check above and begin.
         nonlocal found
-        found = impact(source, plan, await records.rows())
+        rows = await records.rows()
+        found = impact(source, plan, rows)
+        refuse_chained(found, rows)
         if found.token != plan["impact_token"]:
             raise IntentError(*IMPACT_CHANGED)
 

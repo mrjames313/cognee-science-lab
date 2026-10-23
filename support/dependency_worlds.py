@@ -216,16 +216,77 @@ def add_second_own_text(old, new, ctx):
     add_glossary(new, data_id=new["inputs"]["doc01"]["data_id"])
 
 
-def add_saved_record(old, new, ctx):
-    new["inputs"]["record"] = dict(
+def cited_source(payload):
+    return str(uuid5(UUID(payload["dataset_id"]), "cited-source"))
+
+
+def saved_record(
+    payload, key="rec", *, identity=None, dataset=None, revision=1, digest="record"
+):
+    """A citation of resolution r1 of another source of the dataset."""
+    payload["inputs"][key] = dict(
         kind="saved_record",
-        dataset_id=new["dataset_id"],
-        identity_data_id=new["identity_data_id"],
+        dataset_id=dataset or payload["dataset_id"],
+        identity_data_id=identity or cited_source(payload),
         record_type="mention_resolution",
         record_id="r1",
-        representation_revision=1,
-        content_sha256=text_digest("record"),
+        representation_revision=revision,
+        content_sha256=text_digest(digest),
     )
+
+
+def cite_own_record(old, new, ctx):
+    saved_record(new, identity=new["identity_data_id"])
+
+
+def cite_record_of_another_dataset(old, new, ctx):
+    saved_record(new, dataset=str(uuid5(UUID(new["dataset_id"]), "other")))
+
+
+def cite_record(*, producer):
+    """v01 cites a saved record the old revision did not cite."""
+
+    def change(old, new, ctx):
+        saved_record(new)
+        cite(new, "v01", "rec")
+        if producer:
+            attest(new, "v01")
+
+    return change
+
+
+def drop_record_citation(*, producer):
+    """v01 stops citing a saved record, its reviewed fields unchanged."""
+
+    def change(old, new, ctx):
+        saved_record(old)
+        cite(old, "v01", "rec")
+        cite(new, "v01", "existing_A")
+        if producer:
+            attest(new, "v01")
+
+    return change
+
+
+def change_cited_record(**pinned):
+    """v01 cites a saved record whose pin changes under its old key."""
+
+    def change(old, new, ctx):
+        saved_record(old)
+        saved_record(new, **pinned)
+        for payload in (old, new):
+            cite(payload, "v01", "rec")
+        attest(new, "v01")
+
+    return change
+
+
+def group_cites_record(old, new, ctx):
+    """A continuing group cites a saved record in both revisions; its
+    resolution cites it through the group."""
+    for payload in (old, new):
+        saved_record(payload)
+        payload["mention_groups"][ctx["continuing"]]["input_refs"].append("rec")
 
 
 DEPENDENCY_DECISIONS = [
@@ -422,11 +483,75 @@ DEPENDENCY_DECISIONS = [
         same_text=refuse("not_admitted"),
     ),
     decision(
-        "saved-record input",
+        "saved record of the citing source itself",
         "rule 5",
         [],
-        add_saved_record,
+        cite_own_record,
+        text_edit=refuse("self_citation"),
+        same_text=refuse("self_citation"),
+    ),
+    decision(
+        "saved record of another dataset",
+        "rule 5",
+        [],
+        cite_record_of_another_dataset,
         text_edit=refuse("not_admitted"),
         same_text=refuse("not_admitted"),
+    ),
+    decision(
+        "new saved-record citation under a new producer",
+        "rule 5",
+        [],
+        cite_record(producer=True),
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "new saved-record citation under the old producer",
+        "rule 5",
+        [],
+        cite_record(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "saved-record citation dropped under the old producer",
+        "rule 5",
+        [],
+        drop_record_citation(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "saved-record citation dropped under a new producer",
+        "rule 5",
+        [],
+        drop_record_citation(producer=True),
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "saved record's digest changed under its old key",
+        "rule 5",
+        [],
+        change_cited_record(digest="changed"),
+        text_edit=refuse("foreign_input_changed"),
+        same_text=refuse("foreign_input_changed"),
+    ),
+    decision(
+        "saved record's pinned revision changed under its old key",
+        "rule 5",
+        [],
+        change_cited_record(revision=2),
+        text_edit=refuse("foreign_input_changed"),
+        same_text=refuse("foreign_input_changed"),
+    ),
+    decision(
+        "continuing group cites a saved record",
+        "rule 5",
+        [CONTINUING],
+        group_cites_record,
+        text_edit=ADMIT,
+        same_text=ADMIT,
     ),
 ]

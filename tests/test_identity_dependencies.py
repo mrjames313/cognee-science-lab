@@ -708,7 +708,7 @@ def test_live_drift_that_no_row_records_needs_review(source_payload):
     """A drifted input that no edit classified (corpus-field drift, a span
     stale after a re-add) withholds its decisions for a reviewer, beside
     what the rows already withhold."""
-    from cognee_lab.identity.retrieve import held_by
+    from cognee_lab.identity.chains import held_by
     from cognee_lab.identity.validation import Reason
     from cognee_lab.identity.withholding import Status, Withheld
 

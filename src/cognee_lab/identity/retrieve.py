@@ -1,39 +1,29 @@
 """Small fixture retriever; native requests/registration follow in the next milestone."""
 
 import re
-from collections.abc import AsyncIterator
 from dataclasses import asdict
 from types import SimpleNamespace
 from uuid import UUID
 
-from .models import Accepted, ChunkInput, IdentitySource
+from .chains import Live, close_live, record_reader
+from .models import Accepted, ChunkInput
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
-from .storage import PublicationRow
-from .validation import (
-    IntentError,
-    Reason,
-    decision_inputs,
-    stronger,
-    validate_inputs,
-    withheld_by,
-)
+from .validation import IntentError, Reason, validate_inputs
 from .withholding import (
     Status,
-    Withheld,
     WithheldSet,
-    combine,
     current_readers,
     recorded_rows,
     withheld_decisions,
 )
 
 
-async def live_drift(publisher, source) -> dict[str, Reason]:
+async def live_drift(publisher, source, reader) -> dict[str, Reason]:
     """Validate one current source as retrieval does: its registered snapshot,
-    its own chunks in the graph and every input of every decision. An own
-    failure raises; a foreign input that fails is returned with its
-    reason."""
+    its own chunks in the graph and every input of every decision, a cited
+    saved record through `reader` (chains.record_reader). An own failure
+    raises; a foreign input that fails is returned with its reason."""
     from .registered import read_registered, read_texts
 
     if await read_registered(source) != source:
@@ -63,30 +53,12 @@ async def live_drift(publisher, source) -> dict[str, Reason]:
                 is_part_of=SimpleNamespace(id=parent.data_id),
             )
     return await validate_inputs(
-        source, texts=texts, chunks=chunks, graph=publisher.graph
+        source,
+        texts=texts,
+        chunks=chunks,
+        graph=publisher.graph,
+        saved_record_reader=reader,
     )
-
-
-def held_by(source, recorded, drift):
-    """The source's withheld decisions: `recorded`, its entries of the
-    withheld-decision set, combined with every decision citing an input that
-    failed live validation. Live drift that a recorded entry already holds,
-    for a reason no stronger, adds nothing: a recorded move still waits for
-    its refresh. Anything else no edit classified, so a reviewer answers it
-    (`refresh_needed`)."""
-    held = dict(recorded)
-    cited = decision_inputs(source)
-    for key, reason in withheld_by(source, drift).items():
-        inputs = cited[key] & set(drift)
-        entry = recorded.get(key)
-        if (
-            entry
-            and inputs <= entry.inputs
-            and stronger(reason, entry.reason) == entry.reason
-        ):
-            continue
-        held[key] = combine(entry, Withheld(reason, Status.REFRESH_NEEDED, inputs))
-    return held
 
 
 def is_served(row) -> bool:
@@ -95,25 +67,28 @@ def is_served(row) -> bool:
     return row.state == "current" and row.revision == row.verified_revision
 
 
-async def live_held(
-    publisher, rows, withheld: WithheldSet
-) -> AsyncIterator[
-    tuple[IdentitySource, PublicationRow, dict[str, Withheld] | IntentError]
-]:
-    """The one live-validation pass that retrieval and status share. For each
-    served row, yield (source, row, held): its withheld decisions, `withheld`
-    combined with what live validation finds in every decision, or the
-    IntentError of an own input that failed."""
+async def live_held(publisher, rows, withheld: WithheldSet) -> dict[str, Live]:
+    """The one live-validation pass that retrieval and status share, with
+    withholding spread down every chain of citations. Each served row maps
+    to (source, row, held): its withheld decisions, `withheld` combined
+    with what live validation finds in every decision and with what a
+    withheld record above it holds (chains.close_live), or the IntentError
+    of an own input that failed."""
+    reader = record_reader(rows)
+    found = {}
     for row in rows:
         if not is_served(row):
             continue
         source = row.description
         try:
-            drift = await live_drift(publisher, source)
+            found[row.source] = (
+                source,
+                row,
+                await live_drift(publisher, source, reader),
+            )
         except IntentError as exc:
-            yield source, row, exc
-            continue
-        yield source, row, held_by(source, withheld.get(row.source, {}), drift)
+            found[row.source] = (source, row, exc)
+    return close_live(found, withheld)
 
 
 async def withheld_now(publisher, rows, table=None) -> WithheldSet:
@@ -126,9 +101,9 @@ async def withheld_now(publisher, rows, table=None) -> WithheldSet:
     if table is None:
         table = await publisher.withholdings.rows()
     held = withheld_decisions(rows, table)
-    async for _, row, found in live_held(publisher, rows, held):
-        if found and not isinstance(found, IntentError):
-            held[row.source] = found
+    for source, (_, _, found) in (await live_held(publisher, rows, held)).items():
+        if not isinstance(found, IntentError):
+            held[source] = found
     return held
 
 
@@ -167,8 +142,10 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
     valid, unavailable = [], []
     events = await publisher.records.events(dataset_id)
     live = {
-        row.source: (source, found)
-        async for source, row, found in live_held(publisher, rows, withheld)
+        key: (source, found)
+        for key, (source, _, found) in (
+            await live_held(publisher, rows, withheld)
+        ).items()
     }
     for row in rows:
         if row.source not in live:
