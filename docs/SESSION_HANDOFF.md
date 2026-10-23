@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules, and Checkpoint E added four changed-interpretation and kind-change fixtures. **Next task:** a `forget` command for a source nothing depends on (step-4 item 4). See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules, Checkpoint E added four changed-interpretation and kind-change fixtures, and Checkpoint F added `forget` and `readd` for a source nothing depends on. **Next task:** a no-behavior-change refactor of the ledger and the retiring operations; then dependencies (step-4 item 3). See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -11,7 +11,7 @@ Read this document first, then:
 1. [ROADMAP.md](../ROADMAP.md): project stages and current scope.
 2. [Stage-6 architecture/contract](../results/cognee_identity_stage6_handoff.md): physical representation, ownership, continuity, recovery and original six-step build order. Its dated implementation subsections are checkpoint history.
 3. [R1–R6 requirements](../results/cognee_stage5_4_5_requirements_review.md): outcome constraints, not a claim of complete coverage.
-4. [Latest fixture guide](stage6_identity_reinterpretation.md), followed by the earlier guides linked below for individual commands.
+4. [Latest fixture guide](stage6_identity_forget.md), followed by the earlier guides linked below for individual commands.
 5. [Integration playbook](../results/cognee_knowledge_integration_playbook.md): findings tagged with Describe/Publish/Maintain/Retrieve and transfer questions for other integrations.
 
 The [representation decision record](../results/cognee_stage5_4_5_identity_representation_proposal.md) and [pinned native extension reference](../results/cognee_extension_architecture_reference_v1.6.2.md) explain rationale and native behavior. Do not treat their early dated “next” or “not implemented at that checkpoint” statements as current implementation status. The roadmap and this handoff identify current work; later explicit approved scope changes supersede earlier proposals.
@@ -322,9 +322,9 @@ The two kind changes are the first runs of a TextChange with equal texts. It nee
 
 Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: 299 unit tests passed. 45 native integration tests passed (983 s), covering the two new native files and every module the change touched. `verify.py journey all` gave 965 PASS and 0 FAIL in 49 runs on `63b30b7`. The admission code, `replace.py` and `text_changes.py` did not change, so the occurrence and ledger checks were not rerun. Two thermo reviews found no medium or high issue; their simplifications are in the branch: unique group keys g07 to g09 instead of reusing g03, four flat commands, and one fact-and-evidence lookup. A third review compared every earlier captured describer with `main` and found them byte-identical.
 
-### Next task
+### Forget, decided and built 2026-10-22
 
-Step-4 item 4, full source lifecycle: a `forget` command that removes a source no other source depends on. The user decided on 2026-10-22:
+The user decided on 2026-10-22, for `forget`:
 
 - A forgotten source leaves a record of its last revision, so a re-added document continues at the next revision and never derives a retired UUID again.
 - `forget` is a separate command from `withdraw`, which keeps the original Data and facts.
@@ -338,11 +338,29 @@ Dependency examples for item 3, given to the user on 2026-10-22: a glossary or a
 
 The user decided on 2026-10-22 to retire the reviewed roots under `outputs/stage6_*` as history. Their result files stay readable, but current code need not open them, so delete `TextChange.from_plan`'s legacy readers and the tracked follow-up that kept them. Run `support/occurrence_check.py` for any change to `admission.py`.
 
+**Checkpoint F, completed 2026-10-22.** `forget --source <doc> --expected-revision N` removes a current source's original Data and its identity Data through Cognee's native document deletion, with the chunks, facts, evidence, markers, identity edges and contributions, and every Entity only it owned. Entities and shared edges another source owns survive with only their contributions. The ledger row ends `forgotten` and keeps its revision and description. `readd` publishes the source again at the next revision through `Publisher.readd`: every group's UUID is derived again, and an Entity the forget removed comes back under a new UUID, derived from a key that names it or, for an Entity nothing names, from the removed UUID. `status` shows a forgotten row; `retrieve` neither returns it nor lists it as unavailable. The [forget guide](stage6_identity_forget.md) has the commands, results, UUIDs, scope and a list of what survives a forget.
+
+- Dependents are found by `dependents()` in `retirement.py`, which text changes use too. A source whose forget is unfinished fences its inputs: a publish, re-add or replace that consumes them is refused (`retiring_source`). Forget checks dependents again after `begin`.
+- Forget has six fault stages. Two of them fail inside Cognee's own delete, after it commits the Data row and before it sweeps evidence rows and stored files; `reconcile` finishes the sweep. A stored file another Data row still references is kept and does not block the forget.
+- Reconcile of a failed publication now rebuilds its captured facts (`write_semantics` skips a chunk whose fact and evidence exist), which also fixes a failed first publication that could not be reconciled before.
+- The legacy plan readers are deleted. A plan without `occurrence_map` is refused with `recovery_plan`; the reviewed `outputs/stage6_*` roots are history.
+- Shared retirement code moved from `withdraw.py` to `retirement.py`; fixture drivers are in `forget_fixture.py`; `RecordStore.row(source)` replaces row scans.
+
+Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: 315 unit tests passed. The full native integration suite passed (59 tests, 1232 s). The ledger check passed with `PINNED` at 5889 nodes and 5770 sequences, and its mutants caught all 40 breaks, including 10 new ones for forget and re-add. `support/occurrence_check.py` and its mutants passed. `verify.py journey all` gave 1159 PASS and 0 FAIL in 58 runs on `5f5dd37`, including journeys F1 to F4 in `source-lifecycle.md`. Five thermo reviews over three rounds found five medium issues, all fixed with a test that failed first: a native delete that commits before sweeping evidence and files, an unfenced half-finished forget, retiring owners counted as independent, a re-add that could recreate a removed Entity, and a shared stored file that blocked a forget. The remaining low items are tracked follow-ups.
+
+### Next task
+
+A refactor checkpoint for the ledger and the three retiring operations, from the Checkpoint F code review: a transition table in `RecordStore.begin` (with the ledger mutants rewritten for it), a typed publication-row view, one stage runner shared by replace, withdraw and forget, one terminal-state field in the ledger model instead of `owns_withdrawn` and `owns_forgotten`, and a parametrized storage transition test. No behavior change. After it, the remaining step-4 work is dependencies (item 3), including what an erasure does to dependents, which waits for the user's choice among the dependency examples above.
+
 ### Tracked follow-ups
 
-Neither blocks the next case.
+None blocks the next task.
 
-- Delete `TextChange.from_plan`'s legacy readers once no kept root holds a plan without `occurrence_map`.
+- A forgotten source cannot be withdrawn first, and a withdrawn or failed-first-publication source cannot be forgotten. An erasure intent will need both (step-4 item 3).
+- The replace `source_missing` guard in `RecordStore.begin` is not covered by the ledger model, which sends no replace for a missing row.
+- `describe_readd` assigns naming keys to removed Entities greedily, so it can refuse a re-add for which a valid assignment exists (a refusal, never a merge; no fixture reaches it). A bipartite matching would fix it.
+- `check_readd_entity_ids` accepts `replaces:<uuid>` for any removed UUID, not only the Entity's own. The results are still fresh and probed, so this is looser than the guide's wording, not unsafe.
+- `remains()` reads `stored_files` without the guard `forget()` has, so a development root with a forget plan saved before that field crashes the snapshot. No kept root has one.
 - The oracle's worlds do not cover more than one addition or reordering. A unit test pins reordering, and the captured addition fixture's general map pins two additions. Widen the bound if a later rule depends on either.
 
 ## Code map
@@ -356,9 +374,10 @@ Paths below are relative to `src/cognee_lab/identity/`.
 | `storage.py` | Namespaced relational publication/event tables; portable expected-revision/attempt and project-writer guards |
 | `registered.py` | Real Data JSON/raw-text ingestion/readback and registered snapshot checks |
 | `publish.py` | Missing-node creation, safe existing-node retention, original markers, aggregated generated-source identity contributions and verification |
-| `replace.py`, `withdraw.py` | Guarded replacement/withdrawal, `admit_replacement` (the one admission call site), durable old/new intent, selective retirement and explicit forward recovery |
+| `replace.py`, `withdraw.py`, `forget.py` | Guarded replacement, withdrawal and forget, `admit_replacement` (the one admission call site), durable old/new intent, selective retirement and explicit forward recovery |
+| `retirement.py`, `forget_fixture.py` | Shared retirement primitives (ownership snapshots, contributions, `dependents`, removed Entities, survivor checks) and the forget, re-add and dependent-fixture drivers |
 | `admission.py` | What a reviewed replacement may claim: `parse_occurrence_map`, `identity_map`, `admit` and its rules in the order it applies them, returning a `GroupFate`, and the graph probe `check_absent_from_graph` |
-| `text_changes.py` | `TextChange` with its typed `occurrence_map`, `from_plan` and the legacy plan reader, and `prefix_shift`; `preflight` calls `admit` with `first_attempt=not retry`; dependency/cascade guards, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
+| `text_changes.py` | `TextChange` with its typed `occurrence_map`, `from_plan` (which refuses a plan without `occurrence_map`) and `prefix_shift`; `preflight` calls `admit` with `first_attempt=not retry`; dependency/cascade guards, native whole-document Forget/ingest/chunk rebuild and retired chunk checks |
 | `retrieve.py` | Bounded fixture retrieval, saved-source eligibility, scoped identity links/local mention facts and native current evidence; not a public corpus-wide retriever |
 | `native.py` | Normalizers over graph/provenance/neighborhood interfaces |
 | `fixture.py`, `multisource.py`, `captured_chunks.py` | Captured facts, source contexts, exact producing/evidence chunk binding, single/two-source setup and diagnostics. `CAPTURED_GROUPS` in `captured_chunks.py` names each captured group's creating revision, creating producer and fact. A group has retired when its creating producer is in the source's lineage and the source no longer declares it |
@@ -410,7 +429,7 @@ The user agreed this routine on 2026-10-21:
 
 The integration suite, `uv run pytest -q -m integration`, takes about 10 minutes and runs only on a local machine. Run the focused native tests for the changed path.
 
-**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 35 journey blocks. `journey all` runs the 34 loopback blocks as 49 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. [Verification skill](#verification-skill) lists each `journey all` run.
+**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The map in `.claude/skills/verify/features/` has 39 journey blocks. `journey all` runs the 38 loopback blocks as 58 runs. Journey P5 calls the NVIDIA embedding API in `.env`, so it runs only with `--include-env`. Journeys use `--embedding loopback` unless a block asks for `env`. `.claude/skills/verify/SKILL.md` gives the helper commands and proof rules. [Verification skill](#verification-skill) lists each `journey all` run.
 
 An earlier full run on 2026-10-21 took about 2 hours. The step timings suggest that macOS idle throttling caused most of it. Every step took a flat 40 s or so until `caffeinate` started, and about 4 s after. This is an inference from the timings, not a proven cause. A warm step costs about 3.6 to 6.7 s, and about 2.4 s of that is imports. An unthrottled full run is estimated at about 11 minutes.
 

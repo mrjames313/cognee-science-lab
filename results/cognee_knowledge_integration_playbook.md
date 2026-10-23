@@ -365,3 +365,15 @@ The assistant and its subagents ran the evidence on the user's Mac with loopback
 
 The assistant and its subagents ran the evidence on the user's Mac with loopback embeddings. The [reinterpretation guide](../docs/stage6_identity_reinterpretation.md) records the commands.
 
+## Forget a source nothing depends on — 2026-10-22
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| Removal has two intents that agree only without dependents. | M | Cleanup may refuse while other sources consumed the document. Erasure must not be blocked. Only the shared case was built; the refusal with dependents is a named placeholder. | Before building removal, ask why records are removed. Build first what every intent agrees on, and name what is left open. |
+| A native delete is not atomic, so removal must sweep what it leaves. | M | Cognee commits the Data delete before it removes evidence rows and stored files, and a retry on the missing Data row sweeps neither. Forget sweeps both itself, idempotently, and two fault stages inject a failure inside the native call. | Read the order of a storage engine's own delete. If it commits early, record what to clean and clean it on retry. |
+| What was removed must be decided from the removal, not from the present. | M | A re-add first recomputed the removed Entities from current rows, so a co-owner forgotten and re-added in between hid a removal. The re-add now also treats as removed any Entity the forget recorded that the graph no longer holds. | When a later step depends on what an earlier removal destroyed, read it from the removal's record and the store, not from current ownership. |
+| An unfinished removal must fence its inputs. | M, P | A new source could start consuming a document whose forget had failed, and then block that forget forever. Publish, re-add and replace now refuse inputs of a source whose forget is unfinished. | While a removal is unfinished, refuse new readers of what it removes. |
+| Removal leaves residue in many places. | M | After a forget, the kept description, the forget plan (with the document's first 80 characters), recovery events, fixture files and soft-deleted store bytes still hold forgotten content. The forget guide lists them. | Inventory every copy of a record before promising erasure: ledger, plans, logs, files and the storage engines' deleted-but-unreclaimed bytes. |
+
+The assistant and its subagents ran the evidence on the user's Mac with loopback embeddings. The [forget guide](../docs/stage6_identity_forget.md) records the commands.
+
