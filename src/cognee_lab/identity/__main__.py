@@ -128,6 +128,10 @@ def main():
             parser.error(
                 f"{REFRESH_FAULT} applies to edit-glossary and refresh-dependents"
             )
+    elif args.fault_stage == "replace_dependents" and args.command not in TEXT_COMMANDS:
+        parser.error(
+            "replace_dependents runs only in a command that makes a text change"
+        )
     elif args.fault_stage:
         if args.command in TEXT_COMMANDS:
             if not args.fault_stage.startswith(("text_", "replace_")):

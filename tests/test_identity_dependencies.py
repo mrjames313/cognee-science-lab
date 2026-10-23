@@ -518,3 +518,34 @@ async def test_a_retried_second_edit_classifies_as_its_first_attempt_did(
         ("remap", start, start + len(ENTRY))
     ] * 2
     assert retry == first
+
+
+@pytest.mark.parametrize(
+    "command", [["revise"], ["reconfirm", "--decision", "r01"], ["readd"]]
+)
+def test_a_command_without_a_text_change_refuses_the_dependents_fault(
+    command, monkeypatch, tmp_path, capsys
+):
+    from cognee_lab.identity.__main__ import main
+
+    root = tmp_path / "root"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "cognee_lab.identity",
+            command[0],
+            "--root",
+            str(root),
+            "--expected-revision",
+            "1",
+            "--fault-stage",
+            "replace_dependents",
+            *command[1:],
+        ],
+    )
+    with pytest.raises(SystemExit) as refused:
+        main()
+    assert refused.value.code == 2
+    error = capsys.readouterr().err.strip().splitlines()[-1]
+    assert "replace_dependents" in error and "text change" in error
+    assert not root.exists()
