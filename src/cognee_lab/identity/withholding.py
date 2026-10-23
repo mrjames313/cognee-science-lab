@@ -369,17 +369,31 @@ async def refresh_dependents(publisher, replace):
     """After an edit completes, write each current dependent's next revision
     with its moved spans' new ranges: an ordinary unchanged-text replacement,
     `replace(description, expected_revision)`, whose withholding cleanup
-    releases the moved decisions once it completes. A dependent that is not
-    current is left for its own reconcile. A rerun finishes what an
-    interrupted refresh left."""
+    releases the moved decisions once it completes. A rerun finishes an
+    interrupted refresh: a dependent whose refresh failed resumes its saved
+    revision. A span moved by an edit that is still pending or failed waits
+    for that edit."""
     rows = await publisher.records.rows()
     table = recorded_rows(rows, await publisher.withholdings.rows())
+    waiting = {r.source for r in unfinished_edits(rows)}
     refreshed = []
     for row in rows:
-        moved = [w for w in table if w.source == row.source and w.status == REMAP]
-        if not moved or row.state != "current":
+        moved = [
+            w
+            for w in table
+            if w.source == row.source
+            and w.status == REMAP
+            and w.consumed not in waiting
+        ]
+        if not moved:
             continue
-        revised = remapped(IdentitySource.model_validate_json(row.description), moved)
+        saved = IdentitySource.model_validate_json(row.description)
+        if row.state == "current":
+            revised = remapped(saved, moved)
+        elif row.resumed_by == "replace":
+            revised = saved
+        else:
+            continue
         await replace(revised, expected_revision=row.revision)
         refreshed.append(
             dict(

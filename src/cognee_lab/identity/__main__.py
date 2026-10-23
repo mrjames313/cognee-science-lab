@@ -18,6 +18,7 @@ from .forget import FAULT_STAGES as FORGET_STAGES
 from .glossary_fixture import CASES as GLOSSARY_CASES
 from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
 from .glossary_fixture import INFO as GLOSSARY_INFO
+from .glossary_fixture import REFRESH_FAULT
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
 from .withdraw import FAULT_STAGES as WITHDRAW_STAGES
@@ -99,6 +100,7 @@ def main():
             *WITHDRAW_STAGES,
             *FORGET_STAGES,
             *REPLACE_STAGES,
+            REFRESH_FAULT,
         ],
     )
     parser.add_argument(
@@ -121,7 +123,12 @@ def main():
         parser.error("edit-glossary requires --case")
     if args.command in {"reconfirm", "replace-decision"} and args.decision is None:
         parser.error(f"{args.command} requires --decision")
-    if args.fault_stage:
+    if args.fault_stage == REFRESH_FAULT:
+        if args.command not in {"edit-glossary", "refresh-dependents"}:
+            parser.error(
+                f"{REFRESH_FAULT} applies to edit-glossary and refresh-dependents"
+            )
+    elif args.fault_stage:
         if args.command in TEXT_COMMANDS:
             if not args.fault_stage.startswith(("text_", "replace_")):
                 parser.error("Fault stage does not match the selected operation")

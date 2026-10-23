@@ -27,6 +27,9 @@ GLOSSARY_IDENTITY_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:glossary:identity
 INFO = "glossary-fixture-info.json"
 CHUNK_BUDGET = 512
 HC_LINE = re.compile(r"^HC: .*$", re.MULTILINE)
+# A fault in the refresh that follows an edit: doc01's refresh revision
+# fails at replace_registered, after the edit itself completed.
+REFRESH_FAULT = "refresh_interrupted"
 COMMANDS = (
     "glossary-fixture",
     "edit-glossary",
@@ -529,6 +532,7 @@ async def run(args, root):
                 "source_missing", "Selected source is not in this fixture"
             )
         selected = sources[args.source]
+        edit_fault = None if args.fault_stage == REFRESH_FAULT else args.fault_stage
         if args.command == "edit-glossary":
             if args.source != "glossary":
                 raise IntentError("fixture_scope", "edit-glossary edits the glossary")
@@ -538,7 +542,7 @@ async def run(args, root):
                 selected,
                 args.case,
                 expected_revision=args.expected_revision,
-                fault_stage=args.fault_stage,
+                fault_stage=edit_fault,
             )
         elif args.command in ("reconfirm", "replace-decision"):
             if args.source != "doc01" or not args.decision:
@@ -557,8 +561,13 @@ async def run(args, root):
         elif args.command == "reconcile":
             await reconcile(publisher, root, args.source, selected)
         # Every command that may complete an edit refreshes the moved spans.
+        refresh_fault = (
+            "replace_registered" if args.fault_stage == REFRESH_FAULT else None
+        )
         refreshed = (
-            await refresh_dependents(publisher, replace_doc01(publisher, root))
+            await refresh_dependents(
+                publisher, replace_doc01(publisher, root, refresh_fault)
+            )
             if args.command in ("edit-glossary", "reconcile", "refresh-dependents")
             else []
         )
