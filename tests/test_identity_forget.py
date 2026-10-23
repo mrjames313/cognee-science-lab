@@ -541,6 +541,52 @@ def test_a_readd_reports_whether_its_text_and_decisions_differ(source_payload):
     assert changed(provenance) == dict(text=False, decisions=False)
 
 
+def test_a_readd_reports_other_grouping_and_not_a_text_shift(source_payload):
+    """g01 holds `The controller` and `it`, g02 holds `HC`. Dropping `it`,
+    moving it to g02, or giving g01's `it` to g02 for g02's own `it`
+    changes the grouping, which is a decision. Moving every occurrence by
+    the same shift, as a prefix edit does, is not."""
+    payload = json.loads(json.dumps(source_payload))
+    g02 = dict(payload["mention_groups"]["g01"], entity_id=str(uuid4()))
+    g02["occurrences"] = [dict(start=19, end=21, text="HC")]
+    payload["mention_groups"]["g02"] = g02
+    payload["entity_constructions"][g02["entity_id"]] = dict(
+        name="HC", description="A mention group."
+    )
+    tombstone = tomb(source_of(payload))
+
+    def differs(edit):
+        edited = json.loads(json.dumps(payload))
+        edit(edited["mention_groups"])
+        return differs_from_forgotten(tombstone, source_of(edited))["decisions"]
+
+    def dropped(groups):
+        groups["g01"]["occurrences"].pop()
+
+    def moved(groups):
+        groups["g02"]["occurrences"].append(groups["g01"]["occurrences"].pop())
+
+    def exchanged(groups):
+        groups["g01"]["occurrences"][1].update(start=100, end=102)
+        groups["g02"]["occurrences"][1].update(start=86, end=88)
+
+    def shifted(groups):
+        for group in groups.values():
+            for o in group["occurrences"]:
+                o["start"], o["end"] = o["start"] + 5, o["end"] + 5
+
+    assert not differs(lambda groups: None)
+    for edit in (dropped, moved):
+        assert differs(edit), edit.__name__
+    assert not differs(shifted)
+
+    payload["mention_groups"]["g02"]["occurrences"].append(
+        dict(start=100, end=102, text="it")
+    )
+    tombstone = tomb(source_of(payload))
+    assert differs(exchanged)
+
+
 async def test_a_tombstone_carries_the_uuids_of_every_forgotten_life(
     source_payload,
 ):

@@ -160,10 +160,22 @@ def decisions_digest(source: IdentitySource) -> str:
     applicability, and each recipe under the name of its Entity. A re-add
     renames the source's own Entities and moves to the next revision, so
     an Entity is named by its group key, or by the keys of the resolutions
-    and variants that name it, never by its UUID. Producers, inputs,
-    explanations and occurrences are left out: they record how a decision
-    was made and where it reads, which other text or a removal changes."""
+    and variants that name it, never by its UUID. Each group's occurrences
+    count by their surface text and their place in the order of all the
+    source's occurrences, which a text shift keeps and a regrouping does
+    not. A span-scoped variant's ranges count as offsets: the description
+    holds no surface text for them, and a text edit does not remap them
+    either (`check_no_span_variants`), so a shifted range is another scope.
+    Producers, inputs and explanations are left out: they record how a
+    decision was made and where it reads, which other text or a removal
+    changes."""
     groups = {g.entity_id: k for k, g in source.mention_groups.items()}
+    spans = sorted(
+        (o.start, o.end, k)
+        for k, g in source.mention_groups.items()
+        for o in g.occurrences
+    )
+    place = {span: n for n, span in enumerate(spans)}
 
     def name(entity_id):
         if entity_id in groups:
@@ -179,6 +191,10 @@ def decisions_digest(source: IdentitySource) -> str:
 
     return object_digest(
         dict(
+            groups={
+                k: [[place[o.start, o.end, k], o.text] for o in g.occurrences]
+                for k, g in source.mention_groups.items()
+            },
             resolutions={
                 k: dict(
                     group=r.group_ref,
