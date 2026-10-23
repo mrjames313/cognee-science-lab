@@ -34,7 +34,8 @@ async def read_registered(source):
 
 async def read_texts(source, known=None):
     """The registered text of every source_text input, keyed by input ref.
-    `known` supplies the text of inputs that are not registered yet."""
+    `known` supplies the text of inputs that are not registered yet. Another
+    document whose Data item is gone has no entry."""
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.infrastructure.files.utils.open_data_file import open_data_file
     from cognee.modules.data.models import Data
@@ -47,6 +48,10 @@ async def read_texts(source, known=None):
                 continue
             data = await session.get(Data, item.data_id)
             if data is None or data.dataset_id != item.dataset_id:
+                # Another document that is gone withholds the decisions
+                # citing it; validation reports it as input_removed.
+                if key != source.original_input_ref:
+                    continue
                 raise IntentError("source_missing", "Original Data item missing")
             async with open_data_file(
                 data.raw_data_location, mode="r", encoding="utf-8"

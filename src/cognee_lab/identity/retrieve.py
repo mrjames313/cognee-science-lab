@@ -7,12 +7,20 @@ from uuid import UUID
 from .models import Accepted, ChunkInput, IdentitySource
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
-from .validation import IntentError, validate_inputs
+from .validation import IntentError, is_foreign, validate_inputs, withheld_by
 
 
-async def valid_sources(publisher, dataset_id, rows):
+async def valid_sources(publisher, dataset_id, rows, withheld=None):
+    """Split the rows into served sources and unavailable entries.
+
+    A served entry is (source, row, held): `held` maps each withheld decision
+    of that source to its reason. `withheld` gives the recorded withholdings
+    (source -> assignment -> reason); a foreign input that fails validation
+    here withholds the decisions citing it as well. An unavailable entry names
+    a whole source (assignment_id None) or one withheld decision."""
     from .registered import read_registered, read_texts
 
+    withheld = withheld or {}
     valid, unavailable = [], []
     events = await publisher.records.events(dataset_id)
     for row in rows:
@@ -31,6 +39,7 @@ async def valid_sources(publisher, dataset_id, rows):
                 unavailable.append(
                     dict(
                         identity_data_id=row.source,
+                        assignment_id=None,
                         reason="publication_" + row.state,
                         recovery_event_id=(
                             incident["recovery_event_id"] if incident else None
@@ -39,6 +48,7 @@ async def valid_sources(publisher, dataset_id, rows):
                 )
             continue
         source = IdentitySource.model_validate_json(row.description)
+        recorded = withheld.get(row.source, {})
         try:
             if await read_registered(source) != source:
                 raise IntentError(
@@ -46,7 +56,7 @@ async def valid_sources(publisher, dataset_id, rows):
                     "Registered identity snapshot differs from saved current intent",
                 )
             texts, chunks = await read_texts(source), {}
-            for item in source.inputs.values():
+            for key, item in source.inputs.items():
                 if isinstance(item, ChunkInput):
                     node = await publisher.graph.get_node(str(item.chunk_id))
                     parent = source.inputs[item.document_ref]
@@ -57,6 +67,9 @@ async def valid_sources(publisher, dataset_id, rows):
                             publisher.graph, item.chunk_id, parent.data_id, "is_part_of"
                         )
                     ):
+                        # Another document's chunk is checked per decision below.
+                        if is_foreign(source, key):
+                            continue
                         raise IntentError(
                             "chunk_mapping", "Original chunk or document link missing"
                         )
@@ -66,10 +79,13 @@ async def valid_sources(publisher, dataset_id, rows):
                         text=node["text"],
                         is_part_of=SimpleNamespace(id=parent.data_id),
                     )
-            await validate_inputs(
-                source, texts=texts, chunks=chunks, graph=publisher.graph
+            drift = await validate_inputs(
+                source,
+                texts=texts,
+                chunks=chunks,
+                graph=publisher.graph,
+                withheld=set(recorded),
             )
-            valid.append((source, row))
         except IntentError as exc:
             event = await publisher.records.fail(
                 source, row.attempt, "retrieval_validation", exc
@@ -77,10 +93,23 @@ async def valid_sources(publisher, dataset_id, rows):
             unavailable.append(
                 dict(
                     identity_data_id=row.source,
+                    assignment_id=None,
                     reason=exc.code,
                     recovery_event_id=event,
                 )
             )
+            continue
+        held = {**withheld_by(source, drift), **recorded}
+        unavailable += [
+            dict(
+                identity_data_id=row.source,
+                assignment_id=key,
+                reason=reason,
+                recovery_event_id=None,
+            )
+            for key, reason in sorted(held.items())
+        ]
+        valid.append((source, row, held))
     return valid, unavailable
 
 
@@ -154,7 +183,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     # matches; vector candidates remain available for natural-language queries.
     seeds = await select_seed_entities(publisher.graph, candidates, mention_ids, query)
     facts, seen, work, limited, fact_limited = [], set(), 0, False, False
-    for source, row in current:
+    for source, row, held in current:
         if work >= work_limit:
             limited = True
             break
@@ -195,6 +224,8 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
                     limited = True
                     break
                 work += 1
+                if key in held:
+                    continue
                 scope = variant.applicability
                 # A span-specific alias needs a span-specific candidate context;
                 # this first document-context route declines it rather than widen it.
@@ -216,8 +247,11 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
                 limited = True
                 break
             work += 1
+            # A withheld resolution is served like an unresolved one: its
+            # local fact stays in the graph and no identity query reaches it.
             if (
-                isinstance(decision, Accepted)
+                key not in held
+                and isinstance(decision, Accepted)
                 and str(decision.target_entity_id) in eligible
             ):
                 group = source.mention_groups[decision.group_ref]
@@ -318,7 +352,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
         for r in await publisher.records.rows(dataset_id)
     }
     if any(
-        after.get(r.source) != ("current", r.revision, r.attempt) for _, r in current
+        after.get(r.source) != ("current", r.revision, r.attempt) for _, r, _ in current
     ):
         raise IntentError(
             "retrieval_changed", "Publication changed during retrieval; retry query"

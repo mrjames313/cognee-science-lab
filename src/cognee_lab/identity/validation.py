@@ -67,6 +67,64 @@ def map_chunks(document_text: str, chunks: list) -> dict[str, tuple[int, int]]:
     return {str(c.id): span for c, span in zip(ordered, offsets, strict=True)}
 
 
+# Why a decision is withheld: an input it read no longer validates, or is gone.
+INPUT_CHANGED, INPUT_REMOVED = "input_changed", "input_removed"
+
+
+def is_foreign(source: IdentitySource, key: str) -> bool:
+    """Whether an input is another document's text, span or chunk, or a corpus
+    object. Its drift withholds the decisions that cite it; it does not fail
+    the source."""
+    item = source.inputs[key]
+    own = source.inputs[source.original_input_ref].data_id
+    if isinstance(item, SourceTextInput):
+        return item.data_id != own
+    if isinstance(item, (ChunkInput, TextSpanInput)):
+        return source.inputs[item.document_ref].data_id != own
+    return isinstance(item, CorpusObjectInput)
+
+
+def decision_inputs(source: IdentitySource) -> dict[str, frozenset[str]]:
+    """The input keys each decision cites directly. A resolution is one unit
+    with its group, so it cites the group's inputs too; a variant cites its
+    scope's document."""
+    cited = {}
+    for key, decision in source.mention_resolutions.items():
+        group = source.mention_groups[decision.group_ref]
+        cited[key] = frozenset([*decision.input_refs, *group.input_refs])
+    for key, variant in source.variant_assignments.items():
+        scope = getattr(variant.applicability, "document_ref", None)
+        cited[key] = frozenset([*variant.input_refs, *([scope] if scope else [])])
+    return cited
+
+
+def withheld_by(source: IdentitySource, drift: dict[str, str]) -> dict[str, str]:
+    """The decisions that cite a drifted input, each with its reason. A decision
+    citing several inputs is valid only when all of them are."""
+    withheld = {}
+    for key, inputs in decision_inputs(source).items():
+        reasons = {drift[i] for i in inputs if i in drift}
+        if reasons:
+            withheld[key] = INPUT_REMOVED if INPUT_REMOVED in reasons else INPUT_CHANGED
+    return withheld
+
+
+def checked_inputs(source: IdentitySource, withheld) -> set[str]:
+    """The inputs to validate: the original text and the groups' own structure
+    always, and every input a decision outside `withheld` cites. A text reached
+    only as a span's or chunk's document is read, not digest-checked."""
+    used = {source.original_input_ref}
+    resolved = {d.group_ref for d in source.mention_resolutions.values()}
+    for key, group in source.mention_groups.items():
+        used.update([group.document_ref, *group.chunk_refs])
+        if key not in resolved:
+            used.update(group.input_refs)
+    for key, inputs in decision_inputs(source).items():
+        if key not in withheld:
+            used.update(inputs)
+    return used
+
+
 async def validate_inputs(
     source: IdentitySource,
     *,
@@ -74,64 +132,56 @@ async def validate_inputs(
     chunks: dict[str, Any],
     graph,
     saved_record_reader=None,
-) -> None:
-    """Validate the current source and the union of actually consumed dependencies."""
-    used = {source.original_input_ref}
-    for record in [
-        *source.mention_groups.values(),
-        *source.mention_resolutions.values(),
-        *source.variant_assignments.values(),
-    ]:
-        used.update(record.input_refs)
-    for group in source.mention_groups.values():
-        used.add(group.document_ref)
-        used.update(group.chunk_refs)
-    for variant in source.variant_assignments.values():
-        if hasattr(variant.applicability, "document_ref"):
-            used.add(variant.applicability.document_ref)
-    for key in list(used):
-        item = source.inputs[key]
-        if isinstance(item, (ChunkInput, TextSpanInput)):
-            used.add(item.document_ref)
+    withheld=frozenset(),
+) -> dict[str, str]:
+    """Validate the source's own inputs and the inputs its decisions outside
+    `withheld` consume. An own input that fails raises. A foreign input that
+    fails is returned with its reason (`input_changed` or `input_removed`),
+    so the caller withholds the decisions citing it instead of the source."""
+    used = checked_inputs(source, withheld)
+    own_ref = source.original_input_ref
+    own = source.inputs[own_ref]
+    if own_ref not in texts or text_digest(texts[own_ref]) != own.text_sha256:
+        raise IntentError("source_changed", f"Text missing/changed: {own_ref}")
+    mapping = {}
+    matching = [c for c in chunks.values() if str(c.is_part_of.id) == str(own.data_id)]
+    if matching:
+        mapping = map_chunks(texts[own_ref], matching)
 
-    mappings = {}
-    for key in used:
+    drift = {}
+    for key in sorted(used):
         item = source.inputs[key]
+        foreign = is_foreign(source, key)
+        document = getattr(item, "document_ref", None)
+        text = texts.get(document if document else key)
+        if foreign and isinstance(item, (SourceTextInput, ChunkInput, TextSpanInput)):
+            if text is None:
+                drift[key] = INPUT_REMOVED
+                continue
         if isinstance(item, SourceTextInput):
-            if key not in texts or text_digest(texts[key]) != item.text_sha256:
-                raise IntentError("source_changed", f"Text missing/changed: {key}")
-            matching = [
-                c for c in chunks.values() if str(c.is_part_of.id) == str(item.data_id)
-            ]
-            if matching:
-                mappings[key] = map_chunks(texts[key], matching)
-
-    for key in used:
-        item = source.inputs[key]
-        if isinstance(item, SourceTextInput):
-            text = texts.get(key)
             if text is None or text_digest(text) != item.text_sha256:
+                if foreign:
+                    drift[key] = INPUT_CHANGED
+                    continue
                 raise IntentError("source_changed", f"Text missing/changed: {key}")
         elif isinstance(item, TextSpanInput):
-            text = texts[item.document_ref]
             if (
                 item.end > len(text)
                 or text_digest(text[item.start : item.end]) != item.text_sha256
             ):
+                if foreign:
+                    drift[key] = INPUT_CHANGED
+                    continue
                 raise IntentError("input_changed", f"Span missing/changed: {key}")
         elif isinstance(item, CorpusObjectInput):
             node = await graph.get_node(str(item.entity_id))
             if node is None:
-                raise IntentError(
-                    "missing_reasoning_input", f"Corpus input missing: {key}"
-                )
-            if any(field not in node for field in item.selected_fields):
-                raise IntentError("input_changed", f"Corpus fields missing: {key}")
-            if (
+                drift[key] = INPUT_REMOVED
+            elif any(field not in node for field in item.selected_fields) or (
                 object_digest({field: node[field] for field in item.selected_fields})
                 != item.content_sha256
             ):
-                raise IntentError("input_changed", f"Corpus fields changed: {key}")
+                drift[key] = INPUT_CHANGED
         elif isinstance(item, SavedRecordInput):
             if saved_record_reader is None:
                 raise IntentError(
@@ -146,17 +196,21 @@ async def validate_inputs(
         elif isinstance(item, ChunkInput):
             chunk = chunks.get(str(item.chunk_id))
             parent = source.inputs[item.document_ref]
-            text = texts[item.document_ref]
             if (
                 chunk is None
                 or str(chunk.is_part_of.id) != str(parent.data_id)
                 or item.end > len(text)
                 or chunk.text != text[item.start : item.end]
             ):
+                if foreign:
+                    drift[key] = INPUT_CHANGED
+                    continue
                 raise IntentError(
                     "chunk_mapping", f"Chunk missing or mapping changed: {key}"
                 )
-            if mappings.get(item.document_ref, {}).get(str(item.chunk_id)) != (
+            # Only the own document's chunks are all supplied, so only they
+            # are checked against the ordered native tiling.
+            if not foreign and mapping.get(str(item.chunk_id)) != (
                 item.start,
                 item.end,
             ):
@@ -186,8 +240,10 @@ async def validate_inputs(
     for variant in source.variant_assignments.values():
         scope = variant.applicability
         if isinstance(scope, TextScope):
-            if any(r.end > len(texts[scope.document_ref]) for r in scope.ranges):
+            scoped = texts.get(scope.document_ref)
+            if scoped is not None and any(r.end > len(scoped) for r in scope.ranges):
                 raise IntentError("scope_range", "Variant range outside document")
+    return drift
 
 
 def validate_uses(sources: list[IdentitySource]) -> None:

@@ -14,6 +14,7 @@ from cognee_lab.identity.validation import (
     text_digest,
     validate_inputs,
     validate_uses,
+    withheld_by,
 )
 
 
@@ -113,11 +114,13 @@ def test_generated_schema_matches_and_example_validates(source_payload):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "state,code", [("missing", "missing_reasoning_input"), ("changed", "input_changed")]
+    "state,reason", [("missing", "input_removed"), ("changed", "input_changed")]
 )
 async def test_recipe_does_not_replace_missing_or_changed_reasoning_input(
-    source_payload, state, code
+    source_payload, state, reason
 ):
+    """A missing or changed corpus input withholds every decision that read
+    it, with the reason a user sees; the saved recipe does not stand in."""
     source = parse(source_payload)
     text = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
     chunk = SimpleNamespace(
@@ -135,8 +138,8 @@ async def test_recipe_does_not_replace_missing_or_changed_reasoning_input(
                 else {"name": "Changed", "description": "Changed"}
             )
 
-    with pytest.raises(IntentError) as err:
-        await validate_inputs(
-            source, texts={"doc01": text}, chunks={str(chunk.id): chunk}, graph=Graph()
-        )
-    assert err.value.code == code
+    drift = await validate_inputs(
+        source, texts={"doc01": text}, chunks={str(chunk.id): chunk}, graph=Graph()
+    )
+    assert drift == {"existing_A": reason}
+    assert withheld_by(source, drift) == {"r01": reason, "v01": reason}

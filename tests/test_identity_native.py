@@ -83,9 +83,11 @@ with fixture_environment(root):
   dataset=UUID(json.loads((root/'fixture-info.json').read_text())['dataset_id'])
   answer=await retrieve(p,dataset,'What does HC limit?')
   assert answer['facts']==[]
-  assert answer['unavailable_sources'][0]['reason']=='input_changed'
-  events=await p.records.events(dataset)
-  assert len(events)==1 and events[0]['origin']=='test'
+  # Both decisions read the changed field: each is withheld, the source is not.
+  assert [(u['assignment_id'],u['reason']) for u in answer['unavailable_sources']]==[('r01','input_changed'),('v01','input_changed')]
+  assert all(u['recovery_event_id'] is None for u in answer['unavailable_sources'])
+  assert await p.records.events(dataset)==[]
+  assert [r.state for r in await p.records.rows(dataset)]==['current']
  asyncio.run(check())
 """
     mutated = subprocess.run(

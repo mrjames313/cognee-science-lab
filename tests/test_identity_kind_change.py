@@ -31,6 +31,7 @@ from cognee_lab.identity.validation import (
     IntentError,
     fresh_mention_id,
     validate_inputs,
+    withheld_by,
 )
 
 HC = UUID(HC_ID)
@@ -119,21 +120,25 @@ async def test_the_listed_corpus_input_matches_the_hc_entity_in_the_graph(
         async def get_node(self, key):
             return nodes.get(key)
 
-    await validate_inputs(
-        reusable,
-        texts={"doc01": BEFORE},
-        chunks={str(chunk.id): chunk},
-        graph=Entities(),
-    )
-    nodes[str(HC)]["description"] = "changed"
-    with pytest.raises(IntentError) as refused:
+    assert (
         await validate_inputs(
             reusable,
             texts={"doc01": BEFORE},
             chunks={str(chunk.id): chunk},
             graph=Entities(),
         )
-    assert refused.value.code == "input_changed"
+        == {}
+    )
+    nodes[str(HC)]["description"] = "changed"
+    drift = await validate_inputs(
+        reusable,
+        texts={"doc01": BEFORE},
+        chunks={str(chunk.id): chunk},
+        graph=Entities(),
+    )
+    # A changed corpus field withholds the decision that read it, not the source.
+    assert drift == {"existing_HC": "input_changed"}
+    assert withheld_by(reusable, drift) == {"v02": "input_changed"}
 
 
 async def test_a_fresh_group_needs_a_rebuild_even_when_the_text_is_unchanged(
