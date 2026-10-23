@@ -298,8 +298,8 @@ async def test_an_unfinished_edit_withholds_every_decision_citing_the_document(
         held = await withheld_decisions([editing, rows[1]], publisher.withholdings)
         assert held == {
             str(doc01.identity_data_id): {
-                "r01": ("input_changed", "edit_unfinished"),
-                "v01": ("input_changed", "edit_unfinished"),
+                "r01": ("input_changed", "edit_unfinished", {"glossary_hc"}),
+                "v01": ("input_changed", "edit_unfinished", {"glossary_hc"}),
             }
         }
     # A failed replacement with unchanged text changes no input.
@@ -549,3 +549,20 @@ def test_a_command_without_a_text_change_refuses_the_dependents_fault(
     error = capsys.readouterr().err.strip().splitlines()[-1]
     assert "replace_dependents" in error and "text change" in error
     assert not root.exists()
+
+
+def test_live_drift_that_no_row_records_needs_review(source_payload):
+    """A drifted input that no edit classified (corpus-field drift, a span
+    stale after a re-add) withholds its decisions for a reviewer, beside
+    what the rows already withhold."""
+    from cognee_lab.identity.retrieve import held_by
+    from cognee_lab.identity.withholding import Withheld
+
+    source = citing(source_payload)
+    recorded = {"v01": Withheld("input_changed", "remap", frozenset(["glossary_hc"]))}
+    assert held_by(source, recorded, {}) == recorded
+    held = held_by(source, recorded, {"glossary_hc": "input_removed"})
+    assert held == {
+        "r01": ("input_removed", "refresh_needed", {"glossary_hc"}),
+        "v01": ("input_removed", "refresh_needed", {"glossary_hc"}),
+    }

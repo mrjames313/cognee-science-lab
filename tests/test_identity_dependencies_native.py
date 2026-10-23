@@ -239,3 +239,86 @@ def test_native_interrupted_refresh_is_finished_by_a_rerun(tmp_path):
     assert revisions(done, "doc01") == (2, 2, 2)
     assert done["withholdings"] == [] and fact_keys(done["result"]) == ["r01"]
     assert [e["outcome"] for e in done["recovery_events"]] == ["restored"]
+
+
+@pytest.mark.integration
+def test_native_readd_after_an_interrupted_refresh_leaves_no_decision_stuck(
+    tmp_path,
+):
+    """doc01 is forgotten after its interrupted refresh finished, the glossary
+    entry then moves, and doc01 is re-added with the range it had. No edit
+    classified that move, so only live validation finds it. status and the
+    reviewer see the same withheld decisions retrieval does."""
+    root = tmp_path / "readd"
+    run(root, "glossary-fixture")
+    command(
+        root,
+        "edit-glossary",
+        "--source",
+        "glossary",
+        "--case",
+        "insert",
+        "--expected-revision",
+        "1",
+        "--fault-stage",
+        "refresh_interrupted",
+        expect=1,
+    )
+    assert revisions(run(root, "refresh-dependents"), "doc01") == (2, 2, 2)
+    command(root, "forget", "--source", "doc01", "--expected-revision", "2")
+    moved = run(
+        root,
+        "edit-glossary",
+        "--source",
+        "glossary",
+        "--case",
+        "insert",
+        "--expected-revision",
+        "2",
+    )
+    assert moved["withholdings"] == [] and moved["refreshed"] == []
+    command(root, "readd", "--source", "doc01", "--expected-revision", "2")
+    answer = printed(root, "retrieve")
+    assert unavailable(answer) == [("r01", "input_changed"), ("v01", "input_changed")]
+    status = printed(root, "status")
+    assert status["withholdings"] == []
+    assert {(d["assignment_id"], d["status"]) for d in status["refresh_needed"]} == {
+        ("r01", "refresh_needed"),
+        ("v01", "refresh_needed"),
+    }
+    first = run(root, "reconfirm", "--decision", "r01", "--expected-revision", "3")
+    assert withheld(first) == {("v01", "input_changed", "refresh_needed")}
+    assert fact_keys(first["helios"]) == ["r01"]
+    second = run(root, "reconfirm", "--decision", "v01", "--expected-revision", "4")
+    assert second["withheld_decisions"] == [] and fact_keys(second["result"]) == ["r01"]
+
+
+@pytest.mark.integration
+def test_native_reconfirm_waits_for_an_unfinished_glossary_edit(tmp_path):
+    """r01 needs review after the cosmetic change. A second glossary edit
+    then fails, so the glossary text is not committed: the reviewer may not
+    attest it until the edit is reconciled."""
+    root = tmp_path / "unfinished"
+    run(root, "glossary-fixture")
+    edit = ["edit-glossary", "--source", "glossary", "--case"]
+    run(root, *edit, "cosmetic", "--expected-revision", "1")
+    command(
+        root,
+        *edit,
+        "insert",
+        "--expected-revision",
+        "2",
+        "--fault-stage",
+        "text_chunks",
+        expect=1,
+    )
+    status = printed(root, "status")
+    assert {d["status"] for d in status["withheld_decisions"]} == {"edit_unfinished"}
+    assert status["refresh_needed"] == []
+    refused = printed(
+        root, "reconfirm", "--decision", "r01", "--expected-revision", "1", expect=1
+    )
+    assert "Reconcile the edit" in refused["message"]
+    run(root, "reconcile", "--source", "glossary")
+    done = run(root, "reconfirm", "--decision", "r01", "--expected-revision", "1")
+    assert withheld(done) == {("v01", "input_changed", "refresh_needed")}

@@ -305,8 +305,15 @@ async def review(
     the glossary's current HC entry, or, for v01, replace it with a variant
     for the entry's new meaning."""
     from .fixture import context_for
+    from .retrieve import withheld_now
     from .text_changes import read_original
-    from .withholding import REFRESH_NEEDED, reconfirmed, withheld_decisions
+    from .validation import INPUT_REMOVED
+    from .withholding import (
+        REFRESH_NEEDED,
+        document_inputs,
+        reconfirmed,
+        unfinished_edits,
+    )
 
     row = await publisher.records.row(doc01)
     if row.revision != expected_revision:
@@ -314,31 +321,42 @@ async def review(
 
         raise IntentError(*STALE_REVISION)
     rows = await publisher.records.rows()
-    held = (await withheld_decisions(rows, publisher.withholdings)).get(
-        str(doc01.identity_data_id), {}
+    # The reviewer attests committed text: no document doc01 reads may have
+    # an edit that is still pending or failed.
+    for edit in unfinished_edits(rows):
+        edited = IdentitySource.model_validate_json(edit.description)
+        if document_inputs(doc01, edited.inputs[edited.original_input_ref].data_id):
+            raise IntentError(
+                "edit_unfinished",
+                "Reconcile the edit of a document doc01 reads before a review",
+            )
+    entry = (
+        (await withheld_now(publisher, rows))
+        .get(str(doc01.identity_data_id), {})
+        .get(decision)
     )
-    if decision not in held or held[decision].status != REFRESH_NEEDED:
+    if entry is None or entry.status != REFRESH_NEEDED:
         raise IntentError(
             "not_withheld", f"{decision} is not withheld for review in doc01"
         )
+    if command == "reconfirm" and entry.reason == INPUT_REMOVED:
+        raise IntentError(
+            "input_removed",
+            "A removed input is never re-confirmed; replace the decision",
+        )
     glossary = (await current_sources(root, publisher))["glossary"]
     text = await read_original(glossary, await context_for(glossary.identity_data_id))
-    entry = hc_entry(text)
+    entry_line = hc_entry(text)
     revision = doc01.revision + 1
     span_key = f"glossary_hc_r{revision}"
     span = dict(
         kind="text_span",
         document_ref="glossary",
-        start=entry.start(),
-        end=entry.end(),
-        text_sha256=text_digest(entry.group()),
+        start=entry_line.start(),
+        end=entry_line.end(),
+        text_sha256=text_digest(entry_line.group()),
     )
-    rows_for = [
-        w
-        for w in await publisher.withholdings.rows()
-        if w.source == str(doc01.identity_data_id) and w.assignment == decision
-    ]
-    old_keys = sorted({w.input_ref for w in rows_for})
+    old_keys = sorted(entry.inputs)
     if len(old_keys) != 1 or not isinstance(doc01.inputs[old_keys[0]], TextSpanInput):
         raise IntentError(
             "fixture_scope", "This fixture reviews one withheld glossary span"
@@ -352,8 +370,8 @@ async def review(
             policy=DOC01_REVIEW,
             confirmed_by="captured fixture reviewer",
             withholding=[
-                dict(input_ref=w.input_ref, reason=w.reason, status=w.status)
-                for w in rows_for
+                dict(input_ref=k, reason=entry.reason, status=entry.status)
+                for k in old_keys
             ],
             old_digests={k: doc01.inputs[k].text_sha256 for k in old_keys},
             new_digest=span["text_sha256"],
@@ -451,7 +469,8 @@ async def snapshot(publisher, root, query):
     found = {}
     for label, source in sources.items():
         row = by_source[str(source.identity_data_id)]
-        registered = await read_registered(source)
+        # A withdrawn or forgotten source has no registered snapshot to read.
+        registered = None if row.is_retired else await read_registered(source)
         reads = (
             set()
             if label == "glossary"
@@ -462,7 +481,7 @@ async def snapshot(publisher, root, query):
             state=row.state,
             saved_revision=source.revision,
             verified_revision=row.verified_revision,
-            registered_revision=registered.revision,
+            registered_revision=registered.revision if registered else None,
             registered_matches_saved=registered == source,
             glossary_spans={
                 k: source.inputs[k].model_dump(mode="json") for k in sorted(reads)
@@ -560,6 +579,26 @@ async def run(args, root):
             )
         elif args.command == "reconcile":
             await reconcile(publisher, root, args.source, selected)
+        elif args.command == "forget":
+            await publisher.forget(
+                selected,
+                expected_revision=args.expected_revision,
+                origin="test/fault_injection" if args.fault_stage else "test",
+                fault_stage=args.fault_stage,
+            )
+        elif args.command == "readd":
+            from .forget_fixture import readd
+
+            if args.source != "doc01":
+                raise IntentError("fixture_scope", "readd re-adds doc01")
+            await readd(
+                publisher,
+                root,
+                "doc01",
+                selected,
+                expected_revision=args.expected_revision,
+                fault_stage=args.fault_stage,
+            )
         # Every command that may complete an edit refreshes the moved spans.
         refresh_fault = (
             "replace_registered" if args.fault_stage == REFRESH_FAULT else None

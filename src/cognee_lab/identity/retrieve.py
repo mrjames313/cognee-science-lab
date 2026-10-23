@@ -7,19 +7,102 @@ from uuid import UUID
 from .models import Accepted, ChunkInput, IdentitySource
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
-from .validation import IntentError, is_foreign, validate_inputs, withheld_by
+from .validation import (
+    IntentError,
+    decision_inputs,
+    is_foreign,
+    validate_inputs,
+    withheld_by,
+)
+
+
+async def live_drift(publisher, source, withheld) -> dict[str, str]:
+    """Validate one current source as retrieval does: its registered snapshot,
+    its own chunks in the graph and every input `validate_inputs` checks,
+    skipping the inputs of the decisions in `withheld`. An own failure
+    raises; a foreign input that fails is returned with its reason."""
+    from .registered import read_registered, read_texts
+
+    if await read_registered(source) != source:
+        raise IntentError(
+            "generated_source_changed",
+            "Registered identity snapshot differs from saved current intent",
+        )
+    texts, chunks = await read_texts(source), {}
+    for key, item in source.inputs.items():
+        if isinstance(item, ChunkInput):
+            node = await publisher.graph.get_node(str(item.chunk_id))
+            parent = source.inputs[item.document_ref]
+            if (
+                node is None
+                or node.get("type") != "DocumentChunk"
+                or not await edge_metadata(
+                    publisher.graph, item.chunk_id, parent.data_id, "is_part_of"
+                )
+            ):
+                # Another document's chunk is checked per decision below.
+                if is_foreign(source, key):
+                    continue
+                raise IntentError(
+                    "chunk_mapping", "Original chunk or document link missing"
+                )
+            chunks[str(item.chunk_id)] = SimpleNamespace(
+                id=item.chunk_id,
+                chunk_index=node["chunk_index"],
+                text=node["text"],
+                is_part_of=SimpleNamespace(id=parent.data_id),
+            )
+    return await validate_inputs(
+        source, texts=texts, chunks=chunks, graph=publisher.graph, withheld=withheld
+    )
+
+
+def held_by(source, recorded, drift):
+    """The source's withheld decisions: `recorded`, its entries of the
+    withheld-decision set, and every decision citing an input that failed
+    live validation. No edit classified such an input, so a reviewer
+    answers it (`refresh_needed`)."""
+    from .withholding import REFRESH_NEEDED, Withheld, combine
+
+    held = dict(recorded)
+    cited = decision_inputs(source)
+    for key, reason in withheld_by(source, drift).items():
+        found = Withheld(reason, REFRESH_NEEDED, cited[key] & set(drift))
+        held[key] = combine(held.get(key), found)
+    return held
+
+
+async def withheld_now(publisher, rows):
+    """The withheld-decision set retrieval applies: the rows and the derived
+    rule (withholding.withheld_decisions), and every decision of a served
+    source whose foreign input fails live validation. `status` and the
+    reviewer commands read it, so they see what retrieval withholds. A source
+    whose own input fails is left as it is: retrieval fails it whole."""
+    from .withholding import withheld_decisions
+
+    held = await withheld_decisions(rows, publisher.withholdings)
+    for row in rows:
+        if row.state != "current" or row.revision != row.verified_revision:
+            continue
+        source = IdentitySource.model_validate_json(row.description)
+        recorded = held.get(row.source, {})
+        try:
+            drift = await live_drift(publisher, source, set(recorded))
+        except IntentError:
+            continue
+        if decided := held_by(source, recorded, drift):
+            held[row.source] = decided
+    return held
 
 
 async def valid_sources(publisher, dataset_id, rows, withheld=None):
     """Split the rows into served sources and unavailable entries.
 
     A served entry is (source, row, held): `held` maps each withheld decision
-    of that source to its reason. `withheld` is the withheld-decision set
+    of that source to its entry. `withheld` is the withheld-decision set
     (withholding.withheld_decisions); a foreign input that fails validation
     here withholds the decisions citing it as well. An unavailable entry names
     a whole source (assignment_id None) or one withheld decision."""
-    from .registered import read_registered, read_texts
-
     withheld = withheld or {}
     valid, unavailable = [], []
     events = await publisher.records.events(dataset_id)
@@ -48,44 +131,9 @@ async def valid_sources(publisher, dataset_id, rows, withheld=None):
                 )
             continue
         source = IdentitySource.model_validate_json(row.description)
-        recorded = {k: w.reason for k, w in withheld.get(row.source, {}).items()}
+        recorded = withheld.get(row.source, {})
         try:
-            if await read_registered(source) != source:
-                raise IntentError(
-                    "generated_source_changed",
-                    "Registered identity snapshot differs from saved current intent",
-                )
-            texts, chunks = await read_texts(source), {}
-            for key, item in source.inputs.items():
-                if isinstance(item, ChunkInput):
-                    node = await publisher.graph.get_node(str(item.chunk_id))
-                    parent = source.inputs[item.document_ref]
-                    if (
-                        node is None
-                        or node.get("type") != "DocumentChunk"
-                        or not await edge_metadata(
-                            publisher.graph, item.chunk_id, parent.data_id, "is_part_of"
-                        )
-                    ):
-                        # Another document's chunk is checked per decision below.
-                        if is_foreign(source, key):
-                            continue
-                        raise IntentError(
-                            "chunk_mapping", "Original chunk or document link missing"
-                        )
-                    chunks[str(item.chunk_id)] = SimpleNamespace(
-                        id=item.chunk_id,
-                        chunk_index=node["chunk_index"],
-                        text=node["text"],
-                        is_part_of=SimpleNamespace(id=parent.data_id),
-                    )
-            drift = await validate_inputs(
-                source,
-                texts=texts,
-                chunks=chunks,
-                graph=publisher.graph,
-                withheld=set(recorded),
-            )
+            drift = await live_drift(publisher, source, set(recorded))
         except IntentError as exc:
             event = await publisher.records.fail(
                 source, row.attempt, "retrieval_validation", exc
@@ -99,15 +147,15 @@ async def valid_sources(publisher, dataset_id, rows, withheld=None):
                 )
             )
             continue
-        held = {**withheld_by(source, drift), **recorded}
+        held = held_by(source, recorded, drift)
         unavailable += [
             dict(
                 identity_data_id=row.source,
                 assignment_id=key,
-                reason=reason,
+                reason=entry.reason,
                 recovery_event_id=None,
             )
-            for key, reason in sorted(held.items())
+            for key, entry in sorted(held.items())
         ]
         valid.append((source, row, held))
     return valid, unavailable

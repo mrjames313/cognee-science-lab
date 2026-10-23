@@ -174,7 +174,8 @@ def main():
         parser.error(str(exc))
     with environment:
         if args.command in GLOSSARY_COMMANDS or (
-            args.command == "reconcile" and (root / GLOSSARY_INFO).exists()
+            args.command in {"reconcile", "forget", "readd"}
+            and (root / GLOSSARY_INFO).exists()
         ):
             from .glossary_fixture import run
         elif args.command in OCCURRENCE_COMMANDS:

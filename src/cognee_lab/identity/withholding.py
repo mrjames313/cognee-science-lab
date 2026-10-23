@@ -29,8 +29,9 @@ from .validation import INPUT_CHANGED, INPUT_REMOVED, decision_inputs, text_dige
 REMAP = "remap"
 REFRESH_NEEDED = "refresh_needed"
 EDIT_UNFINISHED = "edit_unfinished"
-# When several inputs withhold one decision, it shows the strongest status.
-STATUS_ORDER = (REMAP, EDIT_UNFINISHED, REFRESH_NEEDED)
+# When several inputs withhold one decision, it shows the strongest status:
+# an unfinished edit blocks a review, and a review blocks a refresh.
+STATUS_ORDER = (REMAP, REFRESH_NEEDED, EDIT_UNFINISHED)
 UNCHANGED, MOVED, CHANGED = "unchanged", "moved", "changed"
 
 
@@ -86,10 +87,12 @@ class Classified:
 
 
 class Withheld(NamedTuple):
-    """One entry of the withheld-decision set."""
+    """One entry of the withheld-decision set: why, what answers it, and the
+    input keys of the decision that withhold it."""
 
     reason: str
     status: str
+    inputs: frozenset[str] = frozenset()
 
 
 WithheldSet = dict[str, dict[str, Withheld]]  # source -> assignment -> entry
@@ -280,18 +283,25 @@ async def withhold_dependents(publisher, edited, previous_text, text, revision):
     return [asdict(r) for r in written]
 
 
+def combine(previous: Withheld | None, entry: Withheld) -> Withheld:
+    """One entry for a decision withheld more than once: `input_removed` over
+    `input_changed`, the strongest status, and every withholding input."""
+    if previous is None:
+        return entry
+    return Withheld(
+        (
+            INPUT_REMOVED
+            if INPUT_REMOVED in (previous.reason, entry.reason)
+            else entry.reason
+        ),
+        max(previous.status, entry.status, key=STATUS_ORDER.index),
+        previous.inputs | entry.inputs,
+    )
+
+
 def merge(held: WithheldSet, source, assignment, entry: Withheld):
-    previous = held.setdefault(source, {}).get(assignment)
-    if previous is not None:
-        entry = Withheld(
-            (
-                INPUT_REMOVED
-                if INPUT_REMOVED in (previous.reason, entry.reason)
-                else entry.reason
-            ),
-            max(previous.status, entry.status, key=STATUS_ORDER.index),
-        )
-    held[source][assignment] = entry
+    entries = held.setdefault(source, {})
+    entries[assignment] = combine(entries.get(assignment), entry)
 
 
 def unfinished_edits(rows):
@@ -327,7 +337,12 @@ async def withheld_decisions(rows, store) -> WithheldSet:
     (`input_changed`, status `edit_unfinished`)."""
     held: WithheldSet = {}
     for w in recorded_rows(rows, await store.rows()):
-        merge(held, w.source, w.assignment, Withheld(w.reason, w.status))
+        merge(
+            held,
+            w.source,
+            w.assignment,
+            Withheld(w.reason, w.status, frozenset([w.input_ref])),
+        )
     readers = {
         r.source: IdentitySource.model_validate_json(r.description)
         for r in rows
@@ -339,10 +354,15 @@ async def withheld_decisions(rows, store) -> WithheldSet:
         for source, reader in readers.items():
             if source == edit.source:
                 continue
-            for assignment in citing(reader, document_inputs(reader, doc)):
-                merge(
-                    held, source, assignment, Withheld(INPUT_CHANGED, EDIT_UNFINISHED)
-                )
+            keys = document_inputs(reader, doc)
+            for assignment, inputs in decision_inputs(reader).items():
+                if inputs & keys:
+                    merge(
+                        held,
+                        source,
+                        assignment,
+                        Withheld(INPUT_CHANGED, EDIT_UNFINISHED, inputs & keys),
+                    )
     return held
 
 
@@ -443,22 +463,26 @@ def reconfirmed(reader, assignment, replacements, producer_key, producer):
 
 
 async def withholding_status(publisher, rows):
-    """What `status` lists: the recorded rows, and the withheld-decision set
-    with the decisions that need a reviewer (refresh items)."""
-    held = await withheld_decisions(rows, publisher.withholdings)
-    dataset = {r.dataset for r in rows}
+    """What `status` lists: the recorded rows that still apply, and the
+    withheld-decision set retrieval applies (live validation included, so
+    this reads the graph) with the decisions a reviewer answers."""
+    from .retrieve import withheld_now
+
+    held = await withheld_now(publisher, rows)
     decisions = [
         dict(
-            identity_data_id=source, assignment_id=key, reason=w.reason, status=w.status
+            identity_data_id=source,
+            assignment_id=key,
+            reason=w.reason,
+            status=w.status,
+            input_refs=sorted(w.inputs),
         )
         for source, entries in sorted(held.items())
         for key, w in sorted(entries.items())
     ]
     return dict(
         withholdings=[
-            asdict(w)
-            for w in await publisher.withholdings.rows()
-            if w.dataset in dataset
+            asdict(w) for w in recorded_rows(rows, await publisher.withholdings.rows())
         ],
         withheld_decisions=decisions,
         refresh_needed=[d for d in decisions if d["status"] == REFRESH_NEEDED],
