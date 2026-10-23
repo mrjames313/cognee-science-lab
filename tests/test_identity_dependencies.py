@@ -498,3 +498,23 @@ async def test_admission_refuses_a_corpus_input_whose_entity_is_missing(
     # A changed field still only withholds the decisions that read it.
     changed = {str(entity): dict(type="Entity", name="Changed", description="Changed")}
     await admitting_publisher(changed).admit_inputs(source, texts, own_chunks(source))
+
+
+async def test_a_retried_second_edit_classifies_as_its_first_attempt_did(
+    source_payload,
+):
+    """The first edit moved the span and no refresh ran, so doc01 still holds
+    the revision-1 range. The second edit's retry must find the move again,
+    not slice the previous text with a range taken from the new text."""
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    publisher = memory_publisher([row_of(glossary), row_of(doc01)])
+    await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+    twice = "Preface.\n" + INSERTED
+    first = await withhold_dependents(publisher, glossary, INSERTED, twice, 3)
+    retry = await withhold_dependents(publisher, glossary, INSERTED, twice, 3)
+    start = twice.index(ENTRY)
+    assert [(w["status"], w["new_start"], w["new_end"]) for w in first] == [
+        ("remap", start, start + len(ENTRY))
+    ] * 2
+    assert retry == first

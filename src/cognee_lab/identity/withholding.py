@@ -188,44 +188,42 @@ def citing(reader: IdentitySource, keys) -> set[str]:
     return {a for a, inputs in decision_inputs(reader).items() if inputs & set(keys)}
 
 
-def occurs_once(text: str, part: str) -> int | None:
-    first = text.find(part)
-    if first < 0 or text.find(part, first + 1) >= 0:
-        return None
-    return first
+def found_once(text: str, length: int, digest: str) -> int | None:
+    """The start of the one window of `text` with this length and digest, or
+    None when there is no such window or more than one."""
+    found = None
+    for start in range(len(text) - length + 1):
+        if text_digest(text[start : start + length]) == digest:
+            if found is not None:
+                return None
+            found = start
+    return found
 
 
-def classify_span(key, item, previous_text, text, earlier=()):
-    """An unchanged span validates in place. One whose old text is found
-    exactly once in the new text moved. Anything else changed. `earlier`
-    gives ranges a former edit recorded for this span in `previous_text`."""
+def classify_span(key, item, text):
+    """An unchanged span validates in place. One whose text is found exactly
+    once in the new text moved. Anything else changed. The span's text is
+    found by its length and digest, never by slicing an earlier text, so a
+    retry, or an edit after an unrefreshed move, classifies the same way."""
     here = text[item.start : item.end] if item.end <= len(text) else None
     if here is not None and text_digest(here) == item.text_sha256:
         return Classified(key, UNCHANGED, item.text_sha256, item.text_sha256)
-    for start, end in [(item.start, item.end), *earlier]:
-        old = previous_text[start:end] if end <= len(previous_text) else None
-        if old and text_digest(old) == item.text_sha256:
-            found = occurs_once(text, old)
-            if found is not None:
-                return Classified(
-                    key,
-                    MOVED,
-                    item.text_sha256,
-                    item.text_sha256,
-                    (found, found + len(old)),
-                )
-            break
+    length = item.end - item.start
+    found = found_once(text, length, item.text_sha256)
+    if found is not None:
+        return Classified(
+            key, MOVED, item.text_sha256, item.text_sha256, (found, found + length)
+        )
     return Classified(
         key, CHANGED, item.text_sha256, text_digest(here) if here else None
     )
 
 
-def classify(reader, data_id, previous_text, text, earlier=None) -> list[Classified]:
+def classify(reader, data_id, previous_text, text) -> list[Classified]:
     """What changing a document's text from `previous_text` to `text` did to
     each input the reader read from it. A text input is classified only when
     a decision cites it directly; a chunk has no fingerprint and is renumbered,
     so any change needs review."""
-    earlier = earlier or {}
     keys = document_inputs(reader, data_id)
     direct = set().union(*decision_inputs(reader).values())
     found = []
@@ -237,9 +235,7 @@ def classify(reader, data_id, previous_text, text, earlier=None) -> list[Classif
                 outcome = UNCHANGED if new == item.text_sha256 else CHANGED
                 found.append(Classified(key, outcome, item.text_sha256, new))
         elif isinstance(item, TextSpanInput):
-            found.append(
-                classify_span(key, item, previous_text, text, earlier.get(key, ()))
-            )
+            found.append(classify_span(key, item, text))
         else:
             outcome = UNCHANGED if previous_text == text else CHANGED
             found.append(Classified(key, outcome, None, None))
@@ -254,17 +250,12 @@ async def withhold_dependents(publisher, edited, previous_text, text, revision):
     store = publisher.withholdings
     doc = edited.inputs[edited.original_input_ref].data_id
     own = (str(edited.dataset_id), str(edited.identity_data_id))
-    prior = await store.rows()
     cleared, written = [], []
     for row in await publisher.records.rows():
         if (row.dataset, row.source) == own or row.is_retired:
             continue
         reader = IdentitySource.model_validate_json(row.description)
-        earlier = {}
-        for w in prior:
-            if w.source == row.source and w.new_start is not None:
-                earlier.setdefault(w.input_ref, []).append((w.new_start, w.new_end))
-        for c in classify(reader, doc, previous_text, text, earlier):
+        for c in classify(reader, doc, previous_text, text):
             cleared.append((row.dataset, row.source, c.input_ref))
             if c.outcome == UNCHANGED:
                 continue
