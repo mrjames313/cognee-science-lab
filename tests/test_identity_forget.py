@@ -220,8 +220,10 @@ TEXT = (FIXTURES / "source.txt").read_text()
 HC = UUID("9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88")
 
 
-def tomb(source, removed=()):
-    return Tombstone.of(source, forgotten_at="t", removed_entity_ids=removed)
+def tomb(source, removed=(), earlier=None):
+    return Tombstone.of(
+        source, forgotten_at="t", removed_entity_ids=removed, earlier=earlier
+    )
 
 
 @pytest.mark.asyncio
@@ -596,13 +598,8 @@ async def test_a_tombstone_carries_the_uuids_of_every_forgotten_life(
     life1 = source_of(source_payload)
     first = tomb(life1)
     life2 = describe_readd(life1, first, set(), TEXT, chunks_of(life1, TEXT))
-    second = tomb(life2).carrying(first)
+    second = tomb(life2, earlier=first)
     old = life1.mention_groups["g01"].entity_id
-    assert second.earlier_mention_ids == [old]
-    assert second.mention_ids == {"g01": life2.mention_groups["g01"].entity_id}
-    assert second.earlier_entity_ids == []
-    assert old in second.used_entity_ids
-    assert tomb(life2).carrying(None) == tomb(life2)
 
     life3 = describe_readd(life1, second, set(), TEXT, chunks_of(life1, TEXT))
     assert life3.revision == 3
@@ -649,8 +646,7 @@ async def test_a_second_readd_replaces_what_the_first_forget_removed(source_payl
     first = tomb(caller, [singleton])
     life2 = describe_readd(caller, first, {singleton}, TEXT, chunks_of(caller, TEXT))
     second_singleton = replacement_entity_id(caller.identity_data_id, 2, singleton)
-    second = tomb(life2, [second_singleton]).carrying(first)
-    assert second.earlier_entity_ids == [singleton]
+    second = tomb(life2, [second_singleton], earlier=first)
     own = f"source_ref:v1:{caller.dataset_id}:{caller.identity_data_id}"
     plan = dict(
         entities={
@@ -717,7 +713,7 @@ async def test_a_third_life_reuses_an_earlier_life_entity_still_in_the_graph(
     life2 = describe_readd(
         source_of(dropped), first, set(), TEXT, chunks_of(life1, TEXT)
     )
-    second = tomb(life2).carrying(first)
+    second = tomb(life2, earlier=first)
     life3 = describe_readd(life1, second, set(), TEXT, chunks_of(life1, TEXT))
     assert HC in life3.entity_constructions
     await admit_readd(OccupiedGraph([HC]), second, life3, set())

@@ -302,7 +302,7 @@ def check_removed_entity_ids(tombstone, source, removed):
     recreating a retired object under its UUID. A mention UUID is forbidden
     whether or not its node was ever written, since a publication that
     failed early leaves it out of the forget's plan."""
-    forbidden = set(removed) | tombstone.forgotten_mention_ids
+    forbidden = set(removed) | set(tombstone.all_mention_ids)
     if forbidden & entity_ids_named(source):
         raise IntentError(
             "forgotten_uuid_reused",

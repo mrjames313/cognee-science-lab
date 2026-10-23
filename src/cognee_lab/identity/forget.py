@@ -481,6 +481,7 @@ async def forget(
             forgotten_at=now(),
             removed_entity_ids=[UUID(e) for e in found.removed_entities],
             impact_token=found.token if found.dependents else None,
+            earlier=(await records.row(source)).last_tombstone,
         )
         run.completion = dict(tombstone=tombstone)
 

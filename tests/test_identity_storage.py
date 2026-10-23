@@ -1,7 +1,7 @@
 import dataclasses
 import itertools
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -229,44 +229,52 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
 
 
 @pytest.mark.asyncio
-async def test_a_second_forget_carries_the_first_tombstone_forward(source_payload):
-    """The re-added life keeps the first tombstone beside its description,
-    and the second forget's tombstone carries its mention UUID."""
-    source_payload["dataset_id"] = str(uuid4())
-    for item in source_payload["inputs"].values():
-        if "dataset_id" in item:
-            item["dataset_id"] = source_payload["dataset_id"]
+async def test_a_readded_row_keeps_its_last_tombstone_until_the_next_forget(
+    source_payload,
+):
+    """The re-add's begin keeps the first tombstone beside the new life,
+    through a failure and its retry. The next forget writes the tombstone
+    it is given, which carries the first one, and no second copy."""
     life1 = IdentitySource.model_validate_json(json.dumps(source_payload))
     old = str(life1.mention_groups["g01"].entity_id)
     life2 = IdentitySource.model_validate_json(
         json.dumps(source_payload).replace(old, str(uuid4()))
     ).model_copy(update={"revision": 2})
     forget = {"operation": "identity_forget"}
-    store = RecordStore()
+    store = memory_store()
     await store.initialize()
     attempt = await store.begin(life1, expected_revision=0, plan={})
     await store.complete(life1, attempt)
     attempt = await store.begin(
-        life1, expected_revision=1, plan=forget, method="forget"
+        life1, expected_revision=1, plan=dict(forget), method="forget"
     )
-    await store.complete(
-        life1, attempt, state="forgotten", tombstone=tombstone_of(life1)
+    first = tombstone_of(life1)
+    await store.complete(life1, attempt, state="forgotten", tombstone=first)
+    (row,) = await store.rows()
+    assert (row.tombstone, row.last_tombstone) == (first, None)
+
+    publish = {"operation": "identity_publish"}
+    attempt = await store.begin(life2, expected_revision=1, plan=dict(publish))
+    await store.fail(life2, attempt, "graph", IntentError("x", "injected"))
+    (row,) = await store.rows()
+    assert (row.description, row.last_tombstone) == (life2, first)
+    attempt = await store.begin(
+        life2, expected_revision=2, plan=dict(publish), method="reconcile"
     )
-    attempt = await store.begin(life2, expected_revision=1, plan={})
     await store.complete(life2, attempt)
-    (row,) = await store.rows(life1.dataset_id)
-    assert row.description == life2 and row.last_tombstone == tombstone_of(life1)
+    (row,) = await store.rows()
+    assert (row.state, row.last_tombstone) == ("current", first)
 
     attempt = await store.begin(
         life2, expected_revision=2, plan=dict(forget), method="forget"
     )
-    await store.complete(
-        life2, attempt, state="forgotten", tombstone=tombstone_of(life2)
+    second = Tombstone.of(
+        life2, forgotten_at="2026-10-23T00:00:00+00:00", earlier=row.last_tombstone
     )
-    (row,) = await store.rows(life1.dataset_id)
-    assert row.tombstone == tombstone_of(life2).carrying(tombstone_of(life1))
-    assert [str(e) for e in row.tombstone.earlier_mention_ids] == [old]
-    assert row.last_tombstone == row.tombstone
+    await store.complete(life2, attempt, state="forgotten", tombstone=second)
+    (row,) = await store.rows()
+    assert (row.tombstone, row.last_tombstone) == (second, None)
+    assert UUID(old) in row.tombstone.used_entity_ids
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,4 @@
-"""The seven properties support/ledger_check.py checks after every step.
+"""The eight properties support/ledger_check.py checks after every step.
 
 Each property is a generator over one Step: the model's record of writers
 and sources before and after the step, what RecordStore showed before and
@@ -271,9 +271,9 @@ def p7_forgotten_rows_hold_no_content(step):
     """A forgotten row holds no description content: its description is the
     tombstone of the description its forget began, its plan keeps only
     identifiers, with no edge property, and no recovery event of the source
-    keeps a message. The model's descriptions share their UUIDs across
-    revisions, so the UUIDs a tombstone carries from an earlier forgotten
-    life are always empty here."""
+    keeps a message. forget.py builds the tombstone, with the UUIDs of the
+    source's earlier forgotten lives; the checker passes Tombstone.of, whose
+    carry is empty because the model's descriptions share their UUIDs."""
     for s, ghost in enumerate(step.model_after.sources):
         row = step.obs_after.rows.get(s)
         if row is None or row.state != "forgotten":
@@ -289,6 +289,26 @@ def p7_forgotten_rows_hold_no_content(step):
                 yield f"S{s + 1} is forgotten but a recovery event keeps its message"
 
 
+def p8_tombstone_kept_until_next_forget(step):
+    """A source that lives again keeps the tombstone its last forget left
+    (`last_tombstone`), from the re-add's begin until its next forget, for
+    that forget to carry; a forgotten row holds none beside its own."""
+    for s, after in step.obs_after.rows.items():
+        before = step.obs_before.rows.get(s)
+        if after.state == "forgotten" or before is None:
+            kept = None
+        elif before.state == "forgotten":
+            kept = before.tombstone
+        else:
+            kept = before.last_tombstone
+        if after.last_tombstone != kept:
+            yield (
+                f"S{s + 1} {after.state} row holds last_tombstone "
+                f"{'none' if after.last_tombstone is None else after.last_tombstone.revision}, "
+                f"not {'none' if kept is None else kept.revision}"
+            )
+
+
 PROPERTIES = [
     p1_withheld_until_complete,
     p2_independent_sources,
@@ -297,6 +317,7 @@ PROPERTIES = [
     p5_explicit_forward_recovery,
     p6_failed_rows_recoverable,
     p7_forgotten_rows_hold_no_content,
+    p8_tombstone_kept_until_next_forget,
 ]
 
 

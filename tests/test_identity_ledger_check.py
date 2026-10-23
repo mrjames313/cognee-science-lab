@@ -62,6 +62,16 @@ def test_a_replay_runs_the_steps_after_a_refused_step():
 
 # The minimal sequence that a search at the named depth reports for each break.
 DEEP_SEQUENCES = {
+    "complete-keeps-last-tombstone": (
+        "W1 publish S1 rev=1 expect=0 plan=publish",
+        "W1 complete",
+        "W1 forget S1 rev=1 expect=1 plan=forget",
+        "W1 complete",
+        "W1 publish S1 rev=2 expect=1 plan=publish",
+        "W1 complete",
+        "W1 forget S1 rev=2 expect=2 plan=forget",
+        "W1 complete",
+    ),
     "withdrawn-guard-admits-replace": (
         "W1 publish S1 rev=1 expect=0 plan=publish",
         "W1 complete",

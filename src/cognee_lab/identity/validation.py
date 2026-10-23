@@ -434,12 +434,9 @@ def uses_of(saved) -> tuple[dict[UUID, tuple], set[UUID]]:
     mention UUID of an earlier forgotten life has no key of its own."""
     if isinstance(saved, Tombstone):
         mentions = {
-            e: (saved.identity_data_id, k) for k, e in saved.mention_ids.items()
+            e: (saved.identity_data_id, k) for e, k in saved.all_mention_ids.items()
         }
-        mentions |= {
-            e: (saved.identity_data_id, None) for e in saved.earlier_mention_ids
-        }
-        return mentions, set(saved.entity_ids) | set(saved.earlier_entity_ids)
+        return mentions, set(saved.all_reusable_ids)
     mentions = {
         g.entity_id: (saved.identity_data_id, k)
         for k, g in saved.mention_groups.items()

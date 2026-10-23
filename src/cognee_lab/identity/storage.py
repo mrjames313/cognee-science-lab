@@ -31,8 +31,9 @@ class Publication(Base):
     attempt: Mapped[str] = mapped_column(String(36))
     description: Mapped[str] = mapped_column(Text)
     plan: Mapped[str] = mapped_column(Text)
-    # The tombstone the source's last forget left, kept through a re-added
-    # life so the next forget carries its UUIDs forward (Tombstone.carrying).
+    # On a source that lives again: the tombstone its last forget left, set
+    # by the re-add's begin and kept until the next forget, which carries
+    # its UUIDs into the new tombstone (forget.py). None on a forgotten row.
     last_tombstone: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -102,8 +103,8 @@ class PublicationRow:
     once: a forgotten row holds its tombstone and no description, every
     other row its description and no tombstone. A forgotten row from before
     tombstones is refused here. `last_tombstone` is the tombstone the
-    source's last forget left, on a forgotten row and on one re-added
-    since."""
+    source's last forget left, on a row re-added since; a forgotten row's
+    own tombstone already carries it."""
 
     dataset: str
     source: str
@@ -541,6 +542,8 @@ class RecordStore:
             if row is None:
                 row = Publication(dataset=dataset, source=sid, verified_revision=0)
                 session.add(row)
+            elif row.state == "forgotten":
+                row.last_tombstone = row.description
             row.revision, row.state, row.attempt = source.revision, "pending", attempt
             row.description, row.plan = payload, encode(plan)
             # Recovery attempts are diagnostic links, not new incidents.
@@ -656,9 +659,9 @@ class RecordStore:
 
     async def complete(self, source, attempt, *, state="current", tombstone=None):
         """Acknowledge the pending attempt. A forget completes with the
-        source's tombstone, which replaces its description in the same
-        transaction, carrying the UUIDs of the tombstone the source's last
-        forget left; its plan keeps only identifiers, and every recovery
+        source's tombstone, which replaces its description and its
+        `last_tombstone` in the same transaction (forget.py builds it to
+        carry that one); its plan keeps only identifiers, and every recovery
         event of the source loses its message."""
         if state not in {"current", "withdrawn", "forgotten"}:
             raise ValueError("Unsupported completion state")
@@ -674,6 +677,7 @@ class RecordStore:
                 sid,
             ) or tombstone.revision != source.revision:
                 raise ValueError("The tombstone names another source or revision")
+            values.update(description=tombstone.model_dump_json(), last_tombstone=None)
         async with self.session_factory() as session:
             result = await session.execute(
                 update(Publication)
@@ -692,11 +696,6 @@ class RecordStore:
                 )
             if tombstone is not None:
                 row = await session.get(Publication, (dataset, sid))
-                earlier = row.last_tombstone
-                carried = tombstone.carrying(
-                    Tombstone.model_validate_json(earlier) if earlier else None
-                )
-                row.description = row.last_tombstone = carried.model_dump_json()
                 row.plan = encode(scrubbed_plan(json.loads(row.plan)))
             await session.execute(
                 update(Writer)

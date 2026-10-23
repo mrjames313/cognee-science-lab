@@ -184,9 +184,16 @@ MUTANTS = {
     ),
     # A forgotten row keeps its description, its plan or its event messages.
     "complete-keeps-description": Mutant(
-        "                row.description = row.last_tombstone = carried.model_dump_json()\n",
-        "                row.last_tombstone = carried.model_dump_json()\n",
+        "            values.update(description=tombstone.model_dump_json(), last_tombstone=None)\n",
+        "            values.update(last_tombstone=None)\n",
         "P7",
+    ),
+    # A re-add drops the tombstone its next forget must carry.
+    "begin-drops-last-tombstone": Mutant(
+        '            elif row.state == "forgotten":\n'
+        "                row.last_tombstone = row.description\n",
+        "",
+        "P8",
     ),
     "complete-keeps-plan": Mutant(
         "                row.plan = encode(scrubbed_plan(json.loads(row.plan)))\n",
@@ -353,6 +360,13 @@ MUTANTS = {
 # --mutants and the pytest file leave them out. Run one with
 # --mutant NAME --depth N. The test replays the minimal sequence of each.
 DEEP_MUTANTS = {
+    # Caught at depth 8: a forgotten row keeps the tombstone of the life
+    # before beside its own, which a second forget of a re-add needs.
+    "complete-keeps-last-tombstone": Mutant(
+        "            values.update(description=tombstone.model_dump_json(), last_tombstone=None)\n",
+        "            values.update(description=tombstone.model_dump_json())\n",
+        "P8",
+    ),
     # Caught at depth 7: a replace retry built from a stale read of the
     # current replacement row, sent after the row was withdrawn.
     "withdrawn-guard-admits-replace": Mutant(
