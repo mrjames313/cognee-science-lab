@@ -1,5 +1,5 @@
-"""Forget: the dependents check, the re-add admission and the ownership rules
-that need no store."""
+"""Forget: the dependents check, the removed Entities, the re-add admission
+and the ownership rules that need no store."""
 
 import json
 from uuid import UUID, uuid4
@@ -8,10 +8,14 @@ import pytest
 
 from cognee_lab.identity.admission import admit_readd, replacement_entity_id
 from cognee_lab.identity.fixture import FIXTURES
-from cognee_lab.identity.forget import refuse_dependents
+from cognee_lab.identity.erasure import impact
 from cognee_lab.identity.forget_fixture import describe_readd
-from cognee_lab.identity.models import IdentitySource
-from cognee_lab.identity.retirement import dependents, refuse_retiring_inputs
+from cognee_lab.identity.models import IdentitySource, Tombstone
+from cognee_lab.identity.retirement import (
+    dependents,
+    refuse_retiring_inputs,
+    removed_entities,
+)
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import (
     IntentError,
@@ -134,8 +138,16 @@ def other_row(other, state):
     )
 
 
+def readers(found):
+    """The sources an impact revises, with the inputs each decision cites."""
+    return {
+        d.identity_data_id: [c.consumed for r in d.decisions for c in r.citing]
+        for d in found.dependents
+    }
+
+
 @pytest.mark.parametrize(
-    "state, refused",
+    "state, removed",
     [
         ("current", False),
         ("failed_withdraw", True),
@@ -145,11 +157,11 @@ def other_row(other, state):
     ],
 )
 def test_an_entity_shared_only_with_a_retiring_owner_counts_as_removed(
-    source_payload, state, refused
+    source_payload, state, removed
 ):
-    """A reader of an Entity this source shares with another owner refuses
-    the forget only when that other owner is retired or retiring, because
-    then the forget removes the Entity."""
+    """A reader of an Entity this source shares with another owner is a
+    dependent of the forget only when that other owner is retired or
+    retiring, because then the forget removes the Entity."""
     source = source_of(source_payload)
     other = reader_of(source_payload)
     entity = uuid4()
@@ -158,15 +170,10 @@ def test_an_entity_shared_only_with_a_retiring_owner_counts_as_removed(
         source, entity, [f"source_ref:v1:{other.dataset_id}:{other.identity_data_id}"]
     )
     rows = [row_of(source), other_row(other, state), row_of(reader)]
-    if refused:
-        with pytest.raises(IntentError) as found:
-            refuse_dependents(source, plan, rows)
-        assert found.value.code == "dependent_source"
-        assert [d["consumed"] for d in found.value.details["dependents"]] == [
-            str(entity)
-        ]
-    else:
-        assert refuse_dependents(source, plan, rows) == set()
+    plan["revision"] = source.revision
+    assert removed_entities(source, plan, rows) == ({entity} if removed else set())
+    expected = {str(reader.identity_data_id): [str(entity)]} if removed else {}
+    assert readers(impact(source, plan, rows)) == expected
 
 
 def test_an_entity_owned_through_the_document_chunks_alone_is_removed(
@@ -179,10 +186,12 @@ def test_an_entity_owned_through_the_document_chunks_alone_is_removed(
     plan = owned_plan(
         source, entity, [f"source_ref:v2:{doc.dataset_id}:{doc.data_id}:{uuid4()}"]
     )
-    with pytest.raises(IntentError) as found:
-        refuse_dependents(source, plan, [row_of(source), row_of(reader)])
-    assert found.value.code == "dependent_source"
-    assert refuse_dependents(source, plan, [row_of(source)]) == {entity}
+    plan["revision"] = source.revision
+    rows = [row_of(source), row_of(reader)]
+    assert removed_entities(source, plan, rows) == {entity}
+    assert readers(impact(source, plan, rows)) == {
+        str(reader.identity_data_id): [str(entity)]
+    }
 
 
 @pytest.mark.parametrize("state", ["failed", "pending"])
@@ -242,11 +251,17 @@ TEXT = (FIXTURES / "source.txt").read_text()
 HC = UUID("9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88")
 
 
+def tomb(source, removed=()):
+    return Tombstone.of(source, forgotten_at="t", removed_entity_ids=removed)
+
+
 @pytest.mark.asyncio
 async def test_a_readd_derives_every_group_from_the_next_revision(source_payload):
     forgotten = source_of(source_payload)
     text = TEXT
-    readded = describe_readd(forgotten, set(), text, chunks_of(forgotten, text))
+    readded = describe_readd(
+        forgotten, tomb(forgotten), set(), text, chunks_of(forgotten, text)
+    )
     assert readded.revision == forgotten.revision + 1
     for key, group in readded.mention_groups.items():
         assert group.entity_id == fresh_mention_id(
@@ -260,7 +275,7 @@ async def test_a_readd_derives_every_group_from_the_next_revision(source_payload
     } | {g.entity_id for g in forgotten.mention_groups.values()}
     assert readded.mention_resolutions == forgotten.mention_resolutions
     assert readded.variant_assignments == forgotten.variant_assignments
-    await admit_readd(AbsentGraph(), forgotten, readded, set())
+    await admit_readd(AbsentGraph(), tomb(forgotten), readded, set())
 
 
 @pytest.mark.asyncio
@@ -273,17 +288,21 @@ async def test_a_readd_derives_a_named_replacement_from_a_key_that_names_it(
     reusable Entity does, and the variant follows."""
     forgotten = source_of(source_payload)
     text = TEXT
-    readded = describe_readd(forgotten, {HC}, text, chunks_of(forgotten, text))
+    readded = describe_readd(
+        forgotten, tomb(forgotten), {HC}, text, chunks_of(forgotten, text)
+    )
     new_hc = fresh_entity_id(forgotten.identity_data_id, 2, "v01")
     assert HC not in readded.entity_constructions
     assert readded.entity_constructions[new_hc] == forgotten.entity_constructions[HC]
     assert readded.variant_assignments["v01"].source_entity_id == new_hc
-    await admit_readd(AbsentGraph(), forgotten, readded, {HC})
+    await admit_readd(AbsentGraph(), tomb(forgotten), readded, {HC})
 
-    kept = describe_readd(forgotten, set(), text, chunks_of(forgotten, text))
+    kept = describe_readd(
+        forgotten, tomb(forgotten), set(), text, chunks_of(forgotten, text)
+    )
     assert HC in kept.entity_constructions
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, kept, {HC})
+        await admit_readd(AbsentGraph(), tomb(forgotten), kept, {HC})
     assert refused.value.code == "forgotten_uuid_reused"
 
     # The replaces form is only for an Entity nothing names.
@@ -291,11 +310,11 @@ async def test_a_readd_derives_a_named_replacement_from_a_key_that_names_it(
     for wrong in (uuid4(), by_removed_uuid):
         underived = renamed_entity(readded, new_hc, wrong)
         with pytest.raises(IntentError) as refused:
-            await admit_readd(AbsentGraph(), forgotten, underived, {HC})
+            await admit_readd(AbsentGraph(), tomb(forgotten), underived, {HC})
         assert refused.value.code == "entity_uuid_not_derived"
 
     with pytest.raises(IntentError) as refused:
-        await admit_readd(OccupiedGraph([new_hc]), forgotten, readded, {HC})
+        await admit_readd(OccupiedGraph([new_hc]), tomb(forgotten), readded, {HC})
     assert refused.value.code == "entity_uuid_in_graph"
 
 
@@ -310,17 +329,19 @@ async def test_a_readd_replaces_an_unnamed_entity_by_the_removed_uuid(source_pay
     )
     forgotten = source_of(payload)
     text = TEXT
-    readded = describe_readd(forgotten, {singleton}, text, chunks_of(forgotten, text))
+    readded = describe_readd(
+        forgotten, tomb(forgotten), {singleton}, text, chunks_of(forgotten, text)
+    )
     new = replacement_entity_id(forgotten.identity_data_id, 2, singleton)
     assert singleton not in readded.entity_constructions
     assert (
         readded.entity_constructions[new] == forgotten.entity_constructions[singleton]
     )
-    await admit_readd(AbsentGraph(), forgotten, readded, {singleton})
+    await admit_readd(AbsentGraph(), tomb(forgotten), readded, {singleton})
 
     underived = renamed_entity(readded, new, uuid4())
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, underived, {singleton})
+        await admit_readd(AbsentGraph(), tomb(forgotten), underived, {singleton})
     assert refused.value.code == "entity_uuid_not_derived"
 
 
@@ -333,7 +354,9 @@ def test_a_readd_gives_two_removed_entities_one_key_names_separate_replacements(
     merge them."""
     forgotten = source_of(source_payload)
     a = forgotten.mention_resolutions["r01"].target_entity_id
-    readded = describe_readd(forgotten, {a, HC}, TEXT, chunks_of(forgotten, TEXT))
+    readded = describe_readd(
+        forgotten, tomb(forgotten), {a, HC}, TEXT, chunks_of(forgotten, TEXT)
+    )
     identity = forgotten.identity_data_id
     v01 = readded.variant_assignments["v01"]
     assert v01.target_entity_id == fresh_entity_id(identity, 2, "r01")
@@ -345,7 +368,9 @@ def test_a_readd_gives_two_removed_entities_one_key_names_separate_replacements(
     payload["mention_resolutions"]["r01"]["explanation"] = None
     only_v01 = source_of(payload)
     with pytest.raises(IntentError) as refused:
-        describe_readd(only_v01, {a, HC}, TEXT, chunks_of(only_v01, TEXT))
+        describe_readd(
+            only_v01, tomb(only_v01), {a, HC}, TEXT, chunks_of(only_v01, TEXT)
+        )
     assert refused.value.code == "entity_uuid_not_derived"
 
 
@@ -394,8 +419,9 @@ async def test_a_readd_replaces_an_entity_a_later_forget_of_a_co_owner_removed(
         original_data_id=str(doc.data_id),
     )
     rows = [row_of(source, "forgotten", plan), row_of(other, "current")]
-    assert await readd_removed(AbsentGraph(), source, plan, rows) == {entity}
-    assert await readd_removed(OccupiedGraph([entity]), source, plan, rows) == set()
+    kept = tomb(source)
+    assert await readd_removed(AbsentGraph(), kept, plan, rows) == {entity}
+    assert await readd_removed(OccupiedGraph([entity]), kept, plan, rows) == set()
 
 
 FORGET_GRAPH_METHODS = (
@@ -451,34 +477,37 @@ async def test_a_readd_with_the_forgotten_uuids_or_revision_is_refused(
 ):
     forgotten = source_of(source_payload)
     text = TEXT
-    readded = describe_readd(forgotten, set(), text, chunks_of(forgotten, text))
+    readded = describe_readd(
+        forgotten, tomb(forgotten), set(), text, chunks_of(forgotten, text)
+    )
 
     same_ids = forgotten.model_copy(update={"revision": 2})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, same_ids, set())
+        await admit_readd(AbsentGraph(), tomb(forgotten), same_ids, set())
     assert refused.value.code == "fresh_uuid_reused"
 
     skipped = readded.model_copy(update={"revision": 3})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, skipped, set())
+        await admit_readd(AbsentGraph(), tomb(forgotten), skipped, set())
     assert refused.value.code == "revision_sequence"
 
     wrong_derivation = describe_readd(
-        forgotten.model_copy(update={"revision": 5}),
+        forgotten,
+        tomb(forgotten.model_copy(update={"revision": 5})),
         set(),
         text,
         chunks_of(forgotten, text),
     ).model_copy(update={"revision": 2})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, wrong_derivation, set())
+        await admit_readd(AbsentGraph(), tomb(forgotten), wrong_derivation, set())
     assert refused.value.code == "fresh_uuid_not_derived"
 
     other = readded.model_copy(update={"identity_data_id": uuid4()})
     with pytest.raises(IntentError) as refused:
-        await admit_readd(AbsentGraph(), forgotten, other, set())
+        await admit_readd(AbsentGraph(), tomb(forgotten), other, set())
     assert refused.value.code == "source_changed"
 
     occupied = OccupiedGraph([readded.mention_groups["g01"].entity_id])
     with pytest.raises(IntentError) as refused:
-        await admit_readd(occupied, forgotten, readded, set())
+        await admit_readd(occupied, tomb(forgotten), readded, set())
     assert refused.value.code == "fresh_uuid_in_graph"

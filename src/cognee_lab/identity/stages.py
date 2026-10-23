@@ -30,6 +30,8 @@ class Run:
         self.attempt = attempt
         self.fault_stage = fault_stage
         self.stage: str | None = None
+        # Keyword arguments a stage sets for complete(): a forget's tombstone.
+        self.completion: dict = {}
 
     def inject(self, name: str, message: str | None = None):
         """Fail here when the requested fault stage names this point."""
@@ -49,10 +51,13 @@ Stage = tuple[str, Callable[[Run], Awaitable]]
 
 async def saved_row(records, source, missing, exact=None):
     """The source's saved row, refused when it is missing or, given `exact`,
-    when its description is not this one."""
+    when its description is not this one. A forgotten row keeps no
+    description to compare; its caller decides what it accepts."""
     row = await records.row(source)
     if row is None:
         raise IntentError("source_missing", missing)
+    if row.state == "forgotten":
+        return row
     if exact and IdentitySource.model_validate_json(row.description) != source:
         raise IntentError("revision_reuse", exact)
     return row
@@ -88,7 +93,9 @@ async def run_attempt(
             if name in operation.faults:
                 run.inject(name)
         if operation.state is not None:
-            await records.complete(source, attempt, state=operation.state)
+            await records.complete(
+                source, attempt, state=operation.state, **run.completion
+            )
         return attempt, results
     except Exception as exc:
         if getattr(exc, "code", None) == "recovery_required":

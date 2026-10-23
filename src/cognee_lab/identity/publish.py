@@ -110,18 +110,10 @@ class Publisher:
             fault_stage=fault_stage,
         )
 
-    async def forget(
-        self, source, *, expected_revision, origin="runtime", fault_stage=None
-    ):
+    async def forget(self, source, *, expected_revision, **run):
         from .forget import forget
 
-        return await forget(
-            self,
-            source,
-            expected_revision=expected_revision,
-            origin=origin,
-            fault_stage=fault_stage,
-        )
+        return await forget(self, source, expected_revision=expected_revision, **run)
 
     async def replace(
         self,
@@ -197,13 +189,23 @@ class Publisher:
         from .admission import check_corpus_inputs_exist
 
         await check_corpus_inputs_exist(self.graph, source)
-        descriptions = [
-            IdentitySource.model_validate_json(r.description)
+        others = [
+            r
             for r in rows
             if (r.dataset, r.source)
             != (str(source.dataset_id), str(source.identity_data_id))
         ]
-        validate_uses([*descriptions, source])
+        validate_uses(
+            [
+                *(
+                    IdentitySource.model_validate_json(r.description)
+                    for r in others
+                    if r.state != "forgotten"
+                ),
+                source,
+            ],
+            [r.tombstone for r in others if r.state == "forgotten"],
+        )
         refuse_retiring_inputs(source, rows)
         previous = await self.records.row(source)
         if previous and previous.revision != (saved_revision or source.revision):
@@ -333,16 +335,22 @@ class Publisher:
 
     async def admit_readd(self, source, texts, chunks):
         """Admit a re-add before anything is written: the description against
-        the forgotten one and its forget plan, then the input checks."""
+        the forgotten source's tombstone and its forget plan, then the input
+        checks. A forget whose dependents are not all revised yet refuses."""
         from .admission import admit_readd
+        from .erasure import unfinished
         from .retirement import readd_removed
 
         row = await self.forgotten_row(source)
-        forgotten = IdentitySource.model_validate_json(row.description)
-        removed = await readd_removed(
-            self.graph, forgotten, row.plan, await self.records.rows()
-        )
-        await admit_readd(self.graph, forgotten, source, removed)
+        rows = await self.records.rows()
+        if waiting := unfinished(row.tombstone, rows):
+            raise IntentError(
+                "dependents_unfinished",
+                "The forget has not revised every dependent yet; run forget or reconcile on the forgotten source first",
+                details=dict(dependents=[r.source for r in waiting]),
+            )
+        removed = await readd_removed(self.graph, row.tombstone, row.plan, rows)
+        await admit_readd(self.graph, row.tombstone, source, removed)
         await self.admit_inputs(source, texts, chunks, saved_revision=row.revision)
         return row
 

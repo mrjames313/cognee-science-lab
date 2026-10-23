@@ -48,7 +48,9 @@ from ledger_model import (
     candidates,
     canonical,
     description,
+    canonical_tombstone,
     source_id,
+    tombstone,
     variant_of,
     view_of,
 )
@@ -77,12 +79,24 @@ def served(row):
     )
 
 
+def completion(method, attempt):
+    """The keyword arguments the caller passes complete(): forget() passes
+    the tombstone of the description it began."""
+    if method.done_state != "forgotten":
+        return {}
+    return dict(tombstone=tombstone(attempt.source, attempt.revision, attempt.variant))
+
+
 async def call(awaitable):
     """Run one RecordStore call; return (accepted, value or refusal code)."""
     try:
         return True, await awaitable
     except IntentError as exc:
         return False, exc.code
+
+
+class Unreadable(Exception):
+    """rows() refused the store after a step: a forgotten row kept content."""
 
 
 class Harness:
@@ -111,7 +125,11 @@ class Harness:
 
     async def observe(self, sources):
         index = {source_id(s): s for s in range(sources)}
-        rows = {index[r.source]: r for r in await self.store.rows(DATASET)}
+        try:
+            rows = {index[r.source]: r for r in await self.store.rows(DATASET)}
+        except IntentError as exc:
+            # rows() refuses a forgotten row that is not a tombstone.
+            raise Unreadable(exc.code, str(exc)) from exc
         events = {s: [] for s in range(sources)}
         for e in await self.store.events(DATASET):
             events[index[e["identity_data_id"]]].append(e)
@@ -193,7 +211,12 @@ class Harness:
                             world, writer, attempt, method.on_assert_refused, source
                         )
                 ok, _ = await call(
-                    self.store.complete(source, attempt.id, state=method.done_state)
+                    self.store.complete(
+                        source,
+                        attempt.id,
+                        state=method.done_state,
+                        **completion(method, attempt),
+                    )
                 )
                 if not ok:
                     return await self.fail_attempt(
@@ -228,7 +251,12 @@ class Harness:
                         if ok:
                             return ACCEPTED
                     ok, _ = await call(
-                        self.store.complete(source, attempt.id, state=detail)
+                        self.store.complete(
+                            source,
+                            attempt.id,
+                            state=detail,
+                            **completion(METHODS[attempt.method], attempt),
+                        )
                     )
                     if ok:
                         self.completed(world, attempt, detail)
@@ -293,7 +321,17 @@ class Harness:
             why = None if ok else f"assert_pending refused ({code})"
         if ok:
             ok, code = await call(
-                self.store.complete(source, value, state=method.done_state)
+                self.store.complete(
+                    source,
+                    value,
+                    state=method.done_state,
+                    **completion(
+                        method,
+                        Attempt(
+                            value, s, view.revision, view.variant, method.name, True
+                        ),
+                    ),
+                )
             )
             why = None if ok else f"complete refused ({code})"
         await self.restore(snap)
@@ -423,6 +461,9 @@ def p5_explicit_forward_recovery(step):
     event."""
     op, before, after = step.op, step.obs_before, step.obs_after
     completing = isinstance(op, Finish) and op.stage is None and step.accepted
+    forgetting = completing and (
+        step.model_after.sources[op_source(step)].outcome == "forgotten"
+    )
     for s in range(len(step.model_after.sources)):
         old, new = before.rows.get(s), after.rows.get(s)
         if old and (new is None or new.revision < old.revision):
@@ -438,7 +479,10 @@ def p5_explicit_forward_recovery(step):
             if now is None:
                 yield f"S{s + 1} recovery event deleted by {op.label!r}"
             elif e.get("resolved_at") is not None and now != e:
-                yield f"S{s + 1} resolved recovery event changed by {op.label!r}"
+                # The one exception: completing a forget drops the messages
+                # of the forgotten source's events, resolved ones included.
+                if not (forgetting and s == op_source(step) and now == scrubbed(e)):
+                    yield f"S{s + 1} resolved recovery event changed by {op.label!r}"
             elif (
                 e.get("resolved_at") is None
                 and now.get("resolved_at") is not None
@@ -466,6 +510,19 @@ def p5_explicit_forward_recovery(step):
         yield from begin_rules(op, before.rows.get(op.source))
 
 
+def scrubbed(event):
+    """A recovery event as a completed forget leaves it: no message."""
+    event = dict(event)
+    if "message" in event:
+        event["message"] = None
+    if "recovery_attempts" in event:
+        event["recovery_attempts"] = [
+            dict(a, message=None) if "message" in a else a
+            for a in event["recovery_attempts"]
+        ]
+    return event
+
+
 def begin_rules(op, prior):
     method = METHODS[op.method]
     state = prior.state if prior else None
@@ -486,9 +543,9 @@ def begin_rules(op, prior):
     saved = Plan.of(op.source, prior.plan)
     if not (state in method.begins or method.owns(state, saved.operation)):
         yield f"{op.method} began on a {state} {saved.operation} row"
-    for owner in METHODS.values():
-        if owner.owns(state, saved.operation) and owner.name != op.method:
-            yield f"{state} {saved.operation} row resumed through {op.method}"
+    owners = {m.name for m in METHODS.values() if m.owns(state, saved.operation)}
+    if owners and op.method not in owners:
+        yield f"{state} {saved.operation} row resumed through {op.method}"
     if state == "failed" and method.owns(state, saved.operation):
         for name in method.preserved_on_retry:
             if getattr(op.plan, name) != getattr(saved, name):
@@ -503,6 +560,46 @@ def p6_failed_rows_recoverable(step):
             yield f"S{s + 1} failed row did not recover: {why}"
 
 
+# Plan fields that hold identifiers, refs, ranges or file locations, never
+# content. Restated here rather than read from storage.py.
+CONTENT_FREE_PLAN = frozenset(
+    {
+        "operation",
+        "revision",
+        "origin",
+        "method",
+        "original_data_id",
+        "stored_files",
+        "chunk_ids",
+        "identity_edges",
+        "entities",
+        "edges",
+    }
+)
+
+
+def p7_forgotten_rows_hold_no_content(step):
+    """A forgotten row holds no description content: its description is the
+    tombstone of the description its forget began, its plan keeps only
+    identifiers, with no edge property, and no recovery event of the source
+    keeps a message."""
+    for s, ghost in enumerate(step.model_after.sources):
+        row = step.obs_after.rows.get(s)
+        if row is None or row.state != "forgotten":
+            continue
+        if json.loads(row.description) != canonical_tombstone(
+            s, ghost.revision, ghost.variant
+        ):
+            yield f"S{s + 1} is forgotten but its description is not its tombstone"
+        if set(row.plan) - CONTENT_FREE_PLAN or any(
+            "properties" in e for e in row.plan.get("edges", [])
+        ):
+            yield f"S{s + 1} is forgotten but its plan keeps {sorted(row.plan)}"
+        for e in step.obs_after.events[s]:
+            if e != scrubbed(e):
+                yield f"S{s + 1} is forgotten but a recovery event keeps its message"
+
+
 PROPERTIES = [
     p1_withheld_until_complete,
     p2_independent_sources,
@@ -510,6 +607,7 @@ PROPERTIES = [
     p4_one_writer,
     p5_explicit_forward_recovery,
     p6_failed_rows_recoverable,
+    p7_forgotten_rows_hold_no_content,
 ]
 
 
@@ -533,6 +631,8 @@ REACHABLE = (
     "row pending",
     *(f"accepted {m}" for m in METHODS),
     "accepted readd",
+    "forget withdrawn",
+    "forget failed publish",
     "accepted complete",
     "accepted fail",
     "accepted crash",
@@ -552,6 +652,13 @@ def tally(reached, step):
         prior = step.obs_before.rows.get(step.op.source)
         if prior and prior.state == "forgotten":
             reached["accepted readd"] += 1
+    if isinstance(step.op, Begin) and step.op.method == "forget":
+        prior = step.obs_before.rows.get(step.op.source)
+        if prior and prior.state == "withdrawn":
+            reached["forget withdrawn"] += 1
+        if prior and prior.state == "failed":
+            if prior.plan["operation"] == "identity_publish":
+                reached["forget failed publish"] += 1
     if isinstance(step.op, Finish) and step.op.stage is None:
         attempt = step.model_before.writers[step.op.writer].holds
         if attempt.from_failed and METHODS[attempt.method].done_state == "current":
@@ -678,7 +785,17 @@ async def check_ledger(config: Config) -> Result:
                 # Same tables, same observation: skip the rows()/events() reads.
                 after = before
             else:
-                after = await harness.observe(config.sources)
+                try:
+                    after = await harness.observe(config.sources)
+                except Unreadable as exc:
+                    result.failure = Failure(
+                        "P7",
+                        f"rows() refused the store: {exc.args[1]}",
+                        [*path, op.label],
+                        render(world, before),
+                        "unreadable",
+                    )
+                    return
             for s, ghost in enumerate(child.sources):
                 view = (
                     ghost.views[-1]

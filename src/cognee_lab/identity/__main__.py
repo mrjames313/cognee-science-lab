@@ -13,11 +13,11 @@ from .environment import (
     create_root,
     fixture_environment,
     read_embedding,
+    read_fixture,
 )
 from .forget import FAULT_STAGES as FORGET_STAGES
 from .glossary_fixture import CASES as GLOSSARY_CASES
 from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
-from .glossary_fixture import INFO as GLOSSARY_INFO
 from .glossary_fixture import REFRESH_FAULT
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
@@ -117,6 +117,18 @@ def main():
         ],
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="forget only: report what the forget would remove, with the token "
+        "to confirm, and write nothing",
+    )
+    parser.add_argument(
+        "--confirm",
+        metavar="TOKEN",
+        help="forget only: the dry run's token, required when the forget "
+        "removes other sources' decisions",
+    )
+    parser.add_argument(
         "--dependent",
         action="store_true",
         help="multi-fixture only: doc02 lists doc01's text and private singleton "
@@ -144,6 +156,10 @@ def main():
         )
     if args.dependent and args.command != "multi-fixture":
         parser.error("--dependent applies to multi-fixture only")
+    if (args.dry_run or args.confirm) and args.command != "forget":
+        parser.error("--dry-run and --confirm apply to forget only")
+    if args.dry_run and (args.confirm or args.fault_stage):
+        parser.error("A dry run takes neither --confirm nor --fault-stage")
     creating = args.command in CREATION_COMMANDS
     if creating and root.exists():
         parser.error("Fixture root already exists; choose a new directory")
@@ -153,10 +169,13 @@ def main():
     made = False
     try:
         if creating:
-            create_root(root, args.embedding or "env")
+            create_root(root, args.embedding or "env", args.command)
             made = True
         elif error := _reopen_error(args, root):
             parser.error(error)
+        kind = args.command if creating else read_fixture(root)
+        if kind is None and args.command in {"reconcile", "forget", "readd"}:
+            parser.error("Root predates fixture kinds; regenerate it")
         environment.enter_context(fixture_environment(root))
     except ValueError as exc:
         if made:
@@ -166,7 +185,7 @@ def main():
     with environment:
         if args.command in GLOSSARY_COMMANDS or (
             args.command in {"reconcile", "forget", "readd"}
-            and (root / GLOSSARY_INFO).exists()
+            and kind == "glossary-fixture"
         ):
             from .glossary_fixture import run
         elif args.command in OCCURRENCE_COMMANDS:
@@ -182,7 +201,7 @@ def main():
             "forget",
             "readd",
         } or (
-            args.command == "reconcile" and (root / "multi-fixture-info.json").exists()
+            args.command == "reconcile" and kind in {"multi-fixture", "chunked-fixture"}
         ):
             from .multisource import run
         else:
@@ -212,6 +231,9 @@ def main():
             print(json.dumps(report, default=str))
             raise SystemExit(1) from exc
         print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+        # A forget that completed but left a dependent unrevised.
+        if result.get("dependents_failed"):
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -300,19 +300,30 @@ async def validate_inputs(
     return drift
 
 
-def validate_uses(sources: list[IdentitySource]) -> None:
-    """Build a transient UUID-use view; singleton declarations count as reusable."""
+def validate_uses(sources: list[IdentitySource], tombstones=()) -> None:
+    """Build a transient UUID-use view; singleton declarations count as
+    reusable. A forgotten source's tombstone keeps its last revision's
+    mention and reusable UUIDs, which count too."""
     mentions, reusable = {}, set()
-    for source in sources:
-        local_mentions = {g.entity_id for g in source.mention_groups.values()}
-        reusable.update(set(source.entity_constructions) - local_mentions)
-        for key, group in source.mention_groups.items():
-            identity = (source.identity_data_id, key)
-            if group.entity_id in mentions and mentions[group.entity_id] != identity:
+    uses = [
+        (
+            s.identity_data_id,
+            {k: g.entity_id for k, g in s.mention_groups.items()},
+            set(s.entity_constructions),
+        )
+        for s in sources
+    ] + [
+        (t.identity_data_id, dict(t.mention_ids), set(t.entity_ids)) for t in tombstones
+    ]
+    for identity_data_id, groups, declared in uses:
+        reusable.update(declared - set(groups.values()))
+        for key, entity_id in groups.items():
+            identity = (identity_data_id, key)
+            if entity_id in mentions and mentions[entity_id] != identity:
                 raise IntentError(
                     "incompatible_group", "Mention UUID belongs to another group"
                 )
-            mentions[group.entity_id] = identity
+            mentions[entity_id] = identity
     if set(mentions) & reusable:
         raise IntentError(
             "incompatible_use", "UUID used as both mention and reusable Entity"

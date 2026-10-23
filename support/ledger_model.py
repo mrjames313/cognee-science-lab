@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Literal, NamedTuple
 from uuid import NAMESPACE_URL, uuid5
 
-from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.models import IdentitySource, Tombstone
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURE = REPO / "tests/fixtures/identity/cognee_identity_source_example.json"
@@ -64,11 +64,29 @@ def canonical(s, revision, variant):
 
 
 def variant_of(s, saved):
-    """Which variant a saved description (a parsed JSON dict) is."""
+    """Which variant a saved description (a parsed JSON dict) is. A forgotten
+    row's tombstone keeps the original text digest, which tells them apart."""
     for variant in (0, 1):
         if saved == canonical(s, saved["revision"], variant):
             return variant
+        if saved == canonical_tombstone(s, saved["revision"], variant):
+            return variant
     raise ValueError(f"S{s + 1} saved a description the checker never sent")
+
+
+# forget() stamps the time it completed; the checker sends one fixed time.
+FORGOTTEN_AT = "2026-10-23T00:00:00+00:00"
+
+
+@cache
+def tombstone(s, revision, variant=0):
+    """The tombstone forget() completes with for this description."""
+    return Tombstone.of(description(s, revision, variant), forgotten_at=FORGOTTEN_AT)
+
+
+@cache
+def canonical_tombstone(s, revision, variant):
+    return json.loads(tombstone(s, revision, variant).model_dump_json())
 
 
 @dataclass(frozen=True)
@@ -345,7 +363,9 @@ class Method:
     begins: dict[str | None, int]
     recovers: str | None  # P6: the saved plan operation it resumes
     owns_recovery: bool  # a failed row with the `recovers` plan resumes only here
-    owns_terminal: str | None  # a row in this terminal state begins only here
+    # Terminal row states that only the methods listing them begin on: a
+    # withdrawn row is shared by withdraw and forget.
+    terminals: frozenset[str]
     requires_plan: bool  # begin() must carry a plan of the `recovers` operation
     preserved_on_retry: tuple[str, ...]  # Plan fields a retry keeps
 
@@ -356,8 +376,9 @@ class Method:
         )
 
     def owns(self, state, operation):
-        """Only this method may begin on a row in this state and saved plan."""
-        return state == self.owns_terminal or (
+        """This method is one of those that alone may begin on a row in this
+        state and saved plan."""
+        return state in self.terminals or (
             state == "failed" and self.owns_recovery and operation == self.recovers
         )
 
@@ -376,7 +397,7 @@ METHODS = {
             begins={None: 1, "forgotten": 1},
             recovers=None,
             owns_recovery=False,
-            owns_terminal="forgotten",
+            terminals=frozenset({"forgotten"}),
             requires_plan=False,
             preserved_on_retry=(),
         ),
@@ -391,7 +412,7 @@ METHODS = {
             begins={"current": 0, "failed": 0},
             recovers="publish",
             owns_recovery=False,
-            owns_terminal=None,
+            terminals=frozenset(),
             requires_plan=False,
             preserved_on_retry=(),
         ),
@@ -406,7 +427,7 @@ METHODS = {
             begins={"current": 1},
             recovers="replace",
             owns_recovery=True,
-            owns_terminal=None,
+            terminals=frozenset(),
             requires_plan=True,
             preserved_on_retry=("previous", "change"),
         ),
@@ -421,11 +442,11 @@ METHODS = {
             begins={"current": 0, "failed": 0, "withdrawn": 0},
             recovers="withdraw",
             owns_recovery=True,
-            owns_terminal="withdrawn",
+            terminals=frozenset({"withdrawn"}),
             requires_plan=False,
             preserved_on_retry=(),
         ),
-        Method(  # forget()
+        Method(  # forget(): any source, current, withdrawn or failed
             name="forget",
             intents=forget_intents,
             done_state="forgotten",
@@ -433,10 +454,10 @@ METHODS = {
             on_assert_refused=None,
             fail_stage="forget_contributions",
             ack_stage="forget_verification",
-            begins={"current": 0},
+            begins={"current": 0, "failed": 0, "withdrawn": 0},
             recovers="forget",
             owns_recovery=True,
-            owns_terminal=None,
+            terminals=frozenset({"withdrawn"}),
             requires_plan=True,
             preserved_on_retry=(),
         ),

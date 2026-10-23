@@ -160,6 +160,7 @@ def test_env_creation_records_the_operator_profile_and_no_secret(tmp_path):
     assert marker == {
         "kind": MARKER_KIND,
         "embedding": {**ENV_RECORD, "dimensions": 64},
+        "fixture": "fixture",
     }
     on_disk = [p for p in root.rglob("*") if p.is_file()]
     assert not any("operator-secret" in p.read_text(errors="ignore") for p in on_disk)

@@ -12,7 +12,7 @@ from sqlalchemy import Integer, String, Text, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from .models import IdentitySource
+from .models import IdentitySource, Tombstone
 from .validation import IntentError
 
 
@@ -48,11 +48,52 @@ class RecoveryEvent(Base):
 
 
 RETIRED_STATES = frozenset({"withdrawn", "forgotten"})
+# What a forgotten row's plan keeps: identifiers, refs and file locations.
+# Every edge property goes, since a fact or chunk edge quotes the document.
+FORGOTTEN_PLAN_FIELDS = (
+    "operation",
+    "revision",
+    "origin",
+    "method",
+    "original_data_id",
+    "stored_files",
+    "chunk_ids",
+    "identity_edges",
+    "entities",
+    "edges",
+)
+FORGOTTEN_EDGE_FIELDS = ("source", "target", "relation", "refs")
+
+
+def scrubbed_plan(plan: dict) -> dict:
+    """A forget plan as its forgotten row keeps it, by whitelist."""
+    kept = {k: plan[k] for k in FORGOTTEN_PLAN_FIELDS if k in plan}
+    if "edges" in kept:
+        kept["edges"] = [
+            {k: e[k] for k in FORGOTTEN_EDGE_FIELDS if k in e} for e in kept["edges"]
+        ]
+    return kept
+
+
+def scrubbed_event(info: dict) -> dict:
+    """A recovery event of a forgotten source: an error message can quote
+    content, so it goes; ids, stage, codes and attempts stay."""
+    info = dict(info)
+    if "message" in info:
+        info["message"] = None
+    if "recovery_attempts" in info:
+        info["recovery_attempts"] = [
+            dict(a, message=None) if "message" in a else a
+            for a in info["recovery_attempts"]
+        ]
+    return info
 
 
 @dataclass(frozen=True)
 class PublicationRow:
-    """One saved publication, as RecordStore.rows() and row() read it."""
+    """One saved publication, as RecordStore.rows() and row() read it. A
+    forgotten row's description is its tombstone; a forgotten row from
+    before tombstones is refused here."""
 
     dataset: str
     source: str
@@ -65,6 +106,11 @@ class PublicationRow:
 
     @classmethod
     def of(cls, record: Publication) -> "PublicationRow":
+        if record.state == "forgotten":
+            try:
+                Tombstone.model_validate_json(record.description)
+            except ValueError:
+                raise IntentError(*OLD_FORGOTTEN_ROW) from None
         return cls(
             dataset=record.dataset,
             source=record.source,
@@ -84,6 +130,11 @@ class PublicationRow:
     @property
     def is_retired(self) -> bool:
         return self.state in RETIRED_STATES
+
+    @property
+    def tombstone(self) -> Tombstone:
+        """What a forgotten row keeps of its source."""
+        return Tombstone.model_validate_json(self.description)
 
     @property
     def resumed_by(self) -> str | None:
@@ -130,7 +181,12 @@ PRESERVE_REPLACEMENT = Refusal(
     "recovery_plan", "Preserve the saved replacement retirement plan"
 )
 FORGET_STATE = Refusal(
-    "forget_state", "Forget a current source, or retry its failed forget"
+    "forget_state",
+    "Forget a current, withdrawn or failed-publication source, or retry its failed forget",
+)
+OLD_FORGOTTEN_ROW = Refusal(
+    "forgotten_format",
+    "A forgotten row from before tombstones is not read; regenerate this development root",
 )
 NEW_REVISION = Refusal(
     "revision_sequence", "New description must advance exactly one revision"
@@ -187,11 +243,14 @@ TRANSITIONS = {
         {"reconcile": 0, "replace": 1, "withdraw": 0, "forget": 0},
         sequence=REPLACEMENT_REVISION,
     ),
-    ("failed", None): lineage_row({"reconcile": 0, "withdraw": 0}),
+    # A failed publication: a first one, a reconcile or a re-add.
+    ("failed", None): lineage_row({"reconcile": 0, "withdraw": 0, "forget": 0}),
     ("failed", "identity_withdraw"): owned("withdraw", FAILED_WITHDRAWAL),
     ("failed", "identity_forget"): owned("forget", FAILED_FORGET),
     ("failed", "identity_replace"): owned("replace", FAILED_REPLACEMENT),
-    ("withdrawn", None): Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE),
+    ("withdrawn", None): Transition(
+        {"withdraw": 0, "forget": 0}, otherwise=WITHDRAWN_SOURCE
+    ),
     ("forgotten", None): Transition(
         {"publish": 1}, otherwise=FORGOTTEN_SOURCE, sequence=READD_REVISION
     ),
@@ -476,13 +535,26 @@ class RecordStore:
             await session.commit()
         return event_id
 
-    async def complete(self, source, attempt, *, state="current"):
+    async def complete(self, source, attempt, *, state="current", tombstone=None):
+        """Acknowledge the pending attempt. A forget completes with the
+        source's tombstone, which replaces its description in the same
+        transaction; its plan keeps only identifiers, and every recovery
+        event of the source loses its message."""
         if state not in {"current", "withdrawn", "forgotten"}:
             raise ValueError("Unsupported completion state")
+        if (state == "forgotten") != (tombstone is not None):
+            raise ValueError("A forget, and only a forget, completes with a tombstone")
         dataset, sid = str(source.dataset_id), str(source.identity_data_id)
         values = {"state": state}
         if state == "current":
             values["verified_revision"] = source.revision
+        if tombstone is not None:
+            if (str(tombstone.dataset_id), str(tombstone.identity_data_id)) != (
+                dataset,
+                sid,
+            ) or tombstone.revision != source.revision:
+                raise ValueError("The tombstone names another source or revision")
+            values["description"] = tombstone.model_dump_json()
         async with self.session_factory() as session:
             result = await session.execute(
                 update(Publication)
@@ -499,6 +571,9 @@ class RecordStore:
                 raise IntentError(
                     "stale_attempt", "Cannot acknowledge stale/nonpending attempt"
                 )
+            if tombstone is not None:
+                row = await session.get(Publication, (dataset, sid))
+                row.plan = encode(scrubbed_plan(json.loads(row.plan)))
             await session.execute(
                 update(Writer)
                 .where(
@@ -524,5 +599,7 @@ class RecordStore:
                     )
                     if info.get("recovery_attempts"):
                         info["recovery_attempts"][-1]["outcome"] = "verified"
-                    event.details = encode(info)
+                if tombstone is not None:
+                    info = scrubbed_event(info)
+                event.details = encode(info)
             await session.commit()

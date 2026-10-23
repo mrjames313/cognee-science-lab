@@ -204,8 +204,11 @@ async def current_sources(root, publisher):
     for label, path in manifest["sources"].items():
         source = IdentitySource.model_validate_json((root / path).read_text())
         row = rows.get(str(source.identity_data_id))
+        # A tombstone keeps no description: a forgotten source reads its file.
         found[label] = (
-            IdentitySource.model_validate_json(row.description) if row else source
+            source
+            if row is None or row.state == "forgotten"
+            else IdentitySource.model_validate_json(row.description)
         )
     return found
 
@@ -433,7 +436,11 @@ async def reconcile(publisher, label, selected):
 
     from .revisions import replace_one
 
+    from .forget_fixture import reconcile_forget
+
     row = await publisher.records.row(selected)
+    if (finished := await reconcile_forget(publisher, row, selected)) is not None:
+        return dict(no_refresh(), **finished)
     if row.resumed_by == "replace" and label == "glossary":
         return await change_glossary(
             publisher,
@@ -467,7 +474,16 @@ async def snapshot(publisher, root, query):
     found = {}
     for label, source in sources.items():
         row = by_source[str(source.identity_data_id)]
-        # A withdrawn or forgotten source has no registered snapshot to read.
+        if row.state == "forgotten":
+            found[label] = dict(
+                identity_data_id=row.source,
+                state=row.state,
+                saved_revision=row.revision,
+                verified_revision=row.verified_revision,
+                tombstone=row.tombstone.model_dump(mode="json"),
+            )
+            continue
+        # A withdrawn source has no registered snapshot to read.
         registered = None if row.is_retired else await read_registered(source)
         reads = (
             set()
@@ -497,19 +513,25 @@ async def snapshot(publisher, root, query):
             },
         )
     glossary = sources["glossary"]
-    text = (await read_texts(glossary))["glossary"]
-    entry = hc_entry(text)
+    # A forgotten glossary's Data item is gone, so it has no text to show.
+    erased = by_source[str(glossary.identity_data_id)].state == "forgotten"
+    text = None if erased else (await read_texts(glossary))["glossary"]
+    entry = hc_entry(text) if text is not None else None
     dataset = glossary.dataset_id
     return dict(
         sources=found,
         glossary=dict(
             text=text,
-            text_sha256=text_digest(text),
-            hc_entry=dict(
-                text=entry.group(),
-                start=entry.start(),
-                end=entry.end(),
-                text_sha256=text_digest(entry.group()),
+            text_sha256=text_digest(text) if text is not None else None,
+            hc_entry=(
+                dict(
+                    text=entry.group(),
+                    start=entry.start(),
+                    end=entry.end(),
+                    text_sha256=text_digest(entry.group()),
+                )
+                if entry
+                else None
             ),
         ),
         **await withholding_status(
@@ -582,24 +604,27 @@ async def run(args, root):
         elif args.command == "reconcile":
             refresh = await reconcile(publisher, args.source, selected)
         elif args.command == "forget":
-            await publisher.forget(
-                selected,
-                expected_revision=args.expected_revision,
-                origin="test/fault_injection" if args.fault_stage else "test",
-                fault_stage=args.fault_stage,
+            from .forget_fixture import forget_command
+
+            refresh = dict(
+                no_refresh(),
+                **await forget_command(publisher, root, args, args.source, selected),
             )
+            if args.dry_run:
+                return refresh
         elif args.command == "readd":
             from .forget_fixture import readd
 
-            if args.source != "doc01":
-                raise IntentError("fixture_scope", "readd re-adds doc01")
+            manifest = json.loads((root / INFO).read_text())
             await readd(
                 publisher,
                 root,
-                "doc01",
-                selected,
+                args.source,
+                root / ("glossary.txt" if args.source == "glossary" else "source.txt"),
+                root / manifest["sources"][args.source],
                 expected_revision=args.expected_revision,
                 fault_stage=args.fault_stage,
+                semantics=args.source != "glossary",
             )
         elif args.command == "refresh-dependents":
             refresh = await refresh_dependents(publisher, refresh_fault)

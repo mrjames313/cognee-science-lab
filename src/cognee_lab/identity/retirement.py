@@ -8,12 +8,32 @@ retirement takes away, and `verify_survivors` checks that every other owner
 kept its refs and contributions.
 """
 
-from typing import TypedDict
+from typing import NamedTuple, TypedDict
 from uuid import UUID
 
-from .models import CorpusObjectInput, IdentitySource, SourceTextInput
+from .models import CorpusObjectInput, IdentitySource, SourceTextInput, Tombstone
 from .native import edge_metadata
 from .validation import IntentError
+
+
+class SourceIds(NamedTuple):
+    """Who a source is: what ownership and consumption are decided by. A
+    saved description and a forgotten source's tombstone both give it."""
+
+    dataset_id: UUID
+    identity_data_id: UUID
+    original_data_id: UUID
+
+
+def source_ids(source: "IdentitySource | Tombstone | SourceIds") -> SourceIds:
+    if isinstance(source, SourceIds):
+        return source
+    if isinstance(source, Tombstone):
+        return SourceIds(
+            source.dataset_id, source.identity_data_id, source.original_data_id
+        )
+    doc = source.inputs[source.original_input_ref]
+    return SourceIds(source.dataset_id, source.identity_data_id, doc.data_id)
 
 
 class Dependent(TypedDict):
@@ -31,11 +51,14 @@ def consumes(reader, target, sole_owned=frozenset()):
     Entity in `sole_owned`. A chunk or span input names its document through
     a source_text input of the same description, so the text check covers
     it."""
-    doc = target.inputs[target.original_input_ref]
+    ids = source_ids(target)
     found = []
     for key, item in reader.inputs.items():
         if isinstance(item, SourceTextInput):
-            consumed = (item.dataset_id, item.data_id) == (doc.dataset_id, doc.data_id)
+            consumed = (item.dataset_id, item.data_id) == (
+                ids.dataset_id,
+                ids.original_data_id,
+            )
             consumed_id = item.data_id
         elif isinstance(item, CorpusObjectInput):
             consumed = item.entity_id in sole_owned
@@ -138,16 +161,17 @@ def owned_by(source, *, document):
     with `document`, its document and the document's chunks."""
     from cognee.infrastructure.databases.provenance import parse_source_ref_key
 
-    own = {source.identity_data_id}
+    ids = source_ids(source)
+    own = {ids.identity_data_id}
     if document:
-        own.add(source.inputs[source.original_input_ref].data_id)
+        own.add(ids.original_data_id)
 
     def own_ref(ref):
         try:
             parsed = parse_source_ref_key(ref)
         except ValueError:
             return False
-        return parsed.dataset_id == source.dataset_id and parsed.data_id in own
+        return parsed.dataset_id == ids.dataset_id and parsed.data_id in own
 
     return own_ref
 

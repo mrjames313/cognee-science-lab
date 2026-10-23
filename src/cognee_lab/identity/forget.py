@@ -1,4 +1,4 @@
-"""Forget a source that nothing depends on.
+"""Forget a source: erase it, then remove what other sources based on it.
 
 Forget removes the original document and the generated identity source through
 Cognee's native document deletion, and everything only they owned: chunks and
@@ -6,31 +6,37 @@ their vectors, the document node, markers, the facts and evidence the chunks
 produced, the mention Entities, the identity edges and contributions, and the
 Entities only this source declared. An Entity or edge another source owns
 survives with that source's refs and contributions. The ledger row ends as
-`forgotten` at its last revision, so a re-add continues at the next revision.
-`withdraw` is the sibling orchestration; `retirement.py` holds what both use.
+`forgotten` with a tombstone that keeps identifiers only, so a re-add
+continues at the next revision and never derives a retired UUID again.
+
+A forget that changes another source's decisions needs the caller's
+confirmation: the token of its impact (`erasure.py`). After the source is
+erased, each dependent gets a removal revision of its own. Any source can be
+forgotten: current, withdrawn, or one whose publication failed. `withdraw`
+is the sibling orchestration; `retirement.py` holds what both use.
 """
 
 from uuid import UUID
 
-from .models import ChunkInput
+from .models import ChunkInput, IdentitySource, Tombstone
 from .native import require_graph_methods
 from .retirement import (
     contribution_triples,
-    dependents,
     has_contribution,
     owned_by,
     ownership_snapshot,
     released,
-    removed_entities,
     retired_sources,
+    source_ids,
     verify_survivors,
     withdraw_contributions,
 )
 from .stages import Operation, run_attempt, saved_row
-from .storage import FORGET_STATE, FORGOTTEN_SOURCE, STALE_REVISION
+from .storage import FORGET_STATE, FORGOTTEN_SOURCE, STALE_REVISION, now
 from .validation import IntentError
 
 STAGES = (
+    "forget_impact",
     "forget_contributions",
     "forget_identity",
     "forget_document",
@@ -43,8 +49,11 @@ COMMITTED_FAULTS = {
     "forget_identity_committed": "forget_identity",
     "forget_document_committed": "forget_document",
 }
+# A fault in a dependent's removal revision after the forget completed: it
+# fails at replace_registered, as REFRESH_FAULT does for a refresh.
+DEPENDENTS_FAULT = "forget_dependents"
 FORGET = Operation("forget", "Forget", STAGES, "forgotten")
-FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS)
+FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS, DEPENDENTS_FAULT)
 
 
 async def owned_objects(graph, source):
@@ -180,20 +189,6 @@ async def forget_plan(publisher, source):
     )
 
 
-def refuse_dependents(source, plan, rows):
-    """Refuse while a saved source consumed this document or an Entity the
-    forget removes. Returns the removed Entities."""
-    removed = removed_entities(source, plan, rows)
-    found = dependents(source, rows, removed)
-    if found:
-        raise IntentError(
-            "dependent_source",
-            "Another saved identity source consumed this document or an Entity only it owns; reconsider the dependents first",
-            details=dict(dependents=found),
-        )
-    return removed
-
-
 async def data_present(data_id, dataset_id):
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
@@ -223,22 +218,22 @@ async def evidence_rows(dataset_id, data_id):
 
 async def remains(publisher, source, plan):
     """What is left of a source whose forget began. Every value is false,
-    empty or zero once the forget is complete."""
+    empty or zero once the forget is complete. `source` is its description
+    or, once forgotten, its tombstone."""
     graph, vector = publisher.graph, publisher.vector
-    doc = source.inputs[source.original_input_ref]
-    nodes, edges = await owned_objects(graph, source)
+    ids = source_ids(source)
+    nodes, edges = await owned_objects(graph, ids)
     return dict(
-        original_data_present=await data_present(doc.data_id, source.dataset_id),
-        identity_data_present=await data_present(
-            source.identity_data_id, source.dataset_id
-        ),
+        original_data_present=await data_present(ids.original_data_id, ids.dataset_id),
+        identity_data_present=await data_present(ids.identity_data_id, ids.dataset_id),
         stored_files_present=[
             location
             for locations in plan["stored_files"].values()
             for location in locations
             if await stored_file_present(location, plan["stored_files"])
         ],
-        document_node_present=await graph.get_node(str(doc.data_id)) is not None,
+        document_node_present=await graph.get_node(str(ids.original_data_id))
+        is not None,
         chunks_present=[
             c for c in plan["chunk_ids"] if await graph.get_node(c) is not None
         ],
@@ -247,9 +242,9 @@ async def remains(publisher, source, plan):
             for c in plan["chunk_ids"]
             if await vector.retrieve("DocumentChunk_text", [c])
         ],
-        evidence_rows=await evidence_rows(source.dataset_id, doc.data_id),
+        evidence_rows=await evidence_rows(ids.dataset_id, ids.original_data_id),
         identity_contribution_present=await has_contribution(
-            graph, source, contribution_triples(plan)
+            graph, ids, contribution_triples(plan)
         ),
         owned_nodes=len(nodes),
         owned_edges=len(edges),
@@ -274,11 +269,108 @@ async def verify_forgotten(publisher, source, plan):
     )
 
 
+async def clear_withholdings(publisher, source):
+    """Delete the withholding rows this source holds as a dependent, and the
+    rows its own edits wrote for other sources: their input is gone."""
+    sid = str(source.identity_data_id)
+    table = await publisher.withholdings.rows(source.dataset_id)
+    await publisher.withholdings.replace(
+        [
+            (w.dataset, w.source, w.input_ref)
+            for w in table
+            if sid in (w.source, w.consumed)
+        ],
+        [],
+    )
+
+
+def forgettable(row):
+    """Refuse, earlier than begin(), a row forget neither begins nor resumes:
+    a pending one, or a failed replacement or withdrawal, which only its own
+    method resumes. begin() refuses the same rows under the reservation."""
+    retry = row.resumed_by == "forget"
+    fresh = row.state in ("current", "withdrawn") or (
+        row.state == "failed" and row.resumed_by is None
+    )
+    if not (retry or fresh):
+        raise IntentError(*FORGET_STATE)
+    return retry
+
+
+async def plan_for(publisher, source, row):
+    """A failed forget's saved plan, which keeps the ownership the first
+    attempt found before native deletion detached or removed it; otherwise a
+    new plan from the graph."""
+    if not forgettable(row):
+        return await forget_plan(publisher, source)
+    plan = dict(row.plan)
+    if "stored_files" not in plan:
+        raise IntentError(
+            "recovery_plan",
+            "Failed forget plan predates stored_files; its sweep cannot be finished",
+        )
+    return plan
+
+
+async def preview(publisher, source, *, expected_revision, caller_files=()):
+    """The dry run: what `forget` would do, with the token it would need.
+    Writes nothing. On a forgotten source, the dependents it has not revised
+    yet."""
+    from .erasure import impact, report, unfinished
+
+    records = publisher.records
+    row = await saved_row(records, source, "No saved publication to forget")
+    if row.revision != expected_revision:
+        raise IntentError(*STALE_REVISION)
+    rows = await records.rows()
+    if row.state == "forgotten":
+        return dict(
+            dry_run=True,
+            forgotten=True,
+            unfinished=[r.source for r in unfinished(row.tombstone, rows)],
+            caller_files=[str(f) for f in caller_files],
+        )
+    description = IdentitySource.model_validate_json(row.description)
+    plan = await plan_for(publisher, description, row)
+    return report(
+        impact(description, plan, rows),
+        plan=plan,
+        description=description,
+        events=await records.events(description.dataset_id),
+        caller_files=caller_files,
+    )
+
+
+def confirmed(found, plan, confirm, retry):
+    """The forget may proceed: it affects no other source and no token was
+    given, or the given token is this impact's. A retry without a token
+    keeps the impact its first attempt confirmed."""
+    if confirm is None and not found.dependents:
+        return True
+    if confirm is None and retry:
+        return plan.get("impact_token") == found.token
+    return confirm == found.token
+
+
 async def forget(
-    publisher, source, *, expected_revision, origin="runtime", fault_stage=None
+    publisher,
+    source,
+    *,
+    expected_revision,
+    confirm=None,
+    caller_files=(),
+    origin="runtime",
+    fault_stage=None,
 ):
+    """Erase the source under one reservation, then write each dependent's
+    removal revision under its own. On a forgotten source, finish the
+    dependents a completed forget did not revise; refuse when none is left.
+    Returns the attempt and the dependents' outcome; a dependent failure is
+    reported beside the completed forget, not raised."""
     from cognee import forget as native_forget
     from cognee.modules.users.methods import get_default_user
+
+    from .erasure import impact, remove_dependents, report, unfinished
 
     graph, records = publisher.graph, publisher.records
     require_graph_methods(
@@ -295,6 +387,9 @@ async def forget(
             "add_edges",
         ],
     )
+    dependents_fault = "replace_registered" if fault_stage == DEPENDENTS_FAULT else None
+    if fault_stage == DEPENDENTS_FAULT:
+        fault_stage = None
     row = await saved_row(
         records,
         source,
@@ -303,33 +398,60 @@ async def forget(
     )
     if row.revision != expected_revision:
         raise IntentError(*STALE_REVISION)
-    retry = row.resumed_by == "forget"
-    if retry:
-        # The saved plan keeps the ownership the first attempt found, which
-        # native deletion has since detached or removed.
-        plan = dict(row.plan)
-        if "stored_files" not in plan:
-            raise IntentError(
-                "recovery_plan",
-                "Failed forget plan predates stored_files; its sweep cannot be finished",
-            )
-    else:
-        # Earlier than begin() on purpose, before the plan reads the graph. On
-        # withdrawn, pending and other owners' failed rows begin() differs.
-        if row.state == "forgotten":
+    if row.state == "forgotten":
+        if not unfinished(row.tombstone, await records.rows()):
             raise IntentError(*FORGOTTEN_SOURCE)
-        if row.state != "current":
-            raise IntentError(*FORGET_STATE)
-        plan = await forget_plan(publisher, source)
-    refuse_dependents(source, plan, await records.rows())
+        removal = await remove_dependents(
+            publisher, row.tombstone, fault_stage=dependents_fault
+        )
+        return dict(attempt_id=None, state="forgotten", **removal)
+    retry = forgettable(row)
+    plan = await plan_for(publisher, source, row)
+    found = impact(source, plan, await records.rows())
+    if not confirmed(found, plan, confirm, retry):
+        code, message = (
+            (
+                "confirmation_required",
+                "This forget removes other sources' decisions; review the report and rerun with --confirm <token>",
+            )
+            if confirm is None
+            else (
+                "impact_changed",
+                "The impact changed since the token was issued; rerun the dry run and confirm its token",
+            )
+        )
+        raise IntentError(
+            code,
+            message,
+            details=report(
+                found,
+                plan=plan,
+                description=source,
+                events=await records.events(source.dataset_id),
+                caller_files=caller_files,
+            ),
+        )
+    plan.update(
+        impact_token=found.token,
+        dependents=[d.identity_data_id for d in found.dependents],
+    )
     user = None
+
+    async def check_impact(_):
+        # Again under the writer reservation, from the saved plan: a source
+        # may have published or changed between the check above and begin.
+        nonlocal found
+        found = impact(source, plan, await records.rows())
+        if found.token != plan["impact_token"]:
+            raise IntentError(
+                "impact_changed",
+                "The impact changed since the token was issued; rerun the dry run and confirm its token",
+            )
 
     async def contributions(_):
         nonlocal user
-        # Repeat under the writer reservation: a consumer may have published
-        # between the check above and begin.
-        refuse_dependents(source, plan, await records.rows())
         await withdraw_contributions(graph, source, contribution_triples(plan))
+        await clear_withholdings(publisher, source)
         user = await get_default_user()
 
     # Native deletion of a Data item removes every graph and vector object
@@ -346,10 +468,18 @@ async def forget(
 
         return stage
 
-    async def verification(_):
+    async def verification(run):
         await verify_forgotten(publisher, source, plan)
+        run.completion = dict(
+            tombstone=Tombstone.of(
+                source,
+                forgotten_at=now(),
+                removed_entity_ids=[UUID(e) for e in found.removed_entities],
+                impact_token=found.token if found.dependents else None,
+            )
+        )
 
-    doc = source.inputs[source.original_input_ref]
+    ids = source_ids(source)
     attempt, _ = await run_attempt(
         FORGET,
         records,
@@ -358,9 +488,10 @@ async def forget(
         zip(
             STAGES,
             (
+                check_impact,
                 contributions,
-                native_delete(source.identity_data_id),
-                native_delete(doc.data_id),
+                native_delete(ids.identity_data_id),
+                native_delete(ids.original_data_id),
                 verification,
             ),
             strict=True,
@@ -369,4 +500,8 @@ async def forget(
         origin=origin,
         fault_stage=fault_stage,
     )
-    return dict(attempt_id=attempt, state="forgotten")
+    row = await records.row(source)
+    removal = await remove_dependents(
+        publisher, row.tombstone, fault_stage=dependents_fault
+    )
+    return dict(attempt_id=attempt, state="forgotten", **removal)

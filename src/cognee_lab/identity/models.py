@@ -251,3 +251,62 @@ class IdentitySource(Strict):
             ):
                 raise ValueError("unknown producer/input reference")
         return self
+
+
+class Tombstone(Strict):
+    """What a forgotten source's row keeps: identifiers, digests, its last
+    revision and when it was forgotten, never content. `mention_ids` and
+    `entity_ids` are the last revision's mention and reusable Entity UUIDs,
+    which a re-add may not use again. `removed_entity_ids` are the Entities
+    the forget removed; a dependent still citing one of them, or the
+    document, has not been revised yet. `impact_token` is the confirmed
+    impact on other sources, None when the forget affected none."""
+
+    kind: Literal["identity_source_tombstone"]
+    dataset_id: UUID
+    identity_data_id: UUID
+    original_data_id: UUID
+    revision: int = Field(ge=1)
+    text_sha256: Digest
+    description_sha256: Digest
+    mention_ids: dict[Key, UUID]
+    entity_ids: list[UUID]
+    removed_entity_ids: list[UUID]
+    impact_token: Digest | None
+    forgotten_at: str
+
+    @classmethod
+    def of(
+        cls,
+        source: IdentitySource,
+        *,
+        forgotten_at: str,
+        removed_entity_ids=(),
+        impact_token: str | None = None,
+    ) -> Tombstone:
+        from hashlib import sha256
+
+        doc = source.inputs[source.original_input_ref]
+        mentions = {k: g.entity_id for k, g in source.mention_groups.items()}
+        return cls(
+            kind="identity_source_tombstone",
+            dataset_id=source.dataset_id,
+            identity_data_id=source.identity_data_id,
+            original_data_id=doc.data_id,
+            revision=source.revision,
+            text_sha256=doc.text_sha256,
+            description_sha256=sha256(
+                source.model_dump_json().encode("utf-8")
+            ).hexdigest(),
+            mention_ids=mentions,
+            entity_ids=sorted(
+                set(source.entity_constructions) - set(mentions.values()), key=str
+            ),
+            removed_entity_ids=sorted(set(removed_entity_ids), key=str),
+            impact_token=impact_token,
+            forgotten_at=forgotten_at,
+        )
+
+    @property
+    def used_entity_ids(self) -> frozenset[UUID]:
+        return frozenset(self.mention_ids.values()) | frozenset(self.entity_ids)

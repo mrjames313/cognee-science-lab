@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.storage import (
     TRANSITIONS,
     PublicationRow,
@@ -113,6 +113,10 @@ async def test_withdrawal_guard_and_completion(source_payload):
     assert row.state == "withdrawn" and row.verified_revision == 0
 
 
+def tombstone_of(source):
+    return Tombstone.of(source, forgotten_at="2026-10-23T00:00:00+00:00")
+
+
 @pytest.mark.asyncio
 async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_payload):
     source_payload["dataset_id"] = str(uuid4())
@@ -124,22 +128,51 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
     await store.initialize()
     attempt = await store.begin(source, expected_revision=0, plan={})
     await store.complete(source, attempt)
-    plan = {"operation": "identity_forget"}
+    plan = {
+        "operation": "identity_forget",
+        "original_data_id": "x",
+        "edges": [
+            dict(
+                source="a",
+                target="b",
+                relation="is_part_of",
+                refs=["r"],
+                properties={"edge_text": "The first words of the document"},
+            )
+        ],
+        "runtime_profile": {"cognee_version": "1.6.2"},
+    }
     with pytest.raises(IntentError, match="durable forget plan"):
         await store.begin(source, expected_revision=1, plan={}, method="forget")
     attempt = await store.begin(source, expected_revision=1, plan=plan, method="forget")
-    await store.fail(source, attempt, "forget_document", IntentError("injected", "x"))
+    await store.fail(
+        source, attempt, "forget_document", IntentError("injected", "quotes text")
+    )
     with pytest.raises(IntentError, match="Retry the failed forget"):
         await store.begin(source, expected_revision=1, plan={}, method="reconcile")
     with pytest.raises(IntentError, match="Retry the failed forget"):
         await store.begin(source, expected_revision=1, plan=plan, method="withdraw")
     attempt = await store.begin(source, expected_revision=1, plan=plan, method="forget")
-    await store.complete(source, attempt, state="forgotten")
+    with pytest.raises(ValueError, match="tombstone"):
+        await store.complete(source, attempt, state="forgotten")
+    await store.complete(
+        source, attempt, state="forgotten", tombstone=tombstone_of(source)
+    )
     row = (await store.rows(source.dataset_id))[0]
     assert row.state == "forgotten"
     assert row.revision == 1 and row.verified_revision == 1
-    assert IdentitySource.model_validate_json(row.description) == source
-    assert (await store.events(source.dataset_id))[0]["outcome"] == "forgotten"
+    assert row.tombstone == tombstone_of(source)
+    assert "The controller" not in row.description
+    assert row.plan == {
+        "operation": "identity_forget",
+        "original_data_id": "x",
+        "edges": [dict(source="a", target="b", relation="is_part_of", refs=["r"])],
+        "origin": "runtime",
+        "method": "forget",
+    }
+    (event,) = await store.events(source.dataset_id)
+    assert event["outcome"] == "forgotten" and event["message"] is None
+    assert event["reason_code"] == "injected" and event["stage"] == "forget_document"
     for method in ("reconcile", "withdraw", "forget", "replace"):
         with pytest.raises(IntentError, match="Forgotten source"):
             await store.begin(source, expected_revision=1, plan=plan, method=method)
@@ -152,26 +185,53 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
     assert row.state == "current"
     assert row.revision == 2 and row.verified_revision == 2
 
-    # Forget takes a current source only: a failed first publication must be
-    # reconciled or withdrawn, and a withdrawn source stays withdrawn.
-    partial = source.model_copy(update={"identity_data_id": uuid4()})
-    attempt = await store.begin(partial, expected_revision=0, plan={})
-    await store.fail(partial, attempt, "nodes", IntentError("injected", "partial"))
-    with pytest.raises(IntentError, match="Forget a current source"):
-        await store.begin(partial, expected_revision=1, plan=plan, method="forget")
-    attempt = await store.begin(
-        partial,
-        expected_revision=1,
-        plan={"operation": "identity_withdraw"},
-        method="withdraw",
-    )
-    await store.complete(partial, attempt, state="withdrawn")
-    with pytest.raises(IntentError, match="Withdrawn source"):
-        await store.begin(partial, expected_revision=1, plan=plan, method="forget")
+    # Any source can be forgotten: one whose first publication failed, and a
+    # withdrawn one.
+    for prior in ("failed", "withdrawn"):
+        other = source.model_copy(update={"identity_data_id": uuid4()})
+        attempt = await store.begin(other, expected_revision=0, plan={})
+        if prior == "failed":
+            await store.fail(other, attempt, "nodes", IntentError("x", "partial"))
+        else:
+            await store.complete(other, attempt)
+            attempt = await store.begin(
+                other,
+                expected_revision=1,
+                plan={"operation": "identity_withdraw"},
+                method="withdraw",
+            )
+            await store.complete(other, attempt, state="withdrawn")
+        attempt = await store.begin(
+            other, expected_revision=1, plan=plan, method="forget"
+        )
+        await store.complete(
+            other, attempt, state="forgotten", tombstone=tombstone_of(other)
+        )
     with pytest.raises(IntentError, match="advance it through replacement"):
         await store.begin(
             source.model_copy(update={"revision": 3}), expected_revision=2, plan={}
         )
+
+
+@pytest.mark.asyncio
+async def test_a_forgotten_row_from_before_tombstones_is_refused(source_payload):
+    """A forgotten row that still holds its description is an old format;
+    rows() refuses it rather than read content a tombstone would drop."""
+    from sqlalchemy import update
+
+    from cognee_lab.identity.storage import Publication
+
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    store = memory_store()
+    await store.initialize()
+    attempt = await store.begin(source, expected_revision=0, plan={})
+    await store.complete(source, attempt)
+    async with store.session_factory() as session:
+        await session.execute(update(Publication).values(state="forgotten"))
+        await session.commit()
+    with pytest.raises(IntentError) as refused:
+        await store.rows()
+    assert refused.value.code == "forgotten_format"
 
 
 def memory_store():
@@ -228,6 +288,10 @@ async def reach(store, source, row):
     attempt = await store.begin(
         source, expected_revision=1, plan=dict(plan), method=method
     )
+    if done == "forgotten":
+        return await store.complete(
+            source, attempt, state=done, tombstone=tombstone_of(source)
+        )
     if done:
         return await store.complete(source, attempt, state=done)
     await store.fail(source, attempt, "stage", IntentError("x", "x"))
@@ -309,7 +373,7 @@ BEGIN_MATRIX = {
         "reconcile": WITHDRAWN_ROW,
         "replace": WITHDRAWN_ROW,
         "withdraw": None,
-        "forget": WITHDRAWN_ROW,
+        "forget": None,
     },
     "forgotten": {
         "publish": None,
@@ -326,10 +390,7 @@ BEGIN_MATRIX = {
             "Advance a current revision through replacement",
         ),
         "withdraw": None,
-        "forget": (
-            "forget_state",
-            "Forget a current source, or retry its failed forget",
-        ),
+        "forget": None,
     },
     "failed replace": {
         "publish": LINEAGE,
@@ -369,7 +430,7 @@ async def test_begin_transition_matrix(source_payload, row, method, expected):
     await store.initialize()
     await reach(store, source, row)
     saved = next(iter(await store.rows()), None)
-    if saved is not None:
+    if saved is not None and saved.state != "forgotten":
         source = IdentitySource.model_validate_json(saved.description)
     revision, expected_revision, plan = caller_arguments(method, saved)
     try:

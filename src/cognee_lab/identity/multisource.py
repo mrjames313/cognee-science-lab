@@ -152,18 +152,19 @@ def read_sources(root):
 
 
 async def current_sources(root, publisher):
+    """Each source's saved description, or the root's file when it has no
+    row or is forgotten: a tombstone keeps no description."""
     sources = read_sources(root)
     rows = {r.source: r for r in await publisher.records.rows()}
-    return {
-        label: (
-            IdentitySource.model_validate_json(
-                rows[str(source.identity_data_id)].description
-            )
-            if str(source.identity_data_id) in rows
-            else source
+    found = {}
+    for label, source in sources.items():
+        row = rows.get(str(source.identity_data_id))
+        found[label] = (
+            source
+            if row is None or row.state == "forgotten"
+            else IdentitySource.model_validate_json(row.description)
         )
-        for label, source in sources.items()
-    }
+    return found
 
 
 async def publish_one(
@@ -281,13 +282,26 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         row = rows[str(source.identity_data_id)]
         if row.operation == "identity_forget":
             from .forget_fixture import forget_checks
+            from .models import Tombstone
 
+            # An unfinished forget keeps its description; its identifiers
+            # read the same as a tombstone's.
+            kept = (
+                row.tombstone
+                if row.state == "forgotten"
+                else Tombstone.of(
+                    IdentitySource.model_validate_json(row.description),
+                    forgotten_at="unfinished",
+                )
+            )
             result["sources"][label] = dict(
                 identity_data_id=str(source.identity_data_id),
                 state=row.state,
-                saved_revision=source.revision,
+                saved_revision=row.revision,
                 verified_revision=row.verified_revision,
-                forget=await forget_checks(publisher, source, row.plan, label),
+                forget=await forget_checks(
+                    publisher, kept, row.plan, private_singleton_id(source, label)
+                ),
             )
             continue
         registered = await read_registered(source)
@@ -356,9 +370,27 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             verified_revision=rows[str(source.identity_data_id)].verified_revision,
             registered_revision=registered.revision,
             registered_matches_saved=registered == source,
+            input_keys=sorted(source.inputs),
+            decisions={
+                k: dict(
+                    status=d.status,
+                    producer_ref=d.producer_ref,
+                    input_refs=d.input_refs,
+                )
+                for k, d in [
+                    *source.mention_resolutions.items(),
+                    *source.variant_assignments.items(),
+                ]
+            },
+            resolution_status=(
+                source.mention_resolutions["r01"].status
+                if "r01" in source.mention_resolutions
+                else None
+            ),
             resolution_target_entity_id=(
                 str(source.mention_resolutions["r01"].target_entity_id)
                 if "r01" in source.mention_resolutions
+                and source.mention_resolutions["r01"].status == "accepted"
                 else None
             ),
             mention_entity_id=str(mid),
@@ -485,33 +517,32 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
             )
         elif args.command == "forget":
-            await publisher.forget(
-                selected,
-                expected_revision=args.expected_revision,
-                origin=origin,
-                fault_stage=args.fault_stage,
-            )
+            from .forget_fixture import forget_command
+
+            refresh = await forget_command(publisher, root, args, args.source, selected)
+            if args.dry_run:
+                return refresh
         elif args.command == "readd":
             from .forget_fixture import readd
 
+            manifest = json.loads((root / "multi-fixture-info.json").read_text())
             await readd(
                 publisher,
                 root,
                 args.source,
-                selected,
+                root / ("source.txt" if args.source == "doc01" else "source02.txt"),
+                root / manifest["sources"][args.source],
                 expected_revision=args.expected_revision,
                 fault_stage=args.fault_stage,
             )
         elif args.command == "reconcile":
-            row = await publisher.records.row(selected)
-            if row.state == "forgotten":
-                from .storage import FORGOTTEN_SOURCE
+            from .forget_fixture import reconcile_forget
 
-                raise IntentError(*FORGOTTEN_SOURCE)
-            if row.resumed_by == "forget":
-                await publisher.forget(
-                    selected, expected_revision=selected.revision, origin="test"
-                )
+            row = await publisher.records.row(selected)
+            if (
+                finished := await reconcile_forget(publisher, row, selected)
+            ) is not None:
+                refresh = finished
             elif row.resumed_by == "replace":
                 if row.plan.get("text_change"):
                     from .text_fixture import maintain_one

@@ -264,9 +264,11 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     current, unavailable = await valid_sources(publisher, dataset_id, rows, withheld)
     # Original-owned markers can outlive generated-source withdrawal/failure.
     # Their local labels must never become reusable vector query aliases.
+    # A forgotten source left no marker behind, so its tombstone is skipped.
     mention_ids = {
         str(g.entity_id)
         for row in rows
+        if row.state != "forgotten"
         for g in IdentitySource.model_validate_json(
             row.description
         ).mention_groups.values()

@@ -125,13 +125,29 @@ MUTANTS = {
     ),
     # Without the guard a withdrawn row took reconcile and a replace retry.
     "no-withdrawn-guard": Mutant(
-        'Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE)',
-        'lineage_row({"withdraw": 0, "reconcile": 0, "replace": 0})',
+        "Transition(\n"
+        '        {"withdraw": 0, "forget": 0}, otherwise=WITHDRAWN_SOURCE\n'
+        "    )",
+        'lineage_row({"withdraw": 0, "forget": 0, "reconcile": 0, "replace": 0})',
         "P5",
     ),
+    # Forget refuses a withdrawn source, as before checkpoint I.
+    "forget-refuses-withdrawn": Mutant(
+        '{"withdraw": 0, "forget": 0}, otherwise=WITHDRAWN_SOURCE',
+        '{"withdraw": 0}, otherwise=WITHDRAWN_SOURCE',
+        "INCONCLUSIVE",
+    ),
+    # Forget refuses a source whose publication failed, as before.
+    "forget-refuses-failed-publication": Mutant(
+        'lineage_row({"reconcile": 0, "withdraw": 0, "forget": 0})',
+        'lineage_row({"reconcile": 0, "withdraw": 0})',
+        "INCONCLUSIVE",
+    ),
+    # A forgotten row's tombstone already refuses every begin at its revision
+    # (revision_reuse), so the break that matters admits a new replacement.
     "no-forgotten-guard": Mutant(
         '{"publish": 1}, otherwise=FORGOTTEN_SOURCE, sequence=READD_REVISION',
-        '{"publish": 1, "reconcile": 0, "withdraw": 0, "replace": 0, "forget": 0},'
+        '{"publish": 1, "reconcile": 0, "withdraw": 0, "replace": 1, "forget": 0},'
         " sequence=READD_REVISION",
         "P5",
     ),
@@ -143,26 +159,45 @@ MUTANTS = {
         " {}, otherwise, sequence or READD_REVISION, owner)\n",
         "P5",
     ),
-    "readd-at-forgotten-revision": Mutant(
-        "otherwise=FORGOTTEN_SOURCE, sequence=READD_REVISION",
-        "otherwise=FORGOTTEN_SOURCE, sequence=None",
-        "P5",
-    ),
     # The failed forget row admits reconcile and withdraw besides forget.
     "no-forget-recovery-choice": Mutant(
         'owned("forget", FAILED_FORGET)',
         'lineage_row({"forget": 0, "reconcile": 0, "withdraw": 0}, owner="forget")',
         "P5",
     ),
-    "forget-from-any-failed-row": Mutant(
-        'RequiredPlan("identity_forget", FORGET_PLAN, FORGET_STATE)',
-        'RequiredPlan("identity_forget", FORGET_PLAN, None)',
+    # A failed replacement or withdrawal is resumed only by its own method,
+    # never erased by a forget that would drop its saved intent.
+    "forget-on-failed-replacement": Mutant(
+        'owned("replace", FAILED_REPLACEMENT)',
+        'lineage_row({"replace": 0, "forget": 0}, FAILED_REPLACEMENT, owner="replace")',
+        "P5",
+    ),
+    "forget-on-failed-withdrawal": Mutant(
+        'owned("withdraw", FAILED_WITHDRAWAL)',
+        'lineage_row({"withdraw": 0, "forget": 0}, FAILED_WITHDRAWAL, owner="withdraw")',
         "P5",
     ),
     "forget-takes-any-plan": Mutant(
         '    if required and plan.get("operation") != required.operation:\n',
         '    if required and method != "forget" and plan.get("operation") != required.operation:\n',
         "P5",
+    ),
+    # A forgotten row keeps its description, its plan or its event messages.
+    "complete-keeps-description": Mutant(
+        '            values["description"] = tombstone.model_dump_json()\n',
+        "",
+        "P7",
+    ),
+    "complete-keeps-plan": Mutant(
+        "                row.plan = encode(scrubbed_plan(json.loads(row.plan)))\n",
+        "                pass\n",
+        "P7",
+    ),
+    "complete-keeps-messages": Mutant(
+        "                if tombstone is not None:\n"
+        "                    info = scrubbed_event(info)\n",
+        "",
+        "P7",
     ),
     "complete-forgotten-as-withdrawn": Mutant(
         '        values = {"state": state}\n',
@@ -282,8 +317,8 @@ DEEP_MUTANTS = {
     # Caught at depth 7: a replace retry built from a stale read of the
     # current replacement row, sent after the row was withdrawn.
     "withdrawn-guard-admits-replace": Mutant(
-        'Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE)',
-        'Transition({"withdraw": 0, "replace": 0}, otherwise=WITHDRAWN_SOURCE)',
+        '{"withdraw": 0, "forget": 0}, otherwise=WITHDRAWN_SOURCE',
+        '{"withdraw": 0, "forget": 0, "replace": 0}, otherwise=WITHDRAWN_SOURCE',
         "P5",
     ),
 }

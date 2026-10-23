@@ -77,11 +77,14 @@ def _env_record(settings: dict[str, str]) -> dict:
     }
 
 
-def create_root(root: Path, profile: str) -> None:
-    """Make the root and write its marker with the non-secret embedding record.
+def create_root(root: Path, profile: str, fixture: str) -> None:
+    """Make the root and write its marker with the non-secret embedding record
+    and the fixture kind, the creation command that later commands route by.
 
     The record is resolved first, so a ValueError leaves no root.
     """
+    if fixture not in CREATION_COMMANDS:
+        raise ValueError(f"Unknown fixture kind {fixture!r}")
     embedding = (
         _loopback_record()
         if profile == "loopback"
@@ -89,8 +92,20 @@ def create_root(root: Path, profile: str) -> None:
     )
     root.mkdir(parents=True, exist_ok=False)
     (root / MARKER).write_text(
-        json.dumps({"kind": MARKER_KIND, "embedding": embedding})
+        json.dumps({"kind": MARKER_KIND, "embedding": embedding, "fixture": fixture})
     )
+
+
+def read_fixture(root: Path) -> str | None:
+    """The root's fixture kind, or None for a root made before fixture kinds."""
+    try:
+        marker = json.loads((root / MARKER).read_text())
+    except (OSError, ValueError):
+        raise ValueError(_MALFORMED) from None
+    kind = marker.get("fixture") if isinstance(marker, dict) else None
+    if kind is not None and kind not in CREATION_COMMANDS:
+        raise ValueError("Root marker fixture kind is malformed")
+    return kind
 
 
 def read_embedding(root: Path) -> dict | None:
