@@ -206,9 +206,16 @@ async def current_sources(root, publisher):
 
 
 async def change_glossary(
-    publisher, intended, change, *, expected_revision, fault_stage=None
+    publisher,
+    intended,
+    change,
+    *,
+    expected_revision,
+    fault_stage=None,
+    refresh_fault=None,
 ):
-    """The glossary's text change, with no captured facts to rebuild."""
+    """The glossary's text change, with no captured facts to rebuild, then
+    the refresh of its dependents' moved spans."""
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 
@@ -242,9 +249,14 @@ async def change_glossary(
         [Task(task, needs_llm=False)], [intended], generated.user, generated
     ):
         pass
+    from .revisions import refresh_moved_spans
+
+    return await refresh_moved_spans(publisher, refresh_fault)
 
 
-async def edit(publisher, root, glossary, case, *, expected_revision, fault_stage):
+async def edit(
+    publisher, root, glossary, case, *, expected_revision, fault_stage, refresh_fault
+):
     from .fixture import context_for
     from .text_changes import TextChange, chunk_text, original_context, read_original
 
@@ -273,29 +285,14 @@ async def edit(publisher, root, glossary, case, *, expected_revision, fault_stag
     (root / f"glossary_identity_revision{intended.revision}.json").write_text(
         intended.model_dump_json(indent=2) + "\n"
     )
-    await change_glossary(
+    return await change_glossary(
         publisher,
         intended,
         change,
         expected_revision=expected_revision,
         fault_stage=fault_stage,
+        refresh_fault=refresh_fault,
     )
-
-
-def replace_doc01(publisher, root, fault_stage=None):
-    from .revisions import replace_one
-
-    async def replace(description, expected_revision):
-        await replace_one(
-            publisher,
-            description,
-            root,
-            "doc01",
-            expected_revision=expected_revision,
-            fault_stage=fault_stage,
-        )
-
-    return replace
 
 
 async def review(
@@ -393,8 +390,13 @@ async def review(
     (root / f"identity_doc01_revision{intended.revision}.json").write_text(
         intended.model_dump_json(indent=2) + "\n"
     )
-    await replace_doc01(publisher, root, fault_stage)(
-        intended, expected_revision=expected_revision
+    from .revisions import replace_one
+
+    await replace_one(
+        publisher,
+        intended,
+        expected_revision=expected_revision,
+        fault_stage=fault_stage,
     )
 
 
@@ -429,23 +431,25 @@ def replaced_variant(doc01, decision, span_key, span, producer_key, producer):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def reconcile(publisher, root, label, selected):
+async def reconcile(publisher, label, selected):
+    """Finish the selected source's failed attempt. A glossary edit refreshes
+    its dependents when it completes; return what it refreshed."""
     from .fixture import context_for, load_chunks
     from .multisource import publish_one
     from .text_changes import TextChange
 
+    from .revisions import replace_one
+
     row = await publisher.records.row(selected)
     if row.resumed_by == "replace" and label == "glossary":
-        await change_glossary(
+        return await change_glossary(
             publisher,
             selected,
             TextChange.from_plan(row.plan),
             expected_revision=selected.revision,
         )
-    elif row.resumed_by == "replace":
-        await replace_doc01(publisher, root)(
-            selected, expected_revision=selected.revision
-        )
+    if row.resumed_by == "replace":
+        await replace_one(publisher, selected, expected_revision=selected.revision)
     else:
         ctx = await context_for(selected.inputs[selected.original_input_ref].data_id)
         await publish_one(
@@ -456,6 +460,7 @@ async def reconcile(publisher, root, label, selected):
             operation="reconcile",
             semantics=label != "glossary",
         )
+    return []
 
 
 async def snapshot(publisher, root, query):
@@ -525,7 +530,7 @@ async def snapshot(publisher, root, query):
 
 async def run(args, root):
     from .multisource import publish_one
-    from .withholding import refresh_dependents
+    from .revisions import refresh_moved_spans
 
     if args.command == "glossary-fixture":
         publisher, prepared = await prepare(root)
@@ -551,17 +556,21 @@ async def run(args, root):
                 "source_missing", "Selected source is not in this fixture"
             )
         selected = sources[args.source]
-        edit_fault = None if args.fault_stage == REFRESH_FAULT else args.fault_stage
+        refreshing = args.fault_stage == REFRESH_FAULT
+        # The refresh fault fails each refresh revision at replace_registered.
+        refresh_fault = "replace_registered" if refreshing else None
+        refreshed = []
         if args.command == "edit-glossary":
             if args.source != "glossary":
                 raise IntentError("fixture_scope", "edit-glossary edits the glossary")
-            await edit(
+            refreshed = await edit(
                 publisher,
                 root,
                 selected,
                 args.case,
                 expected_revision=args.expected_revision,
-                fault_stage=edit_fault,
+                fault_stage=None if refreshing else args.fault_stage,
+                refresh_fault=refresh_fault,
             )
         elif args.command in ("reconfirm", "replace-decision"):
             if args.source != "doc01" or not args.decision:
@@ -578,7 +587,7 @@ async def run(args, root):
                 command=args.command,
             )
         elif args.command == "reconcile":
-            await reconcile(publisher, root, args.source, selected)
+            refreshed = await reconcile(publisher, args.source, selected)
         elif args.command == "forget":
             await publisher.forget(
                 selected,
@@ -599,17 +608,8 @@ async def run(args, root):
                 expected_revision=args.expected_revision,
                 fault_stage=args.fault_stage,
             )
-        # Every command that may complete an edit refreshes the moved spans.
-        refresh_fault = (
-            "replace_registered" if args.fault_stage == REFRESH_FAULT else None
-        )
-        refreshed = (
-            await refresh_dependents(
-                publisher, replace_doc01(publisher, root, refresh_fault)
-            )
-            if args.command in ("edit-glossary", "reconcile", "refresh-dependents")
-            else []
-        )
+        elif args.command == "refresh-dependents":
+            refreshed = await refresh_moved_spans(publisher, refresh_fault)
     result = await snapshot(publisher, root, args.query)
     result["refreshed"] = refreshed
     (root / "glossary_result.json").write_text(

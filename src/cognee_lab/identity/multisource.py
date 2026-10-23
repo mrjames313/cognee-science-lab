@@ -526,11 +526,7 @@ async def run(args, root):
                     from .revisions import replace_one
 
                     await replace_one(
-                        publisher,
-                        selected,
-                        root,
-                        args.source,
-                        expected_revision=selected.revision,
+                        publisher, selected, expected_revision=selected.revision
                     )
             else:
                 ctx = await context_for(

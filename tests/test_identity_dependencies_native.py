@@ -322,3 +322,20 @@ def test_native_reconfirm_waits_for_an_unfinished_glossary_edit(tmp_path):
     run(root, "reconcile", "--source", "glossary")
     done = run(root, "reconfirm", "--decision", "r01", "--expected-revision", "1")
     assert withheld(done) == {("v01", "input_changed", "refresh_needed")}
+
+
+@pytest.mark.integration
+def test_native_generic_text_edit_withholds_and_refreshes_its_dependents(tmp_path):
+    """The generic edit-text path withholds what a dependent read and runs
+    the same refresh as the glossary commands. doc02's r01 read doc01's
+    whole text, which needs review, so the refresh leaves doc02 alone."""
+    root = tmp_path / "dependent"
+    command(root, "multi-fixture", "--dependent")
+    command(root, "edit-text", "--source", "doc01", "--expected-revision", "1")
+    status = printed(root, "status")
+    assert {p["revision"] for p in status["publications"]} == {1, 2}
+    assert [
+        (d["assignment_id"], d["status"], d["input_refs"])
+        for d in status["withheld_decisions"]
+    ] == [("r01", "refresh_needed", ["doc01_text"])]
+    assert [w["input_ref"] for w in status["withholdings"]] == ["doc01_text"]

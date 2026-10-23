@@ -46,9 +46,8 @@ def corrected(source):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def replace_one(
-    publisher, source, root, label, *, expected_revision, fault_stage=None
-):
+async def replace_one(publisher, source, *, expected_revision, fault_stage=None):
+    """Replace any source with unchanged text through the native pipeline."""
     from .fixture import context_for, load_chunks, verify_semantics
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
@@ -83,6 +82,23 @@ async def replace_one(
         pass
 
 
+async def refresh_moved_spans(publisher, fault_stage=None):
+    """After a text edit completes, give each dependent whose span the edit
+    moved its next revision (withholding.refresh_dependents), each through
+    replace_one. `fault_stage` fails each refresh revision there."""
+    from .withholding import refresh_dependents
+
+    async def replace(description, expected_revision):
+        await replace_one(
+            publisher,
+            description,
+            expected_revision=expected_revision,
+            fault_stage=fault_stage,
+        )
+
+    return await refresh_dependents(publisher, replace)
+
+
 async def run(args, root):
     if args.source != "doc01" or not (root / "multi-fixture-info.json").exists():
         raise IntentError(
@@ -99,8 +115,6 @@ async def run(args, root):
     await replace_one(
         publisher,
         intended,
-        root,
-        "doc01",
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,
     )
