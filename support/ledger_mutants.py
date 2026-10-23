@@ -135,8 +135,8 @@ MUTANTS = {
         " sequence=READD_REVISION",
         "P5",
     ),
-    # Publish admitted at the next revision on every saved row that no method
-    # owns, as main's break kept the re-add's revision check.
+    # Publish admitted on every saved row that no method owns, held to the
+    # next revision as a re-add is.
     "publish-restarts-saved-row": Mutant(
         '    return Transition(admits, {"publish": SAVED_LINEAGE}, otherwise, sequence, owner)\n',
         '    return Transition({"publish": 1, **admits} if otherwise is None else admits,'
