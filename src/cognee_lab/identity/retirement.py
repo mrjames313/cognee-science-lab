@@ -221,7 +221,7 @@ def contribution_triples(plan):
     triples.update(
         (e["source"], e["target"], e["relation"])
         for e in plan["edges"]
-        if "identity_contributions" in e["properties"]
+        if "identity_contributions" in e.get("properties", {})
     )
     return triples
 

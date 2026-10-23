@@ -315,7 +315,16 @@ def unfinished(tombstone, rows) -> list:
 def report(impact: Impact, *, plan, description, events, caller_files=()) -> dict:
     """The dry run: what a forget removes from other sources, the traces its
     tombstone scrubs, the files it leaves and the token to confirm."""
-    dependents = [asdict(d) for d in impact.dependents]
+    dependents = [
+        dict(
+            asdict(d),
+            decisions=[
+                dict(asdict(r), citing=[c._asdict() for c in r.citing])
+                for r in d.decisions
+            ],
+        )
+        for d in impact.dependents
+    ]
     decisions = [r for d in impact.dependents for r in d.decisions]
     return dict(
         dry_run=True,
@@ -372,7 +381,9 @@ async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
     dependent whose own attempt is pending or failed waits
     (`dependent_unfinished`) until that attempt finishes and a rerun of
     forget or reconcile removes it. Stops at the first failure and reports
-    it, not raised: the forget before it already completed."""
+    it, not raised: the forget before it already completed. `fault_stage`
+    "interrupted" stops before the first revision begins; any other fails
+    each removal revision there."""
     from .revisions import replace_one
 
     ids = source_ids(tombstone)
@@ -380,6 +391,11 @@ async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
     rows = await publisher.records.rows()
     revised, waiting = [], []
     try:
+        if fault_stage == "interrupted":
+            raise IntentError(
+                "injected_failure",
+                "Injected failure before the dependents' removal revisions",
+            )
         for row in unfinished(tombstone, rows):
             if removal_of(row, ids):
                 description = IdentitySource.model_validate_json(row.description)

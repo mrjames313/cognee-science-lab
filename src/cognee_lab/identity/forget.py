@@ -49,11 +49,16 @@ COMMITTED_FAULTS = {
     "forget_identity_committed": "forget_identity",
     "forget_document_committed": "forget_document",
 }
-# A fault in a dependent's removal revision after the forget completed: it
-# fails at replace_registered, as REFRESH_FAULT does for a refresh.
-DEPENDENTS_FAULT = "forget_dependents"
+# Faults in the dependents' removal revisions, after the forget completed.
+# One stops before the first revision begins, as a process that dies there
+# leaves them; the other fails each removal revision at replace_registered,
+# as REFRESH_FAULT does for a refresh.
+DEPENDENT_FAULTS = {
+    "forget_dependents": "interrupted",
+    "forget_dependent_revision": "replace_registered",
+}
 FORGET = Operation("forget", "Forget", STAGES, "forgotten")
-FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS, DEPENDENTS_FAULT)
+FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS, *DEPENDENT_FAULTS)
 
 
 async def owned_objects(graph, source):
@@ -387,8 +392,8 @@ async def forget(
             "add_edges",
         ],
     )
-    dependents_fault = "replace_registered" if fault_stage == DEPENDENTS_FAULT else None
-    if fault_stage == DEPENDENTS_FAULT:
+    dependents_fault = DEPENDENT_FAULTS.get(fault_stage)
+    if dependents_fault:
         fault_stage = None
     row = await saved_row(
         records,
