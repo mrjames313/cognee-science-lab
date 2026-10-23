@@ -164,3 +164,147 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
         await store.begin(
             source.model_copy(update={"revision": 3}), expected_revision=2, plan={}
         )
+
+
+def memory_store():
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    return RecordStore(async_sessionmaker(engine, expire_on_commit=False))
+
+
+async def free_reservation(store):
+    """A person clears an abandoned writer's reservation by hand."""
+    from sqlalchemy import update
+
+    from cognee_lab.identity.storage import Writer
+
+    async with store.session_factory() as session:
+        await session.execute(update(Writer).values(owner=None))
+        await session.commit()
+
+
+PUBLISH = {"operation": "identity_publish"}
+WITHDRAW = {"operation": "identity_withdraw"}
+FORGET = {"operation": "identity_forget"}
+
+
+async def reach(store, source, row):
+    """Drive a fresh store to one row state through the calls that make it."""
+    if row == "none":
+        return
+    attempt = await store.begin(source, expected_revision=0, plan=dict(PUBLISH))
+    if row == "pending":
+        return await free_reservation(store)
+    if row == "failed publish":
+        return await store.fail(source, attempt, "nodes", IntentError("x", "x"))
+    await store.complete(source, attempt)
+    if row == "current":
+        return
+    if row == "failed replace":
+        nxt = source.model_copy(update={"revision": 2})
+        plan = dict(
+            operation="identity_replace", previous_description=source.model_dump_json()
+        )
+        attempt = await store.begin(
+            nxt, expected_revision=1, plan=plan, method="replace"
+        )
+        return await store.fail(nxt, attempt, "replace_saved", IntentError("x", "x"))
+    method, plan, done = {
+        "withdrawn": ("withdraw", WITHDRAW, "withdrawn"),
+        "failed withdraw": ("withdraw", WITHDRAW, None),
+        "forgotten": ("forget", FORGET, "forgotten"),
+        "failed forget": ("forget", FORGET, None),
+    }[row]
+    attempt = await store.begin(
+        source, expected_revision=1, plan=dict(plan), method=method
+    )
+    if done:
+        return await store.complete(source, attempt, state=done)
+    await store.fail(source, attempt, "stage", IntentError("x", "x"))
+
+
+def caller_arguments(method, row):
+    """The begin() arguments that the method's caller builds from one read of
+    the row: a re-add or a new replacement takes the next revision, the rest
+    the saved one, and a retry keeps the saved plan."""
+    if row is None:
+        return 1, 0, {"operation": f"identity_{method}"}
+    operation = row["plan"].get("operation")
+    if method == "publish":
+        return row["revision"] + 1, row["revision"], dict(PUBLISH)
+    retry = row["state"] == "failed" and operation == "identity_replace"
+    if method == "replace" and not retry:
+        plan = dict(
+            operation="identity_replace", previous_description=row["description"]
+        )
+        return row["revision"] + 1, row["revision"], plan
+    keep = {
+        "reconcile": PUBLISH,
+        "replace": row["plan"],
+        "withdraw": (
+            row["plan"]
+            if row["state"] != "withdrawn" and operation == "identity_withdraw"
+            else WITHDRAW
+        ),
+        "forget": (
+            row["plan"]
+            if row["state"] == "failed" and operation == "identity_forget"
+            else FORGET
+        ),
+    }[method]
+    return row["revision"], row["revision"], dict(keep)
+
+
+METHODS = ("publish", "reconcile", "replace", "withdraw", "forget")
+# Row state and saved plan -> what begin() answers each method's caller.
+TRANSITIONS = {
+    "none": ("accepted", "accepted", "source_missing", "accepted", "source_missing"),
+    "pending": ("pending_attempt",) * 5,
+    "current": ("recovery_choice", "accepted", "accepted", "accepted", "accepted"),
+    "withdrawn": ("withdrawn_source",) * 3 + ("accepted", "withdrawn_source"),
+    "forgotten": ("accepted",) + ("forgotten_source",) * 4,
+    "failed publish": (
+        "recovery_choice",
+        "accepted",
+        "recovery_choice",
+        "accepted",
+        "forget_state",
+    ),
+    "failed replace": ("recovery_choice",) * 2
+    + ("accepted",)
+    + ("recovery_choice",) * 2,
+    "failed withdraw": ("recovery_choice",) * 3 + ("accepted", "recovery_choice"),
+    "failed forget": ("recovery_choice",) * 4 + ("accepted",),
+}
+
+
+@pytest.mark.parametrize(
+    "row,method,expected",
+    [
+        (row, method, code)
+        for row, codes in TRANSITIONS.items()
+        for method, code in zip(METHODS, codes, strict=True)
+    ],
+)
+async def test_begin_transition_matrix(source_payload, row, method, expected):
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    store = memory_store()
+    await store.initialize()
+    await reach(store, source, row)
+    saved = next(iter(await store.rows()), None)
+    if saved is not None:
+        source = IdentitySource.model_validate_json(saved["description"])
+    revision, expected_revision, plan = caller_arguments(method, saved)
+    try:
+        await store.begin(
+            source.model_copy(update={"revision": revision}),
+            expected_revision=expected_revision,
+            plan=plan,
+            method=method,
+        )
+        answer = "accepted"
+    except IntentError as refused:
+        answer = refused.code
+    assert answer == expected
