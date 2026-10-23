@@ -35,10 +35,10 @@ Run the check when your diff touches any of these.
 
 All paths are under `src/cognee_lab/identity/`. The test `test_served_copies_the_retrieval_eligibility_test` fails if the eligibility condition in `valid_sources` changes.
 
-**Sync commit:** `82b954e`. On 2026-10-22 the checker described the covered code at this commit, after the no-behavior-change ledger refactor and its review fixes: the transition table, `cell_for()` and `admissible()` in `begin`, `begin`'s final check that a new revision is exactly the next one, the typed `PublicationRow`, and the stage runner in `stages.py`. To see whether the check needs another look, run this command:
+**Sync commit:** `4681f60`. On 2026-10-23 the assistant read the checkpoint H changes to `retrieve.py`, `publish.py`, `replace.py`, `text_changes.py`, `text_fixture.py` and `revisions.py` against `METHODS`: no new `RecordStore` call or argument, two replacement stages that write only the withholding table, and a `reject` step that now covers a narrower set of failures. The checker still describes the code, and `PINNED` is unchanged. Before that, at `82b954e` on 2026-10-22, the checker described the covered code after the no-behavior-change ledger refactor and its review fixes: the transition table, `cell_for()` and `admissible()` in `begin`, `begin`'s final check that a new revision is exactly the next one, the typed `PublicationRow`, and the stage runner in `stages.py`. To see whether the check needs another look, run this command:
 
 ```bash
-git diff 82b954e -- src/cognee_lab/identity/{storage,stages,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
+git diff 4681f60 -- src/cognee_lab/identity/{storage,stages,retrieve,publish,replace,withdraw,forget,text_fixture,text_changes,revisions}.py
 ```
 
 If the diff touches a function in the table, read the changed lines against `METHODS` and the intents functions in `support/ledger_model.py`. `METHODS` restates the transition table in the checker's own terms on purpose: the check must not read `TRANSITIONS`, or it would check the table against itself. Move the sync commit only after you read that the checker still describes the code. A passing check is not enough, because a passing check can describe old code.

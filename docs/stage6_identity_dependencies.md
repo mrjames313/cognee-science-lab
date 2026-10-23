@@ -185,4 +185,13 @@ The spec left these open or worded them two ways. Each is reversible.
 
 ## Evidence
 
-To be completed from the runs below.
+Run by the assistant on the user's Mac on 2026-10-23 with loopback embeddings, on branch `stage6-dependencies`. Every source file is as at `4681f60`; later commits change only documentation.
+
+- `uv run pytest -q -m 'not integration'`: 389 passed, 64 deselected.
+- `uv run python support/occurrence_check.py`: PASS on all 540,045 fate worlds, with the 13 new `DECISIONS` rows each checked on every admitted world that allows it (116 s). `--mutants`: PASS, all 28 breaks caught, including `allow_any_input_kinds`, `allow_changed_foreign_inputs` and `allow_unattested_reconfirms`.
+- `uv run python support/ledger_check.py`: PASS, verified within bound at depth 5, with `PINNED` unchanged at 5889 nodes and 5770 sequences. `--mutants`: all 40 breaks caught as before.
+- `uv run pytest -q -m integration`: 64 passed in 1366 s, including the five tests in `tests/test_identity_dependencies_native.py` (the four cases in sequence with both re-confirms and the replaced variant, a failed edit at `replace_saved`, `replace_dependents` and `text_chunks`, and an interrupted refresh) and the changed corpus-field test in `tests/test_identity_native.py`.
+- Journeys D1 to D6 in `.claude/skills/verify/features/dependencies.md`: 127 PASS and 0 FAIL in 10 runs (D5 runs five fault stages). Each count includes three lab-store guard rows.
+- Every other loopback journey, run one ID at a time (P1 to P4, W1 to W3, R1, R2, E1 to E4, O1 to O8, G1 to G4, I1 to I4, K1 to K5, F1 to F4): 1159 PASS and 0 FAIL in 58 runs, the same totals as the last `journey all` before this checkpoint. `journey all` itself was not run.
+
+The values in this guide come from these runs: the spans and digests from D1 to D4, the glossary chunk from D1's `glossary_identity.json`, and the Hybrid coil UUID from D4's `identity_doc01_revision2.json`.
