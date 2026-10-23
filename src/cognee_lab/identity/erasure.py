@@ -18,7 +18,13 @@ from dataclasses import asdict, dataclass
 from typing import Literal, NamedTuple
 from uuid import UUID
 
-from .admission import ERASURE_IMPLEMENTATION, Erasure, erased_inputs, without_erased
+from .admission import (
+    ERASURE_IMPLEMENTATION,
+    Erasure,
+    erased_inputs,
+    naming,
+    without_erased,
+)
 from .models import Accepted, CorpusObjectInput, IdentitySource
 from .retirement import SourceIds, removed_entities, source_ids
 from .validation import IntentError, decision_inputs, object_digest
@@ -120,16 +126,6 @@ def citations(reader, erasure: Erasure) -> dict[str, Citation]:
     return found
 
 
-def named(decisions) -> set[UUID]:
-    found = set()
-    for d in decisions:
-        if isinstance(d, Accepted):
-            found.add(d.target_entity_id)
-        elif hasattr(d, "source_entity_id"):
-            found.update((d.source_entity_id, d.target_entity_id))
-    return found
-
-
 def removal_producer(ids: SourceIds, removed, token) -> dict:
     """The producer a removal revision names: it removed what the forget of
     this source took away, as the caller confirmed it."""
@@ -167,13 +163,12 @@ def removal_revision(reader, ids: SourceIds, removed, readers=(), token=None):
     citing = {a for a, inputs in by_decision.items() if inputs & erased}
     resolutions = {k: d for k, d in reader.mention_resolutions.items() if k in citing}
     variants = {k: v for k, v in reader.variant_assignments.items() if k in citing}
-    remaining = [
-        *(d for k, d in reader.mention_resolutions.items() if k not in citing),
-        *(v for k, v in reader.variant_assignments.items() if k not in citing),
-    ]
+    remaining = set(by_decision) - citing
     mentions = {g.entity_id for g in reader.mention_groups.values()}
     candidates = (
-        named([*resolutions.values(), *variants.values()]) - named(remaining) - mentions
+        set().union(*(naming(reader, k) for k in citing))
+        - set().union(*(naming(reader, k) for k in remaining))
+        - mentions
     ) & set(reader.entity_constructions)
     key = producer_key(ids, reader.revision + 1)
 

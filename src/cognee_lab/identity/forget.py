@@ -57,6 +57,10 @@ DEPENDENT_FAULTS = {
     "forget_dependents": "interrupted",
     "forget_dependent_revision": "replace_registered",
 }
+IMPACT_CHANGED = (
+    "impact_changed",
+    "The impact changed since the token was issued; rerun the dry run and confirm its token",
+)
 FORGET = Operation("forget", "Forget", STAGES, "forgotten")
 FAULT_STAGES = (*STAGES, *COMMITTED_FAULTS, *DEPENDENT_FAULTS)
 
@@ -421,10 +425,7 @@ async def forget(
                 "This forget removes other sources' decisions; review the report and rerun with --confirm <token>",
             )
             if confirm is None
-            else (
-                "impact_changed",
-                "The impact changed since the token was issued; rerun the dry run and confirm its token",
-            )
+            else IMPACT_CHANGED
         )
         raise IntentError(
             code,
@@ -449,10 +450,7 @@ async def forget(
         nonlocal found
         found = impact(source, plan, await records.rows())
         if found.token != plan["impact_token"]:
-            raise IntentError(
-                "impact_changed",
-                "The impact changed since the token was issued; rerun the dry run and confirm its token",
-            )
+            raise IntentError(*IMPACT_CHANGED)
 
     async def contributions(_):
         nonlocal user
