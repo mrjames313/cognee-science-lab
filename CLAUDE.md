@@ -22,8 +22,8 @@ Read [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) first. It gives the curr
 
 The user agreed this routine on 2026-10-21.
 
-1. On every commit, run `uv run pytest -q -m 'not integration'`. CI runs the same command on every push, then the occurrence check at its default bound (the unit suite covers only small worlds).
-2. For a change that touches `RecordStore` or its callers, run `uv run python support/ledger_check.py`. Read `.claude/skills/identity-ledger/SKILL.md` first. For a change to `src/cognee_lab/identity/admission.py`, run `uv run python support/occurrence_check.py` and `uv run python support/occurrence_check.py --mutants`.
+1. On every commit, run `uv run pytest -q -m 'not integration'`. CI runs the same command on every push, then the occurrence check and the chain check at their default bounds (the unit suite covers only small worlds).
+2. For a change that touches `RecordStore` or its callers, run `uv run python support/ledger_check.py`. Read `.claude/skills/identity-ledger/SKILL.md` first. For a change to `src/cognee_lab/identity/admission.py`, run `uv run python support/occurrence_check.py` and `uv run python support/occurrence_check.py --mutants`. For a change to `admission.py`, `records.py`, `chains.py` (the citation rules and the withholding closure) or `erasure.py`, also run `uv run python support/chain_check.py` and `uv run python support/chain_check.py --mutants`.
 3. For each feature change, run the changed feature's journeys with `.claude/skills/verify/scripts/verify.py journey <ID>`. The feature files in `.claude/skills/verify/features/` list the journeys. Read `.claude/skills/verify/SKILL.md` first.
 4. Once per checkpoint, before the merge to `main`, run `.claude/skills/verify/scripts/verify.py journey all`.
 5. Run the integration suite, `uv run pytest -q -m integration`, only on a local machine. It takes about 10 minutes.
