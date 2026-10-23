@@ -10,7 +10,8 @@ real old and new descriptions. Three checks run:
 - Each corruption of an admitted world's map, slices or revision must be
   refused by the rule it breaks.
 - Each decision choice in `DECISIONS` (a changed decision, a new or dropped
-  Entity recipe, a variant change by scope) layered on an admitted world must
+  Entity recipe, a variant change by scope, and from support/dependency_worlds.py
+  another document's input) layered on an admitted world must
   come out as the rules say, with changed and, where the world allows,
   unchanged text, and on a retry where the outcome depends on the attempt.
 - With --mutants, switching off any one rule of the admitter makes some small
@@ -31,6 +32,7 @@ from uuid import UUID
 from cognee_lab.identity import admission
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import IntentError, text_digest
+from dependency_worlds import DEPENDENCY_DECISIONS
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import (
     ADMIT,
@@ -302,7 +304,7 @@ def check_decisions(world, case):
     cases = [(True, case)]
     if stable(world):
         cases.append((False, materialize(world, text_changed=False)))
-    for decision in DECISIONS:
+    for decision in [*DECISIONS, *DEPENDENCY_DECISIONS]:
         if not decision.needs <= available:
             continue
         attempts = (True, False) if decision.attempt_sensitive() else (True,)
