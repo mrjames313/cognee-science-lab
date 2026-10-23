@@ -636,7 +636,7 @@ def test_a_command_without_a_text_change_refuses_the_dependents_fault(
         main()
     assert refused.value.code == 2
     error = capsys.readouterr().err.strip().splitlines()[-1]
-    assert "withhold_dependents" in error and "text change" in error
+    assert f"withhold_dependents is not a stage of {command[0]}" in error
     assert not root.exists()
 
 

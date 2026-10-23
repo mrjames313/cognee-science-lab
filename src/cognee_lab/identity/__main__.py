@@ -21,11 +21,24 @@ from .glossary_fixture import INFO as GLOSSARY_INFO
 from .glossary_fixture import REFRESH_FAULT
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
+from .replace import TEXT_FAULT_STAGES
 from .withdraw import FAULT_STAGES as WITHDRAW_STAGES
 
-# The replacement stage that withholds a dependent's decisions: text changes only.
-WITHHOLD_STAGE = "withhold_dependents"
-TEXT_COMMANDS = {"edit-text", "edit-glossary", *OCCURRENCE_COMMANDS}
+PUBLISH_STAGES = ("nodes", "identity_edges", "verification")
+UNCHANGED_TEXT_STAGES = tuple(s for s in REPLACE_STAGES if s not in TEXT_FAULT_STAGES)
+# The fault stages of the operation each command runs. A command not listed
+# here publishes.
+COMMAND_FAULT_STAGES = {
+    "revise": UNCHANGED_TEXT_STAGES,
+    "reconfirm": UNCHANGED_TEXT_STAGES,
+    "replace-decision": UNCHANGED_TEXT_STAGES,
+    "edit-text": REPLACE_STAGES,
+    **dict.fromkeys(OCCURRENCE_COMMANDS, REPLACE_STAGES),
+    "edit-glossary": (*REPLACE_STAGES, REFRESH_FAULT),
+    "refresh-dependents": (REFRESH_FAULT,),
+    "withdraw": WITHDRAW_STAGES,
+    "forget": FORGET_STAGES,
+}
 REVISION_COMMANDS = {
     "revise",
     "edit-text",
@@ -96,9 +109,7 @@ def main():
     parser.add_argument(
         "--fault-stage",
         choices=[
-            "nodes",
-            "identity_edges",
-            "verification",
+            *PUBLISH_STAGES,
             *WITHDRAW_STAGES,
             *FORGET_STAGES,
             *REPLACE_STAGES,
@@ -125,36 +136,12 @@ def main():
         parser.error("edit-glossary requires --case")
     if args.command in {"reconfirm", "replace-decision"} and args.decision is None:
         parser.error(f"{args.command} requires --decision")
-    if args.fault_stage == REFRESH_FAULT:
-        if args.command not in {"edit-glossary", "refresh-dependents"}:
-            parser.error(
-                f"{REFRESH_FAULT} applies to edit-glossary and refresh-dependents"
-            )
-    elif args.fault_stage == WITHHOLD_STAGE and args.command not in TEXT_COMMANDS:
+    allowed = COMMAND_FAULT_STAGES.get(args.command, PUBLISH_STAGES)
+    if args.fault_stage and args.fault_stage not in allowed:
         parser.error(
-            "withhold_dependents runs only in a command that makes a text change"
+            f"Fault stage {args.fault_stage} is not a stage of {args.command}; "
+            f"its stages are {', '.join(allowed)}"
         )
-    elif args.fault_stage:
-        if args.command in TEXT_COMMANDS:
-            if args.fault_stage != WITHHOLD_STAGE and not args.fault_stage.startswith(
-                ("text_", "replace_")
-            ):
-                parser.error("Fault stage does not match the selected operation")
-        elif args.fault_stage.startswith("text_"):
-            parser.error("Text failure boundaries require a text-changing command")
-        prefix = {
-            "withdraw": "withdraw_",
-            "forget": "forget_",
-            "revise": "replace_",
-            "reconfirm": "replace_",
-            "replace-decision": "replace_",
-        }.get(args.command)
-        if (prefix and not args.fault_stage.startswith(prefix)) or (
-            not prefix
-            and args.command not in TEXT_COMMANDS
-            and args.fault_stage.startswith(("withdraw_", "replace_", "forget_"))
-        ):
-            parser.error("Fault stage does not match the selected operation")
     if args.dependent and args.command != "multi-fixture":
         parser.error("--dependent applies to multi-fixture only")
     creating = args.command in CREATION_COMMANDS

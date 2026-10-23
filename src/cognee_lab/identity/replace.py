@@ -24,6 +24,13 @@ FAULT_STAGES = (
     "text_registered",
     "text_chunks",
 )
+# The stages that run only for a text change.
+TEXT_FAULT_STAGES = (
+    "withhold_dependents",
+    "text_removed",
+    "text_registered",
+    "text_chunks",
+)
 
 
 def transition(old, texts, text_change):
