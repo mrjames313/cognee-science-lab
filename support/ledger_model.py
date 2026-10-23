@@ -339,14 +339,21 @@ class Method:
     fail_stage: str
     ack_stage: str  # the stage fail() records when complete() refuses
     # Row states (None: no row) it may begin on, each with its revision step:
-    # 0 at the saved revision, 1 at the next. A failed row that it owns
-    # (owns_recovery) is not listed.
-    begins: dict
+    # 0 at the saved revision, 1 at the next. A "failed" entry covers only the
+    # failed rows that no other method owns. A failed row whose saved plan
+    # this method owns needs no entry: owns() admits it at step 0.
+    begins: dict[str | None, int]
     recovers: str | None  # P6: the saved plan operation it resumes
     owns_recovery: bool  # a failed row with the `recovers` plan resumes only here
     owns_terminal: str | None  # a row in this terminal state begins only here
     requires_plan: bool  # begin() must carry a plan of the `recovers` operation
     preserved_on_retry: tuple[str, ...]  # Plan fields a retry keeps
+
+    def __post_init__(self):
+        assert self.recovers or not self.requires_plan, (
+            f"{self.name}: requires_plan names the `recovers` operation, "
+            "so it needs one"
+        )
 
     def owns(self, state, operation):
         """Only this method may begin on a row in this state and saved plan."""
