@@ -30,8 +30,8 @@ These decisions supersede the design handoff's "callers select whole documents" 
 ## The data shapes
 
 - **A withholding row** (table `lab_identity_withholdings`, module `withholding.py`): one decision of a dependent withheld because one input it read changed. Key (dataset, dependent source, assignment, input key). Fields: the edited source (`consumed`) and its revision (`edit_revision`), `reason`, `status` (`remap` or `refresh_needed`), `old_digest`, `new_digest`, and for a moved span its `new_start` and `new_end`. Keying by input lets a later checkpoint chain withholdings through saved records.
-- **The classification of one input** (`Classified`): what an edit did to one input that a dependent read from the edited document: `unchanged`, `moved` (with the new range) or `changed`, with the old and new digest.
-- **The withheld-decision set** (`withheld_decisions(rows, store)`): source, then assignment, then (reason, status). It merges the rows that still apply with a rule derived from the ledger: while a consumed source's text change is pending or failed, every decision citing that document is withheld with `input_changed` and status `edit_unfinished`. `retrieve`, `status` and every validation call read it.
+- **The classification of one input** (`Classified`): what an edit did to one input that a dependent read from the edited document: `unchanged`, `moved` (with the new range) or `changed`, with the old and new digest. A span's text is found in the new text by its length and digest, never by slicing an earlier text, so a retry of an edit, or an edit after a move that was not refreshed yet, classifies the same way as a first attempt.
+- **The withheld-decision set**: source, then assignment, then (reason, status, the input keys that withhold it). `withheld_decisions(rows, table)` merges the rows that still apply with a rule derived from the ledger: while a consumed source's text change is pending or failed, every decision citing that document is withheld with `input_changed` and status `edit_unfinished`. Validation callers read it as their skip set. `withheld_now(publisher, rows)` adds what live validation finds (below); `retrieve`, `status` and the reviewer commands read that full set, so they agree.
 
 The table lives beside the ledger, not in `RecordStore`. `RecordStore`, the ledger model, `TRANSITIONS` and the ledger check's `PINNED` counts are unchanged. Withholding writes no recovery events.
 
@@ -39,7 +39,7 @@ The table lives beside the ledger, not in `RecordStore`. `RecordStore`, the ledg
 
 1. **The edit's own attempt.** A text change runs the stage `replace_dependents` after `replace_saved` and before `text_removal`. It reads every current dependent of the edited document, classifies each input the dependent read from it against the new text, and replaces the rows of each such input in one transaction. An unchanged input has its rows deleted. The stage is idempotent: a retry, or a later edit, recomputes the rows.
 2. **Durability.** From `begin` to completion the edited source's row is pending or failed with a saved text change, and the derived rule withholds every decision citing its document. So a crash before the rows are written never serves a dependent stale, and a failed edit keeps its dependents withheld until `reconcile` finishes it. After completion only the rows apply.
-3. **The refresh.** After the edit completes, the same command runs `refresh_dependents`. Each current dependent with a moved span gets an ordinary unchanged-text replacement: the next revision, with the span's new range, the same digest and no decision or producer change. The writer reservation forbids nesting this inside the edit. A moved decision stays withheld until that revision completes. A dependent whose refresh revision failed is resumed by the next run of `refresh-dependents` (or by `reconcile`). A span moved by an edit that is still unfinished waits for that edit.
+3. **The refresh.** After the edit completes, the same command runs `refresh_dependents`. Every text-change command does: `edit-glossary`, `edit-text`, the occurrence commands and a `reconcile` that completes a text change (through `text_fixture.maintain_one` and `glossary_fixture.change_glossary`). Each current dependent with a moved span gets an ordinary unchanged-text replacement: the next revision, with the span's new range, the same digest and no decision or producer change. The writer reservation forbids nesting this inside the edit. A moved decision stays withheld until that revision completes. A dependent whose refresh revision failed is resumed by the next run of `refresh-dependents` (or by `reconcile`). Recovery is forward only: while `remap` rows apply to a dependent, `refresh_dependents` completes whatever replacement of that dependent failed, a reviewer's re-confirm included, with its saved revision, not only a refresh revision. A span moved by an edit that is still unfinished waits for that edit.
 4. **Cleanup.** Every replacement runs the stage `withholding_cleanup` before publication. A row carries forward across a dependent's revisions until its input validates, or the decision no longer cites the input, or the decision is gone. Rows of a withdrawn or forgotten source are ignored, and a re-add clears them.
 
 Each refreshed dependent gains a revision with no decision change. In the fixture, the insertion takes doc01 from revision 1 to 2.
@@ -51,6 +51,7 @@ Each refreshed dependent gains a revision with no decision change. In the fixtur
 - A foreign text is digest-checked only when a decision that is not withheld cites it directly. A text reached only as a span's document is read, not digest-checked, so a change elsewhere in the glossary leaves the span valid.
 - The inputs of withheld decisions are not checked at all (the skip set). Admission, publication verification and retrieval all pass it.
 - `valid_sources` no longer fails a source for foreign drift. A changed corpus field that a decision read is found here, at retrieval, per decision; no new trigger watches native Entity edits.
+- Admission keeps one hard rule on corpus objects: every corpus input a decision lists names an Entity in the graph (`check_corpus_inputs_exist`, `missing_reasoning_input`). `referenced_corpus_ids` relies on it to exempt an existing Entity from the derived-UUID rule, so a missing one is refused, not withheld. Retrieval and publication verification withhold its decisions with `input_removed` instead.
 - `read_texts` leaves out another document whose Data item is gone, so its span reads as `input_removed`.
 
 ## Admission: other documents' inputs (rule 5)
@@ -61,9 +62,9 @@ Each refreshed dependent gains a revision with no decision change. In the fixtur
 |---|---|---|
 | `check_input_kinds` | `not_admitted` | A text input other than the original is a different document of the same dataset. Span inputs are admitted. Saved-record inputs are refused. |
 | `check_foreign_inputs` | `foreign_input_changed` | Another document's input, or a corpus object, that both descriptions hold under one key keeps its kind, document and digest. Only a span's range may change, with its digest unchanged: a pure move. A changed input takes a new key. An uncited key may be dropped. |
-| `check_reconfirmations` | `reconfirm_unattested` | A resolution or variant that keeps its reviewed fields and cites a foreign input key new in this revision names a producer new in this revision. |
+| `check_reconfirmations` | `reconfirm_unattested` | A resolution or variant that keeps its reviewed fields but cites other foreign inputs, its group's included, names a producer new in this revision. Losing, replacing or adding a foreign key all count. |
 
-The occurrence check's `DECISIONS` table gains 13 rows for rule 5, each stated for a text edit and for unchanged text, and `support/occurrence_mutants.py` gains three breaks, one per rule.
+The occurrence check's `DECISIONS` table gains 17 rows for rule 5, each stated for a text edit and for unchanged text, and `support/occurrence_mutants.py` gains four breaks: one per rule, and `reconfirm_by_own_refs`, which reads a decision's own `input_refs` without its group's.
 
 `TextChange.preflight` compares only the edited text; the fixture drivers supply other documents' texts from `read_texts`.
 
@@ -76,7 +77,8 @@ The occurrence check's `DECISIONS` table gains 13 rows for rule 5, each stated f
 - A withheld resolution is served like an unresolved one: its local fact stays in the graph, and no identity query reaches it. A withheld variant is skipped in identity expansion. Facts attached directly to a reusable Entity do not depend on a decision and stay served.
 - `unavailable_sources` keeps one list. Each entry gains `assignment_id`: `null` for a whole source, or the withheld decision, with its `reason`. A withheld decision has `recovery_event_id` `null`.
 - The final consistency recheck also compares the withheld-decision set; a change during the read raises `retrieval_changed`.
-- `status` lists `withholdings` (the rows), `withheld_decisions` (the merged set, with status) and `refresh_needed` (the decisions a reviewer must answer). It reads no graph, so corpus-field drift appears only in `retrieve`.
+- `status` lists `withholdings` (the rows that still apply), `withheld_decisions` (the set retrieval applies, with status and `input_refs`) and `refresh_needed` (the decisions a reviewer must answer). It reads the graph and the registered texts, like retrieval: a decision withheld only by live validation (a changed corpus field, a foreign chunk that is gone, a span that is stale after a re-add or at a first publish) has no row, and appears with status `refresh_needed`.
+- When several inputs withhold one decision, it shows `edit_unfinished` over `refresh_needed` over `remap`, and `input_removed` over `input_changed`.
 
 ## The glossary fixture
 
@@ -121,6 +123,8 @@ Each `edit-glossary --source glossary --case <case> --expected-revision N` edits
 
 `--case cosmetic` changes `plasma heating` to `plasma-heating` inside the entry. The span's text changed, so the edit writes two `refresh_needed` rows with old digest `d8679397...` and new digest `98df70d0ec0d2d79a639fd1e462355807c98bbc93ee2e03a3f02620fcd660c27`, the digest of what is now at [10, 62). Both queries return no fact, and `retrieve` lists r01 and v01 as unavailable with `input_changed`.
 
+A review (`reconfirm` or `replace-decision`) works from the set retrieval applies, so it also answers a decision that only live validation withholds. It refuses while any document doc01 reads has an edit that is pending or failed (`edit_unfinished`), so the reviewer attests committed text, and `reconfirm` refuses a decision withheld with `input_removed`: a removed input is replaced, never re-confirmed.
+
 `reconfirm --decision r01 --expected-revision 1` re-confirms r01 on the current entry, copy-on-write: doc01 revision 2 adds the input `glossary_hc_r2` (the entry at [10, 62), digest `98df70d0ec0d2d79a639fd1e462355807c98bbc93ee2e03a3f02620fcd660c27`), r01 cites it, and r01 names the new producer `review_r01_r2`: method `captured_fixture`, implementation `re-confirmed`, configuration with `confirmed_by`, the withholding it answers, the old digests and the new digest. v01 still cites `glossary_hc` and stays withheld, so the Helios controller query returns the fact and the HC query does not. `reconfirm --decision v01 --expected-revision 2` gives v01 `glossary_hc_r3` under `review_v01_r3`; `glossary_hc` is no longer cited and is dropped. Nothing is withheld.
 
 A `human_review` producer method is a later schema change; until then a re-confirm uses `captured_fixture` with implementation `re-confirmed`.
@@ -136,6 +140,10 @@ A `human_review` producer method is a later schema change; until then a re-confi
 ## An interrupted refresh
 
 `edit-glossary --case insert ... --fault-stage refresh_interrupted` completes the glossary edit, then fails doc01's refresh revision at `replace_registered`. doc01 is failed and unavailable as a whole source, and the two `remap` rows keep [54, 106). `refresh-dependents` resumes doc01's saved revision 2; its cleanup deletes the rows and the incident is `restored`.
+
+## A re-add after an interrupted refresh
+
+Glossary roots take `forget` and `readd` for doc01. In the native test, the insertion's refresh is interrupted and finished, doc01 is forgotten, the entry moves again, and doc01 is re-added with the range it had. No edit classified that move, and the re-add clears doc01's rows. Live validation finds the stale span: `retrieve`, `status` and `reconfirm` all see r01 and v01 as `input_changed` with status `refresh_needed`, and two re-confirms release them. The move is not remapped automatically, because only an edit's own attempt classifies a move.
 
 ## Commands
 
@@ -167,6 +175,7 @@ Expected: after the edit, `status` lists two `refresh_needed` items (r01, v01) a
 - A trigger for native Entity edits. Corpus-field drift is found when retrieval or a revision validates the dependent.
 - Remapping for moves across documents and span-scoped variant ranges; both count as a change.
 - A chunk of another document has no refusal rule. It needs review through the generic classification; the fixture has none.
+- The CLI picks the glossary driver for `reconcile`, `forget` and `readd` by the root's `glossary-fixture-info.json` file. A fixture-kind field in the root marker would replace that check; it is a separate cleanup.
 
 ## Choices the assistant made
 
@@ -177,9 +186,11 @@ The spec left these open or worded them two ways. Each is reversible.
 - **The re-confirm rule** checks a resolution's and a variant's own `input_refs`. The re-confirm describer also moves the resolution's group to the new key, so the unit stays consistent.
 - **An edit with equal texts** changes no input: a chunk is classified as changed only when the text changed.
 - **A foreign chunk that is gone** reads as `input_changed`, not `input_removed`: rechunking replaces it, and "removed" is kept for a document that is gone.
-- **Statuses.** The derived rule's entries have status `edit_unfinished`. When several inputs withhold one decision, it shows `refresh_needed` over `edit_unfinished` over `remap`, and `input_removed` over `input_changed`.
-- **Validation never fails for foreign drift**, also at admission and publication verification. A drifted input that no row records is still withheld at retrieval, so the rows are the durable record and live validation is the backstop.
-- **The refresh resumes a failed refresh revision.** `refresh-dependents` retries a dependent that is failed with a saved replacement while `remap` rows still apply to it; `reconcile` does the same.
+- **Statuses.** The derived rule's entries have status `edit_unfinished`. When several inputs withhold one decision, it shows `edit_unfinished` over `refresh_needed` over `remap`, and `input_removed` over `input_changed`. Fix round 1 moved `edit_unfinished` above `refresh_needed`: a review must wait for the edit.
+- **Live drift needs review.** A decision withheld only by live validation gets status `refresh_needed`, even when its span merely moved; `refresh_dependents` remaps only what an edit's own attempt classified.
+- **A review waits for every document doc01 reads**, not only the one its decision cites, and `replace-decision` waits too, because it also attests the current entry.
+- **Validation never fails for foreign drift**, also at admission and publication verification, with one exception: admission refuses a listed corpus input whose Entity is missing. A drifted input that no row records is still withheld at retrieval, so the rows are the durable record and live validation is the backstop.
+- **The refresh resumes a failed replacement.** `refresh-dependents` retries a dependent that is failed with a saved replacement while `remap` rows still apply to it, whichever command saved it; `reconcile` does the same.
 - **The fault `refresh_interrupted`** is a fixture-only fault stage for `edit-glossary` and `refresh-dependents`. It fails doc01's refresh revision at `replace_registered`.
 - **The fixture's doc01** is the single-document `fixture` description (no g02), plus the two glossary inputs. r01 and v01 keep `existing_A`.
 
