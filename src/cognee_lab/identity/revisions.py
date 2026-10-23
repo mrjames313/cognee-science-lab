@@ -1,4 +1,10 @@
-"""Captured doc01 correction: revision 2 retargets identity, retaining local facts."""
+"""A source's next revision, and the unchanged-text replacement that writes it.
+
+The captured doc01 correction retargets identity at revision 2, retaining
+local facts. A dependent's refresh revision moves its spans, and a
+reviewer's re-confirm cites the current input under a new producer; each is
+a next revision that drops the inputs nothing cites any more.
+"""
 
 import json
 
@@ -6,7 +12,8 @@ from .models import IdentitySource
 from .multisource import current_sources, fixture_id, snapshot
 from .publish import Publisher
 from .retrieve import retrieve
-from .validation import IntentError, fresh_entity_id
+from .validation import IntentError, cited_inputs, fresh_entity_id
+from .withholding import pending_moves
 
 
 def corrected_id(source):
@@ -82,22 +89,116 @@ async def replace_one(publisher, source, *, expected_revision, fault_stage=None)
         pass
 
 
-async def refresh_moved_spans(publisher, fault_stage=None):
-    """After a text edit completes, give each dependent whose span the edit
-    moved its next revision (withholding.refresh_dependents), each through
-    replace_one. `fault_stage` fails each refresh revision there. Returns
-    the ranges written and the failure that stopped the refresh, if any."""
-    from .withholding import refresh_dependents
+def next_revision(reader: IdentitySource, change) -> IdentitySource:
+    """The reader's next revision after `change(payload)`, with every input
+    nothing cites any more dropped. Uncited inputs are known only once the
+    changed payload validates, so a drop validates it a second time."""
+    payload = reader.model_dump(mode="json")
+    payload["revision"] += 1
+    change(payload)
+    revised = IdentitySource.model_validate_json(json.dumps(payload))
+    uncited = set(revised.inputs) - cited_inputs(revised)
+    if not uncited:
+        return revised
+    for key in uncited:
+        payload["inputs"].pop(key)
+    return IdentitySource.model_validate_json(json.dumps(payload))
 
-    async def replace(description, expected_revision):
-        await replace_one(
-            publisher,
-            description,
-            expected_revision=expected_revision,
-            fault_stage=fault_stage,
-        )
 
-    return await refresh_dependents(publisher, replace)
+def remapped(reader: IdentitySource, moved) -> IdentitySource:
+    """The dependent's next revision with each moved span at its new range.
+    Its decisions, producers and every other cited input are unchanged."""
+
+    def change(payload):
+        for w in moved:
+            payload["inputs"][w.input_ref].update(start=w.new_start, end=w.new_end)
+
+    return next_revision(reader, change)
+
+
+def written_ranges(revised: IdentitySource, moved) -> dict:
+    """What a refresh revision wrote: the range of each moved input it holds."""
+    return dict(
+        identity_data_id=str(revised.identity_data_id),
+        revision=revised.revision,
+        inputs={
+            w.input_ref: dict(
+                start=revised.inputs[w.input_ref].start,
+                end=revised.inputs[w.input_ref].end,
+            )
+            for w in moved
+        },
+    )
+
+
+async def refresh_dependents(publisher, fault_stage=None) -> dict:
+    """After an edit completes, write each current dependent's next revision
+    with its moved spans' new ranges: an ordinary unchanged-text replacement
+    through replace_one, whose withholding cleanup releases the moved
+    decisions once it completes. `fault_stage` fails each refresh revision
+    there. A rerun finishes an
+    interrupted refresh: a dependent whose replacement failed resumes its
+    saved revision first. That revision may hold the range of an earlier
+    edit, so when `remap` rows still apply after it, the refresh remaps
+    again.
+
+    Returns each range written (`refreshed`) and the failure that stopped
+    the refresh (`refresh_failed`), not raised: the edit before it already
+    completed, and `refresh-dependents` reruns the refresh."""
+    refreshed = []
+    try:
+        for source, (row, moved) in (await pending_moves(publisher)).items():
+            if row.state != "current" and row.resumed_by == "replace":
+                saved = IdentitySource.model_validate_json(row.description)
+                await replace_one(
+                    publisher,
+                    saved,
+                    expected_revision=row.revision,
+                    fault_stage=fault_stage,
+                )
+                refreshed.append(written_ranges(saved, moved))
+                row, moved = (await pending_moves(publisher)).get(source, (row, []))
+            if row.state == "current" and moved:
+                revised = remapped(
+                    IdentitySource.model_validate_json(row.description), moved
+                )
+                await replace_one(
+                    publisher,
+                    revised,
+                    expected_revision=row.revision,
+                    fault_stage=fault_stage,
+                )
+                refreshed.append(written_ranges(revised, moved))
+    except IntentError as exc:
+        failed = dict(code=exc.code, message=str(exc))
+        return dict(refreshed=refreshed, refresh_failed=failed)
+    return dict(refreshed=refreshed, refresh_failed=None)
+
+
+def reconfirmed(reader, assignment, replacements, producer_key, producer):
+    """Copy-on-write re-confirm of one withheld decision: its next revision
+    cites each new input in place of the changed one under a producer new in
+    this revision. Other decisions keep citing the old input, so they stay
+    withheld until each is re-confirmed; an old input nothing cites any more
+    is dropped. `replacements` maps an old input key to (new key, input)."""
+
+    def change(payload):
+        records = [
+            payload["mention_resolutions"].get(assignment)
+            or payload["variant_assignments"][assignment]
+        ]
+        if assignment in payload["mention_resolutions"]:
+            records.append(payload["mention_groups"][records[0]["group_ref"]])
+        for old, (new, item) in replacements.items():
+            payload["inputs"][new] = item
+            for record in records:
+                record["input_refs"] = [
+                    new if k == old else k for k in record["input_refs"]
+                ]
+        records[0]["producer_ref"] = producer_key
+        payload["producers"][producer_key] = producer
+
+    return next_revision(reader, change)
 
 
 async def run(args, root):

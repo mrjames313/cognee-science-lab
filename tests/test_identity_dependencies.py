@@ -27,13 +27,12 @@ from cognee_lab.identity.validation import (
     validate_inputs,
     withheld_by,
 )
+from cognee_lab.identity import revisions
+from cognee_lab.identity.revisions import reconfirmed, refresh_dependents, remapped
 from cognee_lab.identity.withholding import (
     WithholdingRow,
     WithholdingStore,
     classify,
-    reconfirmed,
-    refresh_dependents,
-    remapped,
     withheld_decisions,
     withhold_dependents,
 )
@@ -538,7 +537,7 @@ async def test_a_retried_second_edit_classifies_as_its_first_attempt_did(
 
 
 async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
-    source_payload,
+    source_payload, monkeypatch
 ):
     """doc01's refresh revision for the first edit failed. A second edit
     moves the span again before the refresh reruns. Resuming the saved
@@ -555,7 +554,7 @@ async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
     await withhold_dependents(publisher, glossary, INSERTED, twice, 3)
     written = []
 
-    async def replace(description, expected_revision):
+    async def replace(_, description, *, expected_revision, fault_stage=None):
         """Complete the revision; its cleanup keeps the rows that still drift."""
         assert rows[1].revision == expected_revision
         rows[1] = row_of(description)
@@ -571,7 +570,8 @@ async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
             },
         )
 
-    refresh = await refresh_dependents(publisher, replace)
+    monkeypatch.setattr(revisions, "replace_one", replace)
+    refresh = await refresh_dependents(publisher)
     assert refresh["refresh_failed"] is None
     refreshed = refresh["refreshed"]
     first, second = INSERTED.index(ENTRY), twice.index(ENTRY)
@@ -587,7 +587,7 @@ async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
 
 
 async def test_a_failed_refresh_is_reported_beside_the_completed_edit(
-    source_payload,
+    source_payload, monkeypatch
 ):
     """The edit completed before its refresh ran, so a refresh that fails
     does not raise as the edit's failure; refresh-dependents reruns it."""
@@ -596,10 +596,11 @@ async def test_a_failed_refresh_is_reported_beside_the_completed_edit(
     publisher = await memory_publisher([row_of(glossary), row_of(doc01)])
     await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
 
-    async def replace(description, expected_revision):
+    async def replace(_, description, *, expected_revision, fault_stage=None):
         raise IntentError("injected_failure", "Injected failure at replace_registered")
 
-    assert await refresh_dependents(publisher, replace) == dict(
+    monkeypatch.setattr(revisions, "replace_one", replace)
+    assert await refresh_dependents(publisher) == dict(
         refreshed=[],
         refresh_failed=dict(
             code="injected_failure",

@@ -125,11 +125,11 @@ async def maintain_one(
         [Task(task, needs_llm=False)], [source], generated.user, generated
     ):
         pass
-    from .revisions import refresh_moved_spans
+    from .revisions import refresh_dependents
 
     # The edit completed: refresh its dependents at once (the user decided).
     # A refresh failure is reported beside the completed edit.
-    return await refresh_moved_spans(publisher)
+    return await refresh_dependents(publisher)
 
 
 def decision_method(source):

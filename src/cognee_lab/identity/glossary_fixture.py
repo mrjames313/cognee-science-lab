@@ -250,9 +250,9 @@ async def change_glossary(
         [Task(task, needs_llm=False)], [intended], generated.user, generated
     ):
         pass
-    from .revisions import refresh_moved_spans
+    from .revisions import refresh_dependents
 
-    return await refresh_moved_spans(publisher, refresh_fault)
+    return await refresh_dependents(publisher, refresh_fault)
 
 
 async def edit(
@@ -303,7 +303,8 @@ async def review(
     from .retrieve import withheld_now
     from .text_changes import read_original
     from .validation import Reason
-    from .withholding import Status, document_inputs, reconfirmed, unfinished_edits
+    from .revisions import reconfirmed
+    from .withholding import Status, document_inputs, unfinished_edits
 
     await expect_current(
         publisher, doc01, expected_revision, "Reconcile doc01 before a review"
@@ -395,7 +396,7 @@ def replaced_variant(doc01, decision, span_key, span, producer_key, producer):
     """v01 said HC is the Helios controller. The glossary now gives HC
     another meaning, so the reviewer drops v01 and adds v02: HC is a new
     "Hybrid coil" Entity, whose UUID derives from v02 and the new revision."""
-    from .withholding import next_revision
+    from .revisions import next_revision
 
     if decision != "v01" or decision not in doc01.variant_assignments:
         raise IntentError("fixture_scope", "Only v01 has a captured replacement")
@@ -518,7 +519,7 @@ async def snapshot(publisher, root, query):
 
 async def run(args, root):
     from .multisource import publish_one
-    from .revisions import refresh_moved_spans
+    from .revisions import refresh_dependents
 
     if args.command == "glossary-fixture":
         publisher, prepared = await prepare(root)
@@ -597,7 +598,7 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
             )
         elif args.command == "refresh-dependents":
-            refresh = await refresh_moved_spans(publisher, refresh_fault)
+            refresh = await refresh_dependents(publisher, refresh_fault)
             # The refresh is this command's own operation, so it fails here.
             if failed := refresh["refresh_failed"]:
                 raise IntentError(failed["code"], failed["message"])

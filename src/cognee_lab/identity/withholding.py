@@ -4,10 +4,10 @@ A text edit of a consumed document records, in its own attempt, which
 decisions of its dependents read what changed: `classify` compares each input
 a dependent read from that document with the new text, and
 `withhold_dependents` writes one row per affected (dependent, decision,
-input). An unchanged span is valid automatically. A span whose text is found
-exactly once elsewhere moved (`remap`): `refresh_dependents` writes its new
-range. Anything else needs review (`refresh_needed`): a reviewer re-confirms
-or replaces the decision.
+input). An unchanged span is valid automatically. A span whose text is
+found exactly once elsewhere moved (`remap`): `revisions.refresh_dependents`
+writes its new range. Anything else needs review (`refresh_needed`): a
+reviewer re-confirms or replaces the decision.
 
 The rows live in their own table beside the ledger, not in RecordStore.
 `withheld_decisions` merges them with a rule derived from the ledger: while a
@@ -16,7 +16,6 @@ that document is withheld, so a crash before the rows are written never
 serves a dependent stale. Withholding writes no recovery events.
 """
 
-import json
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import NamedTuple
@@ -27,9 +26,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from .models import ChunkInput, IdentitySource, SourceTextInput, TextSpanInput
 from .retirement import consumes
 from .validation import (
-    IntentError,
     Reason,
-    cited_inputs,
     decision_inputs,
     stronger,
     text_digest,
@@ -382,16 +379,6 @@ def withheld_decisions(rows, table) -> WithheldSet:
     return held
 
 
-def remapped(reader: IdentitySource, moved) -> IdentitySource:
-    """The dependent's next revision with each moved span at its new range.
-    Its decisions, producers and every other input are unchanged."""
-    payload = reader.model_dump(mode="json")
-    payload["revision"] += 1
-    for w in moved:
-        payload["inputs"][w.input_ref].update(start=w.new_start, end=w.new_end)
-    return IdentitySource.model_validate_json(json.dumps(payload))
-
-
 async def pending_moves(publisher):
     """Each source's row with the `remap` rows that still apply to it and
     whose edit completed. A span moved by an edit that is still pending or
@@ -411,93 +398,3 @@ async def pending_moves(publisher):
         if moved:
             found[row.source] = (row, moved)
     return found
-
-
-def written_ranges(revised: IdentitySource, moved) -> dict:
-    """What a refresh revision wrote: the range of each moved input it holds."""
-    return dict(
-        identity_data_id=str(revised.identity_data_id),
-        revision=revised.revision,
-        inputs={
-            w.input_ref: dict(
-                start=revised.inputs[w.input_ref].start,
-                end=revised.inputs[w.input_ref].end,
-            )
-            for w in moved
-        },
-    )
-
-
-async def refresh_dependents(publisher, replace) -> dict:
-    """After an edit completes, write each current dependent's next revision
-    with its moved spans' new ranges: an ordinary unchanged-text replacement,
-    `replace(description, expected_revision)`, whose withholding cleanup
-    releases the moved decisions once it completes. A rerun finishes an
-    interrupted refresh: a dependent whose replacement failed resumes its
-    saved revision first. That revision may hold the range of an earlier
-    edit, so when `remap` rows still apply after it, the refresh remaps
-    again.
-
-    Returns each range written (`refreshed`) and the failure that stopped
-    the refresh (`refresh_failed`), not raised: the edit before it already
-    completed, and `refresh-dependents` reruns the refresh."""
-    refreshed = []
-    try:
-        for source, (row, moved) in (await pending_moves(publisher)).items():
-            if row.state != "current" and row.resumed_by == "replace":
-                saved = IdentitySource.model_validate_json(row.description)
-                await replace(saved, expected_revision=row.revision)
-                refreshed.append(written_ranges(saved, moved))
-                row, moved = (await pending_moves(publisher)).get(source, (row, []))
-            if row.state == "current" and moved:
-                revised = remapped(
-                    IdentitySource.model_validate_json(row.description), moved
-                )
-                await replace(revised, expected_revision=row.revision)
-                refreshed.append(written_ranges(revised, moved))
-    except IntentError as exc:
-        failed = dict(code=exc.code, message=str(exc))
-        return dict(refreshed=refreshed, refresh_failed=failed)
-    return dict(refreshed=refreshed, refresh_failed=None)
-
-
-def next_revision(reader: IdentitySource, change) -> IdentitySource:
-    """The reader's next revision after `change(payload)`, with every input
-    nothing cites any more dropped. Uncited inputs are known only once the
-    changed payload validates, so a drop validates it a second time."""
-    payload = reader.model_dump(mode="json")
-    payload["revision"] += 1
-    change(payload)
-    revised = IdentitySource.model_validate_json(json.dumps(payload))
-    uncited = set(revised.inputs) - cited_inputs(revised)
-    if not uncited:
-        return revised
-    for key in uncited:
-        payload["inputs"].pop(key)
-    return IdentitySource.model_validate_json(json.dumps(payload))
-
-
-def reconfirmed(reader, assignment, replacements, producer_key, producer):
-    """Copy-on-write re-confirm of one withheld decision: its next revision
-    cites each new input in place of the changed one under a producer new in
-    this revision. Other decisions keep citing the old input, so they stay
-    withheld until each is re-confirmed; an old input nothing cites any more
-    is dropped. `replacements` maps an old input key to (new key, input)."""
-
-    def change(payload):
-        records = [
-            payload["mention_resolutions"].get(assignment)
-            or payload["variant_assignments"][assignment]
-        ]
-        if assignment in payload["mention_resolutions"]:
-            records.append(payload["mention_groups"][records[0]["group_ref"]])
-        for old, (new, item) in replacements.items():
-            payload["inputs"][new] = item
-            for record in records:
-                record["input_refs"] = [
-                    new if k == old else k for k in record["input_refs"]
-                ]
-        records[0]["producer_ref"] = producer_key
-        payload["producers"][producer_key] = producer
-
-    return next_revision(reader, change)
