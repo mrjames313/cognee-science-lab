@@ -7,7 +7,8 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee_lab.identity.admission import admit, check_erasure_retry, identity_map
+from cognee_lab.identity.admission import admit, identity_map
+from cognee_lab.identity.erasure_rules import check_erasure_retry
 from cognee_lab.identity.erasure import (
     impact,
     producer_key,

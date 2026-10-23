@@ -337,7 +337,7 @@ class Publisher:
         """Admit a re-add before anything is written: the description against
         the forgotten source's tombstone and its forget plan, then the input
         checks. A forget whose dependents are not all revised yet refuses."""
-        from .admission import admit_readd
+        from .erasure_rules import admit_readd
         from .erasure import unfinished
         from .retirement import readd_removed
 

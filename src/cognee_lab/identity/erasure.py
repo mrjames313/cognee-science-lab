@@ -18,16 +18,15 @@ from dataclasses import asdict, dataclass
 from typing import Literal, NamedTuple
 from uuid import UUID
 
-from .admission import (
+from .erasure_rules import (
     ERASURE_IMPLEMENTATION,
     Erasure,
     erased_inputs,
-    naming,
     without_erased,
 )
 from .models import Accepted, CorpusObjectInput, IdentitySource
 from .retirement import SourceIds, removed_entities, source_ids
-from .validation import IntentError, decision_inputs, object_digest
+from .validation import IntentError, decision_inputs, naming, object_digest
 
 RESIDUE = (
     "LanceDB marks deleted vector rows; their bytes stay until a compaction and a cleanup of old table versions",

@@ -1,10 +1,11 @@
 """Scratch breaks of the general admitter, one rule each.
 
-Each mutant replaces one function in cognee_lab.identity.admission. The check
+Each mutant replaces one function in cognee_lab.identity.admission, or in the
+erasure rules it imports (cognee_lab.identity.erasure_rules). The check
 must find a small world that the broken admitter decides wrongly.
 """
 
-from cognee_lab.identity import admission
+from cognee_lab.identity import admission, erasure_rules
 
 
 def skip(*_):
@@ -124,4 +125,7 @@ MUTANTS = {
         drop_scoped_variants_freely,
     ),
 }
-assert all(hasattr(admission, attribute) for attribute, _ in MUTANTS.values())
+assert all(
+    hasattr(admission, attribute) or hasattr(erasure_rules, attribute)
+    for attribute, _ in MUTANTS.values()
+)

@@ -9,6 +9,7 @@ from uuid import UUID, uuid5
 import rfc8785
 
 from .models import (
+    Accepted,
     ChunkInput,
     CorpusObjectInput,
     IdentitySource,
@@ -108,6 +109,56 @@ def decision_inputs(source: IdentitySource) -> dict[str, frozenset[str]]:
         scope = getattr(variant.applicability, "document_ref", None)
         cited[key] = frozenset([*variant.input_refs, *([scope] if scope else [])])
     return cited
+
+
+def reusable_recipes(description):
+    mentions = {g.entity_id for g in description.mention_groups.values()}
+    return {
+        eid: recipe
+        for eid, recipe in description.entity_constructions.items()
+        if eid not in mentions
+    }
+
+
+def referenced_corpus_ids(source):
+    """Existing Entities that a resolution or variant lists as a corpus input
+    in its own input_refs. A group's input_refs do not count: only a decision
+    that names the Entity may exempt it from derivation, so this is not
+    `decision_inputs`. `check_corpus_inputs_exist` proves each one is in the
+    graph."""
+    listed = set()
+    for record in [
+        *source.mention_resolutions.values(),
+        *source.variant_assignments.values(),
+    ]:
+        listed.update(record.input_refs)
+    return {
+        i.entity_id
+        for key, i in source.inputs.items()
+        if key in listed and isinstance(i, CorpusObjectInput)
+    }
+
+
+def naming_keys(source, entity_id):
+    """Keys of the resolutions and variants that name an Entity."""
+    return {
+        k
+        for k, r in source.mention_resolutions.items()
+        if isinstance(r, Accepted) and r.target_entity_id == entity_id
+    } | {
+        k
+        for k, v in source.variant_assignments.items()
+        if entity_id in (v.source_entity_id, v.target_entity_id)
+    }
+
+
+def naming(description, key) -> set[UUID]:
+    """The Entities one resolution or variant names."""
+    decision = description.mention_resolutions.get(key)
+    if decision is not None:
+        return {decision.target_entity_id} if isinstance(decision, Accepted) else set()
+    variant = description.variant_assignments[key]
+    return {variant.source_entity_id, variant.target_entity_id}
 
 
 def withheld_by(source: IdentitySource, drift: dict[str, Reason]) -> dict[str, Reason]:

@@ -30,7 +30,7 @@ from collections import Counter
 from contextlib import contextmanager
 from uuid import UUID
 
-from cognee_lab.identity import admission
+from cognee_lab.identity import admission, erasure_rules
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import IntentError, text_digest
 from dependency_worlds import DEPENDENCY_DECISIONS
@@ -341,13 +341,18 @@ def run(shapes=OLD_SHAPES, max_additions=1, checks=CHECKS):
 
 @contextmanager
 def patched(name):
+    """Replace one rule where its callers look it up: admission, and the
+    erasure rules that admission imports."""
     attribute, replacement = MUTANTS[name]
-    original = getattr(admission, attribute)
-    setattr(admission, attribute, replacement)
+    modules = [m for m in (admission, erasure_rules) if hasattr(m, attribute)]
+    originals = [getattr(m, attribute) for m in modules]
+    for m in modules:
+        setattr(m, attribute, replacement)
     try:
         yield
     finally:
-        setattr(admission, attribute, original)
+        for m, original in zip(modules, originals):
+            setattr(m, attribute, original)
 
 
 def run_mutants():

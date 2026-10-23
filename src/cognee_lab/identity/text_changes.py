@@ -15,7 +15,7 @@ async def reject_sole_owned_readers(publisher, old, source):
     Entity as a corpus object."""
     from uuid import UUID
 
-    from .admission import reusable_recipes
+    from .validation import reusable_recipes
     from .retirement import dependents, owned_by
 
     dropped = sorted(

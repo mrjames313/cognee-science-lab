@@ -166,7 +166,7 @@ def test_native_readd_replaces_what_a_later_forget_of_a_co_owner_removed(tmp_pat
     under the v01-derived UUID of each source's revision 2, and the shared
     singleton, which nothing names, under the UUID derived from the removed
     one. The two sources get separate replacements."""
-    from cognee_lab.identity.admission import replacement_entity_id
+    from cognee_lab.identity.erasure_rules import replacement_entity_id
     from cognee_lab.identity.multisource import fixture_id
     from cognee_lab.identity.validation import fresh_entity_id
 

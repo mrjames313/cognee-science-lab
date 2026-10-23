@@ -10,7 +10,7 @@ rows need a steady world, where every group continues and nothing is new.
 
 from uuid import UUID, uuid5
 
-from cognee_lab.identity.admission import ERASURE_IMPLEMENTATION
+from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION
 from dependency_worlds import add_glossary, cite, glossary_span
 from occurrence_worlds import (
     ADMIT,

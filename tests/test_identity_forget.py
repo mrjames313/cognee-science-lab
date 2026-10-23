@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee_lab.identity.admission import admit_readd, replacement_entity_id
+from cognee_lab.identity.erasure_rules import admit_readd, replacement_entity_id
 from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.erasure import impact
 from cognee_lab.identity.forget_fixture import describe_readd

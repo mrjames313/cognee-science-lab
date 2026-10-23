@@ -1,11 +1,7 @@
 """Identity revision replacement with explicit, durable forward recovery."""
 
-from .admission import (
-    admit,
-    check_absent_from_graph,
-    check_erasure_retry,
-    identity_map,
-)
+from .admission import admit, check_absent_from_graph, identity_map
+from .erasure_rules import check_erasure_retry
 from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
