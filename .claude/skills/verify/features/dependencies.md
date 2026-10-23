@@ -14,7 +14,7 @@ Guide: `docs/stage6_identity_dependencies.md`.
 - `replace-decision` replaces the withheld v01 with a new variant v02 for the entry's new meaning.
 - `failed-edit` withholds every decision citing the glossary while its edit is failed, then `reconcile` completes the edit and the refresh.
 - `interrupted-refresh` leaves doc01 failed when its refresh revision fails; `refresh-dependents` finishes it.
-- Glossary roots also take `forget` and `readd` for doc01.
+- Glossary roots also take `forget` and `readd` for either source; journey F10 in `source-lifecycle.md` forgets the glossary.
 
 ## How to get to it (user POV)
 

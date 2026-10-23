@@ -10,8 +10,9 @@ All functions are in `src/cognee_lab/identity/storage.py` unless the entry names
 - **P2. Independent sources.** Harm: a failure or recovery on one source withholds, resolves or corrupts another source. Code: every row and event query in `begin`, `fail` and `complete` filters on dataset and source.
 - **P3. Stale calls are refused.** Harm: a writer that works from an old read overwrites newer intent. Or a late acknowledgement marks the wrong attempt or description as verified. Code: the `stale_revision` guard in `begin`, the attempt check in `fail`, the attempt and `pending` filter in `complete`, and the description check in `assert_pending`. A guard raises before the commit, so the session rolls back.
 - **P4. One writer at a time.** Harm: two writers interleave graph writes for overlapping intents. Code: `begin` takes the `Writer` row only when it has no owner. `fail` and `complete` release it only for their own attempt.
-- **P5. Recovery is explicit and forward.** Harm: an operator loses track of an incident, sees two incidents for one failure, or sees the record of a resolved incident change. Or a method that does not own the saved intent rolls it back, replaces it or drops its retirement plan. Code: `admissible`, which `begin` consults under the reservation. It reads `TRANSITIONS`, keyed by row state and saved plan operation, for the methods each row admits with their revision step and the refusal for the rest, then `REQUIRED_PLANS`, whose `preserved` fields a replacement retry must keep. `begin` keeps the description check at the saved revision (`revision_reuse`) and the final check that a new revision is exactly the next one (`revision_sequence`), which also gives the missing-row entry its refusal. Also `begin` links a recovery attempt to the open event, `fail` reuses the open event, and `complete` resolves it with `outcome` set to the completion state (`restored` for current) and the last recovery attempt marked `verified`; `retrieve` and the fixtures report that outcome. No call removes an event row. `begin` and `complete` change only unresolved events. `fail` looks an event up by id without checking `resolved_at`, but its attempt guard means it reaches only the event of the row's current attempt, which is unresolved.
+- **P5. Recovery is explicit and forward.** Harm: an operator loses track of an incident, sees two incidents for one failure, or sees the record of a resolved incident change. Or a method that does not own the saved intent rolls it back, replaces it or drops its retirement plan. Code: `admissible`, which `begin` consults under the reservation. It reads `TRANSITIONS`, keyed by row state and saved plan operation, for the methods each row admits with their revision step and the refusal for the rest, then `REQUIRED_PLANS`, whose `preserved` fields a replacement retry must keep. `begin` keeps the description check at the saved revision (`revision_reuse`) and the final check that a new revision is exactly the next one (`revision_sequence`), which also gives the missing-row entry its refusal. Also `begin` links a recovery attempt to the open event, `fail` reuses the open event, and `complete` resolves it with `outcome` set to the completion state (`restored` for current) and the last recovery attempt marked `verified`; `retrieve` and the fixtures report that outcome. No call removes an event row. `begin` and `complete` change only unresolved events, except that a completing forget drops the `message` of every event of the source, resolved ones included (P7). `fail` looks an event up by id without checking `resolved_at`, but its attempt guard means it reaches only the event of the row's current attempt, which is unresolved.
 - **P6. Failed rows can recover.** Harm: a failure that no explicit recovery can clear withholds the source forever. Code: `begin` accepts the owning method on a failed row with the saved revision, description and plan. `assert_pending` and `complete` then accept that attempt.
+- **P7. A forgotten row holds no description content.** Harm: an erased source's occurrence texts, recipe names, document excerpts or error messages stay in the ledger and in `status`. Code: `complete(state="forgotten", tombstone=...)` writes the tombstone as the description, `scrubbed_plan` as the plan and `scrubbed_event` for every recovery event of the source, in the transaction that sets the state. `PublicationRow.of` refuses a forgotten row whose description is not a tombstone (`forgotten_format`), which the checker reports as P7.
 
 ## Steps
 
@@ -27,9 +28,9 @@ Each step is one call sequence that the named caller makes. The checker treats e
 | `Wn replace Sk rev=r+1 expect=r plan=regroup<rR` | `replace` with a regrouping `text_change` (`split-group`, `combine-groups`, `maintain_one`) | `begin(method="replace")` |
 | `Wn replace Sk rev=r expect=r plan=<saved>` | the retry branch of `replace` | `begin(method="replace")` with the saved plan |
 | `Wn withdraw Sk rev=r expect=r plan=withdraw` | `withdraw`, with the saved plan on retry | `begin(method="withdraw")` |
-| `Wn forget Sk rev=r expect=r plan=forget` | `forget`, with the saved plan on retry | `begin(method="forget")` |
+| `Wn forget Sk rev=r expect=r plan=forget` | `forget` on a current, withdrawn or failed row, with the saved plan on retry | `begin(method="forget")` |
 | `Wn forget Sk rev=1 expect=0 plan=forget` | none (refusal input): `forget` raises `source_missing` before `begin` on a missing row | `begin(method="forget")` |
-| `Wn complete` | `Publisher._apply_pending`, `withdraw`, `forget` | `assert_pending()` (not for withdraw or forget), then `complete()`. If a call refuses, the caller's `fail()` runs. A publish whose `assert_pending()` refuses stops with the reservation held. |
+| `Wn complete` | `Publisher._apply_pending`, `withdraw`, `forget` | `assert_pending()` (not for withdraw or forget), then `complete()`, which a forget passes the tombstone of the description it began. If a call refuses, the caller's `fail()` runs. A publish whose `assert_pending()` refuses stops with the reservation held. |
 | `Wn complete desc=alt` | none (refusal input) | the same calls with a description other than the one begun |
 | `Wn fail@stage` | the `except` blocks of the callers | `fail()` with `nodes`, `replace_saved`, `withdraw_contributions` or `forget_contributions` |
 | `Wn crash` | a hard crash (docs/SESSION_HANDOFF.md, "Constraints to preserve") | none. The writer keeps the reservation. |
@@ -85,6 +86,8 @@ Measured on 2026-10-21 on the development Mac (10 cores). P = 0, 2 sources, 2 wr
 
 After the regrouping plan joined the step list on 2026-10-21, depth 5 gave 3828 nodes and 3717 sequences in about 6.7 s. After the forget method and the re-add joined it on 2026-10-22, depth 5 gave 5548 nodes and 5429 sequences in about 9 s. Later that day the forget on a missing row joined the step list, and depth 5 gives 5889 nodes and 5770 sequences in about 10 s; `--mutants` runs its 40 breaks in about 15 s. The depths 6 to 8 rows above predate these changes.
 
+On 2026-10-23 (checkpoint I) forget began on withdrawn and failed-publication rows, the tombstone joined `complete`, and P7 was added. Depth 5 gives 6287 nodes and 6156 sequences in about 10.4 s; `--mutants` runs its 45 breaks in about 15 s.
+
 P5 later gained two checks: no step removes a recovery event, and no step changes a resolved one. After that change, depths 6, 7 and 8 passed again with the same counts. Those runs ran in parallel, so their times are not in the table.
 
 Sampled runs, depth 8 and 9, 2 sources, 2 writers, P = 0.5:
@@ -113,7 +116,7 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `fail-keeps-state` | P1 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1` |
 | `begin-links-every-source` | P2 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 publish S2 rev=1` |
 | `complete-resolves-every-source` | P2 | `W1 publish S1 rev=1`, `W1 complete`, `W1 publish S2 rev=1`, `reject S1`, `W1 complete` |
-| `no-stale-revision-guard` | P3 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 expect=0 plan=forget` |
+| `no-stale-revision-guard` | P3 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget` |
 | `complete-ignores-attempt` | P3 | `W1 publish S1 rev=1`, `W1 complete`, `W1 repeat` |
 | `fail-ignores-attempt` | P3 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1`, `reject S1` |
 | `assert-pending-ignores-description` | P3 | `W1 publish S1 rev=1`, `W1 complete desc=alt` |
@@ -124,16 +127,18 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `no-replace-recovery-choice` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 reconcile S1 rev=2` |
 | `no-withdraw-recovery-choice` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 withdraw S1 rev=1`, `W1 fail@withdraw_contributions`, `W1 reconcile S1 rev=1` |
 | `no-withdrawn-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 withdraw S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1` |
-| `no-forgotten-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete`, `W1 reconcile S1 rev=1` |
+| `forget-refuses-withdrawn` | INCONCLUSIVE | none: no forget on a withdrawn row is accepted, so `forget withdrawn` is never reached |
+| `forget-refuses-failed-publication` | INCONCLUSIVE | none: no forget on a failed publication is accepted, so `forget failed publish` is never reached |
+| `no-forgotten-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1` |
+| `publish-restarts-saved-row` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 publish S1 rev=2` |
 | `no-forget-recovery-choice` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 fail@forget_contributions`, `W1 reconcile S1 rev=1` |
-| `forget-from-any-failed-row` | P5 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 forget S1 rev=1 plan=forget` |
-| `forget-takes-any-plan` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=publish` |
-| `publish-restarts-saved-row` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 publish S1 rev=2 expect=1` |
-| `readd-at-forgotten-revision` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete`, `W1 publish S1 rev=1 expect=1` |
+| `forget-on-failed-replacement` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete desc=alt`, `W1 forget S1 rev=2 plan=forget` |
+| `forget-on-failed-withdrawal` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 withdraw S1 rev=1`, `W1 fail@withdraw_contributions`, `W1 forget S1 rev=1 plan=forget` |
+| `forget-takes-any-plan` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1` |
+| `complete-keeps-description` | P7 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete` |
+| `complete-keeps-plan` | P7 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete` |
+| `complete-keeps-messages` | P7 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1`, `W1 forget S1 rev=1 plan=forget`, `W1 complete` |
 | `complete-forgotten-as-withdrawn` | P1 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S1 rev=1 plan=forget`, `W1 complete` |
-| `advance-guard-refuses-readd` | INCONCLUSIVE | none: no publish on a forgotten row is accepted, so `accepted readd` is never reached |
-| `forget-without-a-row` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S2 rev=1 expect=0 plan=forget` |
-| `complete-misnames-outcome` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1`, `W1 withdraw S1 rev=1`, `W1 complete` |
 | `no-advance-guard` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=2` |
 | `advance-guard-ignores-method` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=2` |
 | `no-revision-reuse` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1 desc=alt` |
@@ -147,6 +152,9 @@ The default bound is depth 5. Depth 5 is the shallowest bound that catches every
 | `begin-links-resolved-events` | P5 | `W1 publish S1 rev=1`, `W1 fail@nodes`, `W1 reconcile S1 rev=1`, `W1 complete`, `W1 reconcile S1 rev=1` |
 | `complete-always-refuses` | P6 | `W1 publish S1 rev=1`, `W1 complete` |
 | `failed-row-never-recoverable` | P6 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1` |
+| `advance-guard-refuses-readd` | INCONCLUSIVE | none: no publish on a forgotten row is accepted, so `accepted readd` is never reached |
+| `forget-without-a-row` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 forget S2 rev=1 plan=forget` |
+| `complete-misnames-outcome` | P5 | `W1 publish S1 rev=1`, `W1 complete`, `reject S1`, `W1 withdraw S1 rev=1`, `W1 complete` |
 | `begin-always-busy` | INCONCLUSIVE | none: no `begin()` is accepted, so the run is `INCONCLUSIVE` |
 
 ### Deep breaks
@@ -161,7 +169,7 @@ uv run python support/ledger_check.py --mutant withdrawn-guard-admits-replace --
 | --- | --- | --- | --- |
 | `withdrawn-guard-admits-replace` | 7 | P5 | `W1 publish S1 rev=1`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1`, `W1 complete`, `W1 withdraw S1 rev=2`, `W1 complete`, `W1 replace S1 rev=2 plan=replace<r1` |
 
-The withdrawn guard is the only guard that refuses the last step. That step is the retry branch of `replace`, built from a stale read of the current replacement row. Its plan is a replace plan, so the plan guard accepts it. The row is withdrawn, not failed, so the plan preservation guard does not apply. At depth 6 the search passes with the real node count (15763 nodes). At depth 7 it fails after 4032 nodes, in about 7 s. On 2026-10-22, after the forget steps joined the step list and the table refactor, the assistant measured on the user's Mac that it fails after 7938 nodes in about 13 s, with the same minimal sequence.
+The withdrawn guard is the only guard that refuses the last step. That step is the retry branch of `replace`, built from a stale read of the current replacement row. Its plan is a replace plan, so the plan guard accepts it. The row is withdrawn, not failed, so the plan preservation guard does not apply. At depth 6 the search passes with the real node count (15763 nodes). At depth 7 it fails after 4032 nodes, in about 7 s. On 2026-10-22, after the forget steps joined the step list and the table refactor, the assistant measured on the user's Mac that it fails after 7938 nodes in about 13 s, with the same minimal sequence. On 2026-10-23, with forget admitted on a withdrawn row, the break's anchor is the withdrawn entry with forget in it; it fails after 8346 nodes in about 14.5 s, with the same minimal sequence.
 
 ### Breaks that are not caught
 
@@ -173,6 +181,8 @@ These breaks are not caught. They are not in `ledger_mutants.py`.
 
 For these three, no reachable sequence separates the break from the real code. Each one gives the same node count as the real code at depth 6 (15763 nodes).
 
+- `readd-at-forgotten-revision`, dropped on 2026-10-23: a forgotten row without its `sequence` refusal. Since the row holds a tombstone, `begin`'s description check refuses a publish at the forgotten revision (`revision_reuse`), and its final check refuses any other revision but the next, so no reachable call separates the break. For the same reason `no-forgotten-guard` now admits a new replacement on the forgotten row, which only the forgotten guard refuses.
+- `forget-from-any-failed-row`, dropped on 2026-10-23: forget's `off_row` refusal. Every row entry now admits or refuses forget itself, so `admissible` never reaches it. The breaks `forget-on-failed-replacement` and `forget-on-failed-withdrawal` cover the owned rows instead.
 - A missing-row entry in `TRANSITIONS` that admits replace. The checker does not send replace for a missing row (see "Missing rows" in the modeling choices). The forget guard is covered by `forget-without-a-row`.
 
 ## Proof that this skill works

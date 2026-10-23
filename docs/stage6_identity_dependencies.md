@@ -7,7 +7,7 @@ A source can read another document: a glossary entry, a protocol, a calibration 
 The user decided this on 2026-10-22 and 2026-10-23:
 
 1. When a consumed input changes, affected dependents are withheld from retrieval until refreshed. They are not blocked, and they are not served with a stale flag. The unit is one decision: only decisions whose inputs cite the changed input are withheld, with the facts generated from their groups. Refresh starts at once: the edit records the withholding before it completes, mechanical re-checks run at once, and anything that needs judgment becomes a "refresh needed" item. Today a reviewer clears it; once Describe exists (step 6) the same trigger runs Describe.
-2. Erasure's effect on dependents is not in this checkpoint. `forget` still refuses a source with dependents.
+2. Erasure's effect on dependents is not in this checkpoint. `forget` still refuses a source with dependents. (Checkpoint I, 2026-10-23, replaced that refusal: a confirmed forget removes the dependents' decisions. See the [forget guide](stage6_identity_forget.md).)
 3. A reviewer may re-confirm a withheld decision. A re-confirm records the new fingerprint and who confirmed it; no IDs change. The table of outcomes by input kind is below.
 4. The first example is a glossary.
 5. Users see the reasons "input changed" (`input_changed`) and "input removed" (`input_removed`), never "input forgotten".
@@ -74,7 +74,7 @@ The occurrence check gains 25 decision rows for rule 5, in `DEPENDENCY_DECISIONS
 
 ## A text edit no longer refuses its dependents
 
-`reject_dependents` is gone from `text_changes.py`. One refusal stays, as `reject_sole_owned_readers`: a text edit that drops a reusable recipe which only the edited source owns, while another source reads that Entity as a corpus object, is refused with `dependent_source`, because the Entity would leave the graph. Forget keeps its own dependents refusal.
+`reject_dependents` is gone from `text_changes.py`. One refusal stays, as `reject_sole_owned_readers`: a text edit that drops a reusable recipe which only the edited source owns, while another source reads that Entity as a corpus object, is refused with `dependent_source`, because the Entity would leave the graph. Forget kept its own dependents refusal until checkpoint I (2026-10-23), which replaced it with the removal of the dependents' decisions ([forget guide](stage6_identity_forget.md)).
 
 ## Retrieval and status
 
@@ -147,7 +147,7 @@ A `human_review` producer method is a later schema change; until then a re-confi
 
 ## A re-add after an interrupted refresh
 
-Glossary roots take `forget` and `readd` for doc01. In the native test, the insertion's refresh is interrupted and finished, doc01 is forgotten, the entry moves again, and doc01 is re-added with the range it had. No edit classified that move, and the re-add clears doc01's rows. Live validation finds the stale span: `retrieve`, `status` and `reconfirm` all see r01 and v01 as `input_changed` with status `refresh_needed`, and two re-confirms release them. The move is not remapped automatically, because only an edit's own attempt classifies a move.
+Glossary roots take `forget` and `readd` for either source. In the native test, the insertion's refresh is interrupted and finished, doc01 is forgotten, the entry moves again, and doc01 is re-added from its caller file, whose span holds the entry's first range (since checkpoint I a re-add reads the caller's files, not the forgotten description). No edit classified that move, and the re-add clears doc01's rows. Live validation finds the stale span: `retrieve`, `status` and `reconfirm` all see r01 and v01 as `input_changed` with status `refresh_needed`, and two re-confirms release them. The move is not remapped automatically, because only an edit's own attempt classifies a move.
 
 ## Commands
 
@@ -179,7 +179,7 @@ Expected: after the edit, `status` lists two `refresh_needed` items (r01, v01) a
 - A trigger for native Entity edits. Corpus-field drift is found when retrieval or a revision validates the dependent.
 - Remapping for moves across documents and span-scoped variant ranges; both count as a change.
 - A chunk of another document has no refusal rule. It needs review through the generic classification; the fixture has none.
-- The CLI picks the glossary driver for `reconcile`, `forget` and `readd` by the root's `glossary-fixture-info.json` file. A fixture-kind field in the root marker would replace that check; it is a separate cleanup.
+- The CLI picked the glossary driver for `reconcile`, `forget` and `readd` by the root's `glossary-fixture-info.json` file. Done in checkpoint I (2026-10-23): the root marker records the fixture kind, and the CLI routes by it.
 - A renamed or new decision may name a sibling's re-confirm producer and cite the key that producer attested (the final review probed it). The rule is per producer and key, and the producer's configuration records the withholding per input, so the record stays true about which content was seen; one decision's re-confirm can still cover another decision's interpretation. Accepted for now; a per-decision attestation would close it.
 - A producer's identity is its key, not its content. A revision may rewrite an old producer's configuration without changing any decision. It is still constrained by the rule above, and withholding is keyed by input, so nothing is released, but recorded provenance is not immutable.
 - `describe_prefix_edit` (`text_fixture.py`) stamps every record with the fixed producer key `text_review`. A second prefix edit after a re-confirm on the same source would be refused by the attestation rule. No CLI path reaches it today; a per-revision key would remove the hazard.
