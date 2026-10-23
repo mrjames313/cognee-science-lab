@@ -696,73 +696,81 @@ def without_erased(refs, erased, fallback):
 
 
 def check_erasure_removals(old, source):
-    """A revision that names a removal producer is an erasure removal and
-    nothing else. Every old decision citing what the forget removed is
-    removed: a resolution becomes unresolved in place under the removal
-    producer, with the erased inputs stripped, and a variant is dropped.
-    Groups lose only the erased inputs. Every other decision, group, input,
-    recipe and producer is unchanged, except that inputs nothing cites any
-    more go, and a reusable recipe goes only when a removed decision named
-    it and no remaining decision does."""
+    """A revision that names a removal producer is an erasure removal, all
+    of it and nothing else: it removes every decision citing what the forget
+    removed (`check_erasure_complete`) and changes nothing more
+    (`check_erasure_confined`)."""
     erasure = erasure_of(old, source)
     if erasure is None:
         return
+    check_erasure_complete(old, source, erasure)
+    check_erasure_confined(old, source, erasure)
+
+
+def check_erasure_complete(old, source, erasure):
+    """Every old decision citing what the forget removed is removed: a
+    resolution becomes unresolved in place under the removal producer, with
+    the erased inputs stripped, and a variant is dropped. No erased input
+    remains, in the inputs or a group's."""
     erased = erased_inputs(old, erasure)
     citing = erased_decisions(old, source)
-    own = old.original_input_ref
-
-    def refuse(code, message):
-        raise IntentError(code, message)
-
     for key in citing & set(old.mention_resolutions):
         was = old.mention_resolutions[key]
         removed = Unresolved(
             group_ref=was.group_ref,
             status="unresolved",
-            input_refs=without_erased(was.input_refs, erased, own),
+            input_refs=without_erased(was.input_refs, erased, old.original_input_ref),
             producer_ref=erasure.producer,
         )
         if source.mention_resolutions.get(key) != removed:
-            refuse(
+            raise IntentError(
                 "erasure_incomplete",
                 "A resolution citing what the forget removed becomes unresolved under the removal producer",
             )
     if citing & set(source.variant_assignments):
-        refuse(
-            "erasure_incomplete",
-            "A variant citing what the forget removed is dropped",
+        raise IntentError(
+            "erasure_incomplete", "A variant citing what the forget removed is dropped"
         )
     if set(source.inputs) & erased or any(
         set(g.input_refs) & erased for g in source.mention_groups.values()
     ):
-        refuse("erasure_incomplete", "No erased input remains")
+        raise IntentError("erasure_incomplete", "No erased input remains")
+
+
+def check_erasure_confined(old, source, erasure):
+    """Every other decision, group, input, recipe and producer is unchanged:
+    groups lose only the erased inputs, inputs nothing cites any more go, the
+    removal producer is the one producer added, and a reusable recipe goes
+    only when a removed decision named it and no remaining decision does."""
+    erased = erased_inputs(old, erasure)
+    citing = erased_decisions(old, source)
+
+    def unrelated(message):
+        raise IntentError("erasure_unrelated", "An erasure removal " + message)
+
     for kind in ("mention_resolutions", "variant_assignments"):
         was, now = getattr(old, kind), getattr(source, kind)
         if {k: v for k, v in now.items() if k not in citing} != {
             k: v for k, v in was.items() if k not in citing
         }:
-            refuse(
-                "erasure_unrelated",
-                "An erasure removal changes only the decisions citing what the forget removed",
-            )
-    groups = {
+            unrelated("changes only the decisions citing what the forget removed")
+    stripped = {
         k: g.model_copy(
-            update=dict(input_refs=without_erased(g.input_refs, erased, own))
+            update=dict(
+                input_refs=without_erased(g.input_refs, erased, old.original_input_ref)
+            )
         )
         for k, g in old.mention_groups.items()
     }
-    if source.mention_groups != groups or any(
+    if source.mention_groups != stripped or any(
         old.inputs.get(k) != item for k, item in source.inputs.items()
     ):
-        refuse(
-            "erasure_unrelated",
-            "An erasure removal keeps every group and input but the erased ones",
-        )
+        unrelated("keeps every group and input but the erased ones")
     if source.producers != {
         **old.producers,
         erasure.producer: source.producers[erasure.producer],
     }:
-        refuse("erasure_unrelated", "An erasure removal adds only its producer")
+        unrelated("adds only its producer")
     removed_names = set().union(*(naming(old, k) for k in citing))
     remaining = set().union(
         *(
@@ -773,16 +781,13 @@ def check_erasure_removals(old, source):
     for eid, recipe in old.entity_constructions.items():
         kept = source.entity_constructions.get(eid)
         if kept is None and (eid not in removed_names or eid in remaining):
-            refuse(
-                "erasure_unrelated",
-                "An erasure removal drops only a recipe that a removed decision named and no remaining decision names",
+            unrelated(
+                "drops only a recipe that a removed decision named and no remaining decision names"
             )
         if kept is not None and kept != recipe:
-            refuse(
-                "erasure_unrelated", "An erasure removal keeps every recipe unchanged"
-            )
+            unrelated("keeps every recipe unchanged")
     if set(source.entity_constructions) - set(old.entity_constructions):
-        refuse("erasure_unrelated", "An erasure removal adds no recipe")
+        unrelated("adds no recipe")
 
 
 def naming(description, key) -> set[UUID]:

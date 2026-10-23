@@ -61,6 +61,20 @@ def attest_any_old_input(old, source):
                 raise admission.IntentError("reconfirm_unattested", "")
 
 
+def drop_scoped_variants_freely(old, source):
+    """Corpus- and span-scoped variants may be dropped without a removal
+    producer; only a kept one must be unchanged."""
+    kept = {
+        k: v
+        for k, v in admission.scoped_variants(old, admission.FIXED_SCOPES).items()
+        if k in source.variant_assignments
+    }
+    if admission.reviewed_decisions(
+        admission.scoped_variants(source, admission.FIXED_SCOPES)
+    ) != admission.reviewed_decisions(kept):
+        raise admission.IntentError("variant_changed", "")
+
+
 MUTANTS = {
     "continue_with_any_uuid": ("same_identity", lambda *_: True),
     "continue_after_merge": (
@@ -102,5 +116,12 @@ MUTANTS = {
         attest_continuing_keys_only,
     ),
     "attest_any_old_input": ("check_reconfirmations", attest_any_old_input),
+    "allow_any_erasure": ("check_erasure_removals", skip),
+    "erase_partially": ("check_erasure_complete", skip),
+    "erase_beyond_the_forgotten": ("check_erasure_confined", skip),
+    "drop_scoped_variants_freely": (
+        "check_scoped_variants",
+        drop_scoped_variants_freely,
+    ),
 }
 assert all(hasattr(admission, attribute) for attribute, _ in MUTANTS.values())
