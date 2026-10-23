@@ -373,18 +373,18 @@ async def replace(
     async def clean_withholdings(_):
         # Rows carry forward across revisions until the input validates or
         # the decision or input is gone. Idempotent: a retry recomputes.
-        from .validation import decision_inputs, validate_inputs
+        from .validation import validate_inputs
+        from .withholding import recorded_rows
 
         own = str(source.identity_data_id)
-        rows = [w for w in await publisher.withholdings.rows() if w.source == own]
-        if not rows:
+        table = await publisher.withholdings.rows(source.dataset_id)
+        if not any(w.source == own for w in table):
             return
         drift = await validate_inputs(source, texts=texts, chunks=chunks, graph=graph)
-        cited = decision_inputs(source)
         kept = {
             (w.assignment, w.input_ref)
-            for w in rows
-            if w.input_ref in drift and w.input_ref in cited.get(w.assignment, ())
+            for w in recorded_rows({own: source}, table)
+            if w.input_ref in drift
         }
         await publisher.withholdings.keep(source.dataset_id, own, kept)
 
