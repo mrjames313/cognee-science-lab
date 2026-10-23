@@ -12,10 +12,10 @@ description: Drive the cognee-science-lab Stage 6 identity CLI (`python -m cogne
 The product surface is a CLI that writes to real Cognee stores (Ladybug graph, LanceDB vector, SQLite relational) inside a root directory you name, then prints one JSON document:
 
 ```bash
-uv run python -m cognee_lab.identity <command> --root <dir> [--source doc01|doc02] [--expected-revision N] [--fault-stage STAGE] [--query TEXT]
+uv run python -m cognee_lab.identity <command> --root <dir> [--source doc01|doc02|glossary] [--expected-revision N] [--fault-stage STAGE] [--query TEXT]
 ```
 
-Commands: `fixture`, `multi-fixture`, `chunked-fixture` (create a root, with `--embedding env|loopback`; `multi-fixture --dependent` makes doc02 consume doc01), `revise`, `edit-text`, `remove-occurrences`, `retire-resolved-group`, `add-occurrences`, `split-group`, `combine-groups`, `reinterpret-new-entity`, `reinterpret-unresolved`, `change-kind-to-mention`, `change-kind-to-reusable`, `forget`, `readd` (maintenance commands that need `--expected-revision`), `withdraw`, `retrieve`, `status`, `reconcile`. The fixtures use captured decisions and make no LLM call.
+Commands: `fixture`, `multi-fixture`, `chunked-fixture`, `glossary-fixture` (create a root, with `--embedding env|loopback`; `multi-fixture --dependent` makes doc02 consume doc01; `glossary-fixture` makes doc01 read a glossary entry), `revise`, `edit-text`, `remove-occurrences`, `retire-resolved-group`, `add-occurrences`, `split-group`, `combine-groups`, `reinterpret-new-entity`, `reinterpret-unresolved`, `change-kind-to-mention`, `change-kind-to-reusable`, `forget`, `readd`, `edit-glossary --case`, `reconfirm --decision`, `replace-decision --decision` (maintenance commands that need `--expected-revision`), `refresh-dependents`, `withdraw`, `retrieve`, `status`, `reconcile`. The fixtures use captured decisions and make no LLM call.
 
 Other surfaces, not covered here: `main.py` is a stub. `scripts/stage1_*` to `stage5_*` are historical lab experiments that need API keys and the shared lab store. Do not drive them for verification. `uv run pytest` is the test suite. It complements this skill and does not replace it.
 
@@ -79,12 +79,12 @@ $V drive "$RUN" main add -- add-occurrences --source doc01 --expected-revision 1
 $V check "$RUN" add '.result.facts | length == 3' 'three facts after addition'
 ```
 
-Stable handles are JSON field paths (`.result.facts`, `.sources.doc01.saved_revision`, `.text_changes[0].groups.g03`, `.recovery_events`, `.unavailable_sources`) and the fixture group keys `g01`/`g02`/`g03` and sources `doc01`/`doc02`. UUIDs differ per root. Compare IDs only within one run.
+Stable handles are JSON field paths (`.result.facts`, `.sources.doc01.saved_revision`, `.text_changes[0].groups.g03`, `.recovery_events`, `.unavailable_sources`) and the fixture group keys `g01`/`g02`/`g03` and sources `doc01`/`doc02`/`glossary`. UUIDs differ per root. Compare IDs only within one run.
 
 Output-shape gotchas:
 
 - `fixture`/`multi-fixture`/`chunked-fixture` print Cognee log lines ("... table already exists, skipping creation") to stdout before the JSON. `drive` extracts the JSON. Do not `jq` the raw `.stdout`.
-- `retrieve` returns facts at top level (`.facts`). Fixture, maintenance and `reconcile` return them under `.result.facts`. `status` returns `.publications` and `.recovery_events` only.
+- `retrieve` returns facts at top level (`.facts`). Fixture, maintenance and `reconcile` return them under `.result.facts`. `status` returns `.publications`, `.recovery_events`, `.withholdings`, `.withheld_decisions` and `.refresh_needed`. A glossary root's commands write `glossary_result.json` and print the same document.
 - `.sources` is keyed `doc01`/`doc02`. `status` `.publications[].source` is an identity-data UUID, not `doc01`.
 - An injected `--fault-stage` failure exits 1. It prints `{"error": "IntentError", "message": "... recovery_event_id=<uuid>"}` on stdout and a rich traceback on stderr. That is the expected result for a failure journey, so check for it and do not treat it as a broken run.
 

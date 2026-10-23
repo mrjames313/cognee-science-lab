@@ -24,9 +24,9 @@ Run the check when your diff touches any of these.
 | --- | --- | --- |
 | `storage.py` | `RecordStore.begin`, `fail`, `complete`, `assert_pending`, `rows`, `events`, the three tables, `TRANSITIONS`, `REQUIRED_PLANS`, `cell_for`, `admissible` and `PublicationRow` | All of it. The checker calls the six `RecordStore` methods and nothing else. It exercises the transition table only through `begin`, which consults `admissible` and `cell_for`, and it does not import the table. |
 | `stages.py` | `run_attempt`, `saved_row` | The frame of replace, withdraw and forget: `begin`, the stages, `complete(state=...)` and the `fail` with its stage. |
-| `retrieve.py` | `valid_sources` | The eligibility condition, copied as `served()`. Also the `fail()` call on a row that fails validation (the `reject` step). |
+| `retrieve.py` | `valid_sources` | The eligibility condition, copied as `served()`. Also the `fail()` call on a row that fails validation (the `reject` step). Since checkpoint H (2026-10-23) only an own input's failure calls `fail()`; a foreign input's drift withholds decisions and calls no `RecordStore` method. |
 | `publish.py` | `Publisher.publish`, `Publisher.reconcile`, `Publisher.readd`, `Publisher._publish`, `Publisher._apply_pending` | The three entry points and the method and expected revision each passes to `begin()`, `assert_pending()` before the `try` block, and the `complete()` or `fail()` that ends the attempt. |
-| `replace.py` | `replace`, `REPLACE` | The replacement arguments, the retry with the saved plan, `plan["text_change"]`, and the stages. |
+| `replace.py` | `replace`, `REPLACE` | The replacement arguments, the retry with the saved plan, `plan["text_change"]`, and the stages. The stages `replace_dependents` and `withholding_cleanup` (checkpoint H) write only the withholding table in `withholding.py`, which is outside the six checked methods. |
 | `withdraw.py` | `withdraw`, `WITHDRAW` | The withdrawal arguments, the reuse of a saved withdrawal plan, and the completion state `withdrawn`. |
 | `forget.py` | `forget`, `FORGET` | The forget arguments, the reuse of a saved forget plan, and the completion state `forgotten`. |
 | `text_fixture.py` | `maintain_one` | It calls `replace` with a `text_change`. The checker sends that plan shape. |

@@ -21,7 +21,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - **Fence.** A journey is a fenced block with the info string `bash journey ID [stages=a,b,c] [env]`. The block holds only `drive`, `check` and shell lines. It never defines `V`, `RUN`, `val` or a cleanup.
 - **Stages.** `stages=` lists the fault stages. The runner sets `STAGE` for each one, in its own run. `--stage S` runs one.
 - **env.** The `env` token marks a journey that calls the embedding API.
-- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes, `G` is group regrouping, `I` is changed interpretation, `K` is kind change and `F` is forget and re-add. The `E` journeys live in the revision file, and the `I` and `K` journeys live in the reinterpretation file.
+- **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes, `G` is group regrouping, `I` is changed interpretation, `K` is kind change, `F` is forget and re-add and `D` is dependencies. The `E` journeys live in the revision file, and the `I` and `K` journeys live in the reinterpretation file.
 - **Fault journeys.** A fault journey lives with the feature that it breaks.
 - **Cited values.** Every expected value comes from a guide under `docs/` or from `docs/SESSION_HANDOFF.md`. An inference from a guide says so in the paragraph.
 - **Non-vacuous checks.** A check on a field requires the field to exist. Use `length > 0`, a type test or `!= null` where a missing field would otherwise pass.
@@ -32,7 +32,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - `$V drive` adds `--root`. Later commands read the profile from the root marker and never take `--embedding`.
 - Keep labels unique within a run. `$V check` reads the latest step with that label.
 - A step that is meant to fail still runs through `drive`. The step exits 1, and a `check` on `.error` proves the failure.
-- Read `retrieve` facts at `.facts`. Read every other command's facts at `.result.facts`. `status` returns only `.publications` and `.recovery_events`.
+- Read `retrieve` facts at `.facts`. Read every other command's facts at `.result.facts`. `status` returns `.publications`, `.recovery_events`, `.withholdings`, `.withheld_decisions` and `.refresh_needed`.
 - Compare UUIDs only within one run.
 - The `replace_published` stage records its incident under a stage named `replacement_cleanup`. Do not assert the incident `stage` field against the flag value.
 
@@ -55,6 +55,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - [Group regrouping](./group-regrouping.md) covers `split-group` and `combine-groups`, each with its `replace_published` recovery case.
 - [Reinterpretation](./reinterpretation.md) covers `reinterpret-new-entity`, `reinterpret-unresolved`, `change-kind-to-mention` and `change-kind-to-reusable`, their recovery cases and their scope refusals.
 - [Source lifecycle](./source-lifecycle.md) covers `forget` of a source nothing depends on, its refusal with dependents, its recovery at each fault stage, and `readd` at the next revision.
+- [Dependencies](./dependencies.md) covers `glossary-fixture`, `edit-glossary` in its four cases, `reconfirm`, `replace-decision`, a failed edit with its `reconcile`, and an interrupted refresh with `refresh-dependents`.
 
 There is no separate failure-recovery file. Every fault journey lives with the feature that it breaks, so the recovery steps stay next to the happy path that they restore.
 
