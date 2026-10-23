@@ -224,7 +224,7 @@ MUTANTS = {
     ),
     # An erasure retry supersedes a description it does not name.
     "supersede-any-description": Mutant(
-        "            and erased_from(plan) == [*erased_from(row.plan), row.description]\n",
+        "            and erased_from(plan) == erased_from(superseding_plan(row, source))\n",
         "            and len(erased_from(plan)) == len(erased_from(row.plan)) + 1\n",
         "P5",
     ),
@@ -265,9 +265,16 @@ MUTANTS = {
     # The store begins an erasure retry without checking that each step of
     # its chain is the removal a forget allows (erasure_rules).
     "erasure-chain-unchecked": Mutant(
-        "    if retry and required.supersedes and (chain := erased_from(plan)):\n",
-        "    if False and (chain := erased_from(plan)):\n",
+        "    if chain := erasure_chain(row, method, plan):\n",
+        "    if False and (chain := erasure_chain(row, method, plan)):\n",
         "P5",
+    ),
+    # begin() reads no saved row for the chain check, so no erasure retry
+    # finds the forget it erases.
+    "begin-reads-no-rows": Mutant(
+        "            if erasure_chain(saved, method, plan):\n",
+        "            if False:\n",
+        "INCONCLUSIVE",
     ),
     "begin-resolves-open-event": Mutant(
         '                    info.setdefault("recovery_attempts", []).append(\n'
@@ -349,7 +356,7 @@ DEEP_MUTANTS = {
     # Caught at depth 7: a retry of a failed erasure retry drops the saved
     # revisions it superseded from its plan.
     "supersede-drops-chain": Mutant(
-        "            and erased_from(plan) == [*erased_from(row.plan), row.description]\n",
+        "            and erased_from(plan) == erased_from(superseding_plan(row, source))\n",
         "            and erased_from(plan)[-1:] in ([], [row.description])\n",
         "P5",
     ),

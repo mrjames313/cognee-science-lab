@@ -16,7 +16,7 @@ document or a removed Entity (`unfinished`).
 
 import json
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import Literal, assert_never
 from uuid import UUID
 
 from .erasure_rules import (
@@ -127,12 +127,31 @@ def producer_key(ids: SourceIds, revision: int) -> str:
     return f"forget_{ids.identity_data_id}_r{revision}"
 
 
+def removal_writer(row):
+    """How a dependent row takes its removal revision, by the attempt it
+    saved: a current row writes its next revision; a failed publication,
+    replacement or text change retries its saved revision with the removal
+    applied, which supersedes it (an erasure retry). None while the row
+    waits for its own attempt: a pending row, or a failed withdrawal or
+    forget, which leaves the source reading nothing once it finishes."""
+    if row.state == "pending":
+        return None
+    match row.failed_attempt:
+        case None | "replace":
+            return write_replacement
+        case "text_change":
+            return write_text_change
+        case "publish":
+            return write_publication
+        case "withdraw" | "forget":
+            return None
+        case unknown:
+            assert_never(unknown)
+
+
 def blocked(row) -> bool:
-    """A dependent whose removal waits for its own attempt: a pending row,
-    or a failed withdrawal or forget, which only its own method resumes and
-    which leaves the source reading nothing. A failed replacement or
-    publication takes the removal in its saved revision instead."""
-    return row.state == "pending" or row.resumed_by in ("withdraw", "forget")
+    """A dependent whose removal waits for its own attempt."""
+    return removal_writer(row) is None
 
 
 def removal_revision(row, cited, ids: SourceIds, removed, readers, token=None):
@@ -253,11 +272,11 @@ def impact(source, plan, rows) -> Impact:
 
 def removal_of(row, ids: SourceIds) -> bool:
     """Whether a failed row is a removal revision for this forget: a
-    replacement or publication whose saved revision introduced this source's
-    removal producer. A later revision that only carries that producer
-    forward is not."""
+    publication, replacement or text change whose saved revision introduced
+    this source's removal producer. A later revision that only carries that
+    producer forward is not."""
     return (
-        row.state == "failed"
+        row.failed_attempt is not None
         and not blocked(row)
         and producer_key(ids, row.revision) in row.description.producers
     )
@@ -335,54 +354,54 @@ def report(impact: Impact, *, plan, description, events) -> dict:
     )
 
 
-async def write_removal(publisher, row, description, revise, rebuild_text):
-    """Write one dependent's removal revision under its own writer
-    reservation: a current row's next revision or a failed replacement's
-    retry through `replace_one`, a failed text change's retry through
-    `rebuild_text`, the writer of that text change the caller supplies, and
-    a failed publication's through `finish_publication`. Each retry
-    supersedes the saved description (an erasure retry). `revise` fails
-    each at one of its stages. False when the dependent waits instead: a
-    failed text change and no writer for it."""
-    from .revisions import finish_publication, replace_one
-    from .text_changes import TextChange
+async def write_replacement(publisher, row, description, revise):
+    """A current row's next revision, or a failed replacement's retry,
+    through `replace_one`."""
+    from .revisions import replace_one
 
-    if row.state == "failed" and row.resumed_by is None:
-        await finish_publication(
-            publisher, description, fault_stage="nodes" if revise else None
-        )
-        return True
-    fault_stage = "replace_registered" if revise else None
-    if row.state == "failed" and row.plan.get("text_change"):
-        if rebuild_text is None:
-            return False
-        await rebuild_text(
-            publisher,
-            description,
-            TextChange.from_plan(row.plan),
-            expected_revision=row.revision,
-            fault_stage=fault_stage,
-        )
-        return True
     await replace_one(
-        publisher, description, expected_revision=row.revision, fault_stage=fault_stage
+        publisher,
+        description,
+        expected_revision=row.revision,
+        fault_stage="replace_registered" if revise else None,
     )
-    return True
 
 
-async def finish_dependents(
-    publisher, tombstone, rows, fault=None, rebuild_text=None
-) -> dict:
+async def write_text_change(publisher, row, description, revise):
+    """A failed text change's retry with its saved text change, through the
+    writer and verifier that text change needs (`text_fixture.rebuild`)."""
+    from .text_changes import TextChange
+    from .text_fixture import rebuild
+
+    await rebuild(
+        publisher,
+        description,
+        TextChange.from_plan(row.plan),
+        expected_revision=row.revision,
+        fault_stage="replace_registered" if revise else None,
+    )
+
+
+async def write_publication(publisher, row, description, revise):
+    """A failed publication's retry through `finish_publication`."""
+    from .revisions import finish_publication
+
+    await finish_publication(
+        publisher, description, fault_stage="nodes" if revise else None
+    )
+
+
+async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
     """Write each unfinished dependent's removal revision after the forget
-    completed (`write_removal`), from `rows` as the caller read them. A
-    failed removal revision resumes with its saved description. A dependent
-    whose own withdrawal or forget is pending or failed waits
-    (`dependent_unfinished`) until that attempt finishes; so does a failed
-    text change when the caller supplies no writer for it. Stops at the
-    first failure and reports it, not raised: the forget before it already
-    completed. `fault` is one of forget.DEPENDENT_FAULTS:
-    `forget_dependents` stops before the first revision begins, when there
-    is one; `forget_dependent_revision` fails each removal revision."""
+    completed, each under its own writer reservation (`removal_writer`),
+    from `rows` as the caller read them. A failed removal revision resumes
+    with its saved description. A dependent whose own attempt is pending,
+    or whose withdrawal or forget failed, waits (`dependent_unfinished`)
+    until that attempt finishes. Stops at the first failure and reports it,
+    not raised: the forget before it already completed. `fault` is one of
+    forget.DEPENDENT_FAULTS: `forget_dependents` stops before the first
+    revision begins, when there is one; `forget_dependent_revision` fails
+    each removal revision."""
     ids = source_ids(tombstone)
     removed = set(tombstone.removed_entity_ids)
     done, waiting = [], []
@@ -398,16 +417,7 @@ async def finish_dependents(
             for row, revised, _ in revisions(rows, ids, removed, tombstone.impact_token)
         }
         for row in todo:
-            description = (
-                row.description if removal_of(row, ids) else planned.get(row.source)
-            )
-            if blocked(row) or not await write_removal(
-                publisher,
-                row,
-                description,
-                fault == "forget_dependent_revision",
-                rebuild_text,
-            ):
+            if (write := removal_writer(row)) is None:
                 waiting.append(
                     dict(
                         identity_data_id=row.source,
@@ -416,6 +426,12 @@ async def finish_dependents(
                     )
                 )
                 continue
+            description = (
+                row.description if removal_of(row, ids) else planned[row.source]
+            )
+            await write(
+                publisher, row, description, fault == "forget_dependent_revision"
+            )
             done.append(
                 dict(identity_data_id=row.source, revision=description.revision)
             )
@@ -430,7 +446,7 @@ async def finish_dependents(
     if waiting:
         failed = dict(
             code="dependent_unfinished",
-            message="A dependent's own withdrawal or forget is pending or failed, or its failed text change needs its writer; finish it, then run forget or reconcile on the forgotten source",
+            message="A dependent's own attempt is pending, or its withdrawal or forget failed; finish it, then run forget or reconcile on the forgotten source",
         )
     return dict(
         dependents_revised=done,

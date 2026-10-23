@@ -371,12 +371,10 @@ async def forget(
     confirm=None,
     origin="runtime",
     fault_stage=None,
-    rebuild_text=None,
 ):
     """Erase the source under one reservation, then write each dependent's
     removal revision under its own (`erasure.finish_dependents`, which a
-    stage in DEPENDENT_FAULTS fails; `rebuild_text` is the caller's writer
-    for a dependent's failed text change). On a forgotten source, finish
+    stage in DEPENDENT_FAULTS fails). On a forgotten source, finish
     the dependents a completed forget did not revise; refuse when none is
     left. Returns the attempt and the dependents' outcome; a dependent
     failure is reported beside the completed forget, not raised."""
@@ -414,7 +412,7 @@ async def forget(
         if not unfinished(row.tombstone, rows):
             raise IntentError(*FORGOTTEN_SOURCE)
         removal = await finish_dependents(
-            publisher, row.tombstone, rows, dependents_fault, rebuild_text
+            publisher, row.tombstone, rows, dependents_fault
         )
         return dict(attempt_id=None, state="forgotten", **removal)
     retry = resumes(row)
@@ -508,6 +506,6 @@ async def forget(
         fault_stage=fault_stage,
     )
     removal = await finish_dependents(
-        publisher, tombstone, await records.rows(), dependents_fault, rebuild_text
+        publisher, tombstone, await records.rows(), dependents_fault
     )
     return dict(attempt_id=attempt, state="forgotten", **removal)

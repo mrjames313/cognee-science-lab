@@ -96,7 +96,6 @@ async def forget_command(publisher, root, args, label, selected):
     caller's files, which a forget never deletes. A refusal that carries the
     dry-run report carries them too."""
     from .forget import forget
-    from .text_fixture import rebuild
 
     files = caller_files(root, label)
     fault = args.fault_stage
@@ -108,7 +107,6 @@ async def forget_command(publisher, root, args, label, selected):
             confirm=args.confirm,
             origin="test/fault_injection" if fault else "test",
             fault_stage=fault,
-            rebuild_text=rebuild,
         )
     except IntentError as exc:
         if isinstance(exc.details, dict) and exc.details.get("dry_run"):
@@ -135,12 +133,10 @@ async def reconcile_forget(publisher, row, selected):
     """`reconcile` of a source whose forget failed: finish the forget. Of a
     forgotten source whose dependents are not all revised: finish them. None
     for any other row."""
-    from .text_fixture import rebuild
-
     if row.tombstone is None and row.resumed_by != "forget":
         return None
     outcome = await publisher.forget(
-        selected, expected_revision=row.revision, origin="test", rebuild_text=rebuild
+        selected, expected_revision=row.revision, origin="test"
     )
     return forget_outcome(outcome, selected)
 

@@ -3,12 +3,12 @@
 A removal revision names a removal producer (`ERASURE_IMPLEMENTATION`) whose
 configuration names the forgotten document and the Entities its forget
 removed. `check_erasure_removals` admits it as that removal, all of it and
-nothing else; `check_retry_chain` admits a chain of them, each in place of
-a failed attempt's saved revision (`check_erasure_retry`). A re-add is a fresh publication at the next
-revision that never brings back a forgotten mention or Entity UUID
-(`admit_readd`). `admission.admit` calls the removal rules in its rule order;
-the replace path and Publisher.readd call the rest. Nothing here imports
-admission.
+nothing else; `check_retry_chain` admits a chain of them, each in place
+of a failed attempt's saved revision (`check_erasure_retry`). A re-add is a
+fresh publication at the next revision that never brings back a forgotten
+mention or Entity UUID (`admit_readd`). `admission.admit` calls the removal
+rules in its rule order; the replace path and Publisher.readd call the
+rest. Nothing here imports admission.
 """
 
 from collections.abc import Mapping
@@ -157,24 +157,13 @@ def check_erasure_cites(removal: ErasureStep):
         )
 
 
-def check_retry_chain(chain, erasures: Erasures, *, first: bool):
+def check_retry_chain(chain, erasures: Erasures):
     """An erasure-retry chain: the saved descriptions that erasure retries
     superseded, in order, then the description the attempt begins with.
     Each step is an erasure removal in place of the one before
-    (`check_erasure_retry`). With `first`, the chain starts at a
-    replacement's previous revision: its first step is the replacement
-    itself, which the removal rules check only when it names a removal
-    producer, as admission does."""
-    steps = pairwise(chain)
-    if first:
-        old, new = next(steps)
-        check_erasure_removals(
-            old,
-            new,
-            erasure_step(old, erasure_of(old, new, erasures)),
-            erasures.readers,
-        )
-    for saved, source in steps:
+    (`check_erasure_retry`). A replacement's own step, from its previous
+    revision to the chain's first description, is admission's."""
+    for saved, source in pairwise(chain):
         check_erasure_retry(saved, source, erasures)
 
 

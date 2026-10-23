@@ -332,7 +332,7 @@ def reconcile_intents(w, s, view):
         return []
     r, v = view.revision, view.variant
     # Publisher.superseded: a failed row's erased list is kept, and an
-    # erasure retry adds the saved description to it.
+    # erasure retry adds the saved description to it (superseding_plan).
     kept = view.plan.erased if view.state == "failed" else ()
     plan = Plan("publish", r, erased=kept)
     ops = [
@@ -342,7 +342,8 @@ def reconcile_intents(w, s, view):
     ]
     if view.state == "failed":
         ops += [
-            Begin(w, s, "reconcile", r, r, superseding(plan, v), 1 - v),
+            Begin(w, s, "reconcile", r, r, superseding_plan(view, plan, 1 - v), 1 - v),
+            # Names the description it begins with, not the saved one.
             Begin(w, s, "reconcile", r, r, superseding(plan, 1 - v), v),
         ]
     if kept:
@@ -385,8 +386,9 @@ def replace_intents(w, s, view):
                 v,
             ),
             # An erasure retry supersedes the saved description with another
-            # one at the same revision, and names the one it supersedes.
-            Begin(w, s, "replace", r, r, superseding(saved, v), 1 - v),
+            # one at the same revision, and names the one it supersedes; the
+            # rest name the wrong one or supersede nothing.
+            Begin(w, s, "replace", r, r, superseding_plan(view, saved, 1 - v), 1 - v),
             Begin(w, s, "replace", r, r, superseding(saved, 1 - v), 1 - v),
             Begin(w, s, "replace", r, r, superseding(saved, v), v),
             Begin(w, s, "replace", r, r, superseding(saved, 1 - v), v),
@@ -399,6 +401,13 @@ def replace_intents(w, s, view):
 def superseding(saved: Plan, variant: int) -> Plan:
     """The saved plan with one more superseded description."""
     return replace(saved, erased=(*saved.erased, variant))
+
+
+def superseding_plan(view: View, plan: Plan, variant: int) -> Plan:
+    """storage.superseding_plan: a retry of a failed row that begins with
+    `variant` keeps the plan's erased list, and adds the saved variant when
+    it begins with another one (an erasure retry)."""
+    return plan if variant == view.variant else superseding(plan, view.variant)
 
 
 def withdraw_intents(w, s, view):

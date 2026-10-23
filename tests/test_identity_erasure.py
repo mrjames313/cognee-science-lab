@@ -451,23 +451,21 @@ def test_an_erasure_retry_step_keeps_the_identity_source(source_payload):
 
 
 def test_every_step_of_a_retry_chain_is_an_erasure_removal(source_payload):
-    """The replacement's own step passes unless it names a removal producer;
-    each later step must be a removal in place of the one before."""
+    """Each step must be a removal in place of the one before, at the same
+    revision; a replacement's own step is admission's, not the chain's."""
     gloss = glossary(source_payload)
     old = source_of(source_payload)
     saved = reader_of(source_payload, gloss)
     saved = source_of(dict(json.loads(saved.model_dump_json()), revision=2))
     revised, _ = removal(saved, gloss, state="failed", plan=REPLACING)
-    check_retry_chain([old, saved, revised], forgot(gloss), first=True)
-    check_retry_chain([saved, revised], forgot(gloss), first=False)
+    check_retry_chain([saved, revised], forgot(gloss))
+    check_retry_chain([revised], forgot(gloss))
     with pytest.raises(IntentError) as refused:
-        check_retry_chain([old, saved], forgot(gloss), first=False)
+        check_retry_chain([old, saved], forgot(gloss))
     assert refused.value.code == "revision_reuse"
     with pytest.raises(IntentError) as refused:
         check_retry_chain(
-            [old, saved, revised, with_removal_producer(revised, gloss)],
-            forgot(gloss),
-            first=True,
+            [saved, revised, with_removal_producer(revised, gloss)], forgot(gloss)
         )
     assert refused.value.code == "revision_reuse"
 

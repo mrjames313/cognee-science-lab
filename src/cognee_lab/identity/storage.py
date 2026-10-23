@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import Integer, String, Text, select, update
@@ -90,6 +90,9 @@ def scrubbed_event(info: dict) -> dict:
     return info
 
 
+FailedAttempt = Literal["publish", "replace", "text_change", "withdraw", "forget"]
+
+
 @dataclass(frozen=True)
 class PublicationRow:
     """One saved publication, as RecordStore.rows() and row() read it, parsed
@@ -159,6 +162,18 @@ class PublicationRow:
     def resumed_by(self) -> str | None:
         """The method that alone resumes this row's saved plan, if it failed."""
         return cell_for(self).owner
+
+    @property
+    def failed_attempt(self) -> FailedAttempt | None:
+        """The attempt a failed row saved, None on any other row: a
+        publication (a first one, a reconcile or a re-add), or the attempt of
+        the one method that resumes it, with a replacement that carries a
+        text change told apart."""
+        if self.state != "failed":
+            return None
+        if self.resumed_by == "replace" and self.plan.get("text_change"):
+            return "text_change"
+        return self.resumed_by or "publish"
 
 
 class Refusal(NamedTuple):
@@ -341,6 +356,26 @@ def erased_from(plan: dict) -> list[IdentitySource]:
     return [IdentitySource.model_validate_json(d) for d in plan.get(ERASED_FROM, [])]
 
 
+def superseding_plan(row, source) -> dict:
+    """The `erased_from` a retry of this failed row plans with `source`: the
+    saved list, with the saved description added when `source` is another
+    one (an erasure retry, which supersedes it). Empty when the list is."""
+    erased = list(row.plan.get(ERASED_FROM, []))
+    if source != row.description:
+        erased.append(row.description.model_dump_json())
+    return {ERASED_FROM: erased} if erased else {}
+
+
+def erasure_chain(row, method, plan) -> list[IdentitySource]:
+    """The superseded descriptions a retry of this failed row names, which
+    begin() checks as an erasure-retry chain against every saved row; empty
+    for any other begin."""
+    required = REQUIRED_PLANS.get(method)
+    if required and required.supersedes and row and row.state == "failed":
+        return erased_from(plan)
+    return []
+
+
 def admissible(row, method, plan, source, rows=()) -> Refusal | None:
     """The refusal begin() gives `method` with this plan and description on
     this saved row (None: no row), or None when it may begin. `rows` are
@@ -369,7 +404,7 @@ def admissible(row, method, plan, source, rows=()) -> Refusal | None:
         superseding = (
             required.supersedes
             and changed == {ERASED_FROM}
-            and erased_from(plan) == [*erased_from(row.plan), row.description]
+            and erased_from(plan) == erased_from(superseding_plan(row, source))
         )
         if changed and not superseding:
             return required.off_row
@@ -379,9 +414,9 @@ def admissible(row, method, plan, source, rows=()) -> Refusal | None:
         return None if revision == actual + 1 else NEW_REVISION
     if not superseding and source != row.description:
         return REVISION_REUSE
-    if retry and required.supersedes and (chain := erased_from(plan)):
+    if chain := erasure_chain(row, method, plan):
         try:
-            check_retry_chain([*chain, source], erasures_of(rows, source), first=False)
+            check_retry_chain([*chain, source], erasures_of(rows, source))
         except IntentError as refused:
             return Refusal(refused.code, str(refused))
     return None
@@ -485,10 +520,11 @@ class RecordStore:
             if actual_revision != expected_revision:
                 raise IntentError(*STALE_REVISION)
             saved = PublicationRow.of(row) if row else None
-            rows = (await session.execute(select(Publication))).scalars().all()
-            if refusal := admissible(
-                saved, method, plan, source, [PublicationRow.of(r) for r in rows]
-            ):
+            rows = []
+            if erasure_chain(saved, method, plan):
+                found = (await session.execute(select(Publication))).scalars().all()
+                rows = [PublicationRow.of(r) for r in found]
+            if refusal := admissible(saved, method, plan, source, rows):
                 raise IntentError(*refusal)
             payload = source.model_dump_json()
             if row is None:

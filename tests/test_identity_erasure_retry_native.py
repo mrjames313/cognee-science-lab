@@ -136,7 +136,7 @@ with fixture_environment(root):
   report=await preview(p,doc01,expected_revision=1)
   (dependent,)=report["dependents"]
   assert (dependent["state"],dependent["blocked"])==("failed",False),report
-  outcome=await forget(p,doc01,expected_revision=1,confirm=report["token"],rebuild_text=rebuild)
+  outcome=await forget(p,doc01,expected_revision=1,confirm=report["token"])
   assert outcome["dependents_failed"] is None,outcome
   row=await p.records.row(old)
   assert (row.state,row.revision)==("current",2),row

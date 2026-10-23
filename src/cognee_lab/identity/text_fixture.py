@@ -85,8 +85,8 @@ async def rebuild(publisher, source, change, *, expected_revision, fault_stage=N
     """Replace `source` with its text change through the native pipeline,
     with the semantic writer and verifier the captured edit needs. A failed
     text change's retry may carry the removal of what a forget took away
-    (erasure.finish_dependents passes this as its `rebuild_text`); its own
-    dependents' ranges then wait for `refresh-dependents`."""
+    (erasure.write_text_change); its own dependents' ranges then wait for
+    `refresh-dependents`."""
     from .fixture import context_for, write_semantics
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task

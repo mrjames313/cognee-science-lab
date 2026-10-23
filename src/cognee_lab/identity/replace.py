@@ -6,6 +6,7 @@ from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
 from .stages import Operation, run_attempt, saved_row
+from .storage import STALE_REVISION, encode, erased_from, superseding_plan
 from .validation import IntentError
 
 # Text changes only: the dependents' withholding, then the text change's
@@ -154,7 +155,6 @@ async def retire(graph, vector, source, plan):
         execute_source_ref_removal,
     )
     from .publish import contributions
-    from .storage import encode
 
     owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
     wanted = wanted_contributions(source)
@@ -280,8 +280,6 @@ async def replace(
     text_change=None,
     semantic_writer=None,
 ):
-    from .storage import STALE_REVISION
-
     graph, vector, records = publisher.graph, publisher.vector, publisher.records
     require_graph_methods(
         graph,
@@ -304,12 +302,7 @@ async def replace(
     # supersedes.
     erasure_retry = retry and source != saved
     if retry:
-        plan = dict(row.plan)
-        if erasure_retry:
-            plan["erased_from"] = [
-                *plan.get("erased_from", []),
-                saved.model_dump_json(),
-            ]
+        plan = dict(row.plan, **superseding_plan(row, source))
         try:
             old = IdentitySource.model_validate_json(plan["previous_description"])
             if (
@@ -353,18 +346,19 @@ async def replace(
             "Text replacement requires explicit semantic writer and verifier",
         )
     # The previous revision, the saved revisions erasure retries superseded,
-    # and the one this attempt begins with; its first step is the
-    # replacement itself.
-    chain = [
-        old,
-        *(IdentitySource.model_validate_json(d) for d in plan.get("erased_from", [])),
-        source,
-    ]
-    erasures = erasures_of(await records.rows(), source)
-    await admit_replacement(
-        graph, old, chain[1], texts, text_change, retry=retry, erasures=erasures
-    )
-    check_retry_chain(chain, erasures, first=True)
+    # and the one this attempt begins with.
+    chain = [old, *erased_from(plan), source]
+
+    async def admit_chain():
+        # The first step is the replacement itself, which admission checks;
+        # each later one is an erasure retry of the step before.
+        erasures = erasures_of(await records.rows(), source)
+        await admit_replacement(
+            graph, old, chain[1], texts, text_change, retry=retry, erasures=erasures
+        )
+        check_retry_chain(chain[1:], erasures)
+
+    await admit_chain()
     if text_change is not None:
         await text_change.preflight(
             publisher, old, source, texts, chunks, ctx, retry=retry
@@ -421,7 +415,7 @@ async def replace(
             )
         # A source may have begun reading a recipe an erasure step drops
         # since admission read the rows.
-        check_retry_chain(chain, erasures_of(await records.rows(), source), first=True)
+        await admit_chain()
 
     async def withhold(_):
         # Before the text changes: the rows are durable before the edit can

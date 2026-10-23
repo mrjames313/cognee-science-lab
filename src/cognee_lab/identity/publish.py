@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
 from .retirement import refuse_retiring_inputs
-from .storage import STALE_REVISION, RecordStore, cell_for, encode, erased_from
+from .storage import (
+    STALE_REVISION,
+    RecordStore,
+    cell_for,
+    encode,
+    erased_from,
+    superseding_plan,
+)
 from .validation import IntentError, validate_inputs, validate_uses
 
 
@@ -320,16 +327,14 @@ class Publisher:
     async def superseded(self, source) -> dict:
         """What a reconcile of a failed publication keeps in its plan: the
         saved revisions erasure retries superseded (`erased_from`), with the
-        saved description added when `source` is another one. That is an
-        erasure retry, the removal of what a forget took away applied to the
-        saved revision; the store refuses any other description."""
+        saved description added when `source` is another one
+        (`superseding_plan`). That is an erasure retry, the removal of what a
+        forget took away applied to the saved revision; the store refuses any
+        other description."""
         row = await self.records.row(source)
         if row is None or row.state != "failed":
             return {}
-        erased = list(row.plan.get("erased_from", []))
-        if source != row.description:
-            erased.append(row.description.model_dump_json())
-        return dict(erased_from=erased) if erased else {}
+        return superseding_plan(row, source)
 
     async def forgotten_row(self, source):
         row = await self.records.row(source)
