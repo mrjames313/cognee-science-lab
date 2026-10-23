@@ -433,9 +433,51 @@ These came from reading the code, not the docs. Each one should become either a 
 - Whether native search really returns overlay products uninterpreted and ignores eligibility. Expected from the extension reference, not run.
 - The textbook layer's design.
 
-## 14. TODO
+## 14. Purpose census (method only)
 
-1. **Pressure-test the provenance observation** (user, 2026-10-23). A large share of identity's integration work seems to go into managing provenance and making the right updates when the underlying source documents change. Check that observation against the code: measure how much of identity's code, tests and checkpoints is about provenance and change response, as opposed to judgment, publishing or retrieval. Then look for common approaches, or even a framework, that the next integrations could reuse. Candidates already visible are input fingerprints, continuity maps, per-decision withholding, forward recovery from saved plans and the owner choice between borrowed and generated sources.
+This section records how to test the observation in TODO item 1, so the test can be repeated. The user asked on 2026-10-23 not to record its numbers until the code is more stable. The assistant ran it once on `012d8a6`, and the result is not recorded here.
+
+**The question.** How much of the identity integration exists because sources change after publication, and how much of that is driven by provenance?
+
+**The script.** `scripts/purpose_census.py`, run from the repository root with `uv run python scripts/purpose_census.py` (add `-v` for counts per module). It reads only the working tree and `git log`.
+
+**Measure 1: code lines by primary purpose.** Every line of `src/cognee_lab/identity/` gets one label. A module has a default label, and named functions, methods or nested functions override it. The labels are judgments made from each function's docstring and callers, not from its name. The core categories are these:
+
+- `P`, provenance checks. Recording or checking what a record came from: inputs, digests, chunk binding, the registered copy, and native state still matching what was recorded.
+- `C.own`, change response by native ownership. Withdraw, forget, re-add and the retirement shared between them.
+- `C.dep`, change response by recorded inputs. Withholding, refresh, re-confirm and foreign-input attestation.
+- `C.cont`, revision continuity. The occurrence map, group fate, recipe and variant rules, and the replace orchestration.
+- `C.text`, the native rebuild for a new text.
+- `L`, the ledger and crash recovery.
+- `B`, publishing one revision's overlay.
+- `Q`, the retrieval probe.
+- `M`, the record model.
+
+CLI and environment code (`F`) and scenario fixtures (`S.first`, `S.change`) are counted outside the core. "Provenance-driven" means `P`, `C.own` and `C.dep` together. "Change response" means every `C.*` label.
+
+**Measure 2: tests.** Test functions are split into files that exercise only first publication or infrastructure, and files that exercise a change. The script lists the first group by name.
+
+**Measure 3: verify journeys.** Journeys in the `publication-and-retrieval` feature count as first publication. All the rest count as change. Journeys whose title names a fault, failure or interruption are also counted as recovery.
+
+**Measure 4: git churn.** Lines added plus lines deleted in each identity module over the history of `HEAD`, grouped by the module's default label.
+
+**Also check by hand.**
+
+- Which ledger methods, states and transition entries a world without change would still need (`TRANSITIONS` in `storage.py`).
+- What the review findings of each checkpoint were about (`docs/SESSION_HANDOFF.md`).
+- How many fixture guides in `docs/` describe a change.
+
+**Known limits to report with any result.**
+
+- Describe and real retrieval are not built, so the total understates two activities.
+- The project scheduled maintenance first, so effort partly reflects the plan.
+- Continuity rules are specific to identity, and they count as change response but not as provenance.
+- Some costs come from design choices: the two description copies, whole-document rebuilds and the fixture standing in for `cognify`.
+- A label is one person's judgment. When a module is new or renamed, the script reports it as unclassified, and someone must label it before the numbers mean anything.
+
+## 15. TODO
+
+1. **Pressure-test the provenance observation** (user, 2026-10-23). The method is in section 14. A large share of identity's integration work seems to go into managing provenance and making the right updates when the underlying source documents change. Check that observation against the code: measure how much of identity's code, tests and checkpoints is about provenance and change response, as opposed to judgment, publishing or retrieval. Then look for common approaches, or even a framework, that the next integrations could reuse. Candidates already visible are input fingerprints, continuity maps, per-decision withholding, forward recovery from saved plans and the owner choice between borrowed and generated sources.
 2. **Compare with Cognee's default provenance** (user, 2026-10-23). List what Cognee records and does by default: source references and the deletion that follows them, `provenance_edge_evidence`, pipeline status, content-derived chunk IDs, incremental `update`'s chunk diff, and Forget's cascade. For each identity provenance mechanism, say whether Cognee already covers it, covers it partly, or does not cover it, and why identity needed its own.
 3. Build the mapping from each activity and procedure to the identity code, tests and journeys, as the evidence column for the rewrite. Do it after the current code work lands.
 4. Write up the per-column trade-offs in full.
