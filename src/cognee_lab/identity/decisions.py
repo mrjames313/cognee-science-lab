@@ -52,8 +52,8 @@ def decisions_digest(source) -> str:
     an Entity is named by its group key, or by its `roles`, never by its
     UUID. Each group's occurrences count by their surface text and their
     place in the order of all the source's occurrences, which a text shift
-    keeps and a regrouping does not. A span-scoped variant's ranges count as offsets: the description
-    holds no surface text for them, and a text edit does not remap them
+    keeps and a regrouping does not. A span-scoped variant's ranges count
+    as offsets: the description holds no surface text for them, and a text edit does not remap them
     either (`admission.check_no_span_variants`), so a shifted range is
     another scope. Producers, inputs and explanations are left out: they
     record how a decision was made and where it reads, which other text or
