@@ -658,3 +658,54 @@ def test_live_drift_that_no_row_records_needs_review(source_payload):
         "r01": ("input_removed", "refresh_needed", {"glossary_hc"}),
         "v01": ("input_removed", "refresh_needed", {"glossary_hc"}),
     }
+
+
+class ServedGraph(Graph):
+    """doc01's own chunk is in the graph, part of its document."""
+
+    def __init__(self, source):
+        item = source.inputs["chunk01"]
+        super().__init__(
+            {str(item.chunk_id): dict(type="DocumentChunk", chunk_index=0, text=TEXT)}
+        )
+
+    async def get_edge_delete_data(self, identities):
+        return {
+            identity: dict(relationship_name="is_part_of") for identity in identities
+        }
+
+
+async def test_status_live_checks_recorded_decisions_too(source_payload, monkeypatch):
+    """A recorded row says r01 and v01 wait for a remap. When live
+    validation finds their input gone, status shows the stronger reason, and
+    a reviewer answers it. A move the row already records adds nothing."""
+    from cognee_lab.identity import registered
+    from cognee_lab.identity.retrieve import withheld_now
+
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    rows = [row_of(glossary), row_of(doc01)]
+    publisher = await memory_publisher(rows)
+    publisher.graph = ServedGraph(doc01)
+    await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+    live = {"doc01": TEXT}
+
+    async def read_registered(source):
+        return source
+
+    async def read_texts(source, known=None):
+        return live
+
+    monkeypatch.setattr(registered, "read_registered", read_registered)
+    monkeypatch.setattr(registered, "read_texts", read_texts)
+    doc = str(doc01.identity_data_id)
+    gone = await withheld_now(publisher, rows)
+    assert gone[doc] == {
+        key: ("input_removed", "refresh_needed", {"glossary_hc"})
+        for key in ("r01", "v01")
+    }
+    live["glossary"] = INSERTED
+    moved = await withheld_now(publisher, rows)
+    assert moved[doc] == {
+        key: ("input_changed", "remap", {"glossary_hc"}) for key in ("r01", "v01")
+    }

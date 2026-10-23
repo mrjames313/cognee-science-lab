@@ -10,12 +10,13 @@ from .publish import contributions, identity_edges
 from .validation import (
     IntentError,
     decision_inputs,
+    stronger,
     validate_inputs,
     withheld_by,
 )
 
 
-async def live_drift(publisher, source, withheld) -> dict[str, str]:
+async def live_drift(publisher, source, withheld=frozenset()) -> dict[str, str]:
     """Validate one current source as retrieval does: its registered snapshot,
     its own chunks in the graph and every input `validate_inputs` checks,
     skipping the inputs of the decisions in `withheld`. An own failure
@@ -55,26 +56,36 @@ async def live_drift(publisher, source, withheld) -> dict[str, str]:
 
 def held_by(source, recorded, drift):
     """The source's withheld decisions: `recorded`, its entries of the
-    withheld-decision set, and every decision citing an input that failed
-    live validation. No edit classified such an input, so a reviewer
-    answers it (`refresh_needed`)."""
+    withheld-decision set, combined with every decision citing an input that
+    failed live validation. Live drift that a recorded entry already holds,
+    for a reason no stronger, adds nothing: a recorded move still waits for
+    its refresh. Anything else no edit classified, so a reviewer answers it
+    (`refresh_needed`)."""
     from .withholding import Status, Withheld, combine
 
     held = dict(recorded)
     cited = decision_inputs(source)
     for key, reason in withheld_by(source, drift).items():
-        found = Withheld(reason, Status.REFRESH_NEEDED, cited[key] & set(drift))
-        held[key] = combine(held.get(key), found)
+        inputs = cited[key] & set(drift)
+        entry = recorded.get(key)
+        if (
+            entry
+            and inputs <= entry.inputs
+            and stronger(reason, entry.reason) == (entry.reason)
+        ):
+            continue
+        held[key] = combine(entry, Withheld(reason, Status.REFRESH_NEEDED, inputs))
     return held
 
 
 async def withheld_now(publisher, rows, table=None):
     """The withheld-decision set retrieval applies: the rows and the derived
-    rule (withholding.withheld_decisions), and every decision of a served
-    source whose foreign input fails live validation. `status` and the
-    reviewer commands read it, so they see what retrieval withholds. A source
-    whose own input fails is left as it is: retrieval fails it whole.
-    `table` is the withholding table, read here when not given."""
+    rule (withholding.withheld_decisions), combined with what live
+    validation finds in every decision of a served source, recorded ones
+    included, so the strongest reason shows. `status` and the reviewer
+    commands read it, so they see what retrieval withholds. A source whose
+    own input fails is left as it is: retrieval fails it whole. `table` is
+    the withholding table, read here when not given."""
     from .withholding import withheld_decisions
 
     if table is None:
@@ -86,7 +97,7 @@ async def withheld_now(publisher, rows, table=None):
         source = IdentitySource.model_validate_json(row.description)
         recorded = held.get(row.source, {})
         try:
-            drift = await live_drift(publisher, source, set(recorded))
+            drift = await live_drift(publisher, source)
         except IntentError:
             continue
         if decided := held_by(source, recorded, drift):
