@@ -352,9 +352,10 @@ class Tombstone(Strict):
         )
 
     @property
+    def all_reusable_ids(self) -> frozenset[UUID]:
+        """The reusable Entity UUIDs of every forgotten life of the source."""
+        return frozenset(self.entity_ids) | frozenset(self.earlier_entity_ids)
+
+    @property
     def used_entity_ids(self) -> frozenset[UUID]:
-        return (
-            self.forgotten_mention_ids
-            | frozenset(self.entity_ids)
-            | frozenset(self.earlier_entity_ids)
-        )
+        return self.forgotten_mention_ids | self.all_reusable_ids

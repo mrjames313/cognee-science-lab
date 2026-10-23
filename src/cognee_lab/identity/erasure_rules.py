@@ -318,11 +318,11 @@ def replacement_entity_id(identity_data_id, revision, removed_id):
 
 def readd_ids(tombstone, source) -> set[UUID]:
     """Reusable Entities a re-add creates: its recipes that were not reusable
-    Entities of the forgotten revision and that no listed corpus input names
-    as existing."""
+    Entities of any forgotten life of the source and that no listed corpus
+    input names as existing."""
     return (
         set(reusable_recipes(source))
-        - set(tombstone.entity_ids)
+        - tombstone.all_reusable_ids
         - referenced_corpus_ids(source)
     )
 

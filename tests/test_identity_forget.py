@@ -699,3 +699,25 @@ async def test_admission_counts_a_readded_source_earlier_forgotten_lives(
     with pytest.raises(IntentError) as refused:
         await publisher.admit_inputs(source, {"doc01": TEXT}, own_chunks(source))
     assert refused.value.code == "incompatible_group"
+
+
+@pytest.mark.asyncio
+async def test_a_third_life_reuses_an_earlier_life_entity_still_in_the_graph(
+    source_payload,
+):
+    """HC is shared, so no forget removes it. The second life's files drop
+    it; the third life's files name it again. It is still in the graph,
+    an Entity of an earlier life of this source, so the third life reuses
+    it as a re-add reuses one of the life just forgotten."""
+    life1 = source_of(source_payload)
+    first = tomb(life1)
+    dropped = json.loads(json.dumps(source_payload))
+    del dropped["variant_assignments"]["v01"]
+    del dropped["entity_constructions"][str(HC)]
+    life2 = describe_readd(
+        source_of(dropped), first, set(), TEXT, chunks_of(life1, TEXT)
+    )
+    second = tomb(life2).carrying(first)
+    life3 = describe_readd(life1, second, set(), TEXT, chunks_of(life1, TEXT))
+    assert HC in life3.entity_constructions
+    await admit_readd(OccupiedGraph([HC]), second, life3, set())
