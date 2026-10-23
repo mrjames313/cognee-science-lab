@@ -15,6 +15,7 @@ from .environment import (
     read_embedding,
     read_fixture,
 )
+from .chain_fixture import CITATIONS
 from .forget import FAULT_STAGES as FORGET_STAGES
 from .glossary_fixture import CASES as GLOSSARY_CASES
 from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
@@ -32,6 +33,7 @@ COMMAND_FAULT_STAGES = {
     "revise": UNCHANGED_TEXT_STAGES,
     "reconfirm": UNCHANGED_TEXT_STAGES,
     "replace-decision": UNCHANGED_TEXT_STAGES,
+    "cite-record": UNCHANGED_TEXT_STAGES,
     "edit-text": REPLACE_STAGES,
     **dict.fromkeys(OCCURRENCE_COMMANDS, REPLACE_STAGES),
     "edit-glossary": (*REPLACE_STAGES, REFRESH_FAULT),
@@ -47,6 +49,7 @@ REVISION_COMMANDS = {
     "edit-glossary",
     "reconfirm",
     "replace-decision",
+    "cite-record",
     *OCCURRENCE_COMMANDS,
 }
 
@@ -93,7 +96,7 @@ def main():
     )
     parser.add_argument(
         "--source",
-        choices=["doc01", "doc02", "glossary"],
+        choices=["doc01", "doc02", "glossary", "doc03"],
         default="doc01",
         help="Selected original document in the isolated fixture",
     )
@@ -104,7 +107,18 @@ def main():
     )
     parser.add_argument(
         "--decision",
-        help="reconfirm and replace-decision only: the withheld decision of doc01",
+        help="reconfirm and replace-decision only: the withheld decision of doc01 "
+        "or doc03",
+    )
+    parser.add_argument(
+        "--citation",
+        choices=CITATIONS,
+        help="cite-record only: which refused saved-record citation to try",
+    )
+    parser.add_argument(
+        "--chain",
+        action="store_true",
+        help="glossary-fixture only: add doc03, whose decisions cite doc01's",
     )
     parser.add_argument(
         "--fault-stage",
@@ -148,6 +162,10 @@ def main():
         parser.error("edit-glossary requires --case")
     if args.command in {"reconfirm", "replace-decision"} and args.decision is None:
         parser.error(f"{args.command} requires --decision")
+    if (args.command == "cite-record") != (args.citation is not None):
+        parser.error("cite-record requires --citation, which applies to it only")
+    if args.chain and args.command != "glossary-fixture":
+        parser.error("--chain applies to glossary-fixture only")
     allowed = COMMAND_FAULT_STAGES.get(args.command, PUBLISH_STAGES)
     if args.fault_stage and args.fault_stage not in allowed:
         parser.error(

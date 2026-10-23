@@ -37,6 +37,7 @@ COMMANDS = (
     "reconfirm",
     "replace-decision",
     "refresh-dependents",
+    "cite-record",
 )
 DOC01_REVIEW = "stage6-captured-glossary-review"
 
@@ -147,7 +148,9 @@ def describe_glossary(dataset_id, text, chunks, revision=1, old=None):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def prepare(root):
+async def prepare(root, *, chain=False):
+    """Register the glossary and doc01 and, with `chain`, doc03, which cites
+    doc01's decisions (chain_fixture.py)."""
     import cognee
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
@@ -182,20 +185,24 @@ async def prepare(root):
         dataset_name="stage6_isolated_fixture",
         skip_connection_test=True,
     )
+    files = dict(doc01="identity.json", glossary="glossary_identity.json")
+    prepared = {"glossary": (glossary, chunks, ctx), "doc01": (doc01, chunks1, ctx1)}
+    if chain:
+        from .chain_fixture import prepare_doc03
+
+        files["doc03"] = "doc03_identity.json"
+        prepared["doc03"] = await prepare_doc03(root, doc01)
     (root / INFO).write_text(
         json.dumps(
             dict(
                 dataset_id=str(doc01.dataset_id),
-                sources=dict(doc01="identity.json", glossary="glossary_identity.json"),
+                sources=files,
                 chunk_budget=CHUNK_BUDGET,
             ),
             indent=2,
         )
     )
-    return publisher, {
-        "glossary": (glossary, chunks, ctx),
-        "doc01": (doc01, chunks1, ctx1),
-    }
+    return publisher, prepared
 
 
 async def change_glossary(
@@ -285,65 +292,60 @@ async def edit(
     )
 
 
-async def review(
-    publisher, root, doc01, decision, *, expected_revision, fault_stage, command
-):
-    """A reviewer's answer to one withheld decision of doc01: re-confirm it on
-    the glossary's current HC entry, or, for v01, replace it with a variant
-    for the entry's new meaning."""
-    from .fixture import context_for, expect_current
+async def review_gate(publisher, source, decision, command):
+    """The withheld entry a reviewer answers, after the gates: no document
+    the source reads has an edit that is pending or failed, and no source
+    whose records it cites has an attempt that is, so the reviewer attests
+    committed content; the decision waits for review, not for a record
+    above it (`upstream_withheld`); a removed input is never re-confirmed."""
+    from .records import saved_records
     from .retrieve import withheld_now
-    from .text_changes import read_original
     from .validation import Reason
-    from .revisions import reconfirmed
-    from .withholding import Status, document_inputs, unfinished_edits
-
-    await expect_current(
-        publisher, doc01, expected_revision, "Reconcile doc01 before a review"
+    from .withholding import (
+        Status,
+        document_inputs,
+        unfinished_edits,
+        unfinished_sources,
     )
+
     rows = await publisher.records.rows()
-    # The reviewer attests committed text: no document doc01 reads may have
-    # an edit that is still pending or failed.
     for edit in unfinished_edits(rows):
-        edited = edit.description
-        if document_inputs(doc01, edited):
+        if document_inputs(source, edit.description):
             raise IntentError(
                 "edit_unfinished",
-                "Reconcile the edit of a document doc01 reads before a review",
+                "Reconcile the edit of a document this source reads before a review",
             )
+    cited = {str(i.identity_data_id) for i in saved_records(source).values()}
+    if cited & unfinished_sources(rows):
+        raise IntentError(
+            "edit_unfinished",
+            "Reconcile the attempt of a source whose records this source cites before a review",
+        )
     entry = (
         (await withheld_now(publisher, rows))
-        .get(str(doc01.identity_data_id), {})
+        .get(str(source.identity_data_id), {})
         .get(decision)
     )
+    if entry is not None and entry.status == Status.UPSTREAM_WITHHELD:
+        raise IntentError(
+            "upstream_withheld",
+            f"{decision} waits for a record it cites; review that record first",
+        )
     if entry is None or entry.status != Status.REFRESH_NEEDED:
         raise IntentError(
-            "not_withheld", f"{decision} is not withheld for review in doc01"
+            "not_withheld", f"{decision} is not withheld for review in this source"
         )
     if command == "reconfirm" and entry.reason == Reason.REMOVED:
         raise IntentError(
             "input_removed",
             "A removed input is never re-confirmed; replace the decision",
         )
-    glossary = (await current_sources(root, publisher, INFO))["glossary"]
-    text = await read_original(glossary, await context_for(glossary.identity_data_id))
-    entry_line = hc_entry(text)
-    revision = doc01.revision + 1
-    span_key = f"glossary_hc_r{revision}"
-    span = dict(
-        kind="text_span",
-        document_ref="glossary",
-        start=entry_line.start(),
-        end=entry_line.end(),
-        text_sha256=text_digest(entry_line.group()),
-    )
-    old_keys = sorted(entry.inputs)
-    if len(old_keys) != 1 or not isinstance(doc01.inputs[old_keys[0]], TextSpanInput):
-        raise IntentError(
-            "fixture_scope", "This fixture reviews one withheld glossary span"
-        )
-    producer_key = f"review_{decision}_r{revision}"
-    producer = dict(
+    return entry, rows
+
+
+def review_producer(entry, command, digests):
+    """The producer a review names, new in its revision."""
+    return dict(
         method="captured_fixture",
         implementation="re-confirmed" if command == "reconfirm" else "replaced",
         version="0.1",
@@ -352,35 +354,107 @@ async def review(
             confirmed_by="captured fixture reviewer",
             withholding=[
                 dict(input_ref=k, reason=entry.reason, status=entry.status)
-                for k in old_keys
+                for k in sorted(entry.inputs)
             ],
-            old_digests={k: doc01.inputs[k].text_sha256 for k in old_keys},
-            new_digest=span["text_sha256"],
+            **digests,
         ),
         run_id=None,
     )
-    if command == "reconfirm":
-        intended = reconfirmed(
-            doc01,
-            decision,
-            {old_keys[0]: (span_key, span)},
-            producer_key,
-            producer,
-        )
-    else:
-        intended = replaced_variant(
-            doc01, decision, span_key, span, producer_key, producer
-        )
-    (root / f"identity_doc01_revision{intended.revision}.json").write_text(
-        intended.model_dump_json(indent=2) + "\n"
-    )
-    from .revisions import replace_one
 
+
+async def review(
+    publisher, root, source, decision, *, expected_revision, fault_stage, command
+):
+    """A reviewer's answer to one withheld decision. A decision of doc01
+    that read the glossary's HC entry is re-confirmed on the entry as it is
+    now, or replaced: v01 by a variant for the entry's new meaning, r01 in
+    place as unresolved. A decision withheld because a saved record it
+    cites changed is re-confirmed on the record as it is now."""
+    from .fixture import context_for, expect_current
+    from .records import saved_records
+    from .revisions import reconfirmed, replace_one
+    from .text_changes import read_original
+
+    await expect_current(
+        publisher, source, expected_revision, "Reconcile the source before a review"
+    )
+    entry, rows = await review_gate(publisher, source, decision, command)
+    revision = source.revision + 1
+    producer_key = f"review_{decision}_r{revision}"
+    old_keys = sorted(entry.inputs)
+    if old_keys and set(old_keys) <= set(saved_records(source)):
+        from .chain_fixture import recited
+
+        if command != "reconfirm":
+            raise IntentError(
+                "fixture_scope", "A saved-record citation has no captured replacement"
+            )
+        replacements, digests = recited(source, entry, rows, revision)
+        producer = review_producer(entry, command, digests)
+        intended = reconfirmed(source, decision, replacements, producer_key, producer)
+    else:
+        if len(old_keys) != 1 or not isinstance(
+            source.inputs[old_keys[0]], TextSpanInput
+        ):
+            raise IntentError(
+                "fixture_scope", "This fixture reviews one withheld glossary span"
+            )
+        glossary = (await current_sources(root, publisher, INFO))["glossary"]
+        text = await read_original(
+            glossary, await context_for(glossary.identity_data_id)
+        )
+        entry_line = hc_entry(text)
+        span_key = f"glossary_hc_r{revision}"
+        span = dict(
+            kind="text_span",
+            document_ref="glossary",
+            start=entry_line.start(),
+            end=entry_line.end(),
+            text_sha256=text_digest(entry_line.group()),
+        )
+        producer = review_producer(
+            entry,
+            command,
+            dict(
+                old_digests={k: source.inputs[k].text_sha256 for k in old_keys},
+                new_digest=span["text_sha256"],
+            ),
+        )
+        if command == "reconfirm":
+            intended = reconfirmed(
+                source,
+                decision,
+                {old_keys[0]: (span_key, span)},
+                producer_key,
+                producer,
+            )
+        elif decision in source.mention_resolutions:
+            from .chain_fixture import unresolved_in_place
+
+            intended = unresolved_in_place(
+                source, decision, old_keys[0], span_key, span, producer_key, producer
+            )
+        else:
+            intended = replaced_variant(
+                source, decision, span_key, span, producer_key, producer
+            )
+    write_revision(root, intended)
     await replace_one(
         publisher,
         intended,
         expected_revision=expected_revision,
         fault_stage=fault_stage,
+    )
+
+
+def write_revision(root, intended):
+    """The caller's file for a reviewed or cited revision of doc01 or doc03
+    (forget_fixture.CALLER_FILES)."""
+    from .chain_fixture import DOC03_IDENTITY_ID
+
+    label = "doc03" if intended.identity_data_id == DOC03_IDENTITY_ID else "doc01"
+    (root / f"identity_{label}_revision{intended.revision}.json").write_text(
+        intended.model_dump_json(indent=2) + "\n"
     )
 
 
@@ -421,7 +495,7 @@ async def reconcile(publisher, label, selected):
 
     from .revisions import replace_one
 
-    from .forget_fixture import reconcile_forget
+    from .forget_fixture import CALLER_FILES, reconcile_forget
 
     row = await publisher.records.row(selected)
     if (finished := await reconcile_forget(publisher, row, selected)) is not None:
@@ -443,12 +517,13 @@ async def reconcile(publisher, label, selected):
             await load_chunks(selected, ctx),
             ctx,
             operation="reconcile",
-            semantics=label != "glossary",
+            semantics=CALLER_FILES[label].facts,
         )
     return no_refresh()
 
 
 async def snapshot(publisher, root, query):
+    from .records import saved_records
     from .registered import read_registered, read_texts
     from .retrieve import retrieve, withholding_status
     from .withholding import document_inputs
@@ -486,11 +561,19 @@ async def snapshot(publisher, root, query):
                 k: source.inputs[k].model_dump(mode="json") for k in sorted(reads)
             },
             decisions={
-                k: dict(input_refs=d.input_refs, producer_ref=d.producer_ref)
+                k: dict(
+                    input_refs=d.input_refs,
+                    producer_ref=d.producer_ref,
+                    status=d.status,
+                )
                 for k, d in [
                     *source.mention_resolutions.items(),
                     *source.variant_assignments.items(),
                 ]
+            },
+            records={
+                k: i.model_dump(mode="json")
+                for k, i in sorted(saved_records(source).items())
             },
             producers={
                 k: dict(implementation=p.implementation, configuration=p.configuration)
@@ -529,14 +612,16 @@ async def snapshot(publisher, root, query):
 
 
 async def run(args, root):
+    from .fixture import expect_current
+    from .forget_fixture import CALLER_FILES
     from .multisource import publish_one
     from .revisions import refresh_dependents
 
     if args.command == "glossary-fixture":
-        publisher, prepared = await prepare(root)
+        publisher, prepared = await prepare(root, chain=args.chain)
         args._fixture_publisher = publisher
-        for label in ("glossary", "doc01"):
-            source, chunks, ctx = prepared[label]
+        # In citation order: doc03 pins doc01's decisions as published.
+        for label, (source, chunks, ctx) in prepared.items():
             await publish_one(
                 publisher,
                 source,
@@ -544,7 +629,7 @@ async def run(args, root):
                 ctx,
                 operation="publish",
                 fault_stage=args.fault_stage if label == args.source else None,
-                semantics=label != "glossary",
+                semantics=CALLER_FILES[label].facts,
             )
         refresh = no_refresh()
     else:
@@ -576,10 +661,35 @@ async def run(args, root):
                 fault_stage=None if refreshing else args.fault_stage,
                 refresh_fault=refresh_fault,
             )
-        elif args.command in ("reconfirm", "replace-decision"):
-            if args.source != "doc01":
+        elif args.command == "cite-record":
+            from .chain_fixture import citing_revision
+            from .revisions import replace_one
+
+            if "doc03" not in sources:
                 raise IntentError(
-                    "fixture_scope", f"{args.command} reviews one decision of doc01"
+                    "fixture_scope", "cite-record needs a glossary-fixture --chain root"
+                )
+            await expect_current(
+                publisher,
+                selected,
+                args.expected_revision,
+                "Reconcile the source before it cites a record",
+            )
+            intended = citing_revision(
+                selected, args.citation, sources, await publisher.records.rows()
+            )
+            write_revision(root, intended)
+            await replace_one(
+                publisher,
+                intended,
+                expected_revision=args.expected_revision,
+                fault_stage=args.fault_stage,
+            )
+        elif args.command in ("reconfirm", "replace-decision"):
+            if args.source not in ("doc01", "doc03"):
+                raise IntentError(
+                    "fixture_scope",
+                    f"{args.command} reviews one decision of doc01 or doc03",
                 )
             await review(
                 publisher,

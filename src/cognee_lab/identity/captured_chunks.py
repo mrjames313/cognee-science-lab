@@ -16,20 +16,25 @@ REINTERPRET_UNRESOLVED = "stage6-captured-reinterpretation-unresolved"
 TO_MENTION = "stage6-captured-kind-change-to-mention"
 
 
+ORIGINAL = "identity-handoff-example"
+
+
 @dataclass(frozen=True)
 class CapturedGroup:
     created: int
-    creator: str | None
+    creator: str
     fact: str | None
 
 
 # `creator` is the producer implementation of the fixture edit that declares
-# the group; None marks an original group. A group has retired only when its
-# creating edit is in the source's lineage and the source no longer declares
-# it, because different edit sequences reach the same revision number. This
-# relies on describers only adding producers, never removing one.
+# the group, or of the original fixture (`ORIGINAL`) for an original group. A
+# group has retired only when its creating edit is in the source's lineage
+# and the source no longer declares it, because different edit sequences
+# reach the same revision number; a source of another fixture, such as the
+# glossary or doc03, never declared one. This relies on describers only
+# adding producers, never removing one.
 CAPTURED_GROUPS = {
-    "g01": CapturedGroup(1, None, FACT_TEXT),
+    "g01": CapturedGroup(1, ORIGINAL, FACT_TEXT),
     "g03": CapturedGroup(2, ADDITION, ADDED_FACT_TEXT),
     "g04": CapturedGroup(2, SPLIT, None),
     "g05": CapturedGroup(2, SPLIT, FACT_TEXT),
@@ -52,8 +57,7 @@ def retired_keys(source):
     return [
         key
         for key, group in CAPTURED_GROUPS.items()
-        if key not in source.mention_groups
-        and (group.creator is None or group.creator in lineage)
+        if key not in source.mention_groups and group.creator in lineage
     ]
 
 

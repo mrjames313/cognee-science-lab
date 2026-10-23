@@ -34,6 +34,12 @@ CALLER_FILES = {
         ("glossary_revision*.txt", "glossary_identity_revision*.json"),
         facts=False,
     ),
+    "doc03": CallerFiles(
+        "doc03.txt",
+        "doc03_identity.json",
+        ("identity_doc03_revision*.json",),
+        facts=False,
+    ),
 }
 RESULT_FILES = ("*_result.json", "result.json")
 
