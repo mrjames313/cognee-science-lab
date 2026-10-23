@@ -391,18 +391,14 @@ def remapped(reader: IdentitySource, moved) -> IdentitySource:
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def refresh_dependents(publisher, replace):
-    """After an edit completes, write each current dependent's next revision
-    with its moved spans' new ranges: an ordinary unchanged-text replacement,
-    `replace(description, expected_revision)`, whose withholding cleanup
-    releases the moved decisions once it completes. A rerun finishes an
-    interrupted refresh: a dependent whose refresh failed resumes its saved
-    revision. A span moved by an edit that is still pending or failed waits
-    for that edit."""
+async def pending_moves(publisher):
+    """Each source's row with the `remap` rows that still apply to it and
+    whose edit completed. A span moved by an edit that is still pending or
+    failed waits for that edit."""
     rows = await publisher.records.rows()
     table = recorded_rows(current_readers(rows), await publisher.withholdings.rows())
     waiting = {r.source for r in unfinished_edits(rows)}
-    refreshed = []
+    found = {}
     for row in rows:
         moved = [
             w
@@ -411,25 +407,48 @@ async def refresh_dependents(publisher, replace):
             and w.status == Status.REMAP
             and w.consumed not in waiting
         ]
-        if not moved:
-            continue
-        saved = IdentitySource.model_validate_json(row.description)
-        if row.state == "current":
-            revised = remapped(saved, moved)
-        elif row.resumed_by == "replace":
-            revised = saved
-        else:
-            continue
-        await replace(revised, expected_revision=row.revision)
-        refreshed.append(
-            dict(
-                identity_data_id=row.source,
-                revision=revised.revision,
-                inputs={
-                    w.input_ref: dict(start=w.new_start, end=w.new_end) for w in moved
-                },
+        if moved:
+            found[row.source] = (row, moved)
+    return found
+
+
+def written_ranges(revised: IdentitySource, moved) -> dict:
+    """What a refresh revision wrote: the range of each moved input it holds."""
+    return dict(
+        identity_data_id=str(revised.identity_data_id),
+        revision=revised.revision,
+        inputs={
+            w.input_ref: dict(
+                start=revised.inputs[w.input_ref].start,
+                end=revised.inputs[w.input_ref].end,
             )
-        )
+            for w in moved
+        },
+    )
+
+
+async def refresh_dependents(publisher, replace):
+    """After an edit completes, write each current dependent's next revision
+    with its moved spans' new ranges: an ordinary unchanged-text replacement,
+    `replace(description, expected_revision)`, whose withholding cleanup
+    releases the moved decisions once it completes. A rerun finishes an
+    interrupted refresh: a dependent whose replacement failed resumes its
+    saved revision first. That revision may hold the range of an earlier
+    edit, so when `remap` rows still apply after it, the refresh remaps
+    again. It reports each range it wrote."""
+    refreshed = []
+    for source, (row, moved) in (await pending_moves(publisher)).items():
+        if row.state != "current" and row.resumed_by == "replace":
+            saved = IdentitySource.model_validate_json(row.description)
+            await replace(saved, expected_revision=row.revision)
+            refreshed.append(written_ranges(saved, moved))
+            row, moved = (await pending_moves(publisher)).get(source, (row, []))
+        if row.state == "current" and moved:
+            revised = remapped(
+                IdentitySource.model_validate_json(row.description), moved
+            )
+            await replace(revised, expected_revision=row.revision)
+            refreshed.append(written_ranges(revised, moved))
     return refreshed
 
 

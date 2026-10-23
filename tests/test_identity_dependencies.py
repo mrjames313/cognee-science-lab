@@ -32,6 +32,7 @@ from cognee_lab.identity.withholding import (
     WithholdingStore,
     classify,
     reconfirmed,
+    refresh_dependents,
     remapped,
     withheld_decisions,
     withhold_dependents,
@@ -534,6 +535,53 @@ async def test_a_retried_second_edit_classifies_as_its_first_attempt_did(
         ("remap", start, start + len(ENTRY))
     ] * 2
     assert retry == first
+
+
+async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
+    source_payload,
+):
+    """doc01's refresh revision for the first edit failed. A second edit
+    moves the span again before the refresh reruns. Resuming the saved
+    revision writes the first edit's range, so the refresh then remaps to the
+    second edit's range, and it reports each range it wrote."""
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    rows = [row_of(glossary), row_of(doc01)]
+    publisher = await memory_publisher(rows)
+    moved = await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+    saved = remapped(doc01, [WithholdingRow(**w) for w in moved])
+    rows[1] = row_of(saved, "failed", dict(operation="identity_replace"))
+    twice = "Preface.\n" + INSERTED
+    await withhold_dependents(publisher, glossary, INSERTED, twice, 3)
+    written = []
+
+    async def replace(description, expected_revision):
+        """Complete the revision; its cleanup keeps the rows that still drift."""
+        assert rows[1].revision == expected_revision
+        rows[1] = row_of(description)
+        written.append(description.inputs["glossary_hc"])
+        drift = await drift_of(description, twice)
+        await publisher.withholdings.keep(
+            description.dataset_id,
+            description.identity_data_id,
+            {
+                (w.assignment, w.input_ref)
+                for w in await publisher.withholdings.rows()
+                if w.input_ref in drift
+            },
+        )
+
+    refreshed = await refresh_dependents(publisher, replace)
+    first, second = INSERTED.index(ENTRY), twice.index(ENTRY)
+    assert [(i.start, i.end) for i in written] == [
+        (first, first + len(ENTRY)),
+        (second, second + len(ENTRY)),
+    ]
+    assert [(r["revision"], r["inputs"]["glossary_hc"]) for r in refreshed] == [
+        (2, dict(start=first, end=first + len(ENTRY))),
+        (3, dict(start=second, end=second + len(ENTRY))),
+    ]
+    assert await publisher.withholdings.rows() == []
 
 
 @pytest.mark.parametrize(
