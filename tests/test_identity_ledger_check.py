@@ -71,15 +71,6 @@ DEEP_SEQUENCES = {
         "W1 complete",
         "W1 replace S1 rev=2 expect=2 plan=replace<r1",
     ),
-    "supersede-drops-chain": (
-        "W1 publish S1 rev=1 expect=0 plan=publish",
-        "W1 complete",
-        "W1 replace S1 rev=2 expect=1 plan=replace<r1",
-        "W1 complete desc=alt",
-        "W1 replace S1 rev=2 expect=2 plan=replace<r1+e0 desc=alt",
-        "W1 complete desc=alt",
-        "W1 replace S1 rev=2 expect=2 plan=replace<r1 desc=alt",
-    ),
 }
 
 

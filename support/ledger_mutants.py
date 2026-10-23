@@ -269,6 +269,13 @@ MUTANTS = {
         "    if False and (chain := erasure_chain(row, method, plan)):\n",
         "P5",
     ),
+    # A retry of a failed erasure retry drops the saved revisions it
+    # superseded from its plan.
+    "supersede-drops-chain": Mutant(
+        "            and erased_from(plan) == erased_from(superseding_plan(row, source))\n",
+        "            and erased_from(plan)[-1:] in ([], [row.description])\n",
+        "P5",
+    ),
     # begin() reads no saved row for the chain check, so no erasure retry
     # finds the forget it erases.
     "begin-reads-no-rows": Mutant(
@@ -351,13 +358,6 @@ DEEP_MUTANTS = {
     "withdrawn-guard-admits-replace": Mutant(
         '{"withdraw": 0, "forget": 0}, otherwise=WITHDRAWN_SOURCE',
         '{"withdraw": 0, "forget": 0, "replace": 0}, otherwise=WITHDRAWN_SOURCE',
-        "P5",
-    ),
-    # Caught at depth 7: a retry of a failed erasure retry drops the saved
-    # revisions it superseded from its plan.
-    "supersede-drops-chain": Mutant(
-        "            and erased_from(plan) == erased_from(superseding_plan(row, source))\n",
-        "            and erased_from(plan)[-1:] in ([], [row.description])\n",
         "P5",
     ),
 }
