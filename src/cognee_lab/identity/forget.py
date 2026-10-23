@@ -314,6 +314,8 @@ async def forget(
                 "Failed forget plan predates stored_files; its sweep cannot be finished",
             )
     else:
+        # Earlier than begin() on purpose, before the plan reads the graph. On
+        # withdrawn, pending and other owners' failed rows begin() differs.
         if row.state == "forgotten":
             raise IntentError(*FORGOTTEN_SOURCE)
         if row.state != "current":

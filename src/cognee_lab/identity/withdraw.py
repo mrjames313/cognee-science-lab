@@ -18,7 +18,8 @@ from .stages import Operation, run_attempt, saved_row
 from .validation import IntentError
 
 STAGES = ("withdraw_contributions", "withdraw_owners", "withdraw_verification")
-WITHDRAW = Operation("withdraw", "Withdrawal", STAGES, "withdrawn")
+# Each stage injects its own fault, to keep the withdrawal's fault messages.
+WITHDRAW = Operation("withdraw", "Withdrawal", (), "withdrawn")
 FAULT_STAGES = STAGES
 
 
@@ -73,16 +74,19 @@ async def withdraw(
             **ownership_snapshot(nodes, edges),
         )
 
-    async def contributions(_):
+    async def contributions(run):
         await withdraw_contributions(graph, source, contribution_triples(plan))
+        run.inject(run.stage, "Injected failure after contribution withdrawal")
 
-    async def owners(_):
+    async def owners(run):
         unified = UnifiedStoreEngine(
             graph, vector, EngineCapability.GRAPH | EngineCapability.VECTOR
         )
-        return await unified.delete_by_source_ref(owner)
+        deleted = await unified.delete_by_source_ref(owner)
+        run.inject(run.stage, "Injected failure after native owner removal")
+        return deleted
 
-    async def verification(_):
+    async def verification(run):
         retired = retired_sources(await records.rows())
         if await graph.find_nodes_by_source_ref(
             owner
@@ -99,6 +103,7 @@ async def withdraw(
             released(owned_by(source, document=False), retired),
             retired,
         )
+        run.inject(run.stage, "Injected failure before withdrawal acknowledgement")
 
     attempt, results = await run_attempt(
         WITHDRAW,

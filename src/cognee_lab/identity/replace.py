@@ -7,13 +7,12 @@ from .registered import read_registered, write_registered
 from .stages import Operation, run_attempt, saved_row
 from .validation import IntentError
 
-REPLACE = Operation(
-    "replace", "Replacement", ("replace_saved", "replace_registered"), None
-)
-# The stages above, then the points inside the shared publisher (after its
-# writes, after retirement, before acknowledgement) and the text change's
-# boundaries.
+REPLACE = Operation("replace", "Replacement", ("replace_registered",), None)
+# replace_saved fails before the snapshot recheck, then the stage above, then
+# the points inside the shared publisher (after its writes, after retirement,
+# before acknowledgement) and the text change's boundaries.
 FAULT_STAGES = (
+    "replace_saved",
     *REPLACE.faults,
     "replace_published",
     "replace_retired",
@@ -132,6 +131,8 @@ async def replace(
                 "recovery_plan", "Saved replacement plan is missing or invalid"
             ) from exc
     else:
+        # Earlier than begin() on purpose, before the plan reads the graph. On
+        # every row but a current one begin() refuses with another message.
         if row.state != "current" or source.revision != saved.revision + 1:
             raise IntentError(
                 "revision_sequence",
@@ -340,7 +341,8 @@ async def replace(
         if text_change is not None:
             await text_change.verify(publisher, old, source, chunks)
 
-    async def recheck(_):
+    async def recheck(run):
+        run.inject("replace_saved")
         # Recheck after taking the writer reservation and before native I/O.
         actual = await read_registered(source)
         if actual not in (old, source):

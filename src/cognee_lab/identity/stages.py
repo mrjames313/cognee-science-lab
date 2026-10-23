@@ -15,7 +15,9 @@ from .validation import IntentError
 class Operation(NamedTuple):
     method: str  # the RecordStore.begin() method
     label: str  # names the operation in a recovery_record_failed message
-    faults: tuple[str, ...]  # fault stage names it accepts, in order
+    # Stages that run_attempt fails right after their work when the fault
+    # stage names them. A stage may instead inject its own fault (Run.inject).
+    faults: tuple[str, ...]
     # complete(state=...) after the last stage, or None when a stage completes
     # the attempt itself.
     state: str | None
@@ -29,10 +31,12 @@ class Run:
         self.fault_stage = fault_stage
         self.stage: str | None = None
 
-    def inject(self, name: str):
+    def inject(self, name: str, message: str | None = None):
         """Fail here when the requested fault stage names this point."""
         if self.fault_stage == name:
-            raise IntentError("injected_failure", f"Injected failure at {name}")
+            raise IntentError(
+                "injected_failure", message or f"Injected failure at {name}"
+            )
 
     async def boundary(self, name: str):
         """Reach a named point inside a stage: record it, and fail there on request."""
