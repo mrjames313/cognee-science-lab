@@ -578,9 +578,9 @@ def check_reconfirmations(old, source):
     whose old decisions cited a key saw that content. A decision under a
     producer of the old revision, whatever its key and whether or not it
     changed, cites only foreign keys that producer's old decisions cited. A
-    continuing decision that keeps its reviewed fields but cites other
-    foreign inputs, by losing or replacing a key, also names a producer new
-    in this revision: a dropped input releases a withholding. A producer new
+    continuing decision that keeps its reviewed fields but changes its
+    foreign inputs in any way also names a producer new in this revision: a
+    dropped input releases a withholding. A producer new
     in this revision is unconstrained, and a pure move keeps its key and
     passes both."""
     before, after = foreign_citations(old), foreign_citations(source)
