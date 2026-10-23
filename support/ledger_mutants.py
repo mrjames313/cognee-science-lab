@@ -217,21 +217,21 @@ MUTANTS = {
         "P5",
     ),
     "no-revision-reuse": Mutant(
-        "                elif not same:\n"
-        "                    raise IntentError(*REVISION_REUSE)\n",
+        "    if not superseding and source != row.description:\n"
+        "        return REVISION_REUSE\n",
         "",
         "P5",
     ),
     # An erasure retry supersedes a description it does not name.
     "supersede-any-description": Mutant(
-        '        kept.append(row.description.model_dump(mode="json"))\n',
-        "        return True\n",
+        "            and erased_from(plan) == [*erased_from(row.plan), row.description]\n",
+        "            and len(erased_from(plan)) == len(erased_from(row.plan)) + 1\n",
         "P5",
     ),
     # A first publication may skip revisions.
     "no-plus-one": Mutant(
-        "            elif source.revision != actual_revision + 1:",
-        "            elif source.revision <= actual_revision:",
+        "        return None if revision == actual + 1 else NEW_REVISION",
+        "        return None if revision > actual else NEW_REVISION",
         "P5",
     ),
     "no-replace-plan-check": Mutant(
@@ -241,13 +241,20 @@ MUTANTS = {
     ),
     # A replace retry is never held to the saved replacement plan.
     "no-replace-plan-preservation": Mutant(
-        'preserved=("previous_description", "text_change")',
-        "preserved=()",
+        'preserved=("previous_description", "text_change", ERASED_FROM)',
+        "preserved=(ERASED_FROM,)",
         "P5",
     ),
     "no-text-change-preservation": Mutant(
-        'preserved=("previous_description", "text_change")',
-        'preserved=("previous_description",)',
+        'preserved=("previous_description", "text_change", ERASED_FROM)',
+        'preserved=("previous_description", ERASED_FROM)',
+        "P5",
+    ),
+    # The store begins an erasure retry without checking that each step of
+    # its chain is the removal a forget allows (erasure_rules).
+    "erasure-chain-unchecked": Mutant(
+        "    if retry and required.supersedes and (chain := erased_from(plan)):\n",
+        "    if False and (chain := erased_from(plan)):\n",
         "P5",
     ),
     "begin-resolves-open-event": Mutant(
@@ -327,12 +334,12 @@ DEEP_MUTANTS = {
         '{"withdraw": 0, "forget": 0, "replace": 0}, otherwise=WITHDRAWN_SOURCE',
         "P5",
     ),
-    # Caught at depth 6: a failed erasure retry, resumed with its saved
-    # arguments, is refused because the retry forgets what it superseded.
+    # Caught at depth 7: a retry of a failed erasure retry drops the saved
+    # revisions it superseded from its plan.
     "supersede-drops-chain": Mutant(
-        '    kept = [json.loads(d) for d in row.plan.get("erased_from", [])]\n',
-        "    kept = []\n",
-        "P6",
+        "            and erased_from(plan) == [*erased_from(row.plan), row.description]\n",
+        "            and erased_from(plan)[-1:] in ([], [row.description])\n",
+        "P5",
     ),
 }
 assert (

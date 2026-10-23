@@ -12,6 +12,7 @@ from cognee_lab.identity.admission import admit, identity_map
 from cognee_lab.identity.erasure_rules import (
     Erasures,
     check_erasure_retry,
+    check_retry_chain,
     erasures_of,
 )
 from cognee_lab.identity.erasure import (
@@ -299,6 +300,9 @@ def test_unfinished_is_derived_from_the_rows(source_payload):
 
 
 SPARE = uuid4()
+REPLACING = {"operation": "identity_replace"}
+PUBLISHING = {"operation": "identity_publish"}
+FORGETTING = {"operation": "identity_forget"}
 
 
 def erasure_case(source_payload, change):
@@ -381,7 +385,8 @@ def test_an_erasure_removal_is_complete_and_nothing_else(source_payload, change,
 def test_a_removal_is_bound_to_a_forgotten_source(source_payload):
     """A removal producer may only claim what the ledger shows a forget took:
     naming a document no forgotten row held is refused, however it is
-    configured."""
+    configured, and so is naming only part of what its forget removed,
+    which would leave decisions citing the rest."""
     gloss = glossary(source_payload)
     doc01 = reader_of(source_payload, gloss)
     revised, _ = removal(doc01, gloss)
@@ -390,13 +395,77 @@ def test_a_removal_is_bound_to_a_forgotten_source(source_payload):
     with pytest.raises(IntentError) as refused:
         admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=live)
     assert refused.value.code == "erasure_unbound"
-    tombstone = Tombstone.of(gloss, forgotten_at="t", removed_entity_ids=[HC])
-    forgotten = replace(
-        row_of(gloss, "forgotten"), description=None, tombstone=tombstone
+
+    def bound(removed):
+        tombstone = Tombstone.of(gloss, forgotten_at="t", removed_entity_ids=removed)
+        forgotten = replace(
+            row_of(gloss, "forgotten"), description=None, tombstone=tombstone
+        )
+        return erasures_of([forgotten, row_of(doc01)], doc01)
+
+    assert dict(bound([HC]).forgotten) == {
+        gloss.inputs["doc01"].data_id: frozenset({HC})
+    }
+    with pytest.raises(IntentError) as refused:
+        admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=bound([HC]))
+    assert refused.value.code == "erasure_unbound"
+    admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=bound([]))
+
+
+def with_removal_producer(source, gloss):
+    """`source` with the removal producer of the forget of `gloss` added at
+    its own revision, and nothing removed."""
+    from cognee_lab.identity.erasure import removal_producer
+
+    ids = source_ids(gloss)
+    payload = json.loads(source.model_dump_json())
+    payload["producers"][producer_key(ids, source.revision)] = removal_producer(
+        ids, (), None
     )
-    bound = erasures_of([forgotten, row_of(doc01)], doc01)
-    assert dict(bound.forgotten) == {gloss.inputs["doc01"].data_id: frozenset({HC})}
-    admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=bound)
+    return source_of(payload)
+
+
+def test_an_erasure_retry_step_removes_something(source_payload):
+    """A step that names the removal producer but cites nothing of the
+    forgotten source removes nothing, and is not an erasure removal."""
+    gloss = glossary(source_payload)
+    saved = source_of(source_payload)
+    with pytest.raises(IntentError) as refused:
+        check_erasure_retry(saved, with_removal_producer(saved, gloss), forgot(gloss))
+    assert refused.value.code == "erasure_empty"
+
+
+def test_an_erasure_retry_step_keeps_the_identity_source(source_payload):
+    gloss = glossary(source_payload)
+    saved = reader_of(source_payload, gloss)
+    revised, _ = removal(saved, gloss, state="failed", plan=REPLACING)
+    moved = json.loads(revised.model_dump_json())
+    moved["identity_data_id"] = str(uuid4())
+    with pytest.raises(IntentError) as refused:
+        check_erasure_retry(saved, source_of(moved), forgot(gloss))
+    assert refused.value.code == "erasure_unrelated"
+
+
+def test_every_step_of_a_retry_chain_is_an_erasure_removal(source_payload):
+    """The replacement's own step passes unless it names a removal producer;
+    each later step must be a removal in place of the one before."""
+    gloss = glossary(source_payload)
+    old = source_of(source_payload)
+    saved = reader_of(source_payload, gloss)
+    saved = source_of(dict(json.loads(saved.model_dump_json()), revision=2))
+    revised, _ = removal(saved, gloss, state="failed", plan=REPLACING)
+    check_retry_chain([old, saved, revised], forgot(gloss), first=True)
+    check_retry_chain([saved, revised], forgot(gloss), first=False)
+    with pytest.raises(IntentError) as refused:
+        check_retry_chain([old, saved], forgot(gloss), first=False)
+    assert refused.value.code == "revision_reuse"
+    with pytest.raises(IntentError) as refused:
+        check_retry_chain(
+            [old, saved, revised, with_removal_producer(revised, gloss)],
+            forgot(gloss),
+            first=True,
+        )
+    assert refused.value.code == "revision_reuse"
 
 
 def test_a_removal_never_drops_a_recipe_another_source_reads(source_payload):
@@ -485,3 +554,52 @@ def test_a_scrubbed_plan_names_every_edge_the_contribution_check_reads():
     )
     assert contribution_triples(scrubbed_plan(plan)) == contribution_triples(plan)
     assert ("m2", "e", "is_a") in contribution_triples(scrubbed_plan(plan))
+
+
+async def failed_replacement_of(store, source):
+    """`source` published, then its next revision failed as a replacement."""
+    attempt = await store.begin(source, expected_revision=0, plan=dict(PUBLISHING))
+    await store.complete(source, attempt)
+    saved = source.model_copy(update={"revision": 2})
+    plan = dict(REPLACING, previous_description=source.model_dump_json())
+    attempt = await store.begin(saved, expected_revision=1, plan=plan, method="replace")
+    await store.fail(saved, attempt, "replace_saved", IntentError("x", "x"))
+    return saved, await store.row(saved)
+
+
+async def test_the_ledger_begins_an_erasure_retry_only_with_the_removal(
+    source_payload,
+):
+    """Under the writer reservation, the store checks the chain an erasure
+    retry names against the forgotten rows it reads: a changed description
+    that removes nothing is refused, the removal is begun."""
+    from test_identity_storage import memory_store
+
+    store = memory_store()
+    await store.initialize()
+    gloss = glossary(source_payload)
+    attempt = await store.begin(gloss, expected_revision=0, plan=dict(PUBLISHING))
+    await store.complete(gloss, attempt)
+    attempt = await store.begin(
+        gloss, expected_revision=1, plan=dict(FORGETTING), method="forget"
+    )
+    await store.complete(
+        gloss,
+        attempt,
+        state="forgotten",
+        tombstone=Tombstone.of(gloss, forgotten_at="t"),
+    )
+    saved, row = await failed_replacement_of(store, reader_of(source_payload, gloss))
+    retry = dict(row.plan, erased_from=[saved.model_dump_json()])
+    smuggled = json.loads(saved.model_dump_json())
+    for recipe in smuggled["entity_constructions"].values():
+        recipe["description"] = "smuggled"
+    with pytest.raises(IntentError) as refused:
+        await store.begin(
+            source_of(smuggled), expected_revision=2, plan=dict(retry), method="replace"
+        )
+    assert refused.value.code == "revision_reuse"
+    revised, _ = removal(saved, gloss, state="failed", plan=REPLACING)
+    await store.begin(revised, expected_revision=2, plan=dict(retry), method="replace")
+    now = await store.row(saved)
+    assert (now.state, now.description) == ("pending", revised)

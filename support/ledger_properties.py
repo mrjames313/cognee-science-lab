@@ -9,9 +9,11 @@ reference.md gives the harm of each break and the code that keeps it.
 
 import json
 from dataclasses import dataclass
+from itertools import pairwise
 
 from ledger_model import (
     CONTENT_FREE_PLAN,
+    ERASURE_STEP,
     METHODS,
     Begin,
     Finish,
@@ -235,7 +237,7 @@ def begin_rules(op, prior):
         superseding = (
             state == "failed"
             and method.supersedes
-            and method.owns(state, saved.operation)
+            and saved.operation == method.recovers
         )
         if not same and not (
             superseding and op.plan.erased == (*saved.erased, prior_variant)
@@ -243,6 +245,9 @@ def begin_rules(op, prior):
             yield f"begin changed S{op.source + 1}'s description at saved revision {actual}"
         if superseding and same and op.plan.erased != saved.erased:
             yield f"{op.method} retry changed the saved plan's erased"
+        chain = (*op.plan.erased, op.variant)
+        if op.plan.erased and any(step != ERASURE_STEP for step in pairwise(chain)):
+            yield f"{op.method} began an erasure retry whose steps {chain} are not each the erasure removal"
     if not (state in method.begins or method.owns(state, saved.operation)):
         yield f"{op.method} began on a {state} {saved.operation} row"
     owners = {m.name for m in METHODS.values() if m.owns(state, saved.operation)}

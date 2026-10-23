@@ -12,6 +12,7 @@ from sqlalchemy import Integer, String, Text, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from .erasure_rules import check_retry_chain, erasures_of
 from .models import IdentitySource, Tombstone
 from .validation import IntentError
 
@@ -279,6 +280,9 @@ TRANSITIONS = {
 }
 
 
+ERASED_FROM = "erased_from"
+
+
 class RequiredPlan(NamedTuple):
     operation: str  # the plan operation begin() requires
     refusal: Refusal  # for a plan of any other operation
@@ -286,15 +290,21 @@ class RequiredPlan(NamedTuple):
     # of a failed row whose plan differs in a preserved field.
     off_row: Refusal
     preserved: tuple[str, ...] = ()  # plan fields a retry keeps
+    # A retry may instead add the saved description to its plan's
+    # `erased_from`, and then begins with another description at the saved
+    # revision: an erasure retry (erasure_rules.check_retry_chain).
+    supersedes: bool = False
 
 
 REQUIRED_PLANS = {
-    # A replacement retry keeps what the failed attempt planned to retire.
+    # A replacement retry keeps what the failed attempt planned to retire,
+    # and the saved revisions earlier erasure retries superseded.
     "replace": RequiredPlan(
         "identity_replace",
         REPLACEMENT_PLAN,
         PRESERVE_REPLACEMENT,
-        preserved=("previous_description", "text_change"),
+        preserved=("previous_description", "text_change", ERASED_FROM),
+        supersedes=True,
     ),
     "forget": RequiredPlan("identity_forget", FORGET_PLAN, FORGET_STATE),
 }
@@ -310,13 +320,19 @@ def cell_for(row: PublicationRow | None) -> Transition:
     raise IntentError("unknown_state", f"Saved row state {row.state!r} is unknown")
 
 
-def admissible(row, method, plan, revision) -> Refusal | None:
-    """The refusal begin() gives `method` with this plan and description
-    revision on this saved row (None: no row), or None when it may begin.
-    begin() checks the expected revision before and, after, the description
-    at the saved revision and that any advance takes exactly the next one."""
+def erased_from(plan: dict) -> list[IdentitySource]:
+    """The saved descriptions a plan says erasure retries superseded."""
+    return [IdentitySource.model_validate_json(d) for d in plan.get(ERASED_FROM, [])]
+
+
+def admissible(row, method, plan, source, rows=()) -> Refusal | None:
+    """The refusal begin() gives `method` with this plan and description on
+    this saved row (None: no row), or None when it may begin. `rows` are
+    every saved row, which bind an erasure retry to the forgets it erases.
+    begin() checks the expected revision before."""
     cell = cell_for(row)
     actual = row.revision if row else 0
+    revision = source.revision
     step = cell.admits.get(method)
     if step is None and (refusal := cell.refuses.get(method, cell.otherwise)):
         return refusal
@@ -329,20 +345,28 @@ def admissible(row, method, plan, revision) -> Refusal | None:
         return required.off_row
     if step == 1 and revision != actual + 1 and cell.sequence:
         return cell.sequence
-    if required and row and row.state == "failed":
-        if any(plan.get(f) != row.plan.get(f) for f in required.preserved):
+    retry = bool(required and row and row.state == "failed")
+    superseding = False
+    if retry:
+        changed = {f for f in required.preserved if plan.get(f) != row.plan.get(f)}
+        # erased_from: preserved, or the saved list plus the saved description.
+        superseding = (
+            required.supersedes
+            and changed == {ERASED_FROM}
+            and erased_from(plan) == [*erased_from(row.plan), row.description]
+        )
+        if changed and not superseding:
             return required.off_row
+    if not row or revision != actual:
+        return None if revision == actual + 1 else NEW_REVISION
+    if not superseding and source != row.description:
+        return REVISION_REUSE
+    if retry and required.supersedes and (chain := erased_from(plan)):
+        try:
+            check_retry_chain([*chain, source], erasures_of(rows, source), first=False)
+        except IntentError as refused:
+            return Refusal(refused.code, str(refused))
     return None
-
-
-def supersedes(row: PublicationRow, plan: dict, same: bool) -> bool:
-    """A replacement retry keeps the saved revisions it superseded,
-    `erased_from`, and adds the saved description exactly when it begins
-    with another one: an erasure retry (replace.py)."""
-    kept = [json.loads(d) for d in row.plan.get("erased_from", [])]
-    if not same:
-        kept.append(row.description.model_dump(mode="json"))
-    return [json.loads(d) for d in plan.get("erased_from", [])] == kept
 
 
 def now() -> str:
@@ -443,19 +467,12 @@ class RecordStore:
             if actual_revision != expected_revision:
                 raise IntentError(*STALE_REVISION)
             saved = PublicationRow.of(row) if row else None
-            if refusal := admissible(saved, method, plan, source.revision):
+            rows = (await session.execute(select(Publication))).scalars().all()
+            if refusal := admissible(
+                saved, method, plan, source, [PublicationRow.of(r) for r in rows]
+            ):
                 raise IntentError(*refusal)
             payload = source.model_dump_json()
-            if row and source.revision == actual_revision:
-                same = json.loads(payload) == json.loads(row.description)
-                if saved.resumed_by == "replace":
-                    if not supersedes(saved, plan, same):
-                        refusal = PRESERVE_REPLACEMENT if same else REVISION_REUSE
-                        raise IntentError(*refusal)
-                elif not same:
-                    raise IntentError(*REVISION_REUSE)
-            elif source.revision != actual_revision + 1:
-                raise IntentError(*NEW_REVISION)
             if row is None:
                 row = Publication(dataset=dataset, source=sid, verified_revision=0)
                 session.add(row)

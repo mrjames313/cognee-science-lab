@@ -139,6 +139,7 @@ MUTANTS = {
     "attest_any_old_input": ("check_reconfirmations", attest_any_old_input),
     "allow_any_erasure": ("check_erasure_removals", skip),
     "erase_partially": ("check_erasure_complete", skip),
+    "erase_nothing": ("check_erasure_cites", skip),
     "erase_beyond_the_forgotten": ("check_erasure_confined", skip),
     "erase_unbound": ("erasure_of", trust_the_producer),
     "drop_read_recipes": ("check_dropped_unread", skip),

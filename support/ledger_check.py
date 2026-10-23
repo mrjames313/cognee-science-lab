@@ -37,6 +37,7 @@ from ledger_model import (
     Begin,
     Crash,
     Finish,
+    FORGOTTEN_AT,
     Ghost,
     Plan,
     Reject,
@@ -44,6 +45,7 @@ from ledger_model import (
     Served,
     World,
     Writer,
+    background,
     candidates,
     description,
     completion,
@@ -90,6 +92,30 @@ class Harness:
         )
         self.tables = storage.Base.metadata.sorted_tables
 
+    async def forget_background(self):
+        """Every sequence starts with the background source forgotten, as
+        forget leaves it: an erasure retry needs a forgotten source. Written
+        to the table directly, so a break in the store cannot stop it."""
+        from cognee_lab.identity.models import Tombstone
+
+        source = background()
+        async with self.engine.begin() as conn:
+            await conn.execute(
+                insert(self.storage.Publication),
+                dict(
+                    dataset=DATASET,
+                    source=str(source.identity_data_id),
+                    revision=1,
+                    verified_revision=1,
+                    state="forgotten",
+                    attempt="background",
+                    description=Tombstone.of(
+                        source, forgotten_at=FORGOTTEN_AT
+                    ).model_dump_json(),
+                    plan=json.dumps(dict(operation="identity_forget", revision=1)),
+                ),
+            )
+
     async def snapshot(self):
         async with self.engine.connect() as conn:
             return {
@@ -108,7 +134,11 @@ class Harness:
     async def observe(self, sources):
         index = {source_id(s): s for s in range(sources)}
         try:
-            rows = {index[r.source]: r for r in await self.store.rows(DATASET)}
+            rows = {
+                index[r.source]: r
+                for r in await self.store.rows(DATASET)
+                if r.source in index
+            }
         except IntentError as exc:
             # rows() refuses a forgotten row that is not a tombstone, and any
             # other row whose description does not parse.
@@ -454,6 +484,7 @@ def render(world, obs):
 async def check_ledger(config: Config) -> Result:
     harness = Harness(load_storage(config.mutant))
     await harness.store.initialize()
+    await harness.forget_background()
     rng = random.Random(config.seed)
     result = Result(config)
     replay = config.replay

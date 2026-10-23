@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Literal, NamedTuple
 from uuid import NAMESPACE_URL, uuid5
 
+from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION
 from cognee_lab.identity.models import IdentitySource, Tombstone
 
 REPO = Path(__file__).resolve().parents[1]
@@ -43,19 +44,75 @@ def source_id(s):
     return str(uuid5(NAMESPACE_URL, f"ledger-check-source:{s}"))
 
 
+# A source forgotten before every sequence, whose document r01 of every
+# variant 0 cites. Its tombstone binds an erasure retry (erasure_rules).
+BACKGROUND = source_id("background")
+BACKGROUND_DOCUMENT = str(uuid5(NAMESPACE_URL, "ledger-check-background-document"))
+
+
+@cache
+def background():
+    """The forgotten source's description: one document and no decisions."""
+    payload = json.loads(json.dumps(fixture()))
+    payload.update(identity_data_id=BACKGROUND, revision=1, original_input_ref="doc01")
+    doc = dict(payload["inputs"]["doc01"], data_id=BACKGROUND_DOCUMENT)
+    payload["inputs"] = {"doc01": doc}
+    for key in (
+        "entity_constructions",
+        "mention_groups",
+        "mention_resolutions",
+        "variant_assignments",
+    ):
+        payload[key] = {}
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
 @cache
 def description(s, revision, variant=0):
     """The description of source s at a revision.
 
-    Variant 1 changes the original text digest. No caller saves it; it is the
-    changed description that begin() must refuse at a saved revision.
+    Variant 0 cites the forgotten background document from r01. Variant 1 is
+    its erasure removal at the same revision, as forget writes it: r01
+    unresolved under the removal producer and the background input dropped.
+    So variant 1 is the one description an erasure retry may supersede
+    variant 0 with, and any other change at a saved revision is refused.
     """
     payload = json.loads(json.dumps(fixture()))
     payload.update(identity_data_id=source_id(s), revision=revision)
-    if variant:
-        text = payload["inputs"][payload["original_input_ref"]]
-        text["text_sha256"] = hashlib.sha256(b"changed text").hexdigest()
+    r01 = payload["mention_resolutions"]["r01"]
+    if not variant:
+        payload["inputs"]["background"] = dict(
+            kind="source_text",
+            dataset_id=DATASET,
+            data_id=BACKGROUND_DOCUMENT,
+            text_sha256=hashlib.sha256(b"background").hexdigest(),
+        )
+        r01["input_refs"].append("background")
+        return IdentitySource.model_validate_json(json.dumps(payload))
+    remover = f"forget_{BACKGROUND}_r{revision}"
+    payload["mention_resolutions"]["r01"] = dict(
+        group_ref=r01["group_ref"],
+        status="unresolved",
+        input_refs=r01["input_refs"],
+        producer_ref=remover,
+    )
+    payload["producers"][remover] = dict(
+        method="captured_fixture",
+        implementation=ERASURE_IMPLEMENTATION,
+        version="0.1",
+        configuration=dict(
+            forgotten_identity_data_id=BACKGROUND,
+            forgotten_document_id=BACKGROUND_DOCUMENT,
+            removed_entity_ids=[],
+            impact_token=None,
+        ),
+        run_id=None,
+    )
     return IdentitySource.model_validate_json(json.dumps(payload))
+
+
+# The one erasure removal among the variants: 0 superseded by 1.
+ERASURE_STEP = (0, 1)
 
 
 @cache
@@ -107,11 +164,11 @@ class Plan:
 
     @property
     def tag(self):
+        erased = "".join(f"+e{v}" for v in self.erased)
         if self.operation != "replace":
-            return self.operation
+            return self.operation + erased
         revision, variant = self.previous
         kind = self.change or "replace"
-        erased = "".join(f"+e{v}" for v in self.erased)
         return f"{kind}<r{revision}" + ("alt" if variant else "") + erased
 
     def as_dict(self, s):
@@ -290,6 +347,8 @@ def replace_intents(w, s, view):
         for change in TEXT_PLANS
     ]
     ops += [
+        # A first attempt may write a removal: replace_one on a current row.
+        Begin(w, s, "replace", r, r + 1, Plan("replace", r + 1, (r, v)), 1),
         Begin(w, s, "replace", r, r + 2, Plan("replace", r + 2, (r, v))),
         Begin(w, s, "replace", r, r + 1, Plan("publish", r + 1)),
     ]
@@ -318,6 +377,7 @@ def replace_intents(w, s, view):
             Begin(w, s, "replace", r, r, superseding(saved, v), 1 - v),
             Begin(w, s, "replace", r, r, superseding(saved, 1 - v), 1 - v),
             Begin(w, s, "replace", r, r, superseding(saved, v), v),
+            Begin(w, s, "replace", r, r, superseding(saved, 1 - v), v),
         ]
         if saved.erased:
             ops.append(Begin(w, s, "replace", r, r, replace(saved, erased=()), v))

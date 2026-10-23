@@ -1,13 +1,7 @@
 """Identity revision replacement with explicit, durable forward recovery."""
 
 from .admission import admit, check_absent_from_graph, identity_map
-from .erasure_rules import (
-    NO_ERASURES,
-    check_dropped_unread,
-    check_erasure_retry,
-    erasure_of,
-    erasures_of,
-)
+from .erasure_rules import NO_ERASURES, check_retry_chain, erasures_of
 from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
@@ -173,15 +167,17 @@ async def replace(
         raise IntentError(*STALE_REVISION)
     saved = row.description
     retry = row.resumed_by == "replace"
-    erased_from = []
+    # Only an erasure retry begins with another description: the removal of
+    # what a forget took away, applied to the saved revision, which it
+    # supersedes.
+    erasure_retry = retry and source != saved
     if retry:
         plan = dict(row.plan)
-        erased_from = list(plan.get("erased_from", []))
-        if source != saved:
-            # Only an erasure retry: the removal of what a forget took away,
-            # applied to the saved revision, which it supersedes.
-            erased_from.append(saved.model_dump_json())
-            plan["erased_from"] = erased_from
+        if erasure_retry:
+            plan["erased_from"] = [
+                *plan.get("erased_from", []),
+                saved.model_dump_json(),
+            ]
         try:
             old = IdentitySource.model_validate_json(plan["previous_description"])
             if (
@@ -224,25 +220,25 @@ async def replace(
             "semantic_rebuild",
             "Text replacement requires explicit semantic writer and verifier",
         )
-    bases = [IdentitySource.model_validate_json(d) for d in erased_from]
+    # The previous revision, the saved revisions erasure retries superseded,
+    # and the one this attempt begins with; its first step is the
+    # replacement itself.
+    chain = [
+        old,
+        *(IdentitySource.model_validate_json(d) for d in plan.get("erased_from", [])),
+        source,
+    ]
     erasures = erasures_of(await records.rows(), source)
     await admit_replacement(
-        graph,
-        old,
-        bases[0] if bases else source,
-        texts,
-        text_change,
-        retry=retry,
-        erasures=erasures,
+        graph, old, chain[1], texts, text_change, retry=retry, erasures=erasures
     )
-    for base, erased in zip(bases, [*bases[1:], source]):
-        check_erasure_retry(base, erased, erasures)
+    check_retry_chain(chain, erasures, first=True)
     if text_change is not None:
         await text_change.preflight(
             publisher, old, source, texts, chunks, ctx, retry=retry
         )
     registered = await read_registered(source)
-    if registered not in (old, *bases, source):
+    if registered not in chain:
         raise IntentError(
             "generated_source_changed",
             "Registered snapshot matches neither the previous nor intended revision",
@@ -268,8 +264,8 @@ async def replace(
         from dataclasses import asdict
 
         plan["text_change"] = asdict(text_change)
-    if not retry or source != saved:
-        await plan_retirement(graph, plan, [old, *bases], source)
+    if erasure_retry or not retry:
+        await plan_retirement(graph, plan, chain[:-1], source)
 
     async def retire_and_verify(run):
         run.inject("replace_published")
@@ -391,16 +387,13 @@ async def replace(
         run.inject("replace_saved")
         # Recheck after taking the writer reservation and before native I/O.
         actual = await read_registered(source)
-        if actual not in (old, *bases, source):
+        if actual not in chain:
             raise IntentError(
                 "generated_source_changed", "Registered identity snapshot changed"
             )
         # A source may have begun reading a recipe an erasure step drops
         # since admission read the rows.
-        fresh = erasures_of(await records.rows(), source)
-        for before, after in zip([old, *bases], [*bases, source]):
-            if erasure_of(before, after, fresh) is not None:
-                check_dropped_unread(before, after, fresh.readers)
+        check_retry_chain(chain, erasures_of(await records.rows(), source), first=True)
 
     async def withhold(_):
         # Before the text changes: the rows are durable before the edit can

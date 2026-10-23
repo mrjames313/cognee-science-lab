@@ -59,8 +59,11 @@ def forgotten(old) -> Erasures:
     )
 
 
-def eraser(payload, *, document=None, removed=()):
-    """The removal producer, naming the forgotten document and Entities."""
+def eraser(payload, *, document=None, removed=None):
+    """The removal producer, naming the forgotten document and Entities: by
+    default the glossary and the one Entity its forget removed."""
+    if removed is None:
+        removed = [removed_entity(payload["identity_data_id"])]
     payload["producers"][ERASER] = dict(
         method="captured_fixture",
         implementation=ERASURE_IMPLEMENTATION,
@@ -168,6 +171,18 @@ def claim_an_entity(old, new, ctx):
     """The producer names an Entity the glossary's forget did not remove."""
     drop_reading_variant(producer=False)(old, new, ctx)
     eraser(new, removed=[HELIOS])
+
+
+def name_part_of_the_removed(old, new, ctx):
+    """The producer names none of the Entities the glossary's forget
+    removed, so a decision citing one could survive the removal."""
+    drop_reading_variant(producer=False)(old, new, ctx)
+    eraser(new, removed=[])
+
+
+def remove_nothing(old, new, ctx):
+    """The producer names the glossary, which the old revision never cites."""
+    eraser(new)
 
 
 def read_recipe(*, drop):
@@ -317,6 +332,22 @@ ERASURE_DECISIONS = [
         claim_an_entity,
         text_edit=UNBOUND,
         same_text=UNBOUND,
+    ),
+    decision(
+        "erasure names only part of what its forget removed",
+        "rule 6",
+        [STEADY],
+        name_part_of_the_removed,
+        text_edit=UNBOUND,
+        same_text=UNBOUND,
+    ),
+    decision(
+        "erasure removes nothing the old revision cites",
+        "rule 6",
+        [STEADY],
+        remove_nothing,
+        text_edit=refuse("erasure_empty"),
+        same_text=refuse("erasure_empty"),
     ),
     decision(
         "erasure drops a recipe another saved source reads",

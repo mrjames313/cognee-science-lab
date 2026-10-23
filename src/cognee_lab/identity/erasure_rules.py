@@ -3,8 +3,8 @@
 A removal revision names a removal producer (`ERASURE_IMPLEMENTATION`) whose
 configuration names the forgotten document and the Entities its forget
 removed. `check_erasure_removals` admits it as that removal, all of it and
-nothing else; `check_erasure_retry` admits it in place of a failed
-replacement's saved revision. A re-add is a fresh publication at the next
+nothing else; `check_retry_chain` admits a chain of them, each in place of
+a failed attempt's saved revision (`check_erasure_retry`). A re-add is a fresh publication at the next
 revision that never brings back a forgotten mention or Entity UUID
 (`admit_readd`). `admission.admit` calls the removal rules in its rule order;
 the replace path and Publisher.readd call the rest. Nothing here imports
@@ -12,6 +12,7 @@ admission.
 """
 
 from collections.abc import Mapping
+from itertools import pairwise
 from types import MappingProxyType
 from typing import NamedTuple
 from uuid import UUID
@@ -84,7 +85,8 @@ def erasure_of(old, source, erasures: Erasures) -> tuple[str, Erasure] | None:
     """The removal producer this revision introduces, with what it erases,
     or None. Its configuration names the forgotten document and the removed
     Entities, and the ledger must agree: the document is a forgotten
-    source's, and its forget removed every Entity named."""
+    source's, and the Entities named are exactly the ones its forget
+    removed, so no step removes only part of what the forget took."""
     found = [
         (key, p)
         for key, p in source.producers.items()
@@ -109,10 +111,10 @@ def erasure_of(old, source, erasures: Erasures) -> tuple[str, Erasure] | None:
             "erasure_configuration", "An erasure removes another document's inputs"
         )
     took = erasures.forgotten.get(document)
-    if took is None or not removed <= took:
+    if took is None or removed != took:
         raise IntentError(
             "erasure_unbound",
-            "A removal producer names a forgotten source's document and only Entities its forget removed",
+            "A removal producer names a forgotten source's document and exactly the Entities its forget removed",
         )
     return key, Erasure(document, removed)
 
@@ -181,17 +183,49 @@ def erasure_step(old, found) -> "ErasureStep | None":
 
 def check_erasure_removals(old, source, removal: ErasureStep | None, readers):
     """A revision that names a removal producer is an erasure removal, all
-    of it and nothing else: it removes every decision citing what the forget
-    removed (`check_erasure_complete`) and changes nothing more
+    of it and nothing else: it cites what the forget removed, removes every
+    decision citing it (`check_erasure_complete`) and changes nothing more
     (`check_erasure_confined`)."""
     if removal is None:
         return
+    check_erasure_cites(removal)
     check_erasure_complete(old, source, removal)
     check_erasure_confined(old, source, removal, readers)
 
 
+def check_erasure_cites(removal: ErasureStep):
+    """An erasure removal removes something: the old revision cites what
+    the forget removed."""
+    if not removal.erased:
+        raise IntentError(
+            "erasure_empty",
+            "An erasure removal removes what its revision cites of the forgotten source",
+        )
+
+
+def check_retry_chain(chain, erasures: Erasures, *, first: bool):
+    """An erasure-retry chain: the saved descriptions that erasure retries
+    superseded, in order, then the description the attempt begins with.
+    Each step is an erasure removal in place of the one before
+    (`check_erasure_retry`). With `first`, the chain starts at a
+    replacement's previous revision: its first step is the replacement
+    itself, which the removal rules check only when it names a removal
+    producer, as admission does."""
+    steps = pairwise(chain)
+    if first:
+        old, new = next(steps)
+        check_erasure_removals(
+            old,
+            new,
+            erasure_step(old, erasure_of(old, new, erasures)),
+            erasures.readers,
+        )
+    for saved, source in steps:
+        check_erasure_retry(saved, source, erasures)
+
+
 def check_erasure_retry(saved, source, erasures: Erasures):
-    """A retry replaces a failed replacement's saved revision only by its
+    """A retry replaces a failed attempt's saved revision only by its
     erasure removal: the same revision, one removal producer new, and the
     removal rules."""
     removal = erasure_step(saved, erasure_of(saved, source, erasures))
@@ -241,6 +275,10 @@ def check_erasure_confined(old, source, removal: ErasureStep, readers):
 
     def unrelated(message):
         raise IntentError("erasure_unrelated", "An erasure removal " + message)
+
+    fields = ("dataset_id", "identity_data_id", "original_input_ref")
+    if any(getattr(old, f) != getattr(source, f) for f in fields):
+        unrelated("keeps the dataset, the identity source and its document")
 
     for kind in ("mention_resolutions", "variant_assignments"):
         was, now = getattr(old, kind), getattr(source, kind)

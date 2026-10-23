@@ -470,13 +470,15 @@ def table_rows():
 
 
 @pytest.mark.parametrize("row", list(table_rows()))
-def test_every_table_entry_answers_every_method(row):
+def test_every_table_entry_answers_every_method(row, source_payload):
     """admissible() answers each (entry, method) pair with a Refusal or None,
     whatever the plan and revision, so no pair falls through the table."""
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
     methods = ("publish", "reconcile", "replace", "withdraw", "forget")
     plans = [{}, *({"operation": f"identity_{m}"} for m in methods)]
-    for method, plan, revision in itertools.product(methods, plans, range(5)):
-        answer = admissible(row, method, plan, revision)
+    for method, plan, revision in itertools.product(methods, plans, range(1, 5)):
+        described = source.model_copy(update={"revision": revision})
+        answer = admissible(row, method, plan, described)
         assert answer is None or isinstance(answer, Refusal), (method, plan)
 
 
@@ -497,7 +499,8 @@ def test_owned_entries_admit_only_their_owner():
             assert dict(cell.admits) == {cell.owner: 0}
 
 
-def test_unknown_row_state_is_refused_clearly():
+def test_unknown_row_state_is_refused_clearly(source_payload):
     row = next(r for r in table_rows() if r and r.state == "current")
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
     with pytest.raises(IntentError, match="unknown"):
-        admissible(dataclasses.replace(row, state="archived"), "reconcile", {}, 2)
+        admissible(dataclasses.replace(row, state="archived"), "reconcile", {}, source)
