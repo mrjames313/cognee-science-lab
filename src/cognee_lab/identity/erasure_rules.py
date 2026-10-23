@@ -17,16 +17,15 @@ from types import MappingProxyType
 from typing import NamedTuple
 from uuid import UUID
 
+from .decisions import decisions_digest, naming_keys
 from .dependency import Target, citations
 from .models import Accepted, CorpusObjectInput, Unresolved
 from .validation import (
     IntentError,
     decision_inputs,
-    decisions_digest,
     fresh_entity_id,
     fresh_mention_id,
     naming,
-    naming_keys,
     referenced_corpus_ids,
     reusable_recipes,
 )

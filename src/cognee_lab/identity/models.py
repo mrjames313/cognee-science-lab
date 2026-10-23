@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .decisions import decisions_digest
+
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Key = Annotated[str, Field(min_length=1)]
 
@@ -263,7 +265,7 @@ class Tombstone(Strict):
     source, from the tombstone its last forget left, apart from a reusable
     Entity the last revision names again. `decisions_sha256` digests the
     reviewed decisions apart from what a re-add must rename
-    (`validation.decisions_digest`), so a re-add can report whether its
+    (`decisions.decisions_digest`), so a re-add can report whether its
     decisions differ. `removed_entity_ids` are the Entities the forget
     removed; a dependent still citing one of them, or the document, has not
     been revised yet. `impact_token` is the confirmed impact on other
@@ -297,8 +299,6 @@ class Tombstone(Strict):
     ) -> Tombstone:
         """The tombstone of `source`, carrying the UUIDs of `earlier`, the
         tombstone the source's last forget left, if it lived before."""
-        from .validation import decisions_digest
-
         doc = source.inputs[source.original_input_ref]
         mentions = {k: g.entity_id for k, g in source.mention_groups.items()}
         reusable = set(source.entity_constructions) - set(mentions.values())

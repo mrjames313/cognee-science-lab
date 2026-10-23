@@ -27,6 +27,7 @@ from .models import (
     SavedRecordInput,
     SourceTextInput,
 )
+from .decisions import naming_keys
 from .erasure_rules import (
     NO_ERASURES,
     check_erasure_removals,
@@ -40,7 +41,6 @@ from .validation import (
     fresh_entity_id,
     fresh_mention_id,
     is_foreign,
-    naming_keys,
     referenced_corpus_ids,
     reusable_recipes,
     text_digest,

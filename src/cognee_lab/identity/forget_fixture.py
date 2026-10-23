@@ -149,7 +149,7 @@ def describe_readd(caller, tombstone, removed, text, chunks):
     and that no other replacement took, or, when nothing names it, under the
     UUID derived from the removed one."""
     from .erasure_rules import replacement_entity_id
-    from .validation import naming_keys
+    from .decisions import naming_keys
     from .captured_chunks import bind_chunks
     from .validation import fresh_entity_id, fresh_mention_id
 
