@@ -8,20 +8,40 @@ from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
+from dataclasses import replace as replaced
+from uuid import uuid4
+
+from cognee_lab.identity.admission import admit, identity_map
+from cognee_lab.identity.glossary_fixture import (
+    CASES,
+    GLOSSARY_TEXT,
+    glossary_inputs,
+    hc_entry,
+    replaced_variant,
+)
 from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import (
     IntentError,
     text_digest,
     validate_inputs,
     withheld_by,
 )
-
-GLOSSARY = (
-    "Glossary\n"
-    "HC: Helios controller, the plasma heating regulator.\n"
-    "RF: radio frequency.\n"
+from cognee_lab.identity.withholding import (
+    WithholdingRow,
+    WithholdingStore,
+    classify,
+    reconfirmed,
+    remapped,
+    withheld_decisions,
+    withhold_dependents,
 )
-ENTRY = "HC: Helios controller, the plasma heating regulator."
+
+GLOSSARY = GLOSSARY_TEXT
+ENTRY = hc_entry(GLOSSARY).group()
+INSERTED = CASES["insert"](GLOSSARY)
+COSMETIC = CASES["cosmetic"](GLOSSARY)
+ELSEWHERE = CASES["elsewhere"](GLOSSARY)
 GLOSSARY_ID = str(uuid5(NAMESPACE_URL, "test:glossary"))
 TEXT = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
 
@@ -100,18 +120,14 @@ async def test_an_unchanged_span_validates_wherever_the_glossary_changed(
     assert await drift_of(source, GLOSSARY) == {}
     # A change elsewhere changes the glossary digest. A text reached only as
     # a span's document is not digest-checked, so the span still validates.
-    elsewhere = GLOSSARY.replace("radio frequency", "radio-frequency heating")
-    assert await drift_of(source, elsewhere) == {}
+    assert await drift_of(source, ELSEWHERE) == {}
 
 
 async def test_a_moved_or_changed_span_withholds_each_decision_citing_it(
     source_payload,
 ):
     source = citing(strip_corpus(source_payload))
-    for edited in (
-        GLOSSARY.replace("HC:", "ECRH: electron cyclotron heating.\nHC:"),
-        GLOSSARY.replace("plasma heating", "plasma-heating"),
-    ):
+    for edited in (INSERTED, COSMETIC):
         drift = await drift_of(source, edited)
         assert drift == {"glossary_hc": "input_changed"}
         assert withheld_by(source, drift) == {
@@ -129,19 +145,17 @@ async def test_a_glossary_that_is_gone_is_an_input_removed(source_payload):
 
 async def test_a_directly_cited_text_is_digest_checked(source_payload):
     source = citing(strip_corpus(source_payload), cite_text=True)
-    elsewhere = GLOSSARY.replace("radio frequency", "radio-frequency heating")
-    drift = await drift_of(source, elsewhere)
+    drift = await drift_of(source, ELSEWHERE)
     assert drift == {"glossary": "input_changed"}
     assert withheld_by(source, drift) == {"r01": "input_changed"}
 
 
 async def test_inputs_of_withheld_decisions_are_not_checked(source_payload):
     source = citing(strip_corpus(source_payload))
-    changed = GLOSSARY.replace("plasma heating", "plasma-heating")
-    assert await drift_of(source, changed, withheld={"r01"}) == {
+    assert await drift_of(source, COSMETIC, withheld={"r01"}) == {
         "glossary_hc": "input_changed"
     }
-    assert await drift_of(source, changed, withheld={"r01", "v01"}) == {}
+    assert await drift_of(source, COSMETIC, withheld={"r01", "v01"}) == {}
 
 
 async def test_an_own_input_still_fails_the_source(source_payload):
@@ -157,21 +171,6 @@ async def test_an_own_input_still_fails_the_source(source_payload):
 
 
 # The withholding table and the withheld-decision set.
-
-from dataclasses import replace as replaced  # noqa: E402
-from uuid import uuid4  # noqa: E402
-
-from cognee_lab.identity.storage import PublicationRow  # noqa: E402
-from cognee_lab.identity.withholding import (  # noqa: E402
-    WithholdingStore,
-    classify,
-    withheld_decisions,
-    withhold_dependents,
-)
-
-INSERTED = GLOSSARY.replace("HC:", "ECRH: electron cyclotron heating.\nHC:")
-COSMETIC = GLOSSARY.replace("plasma heating", "plasma-heating")
-ELSEWHERE = GLOSSARY.replace("radio frequency", "radio-frequency heating")
 
 
 def glossary_source(payload):
@@ -206,7 +205,7 @@ def row_of(source, state="current", plan=None):
     )
 
 
-def memory_publisher(rows):
+async def memory_publisher(rows):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import StaticPool
 
@@ -221,6 +220,7 @@ def memory_publisher(rows):
 
     publisher = SimpleNamespace(records=Records())
     publisher.withholdings = WithholdingStore(factory)
+    await publisher.withholdings.initialize()
     return publisher
 
 
@@ -238,7 +238,7 @@ def test_each_glossary_edit_is_classified_as_the_user_decided(source_payload):
             ("cosmetic", COSMETIC),
         ]
     }
-    shift = len("ECRH: electron cyclotron heating.\n")
+    shift = INSERTED.index(ENTRY) - entry
     assert outcomes == {
         "elsewhere": [("glossary_hc", "unchanged", None)],
         "inserted": [
@@ -264,7 +264,7 @@ async def test_the_edit_writes_rows_per_decision_and_a_retry_converges(
 ):
     glossary = glossary_source(source_payload)
     doc01 = citing(strip_corpus(source_payload))
-    publisher = memory_publisher([row_of(glossary), row_of(doc01)])
+    publisher = await memory_publisher([row_of(glossary), row_of(doc01)])
     written = await withhold_dependents(publisher, glossary, GLOSSARY, COSMETIC, 2)
     assert [(w["assignment"], w["status"], w["reason"]) for w in written] == [
         ("r01", "refresh_needed", "input_changed"),
@@ -287,7 +287,7 @@ async def test_an_unfinished_edit_withholds_every_decision_citing_the_document(
     glossary = glossary_source(source_payload)
     doc01 = citing(strip_corpus(source_payload))
     rows = [row_of(glossary), row_of(doc01)]
-    publisher = memory_publisher(rows)
+    publisher = await memory_publisher(rows)
     assert await withheld_decisions(rows, publisher.withholdings) == {}
     for state in ("pending", "failed"):
         editing = row_of(
@@ -313,7 +313,7 @@ async def test_rows_apply_only_while_the_decision_still_cites_the_input(
     glossary = glossary_source(source_payload)
     doc01 = citing(strip_corpus(source_payload))
     rows = [row_of(glossary), row_of(doc01)]
-    publisher = memory_publisher(rows)
+    publisher = await memory_publisher(rows)
     await withhold_dependents(publisher, glossary, GLOSSARY, COSMETIC, 2)
     held = await withheld_decisions(rows, publisher.withholdings)
     assert set(held[str(doc01.identity_data_id)]) == {"r01", "v01"}
@@ -327,20 +327,6 @@ async def test_rows_apply_only_while_the_decision_still_cites_the_input(
 
 
 # The glossary fixture's revisions of doc01, through the one admission.
-
-from cognee_lab.identity.admission import admit, identity_map  # noqa: E402
-from cognee_lab.identity.glossary_fixture import (  # noqa: E402
-    CASES,
-    GLOSSARY_TEXT,
-    glossary_inputs,
-    hc_entry,
-    replaced_variant,
-)
-from cognee_lab.identity.withholding import (  # noqa: E402
-    WithholdingRow,
-    reconfirmed,
-    remapped,
-)
 
 
 def glossary_doc01(payload):
@@ -471,10 +457,10 @@ def test_a_substantive_change_replaces_v01_with_a_derived_variant(source_payload
 # Admission keeps corpus object existence as a hard rule.
 
 
-def admitting_publisher(nodes):
+async def admitting_publisher(nodes):
     from cognee_lab.identity.publish import Publisher
 
-    records = memory_publisher([]).records
+    records = (await memory_publisher([])).records
 
     async def row(_):
         return None
@@ -493,11 +479,15 @@ async def test_admission_refuses_a_corpus_input_whose_entity_is_missing(
     entity = source.inputs["existing_A"].entity_id
     texts = {"doc01": TEXT}
     with pytest.raises(IntentError) as refused:
-        await admitting_publisher({}).admit_inputs(source, texts, own_chunks(source))
+        await (await admitting_publisher({})).admit_inputs(
+            source, texts, own_chunks(source)
+        )
     assert refused.value.code == "missing_reasoning_input"
     # A changed field still only withholds the decisions that read it.
     changed = {str(entity): dict(type="Entity", name="Changed", description="Changed")}
-    await admitting_publisher(changed).admit_inputs(source, texts, own_chunks(source))
+    await (await admitting_publisher(changed)).admit_inputs(
+        source, texts, own_chunks(source)
+    )
 
 
 async def test_a_retried_second_edit_classifies_as_its_first_attempt_did(
@@ -508,7 +498,7 @@ async def test_a_retried_second_edit_classifies_as_its_first_attempt_did(
     not slice the previous text with a range taken from the new text."""
     glossary = glossary_source(source_payload)
     doc01 = citing(strip_corpus(source_payload))
-    publisher = memory_publisher([row_of(glossary), row_of(doc01)])
+    publisher = await memory_publisher([row_of(glossary), row_of(doc01)])
     await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
     twice = "Preface.\n" + INSERTED
     first = await withhold_dependents(publisher, glossary, INSERTED, twice, 3)
