@@ -136,11 +136,10 @@ async def refresh_dependents(publisher, fault_stage=None) -> dict:
     with its moved spans' new ranges: an ordinary unchanged-text replacement
     through replace_one, whose withholding cleanup releases the moved
     decisions once it completes. `fault_stage` fails each refresh revision
-    there. A rerun finishes an
-    interrupted refresh: a dependent whose replacement failed resumes its
-    saved revision first. That revision may hold the range of an earlier
-    edit, so when `remap` rows still apply after it, the refresh remaps
-    again.
+    there. A rerun finishes an interrupted refresh: a dependent whose
+    replacement failed resumes its saved revision first. That revision may
+    hold the range of an earlier edit, so when `remap` rows still apply
+    after it, the refresh remaps again.
 
     Returns each range written (`refreshed`) and the failure that stopped
     the refresh (`refresh_failed`), not raised: the edit before it already
