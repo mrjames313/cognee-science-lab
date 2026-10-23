@@ -1,6 +1,6 @@
 # Session handoff — resume here
 
-**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules, Checkpoint E added four changed-interpretation and kind-change fixtures, and Checkpoint F added `forget` and `readd` for a source nothing depends on. **Next task:** a no-behavior-change refactor of the ledger and the retiring operations; then dependencies (step-4 item 3). See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
+**Updated:** 2026-10-22 (America/Detroit). **Current work:** Stage 6, accepted implementation step 4 / M3, partially complete. The user approved one general occurrence map on 2026-10-21, to replace the three admission modes. All three checkpoints are complete: A (the general admitter and its proof), B (every text change switched to the general map, old modes deleted) and C (the captured mixed addition and removal case). On 2026-10-22 Checkpoint D folded the unchanged-text correction into the same admission and relaxed its recipe and document-variant rules, Checkpoint E added four changed-interpretation and kind-change fixtures, and Checkpoint F added `forget` and `readd` for a source nothing depends on. A no-behavior-change refactor of the ledger and the retiring operations followed. **Next task:** dependencies (step-4 item 3), starting with the user's decisions. See [Next task](#next-task). This document records the current continuation state; dated experiment writeups describe their own checkpoints.
 
 ## Objective and reading order
 
@@ -348,9 +348,21 @@ The user decided on 2026-10-22 to retire the reviewed roots under `outputs/stage
 
 Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: 315 unit tests passed. The full native integration suite passed (59 tests, 1232 s). The ledger check passed with `PINNED` at 5889 nodes and 5770 sequences, and its mutants caught all 40 breaks, including 10 new ones for forget and re-add. `support/occurrence_check.py` and its mutants passed. `verify.py journey all` gave 1159 PASS and 0 FAIL in 58 runs on `5f5dd37`, including journeys F1 to F4 in `source-lifecycle.md`. Five thermo reviews over three rounds found five medium issues, all fixed with a test that failed first: a native delete that commits before sweeping evidence and files, an unfenced half-finished forget, retiring owners counted as independent, a re-add that could recreate a removed Entity, and a shared stored file that blocked a forget. The remaining low items are tracked follow-ups.
 
+### Ledger refactor, completed 2026-10-22
+
+A refactor with no behavior change, from the Checkpoint F code review.
+
+- `RecordStore.begin` reads a transition table in `storage.py` (`TRANSITIONS`, keyed by row state and saved plan operation, with `REQUIRED_PLANS` and the pure `admissible()`), instead of a chain of conditionals. Each owned failed row names its owner. begin keeps main's final check that an admitted advance is exactly one revision.
+- `RecordStore.rows()` and `row()` return a frozen `PublicationRow`; `RETIRED_STATES` lives in `storage.py`.
+- `stages.py` holds one attempt frame, `run_attempt`, shared by replace, withdraw and forget: begin, ordered stages with fault injection, complete, and the recovery-required failure path. `__main__` builds `--fault-stage` from each operation's stages.
+- `support/ledger_model.py` states each Method fact once (`begins`, `owns_terminal`, `recovers`, `requires_plan`). The ledger mutants were rewritten for the table.
+- The caller pre-checks in `publish.py`, `forget.py` and `replace.py` stay earlier than begin and refuse differently on some rows; each says so in a comment.
+
+Evidence, run by the assistant and its subagents on the user's Mac on 2026-10-22 with loopback embeddings: an equivalence harness ran 26,240 begin calls against `main` with 0 differences in code, message or written row. The ledger check passed with `PINNED` unchanged at 5889 nodes and 5770 sequences, and the `--mutants` output is byte-identical to main's. A scope comparison showed each revision break admits exactly the calls main's break admits. 372 unit tests passed, including a 45-case begin matrix that pins each code and message and a completeness test over every table entry. The occurrence check and its mutants passed. The full native suite passed (59 tests). `verify.py journey all` gave 1159 PASS and 0 FAIL in 58 runs on `7ffd87a`, the same totals as before the refactor. Two thermo reviews found no behavior change beyond two the author admitted (withdrawal fault messages and the `replace_saved` fault point); both were restored. The second round's changes were restorations checked against main, so no further review ran.
+
 ### Next task
 
-A refactor checkpoint for the ledger and the three retiring operations, from the Checkpoint F code review: a transition table in `RecordStore.begin` (with the ledger mutants rewritten for it), a typed publication-row view, one stage runner shared by replace, withdraw and forget, one terminal-state field in the ledger model instead of `owns_withdrawn` and `owns_forgotten`, and a parametrized storage transition test. No behavior change. After it, the remaining step-4 work is dependencies (item 3), including what an erasure does to dependents, which waits for the user's choice among the dependency examples above.
+Dependencies (step-4 item 3). The assistant lays out the context and the decisions it needs for the user; implementation waits for the user's choices.
 
 ### Tracked follow-ups
 
@@ -371,7 +383,8 @@ Paths below are relative to `src/cognee_lab/identity/`.
 |---|---|
 | `models.py`, `schema.py` | Runtime saved forms; generated draft JSON Schema |
 | `validation.py` | SHA-256/JCS fingerprints, exact slices/native chunk tiling, input and cross-source UUID-use checks |
-| `storage.py` | Namespaced relational publication/event tables; portable expected-revision/attempt and project-writer guards |
+| `storage.py` | Namespaced relational publication/event tables, the begin transition table (`TRANSITIONS`, `admissible`) and the `PublicationRow` view; portable expected-revision/attempt and project-writer guards |
+| `stages.py` | `run_attempt`, the one attempt frame for replace, withdraw and forget |
 | `registered.py` | Real Data JSON/raw-text ingestion/readback and registered snapshot checks |
 | `publish.py` | Missing-node creation, safe existing-node retention, original markers, aggregated generated-source identity contributions and verification |
 | `replace.py`, `withdraw.py`, `forget.py` | Guarded replacement, withdrawal and forget, `admit_replacement` (the one admission call site), durable old/new intent, selective retirement and explicit forward recovery |

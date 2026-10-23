@@ -377,3 +377,13 @@ The assistant and its subagents ran the evidence on the user's Mac with loopback
 
 The assistant and its subagents ran the evidence on the user's Mac with loopback embeddings. The [forget guide](../docs/stage6_identity_forget.md) records the commands.
 
+## Ledger refactor — 2026-10-22
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| Prove a refactor with an equivalence harness, not only with tests. | M | Begin's guards became a table. A harness ran 26,240 begin calls on the old and new code and compared code, message and written row; it found 0 differences. The ledger mutants gave byte-identical output to main's. | When restructuring a state machine, run every input in a bounded space through old and new code and diff the answers. |
+| A table can drop a global guard that a chain enforced by accident of order. | M | The old chain ended with "an advance is exactly one revision". The table enforced it per entry, so one missing entry would have admitted any jump. The final check was restored, and a test proves every entry admitting a step has a sequence. | When moving rules into a table, list the guards that held for every input and keep them outside the table. |
+| Unify the frame, but keep each operation's visible messages. | M | One attempt frame replaced three copies. Its first version changed withdraw's fault messages and the point where one replace fault fired; a review found the second and the fix round found the first. Both were restored. | A shared helper must preserve each caller's observable output. Diff the messages, not only the codes. |
+
+The assistant and its subagents ran the evidence on the user's Mac with loopback embeddings. The [session handoff](../docs/SESSION_HANDOFF.md) records it.
+
