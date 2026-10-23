@@ -12,7 +12,8 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-confirmation` refuses a forget that removes another source's decisions without the token, and refuses a token whose impact changed (`impact_changed`).
 - `forget-removes-dependents` erases the source, then unresolves or drops each dependent decision in a revision of the dependent; the dependent's local fact stays and no identity query reaches it.
 - `forget-dependent-interrupted` stops after the forget completed and before or inside a dependent's removal revision; `reconcile` or `forget` on the forgotten source resumes it, and `readd` waits.
-- `forget-dependent-blocked` lists a dependent whose own attempt failed as blocked; its removal waits until that attempt finishes.
+- `forget-dependent-blocked` lists a dependent whose own withdrawal or publication failed as blocked; its removal waits until that attempt finishes.
+- `forget-dependent-failed-replacement` applies the removal to a dependent's failed replacement in its saved revision, and the replacement finishes with it; nothing is left unfinished.
 - `forget-any-source` forgets a withdrawn source and a source whose first publication failed.
 - `forget-fault` fails a forget at an injected stage, withholds the source, then finishes it with `reconcile`.
 - `readd` publishes a forgotten source again at the next revision with new UUIDs for its mentions and for every Entity the forget removed: a named one derives from a key that names it, an unnamed one from the removed UUID.
@@ -351,12 +352,30 @@ $V drive "$RUN" main rec -- reconcile --source doc01
 $V check "$RUN" rec '.error == "IntentError" and (.message | contains("Forgotten source"))' 'nothing is left for the forget'
 ```
 
+**F12 a failed refresh takes the removal in its saved revision.** Proves `forget-dependent-failed-replacement`. Guide: "A dependent that is pending or failed". An insert in the glossary completes, and doc01's refresh fails at `replace_registered`: doc01 is failed at revision 2, citing the glossary at the new range, and only replace resumes it. The glossary's dry run lists doc01 at revision 2, failed and not blocked. With the token the glossary is forgotten and doc01's replacement finishes with the removal applied to its saved revision: doc01 is current at revision 2 with r01 alone, under the removal producer, reading nothing of the glossary. Nothing is left, so `reconcile --source glossary` is refused, and the glossary comes back at revision 3.
+
+```bash journey F12
+$V drive "$RUN" main fixture -- glossary-fixture
+$V drive "$RUN" main edit -- edit-glossary --source glossary --case insert --expected-revision 1 --fault-stage refresh_interrupted
+$V check "$RUN" edit '.sources.doc01.state == "failed" and .refresh_failed.code == "recovery_required"' 'doc01 refresh failed after the glossary edit'
+$V drive "$RUN" main dry -- forget --source glossary --expected-revision 2 --dry-run
+T=$(val dry '.token')
+$V check "$RUN" dry '[.dependents[] | [.state, .revision, .blocked]] == [["failed", 2, false]]' 'doc01 is listed at its failed revision, not blocked'
+$V drive "$RUN" main forget -- forget --source glossary --expected-revision 2 --confirm "$T"
+$V check "$RUN" forget '.dependents_failed == null and [.sources.glossary.state, .sources.doc01.state, .sources.doc01.saved_revision] == ["forgotten", "current", 2]' 'the glossary is forgotten and doc01 finishes at revision 2'
+$V check "$RUN" forget '(.sources.doc01.decisions | keys) == ["r01"] and (.sources.doc01.decisions.r01.producer_ref | startswith("forget_")) and .sources.doc01.glossary_spans == {}' 'doc01 keeps only r01, under the removal producer, and reads nothing of the glossary'
+$V drive "$RUN" main rec -- reconcile --source glossary
+$V check "$RUN" rec '.error == "IntentError" and (.message | contains("Forgotten source"))' 'nothing is left for the forget'
+$V drive "$RUN" main readd -- readd --source glossary --expected-revision 2
+$V check "$RUN" readd '.sources.glossary.state == "current" and .sources.glossary.saved_revision == 3 and (.sources.doc01.decisions | keys) == ["r01"]' 'the glossary is back at revision 3 and the removed decisions stay removed'
+```
+
 ## Gotchas
 
 - Forget needs `--expected-revision`. Withdraw does not.
 - A forgotten source leaves its row in `status`: its last revision, a tombstone in place of its description, and a plan that keeps identifiers only. `retrieve` neither returns it nor lists it as unavailable.
-- Any source can be forgotten: current, withdrawn, or one whose first publication failed. A failed replacement or withdrawal is finished by its own method first.
-- A forget that removes another source's decisions needs `--confirm <token>` from its dry run. A dry run writes nothing and returns before any result file is written. The token changes when the set of affected decisions changes, including a dependent that becomes blocked.
+- Any source can be forgotten: current, withdrawn, or one whose first publication failed. A failed replacement or withdrawal is finished by its own method first. A dependent's failed replacement is not blocked: the forget applies the removal to its saved revision.
+- A forget that removes another source's decisions needs `--confirm <token>` from its dry run. A dry run writes nothing and returns before any result file is written. The token changes when the set of affected decisions changes, including a dependent that becomes blocked or moves to another revision.
 - `drive` exits 1 for an injected failure, a refused forget, a refused `readd` and a forget whose dependent removal stopped. That is the expected result. Check `.error`, `.details` or `.dependents_failed`.
 - `readd` works only on a forgotten source and publishes at the forgotten revision plus one. It reads `source.txt` and `identity.json` from the root (`source02.txt` and `identity02.json` for doc02, `glossary.txt` and `glossary_identity.json` for the glossary): the caller's own files, which a forget lists and never deletes.
 - Only one open forget incident per source is expected. Do not stack two faults in one root.
