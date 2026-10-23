@@ -24,8 +24,8 @@ These decisions supersede the design handoff's "callers select whole documents" 
 | An existing Entity (corpus input) | A field the decision read | Withheld at retrieval with `input_changed`; may be re-confirmed |
 | An existing Entity | Only fields the decision did not read | Valid automatically |
 | An existing Entity | Gone | Withheld with `input_removed` |
-| A saved record of another source | Not supported yet | Admission refuses saved-record inputs |
-| Something depending on a withheld decision | Deferred | Needs saved-record inputs; see "Not in this checkpoint" |
+| A saved record of another source | Not supported yet | Admission refused saved-record inputs. Checkpoint J1 (2026-10-23) admits them: see the [chains guide](stage6_identity_chains.md) |
+| Something depending on a withheld decision | Deferred | Checkpoint J1 withholds it down the whole chain (`upstream_withheld`): see the [chains guide](stage6_identity_chains.md) |
 
 ## The data shapes
 
@@ -174,7 +174,7 @@ Expected: after the edit, `status` lists two `refresh_needed` items (r01, v01) a
 
 ## Not in this checkpoint
 
-- The transitive case. A decision that depends on another source's withheld decision needs saved-record inputs, which no source can declare yet. Rows are keyed by input so chains can be added.
+- The transitive case. A decision that depends on another source's withheld decision needs saved-record inputs, which no source can declare yet. Rows are keyed by input so chains can be added. Done in checkpoint J1 (2026-10-23), with no rows: withholding down a chain is derived at retrieval ([chains guide](stage6_identity_chains.md)).
 - Erasure's effect on dependents (user decision 2).
 - A trigger for native Entity edits. Corpus-field drift is found when retrieval or a revision validates the dependent.
 - Remapping for moves across documents and span-scoped variant ranges; both count as a change.
