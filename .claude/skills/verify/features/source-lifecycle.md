@@ -12,8 +12,9 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-confirmation` refuses a forget that removes another source's decisions without the token, and refuses a token whose impact changed (`impact_changed`).
 - `forget-removes-dependents` erases the source, then unresolves or drops each dependent decision in a revision of the dependent; the dependent's local fact stays and no identity query reaches it.
 - `forget-dependent-interrupted` stops after the forget completed and before or inside a dependent's removal revision; `reconcile` or `forget` on the forgotten source resumes it, and `readd` waits.
-- `forget-dependent-blocked` lists a dependent whose own withdrawal or publication failed as blocked; its removal waits until that attempt finishes.
+- `forget-dependent-blocked` lists a dependent whose own withdrawal failed as blocked; its removal waits until that attempt finishes.
 - `forget-dependent-failed-replacement` applies the removal to a dependent's failed replacement in its saved revision, and the replacement finishes with it; nothing is left unfinished.
+- `forget-dependent-failed-publication` applies the removal to a dependent's failed first publication in its saved revision, and the publication finishes with it. Before that the dependent's own `reconcile` cannot finish, and nothing of it is served.
 - `forget-any-source` forgets a withdrawn source and a source whose first publication failed.
 - `forget-fault` fails a forget at an injected stage, withholds the source, then finishes it with `reconcile`.
 - `readd` publishes a forgotten source again at the next revision with new UUIDs for its mentions and for every Entity the forget removed: a named one derives from a key that names it, an unnamed one from the removed UUID.
@@ -27,7 +28,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - Run `uv run python -m cognee_lab.identity multi-fixture --root <new dir>`. Add `--dependent` to make doc02 consume doc01's text and private singleton.
 - Run `forget --root <dir> --source doc01 --expected-revision 1 --dry-run` for the report and token, then `forget --root <dir> --source doc01 --expected-revision 1 --confirm <token>`. A forget with no dependent needs no token.
 - Add `--fault-stage forget_impact|forget_contributions|forget_identity|forget_document|forget_verification|forget_identity_committed|forget_document_committed` to inject a failure, then run `reconcile --source doc01`. The two `_committed` stages fail after Cognee committed the Data delete and before it swept the item's evidence rows and stored files.
-- Add `--fault-stage forget_dependents` (before the first removal revision) or `forget_dependent_revision` (inside it, at `replace_registered`) to interrupt a dependent's removal after the forget completed, then run `reconcile --source doc01`.
+- Add `--fault-stage forget_dependents` (before the first removal revision) or `forget_dependent_revision` (inside it: at `replace_registered` for a replacement, at `nodes` for a failed publication) to interrupt a dependent's removal after the forget completed, then run `reconcile --source doc01`.
 - Add `--fault-stage nodes|identity_edges|verification` to `readd` to fail the re-add, then run `reconcile --source doc01`.
 - Run `uv run python -m cognee_lab.identity readd --root <dir> --source doc01 --expected-revision 1` on a root whose doc01 is forgotten.
 - Run `retrieve` and `status` against the same root.
@@ -370,12 +371,34 @@ $V drive "$RUN" main readd -- readd --source glossary --expected-revision 2
 $V check "$RUN" readd '.sources.glossary.state == "current" and .sources.glossary.saved_revision == 3 and (.sources.doc01.decisions | keys) == ["r01"]' 'the glossary is back at revision 3 and the removed decisions stay removed'
 ```
 
+**F13 a failed first publication takes the removal in its saved revision.** Proves `forget-dependent-failed-publication`. Guide: "A dependent that is pending or failed". doc02's first publication fails at `nodes` while doc02 reads doc01's text. The dry run lists doc02 at revision 1, failed and not blocked. The forget of doc01 completes and is interrupted before the removal: doc02 is still failed, its own `reconcile` cannot finish, since its saved revision cites a document that is no longer registered, and no fact returns. `reconcile --source doc01` applies the removal to doc02's saved revision and finishes the publication with it: doc02 is current at revision 1 with r01 unresolved under the removal producer; its local fact stays, no identity query reaches it, and every incident is resolved.
+
+```bash journey F13
+$V drive "$RUN" main fixture -- multi-fixture --dependent --source doc02 --fault-stage nodes
+$V check "$RUN" fixture '.error == "IntentError"' 'doc02 first publication failed'
+$V drive "$RUN" main dry -- forget --source doc01 --expected-revision 1 --dry-run
+T=$(val dry '.token')
+$V check "$RUN" dry '[.dependents[] | [.state, .revision, .blocked]] == [["failed", 1, false]]' 'doc02 is listed at its failed revision, not blocked'
+$V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1 --confirm "$T" --fault-stage forget_dependents
+$V check "$RUN" forget '[.sources.doc01.state, .sources.doc02.state, .dependents_failed.code] == ["forgotten", "failed", "injected_failure"]' 'the forget completed and the removal was interrupted'
+$V check "$RUN" forget '.result.facts == []' 'nothing of doc02 is served'
+$V drive "$RUN" main own -- reconcile --source doc02
+$V check "$RUN" own '.error == "IntentError" and (.message | contains("Original Data item is not registered"))' 'doc02 cannot finish its saved revision while it cites the forgotten document'
+$V drive "$RUN" main rec -- reconcile --source doc01
+$V check "$RUN" rec '.dependents_failed == null and .sources.doc02.state == "current" and .sources.doc02.saved_revision == 1' 'doc02 finishes its publication at revision 1'
+$V check "$RUN" rec '.sources.doc02.resolution_status == "unresolved" and (.sources.doc02.decisions.r01.producer_ref | startswith("forget_"))' 'r01 is unresolved under the removal producer'
+$V check "$RUN" rec '.sources.doc02.original_fact_present and .result.facts == [] and .result.unavailable_sources == []' 'the doc02 local fact stays and no identity query reaches it'
+$V check "$RUN" rec '[.recovery_events[] | .resolved_at != null] | all' 'every incident is resolved'
+$V drive "$RUN" main again -- reconcile --source doc01
+$V check "$RUN" again '.error == "IntentError" and (.message | contains("Forgotten source"))' 'nothing is left for the forget'
+```
+
 ## Gotchas
 
 - Forget needs `--expected-revision`. Withdraw does not.
 - A forgotten source leaves its row in `status`: its last revision, a tombstone in place of its description, and a plan that keeps identifiers only. `retrieve` neither returns it nor lists it as unavailable.
-- Any source can be forgotten: current, withdrawn, or one whose first publication failed. A failed replacement or withdrawal is finished by its own method first. A dependent's failed replacement is not blocked: the forget applies the removal to its saved revision.
-- A forget that removes another source's decisions needs `--confirm <token>` from its dry run. A dry run writes nothing and returns before any result file is written. The token changes when the set of affected decisions changes, including a dependent that becomes blocked or moves to another revision.
+- Any source can be forgotten: current, withdrawn, or one whose first publication failed. A failed replacement or withdrawal is finished by its own method first. A dependent's failed replacement or publication is not blocked: the forget applies the removal to its saved revision.
+- A forget that removes another source's decisions needs `--confirm <token>` from its dry run. A dry run writes nothing and returns before any result file is written. The token changes when the set of affected decisions changes, including a dependent that becomes blocked, changes state or moves to another revision.
 - `drive` exits 1 for an injected failure, a refused forget, a refused `readd` and a forget whose dependent removal stopped. That is the expected result. Check `.error`, `.details` or `.dependents_failed`.
 - `readd` works only on a forgotten source and publishes at the forgotten revision plus one. It reads `source.txt` and `identity.json` from the root (`source02.txt` and `identity02.json` for doc02, `glossary.txt` and `glossary_identity.json` for the glossary): the caller's own files, which a forget lists and never deletes.
 - Only one open forget incident per source is expected. Do not stack two faults in one root.
