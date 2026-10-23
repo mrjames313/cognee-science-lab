@@ -2,6 +2,7 @@
 and the ownership rules that need no store."""
 
 import json
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
@@ -14,7 +15,6 @@ from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.retirement import (
     dependents,
     refuse_retiring_inputs,
-    removed_entities,
 )
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import (
@@ -131,11 +131,14 @@ def other_row(other, state):
             "original_data_id": str(doc.data_id),
         },
     }[state]
-    return row_of(
+    row = row_of(
         other,
         state.removeprefix("failed_") if "failed" not in state else "failed",
         plan,
     )
+    if state == "forgotten":
+        return replace(row, description=tomb(other).model_dump_json())
+    return row
 
 
 def readers(found):
@@ -171,7 +174,6 @@ def test_an_entity_shared_only_with_a_retiring_owner_counts_as_removed(
     )
     rows = [row_of(source), other_row(other, state), row_of(reader)]
     plan["revision"] = source.revision
-    assert removed_entities(source, plan, rows) == ({entity} if removed else set())
     expected = {str(reader.identity_data_id): [str(entity)]} if removed else {}
     assert readers(impact(source, plan, rows)) == expected
 
@@ -188,7 +190,6 @@ def test_an_entity_owned_through_the_document_chunks_alone_is_removed(
     )
     plan["revision"] = source.revision
     rows = [row_of(source), row_of(reader)]
-    assert removed_entities(source, plan, rows) == {entity}
     assert readers(impact(source, plan, rows)) == {
         str(reader.identity_data_id): [str(entity)]
     }
@@ -506,6 +507,16 @@ async def test_a_readd_with_the_forgotten_uuids_or_revision_is_refused(
     with pytest.raises(IntentError) as refused:
         await admit_readd(AbsentGraph(), tomb(forgotten), other, set())
     assert refused.value.code == "source_changed"
+
+    # A forgotten mention UUID returns in no role, here as a reusable recipe
+    # a variant names, even when the forget's plan never held its node.
+    payload = json.loads(readded.model_dump_json())
+    mention = str(forgotten.mention_groups["g01"].entity_id)
+    payload["entity_constructions"][mention] = dict(name="back", description="")
+    payload["variant_assignments"]["v01"]["target_entity_id"] = mention
+    with pytest.raises(IntentError) as refused:
+        await admit_readd(AbsentGraph(), tomb(forgotten), source_of(payload), set())
+    assert refused.value.code == "forgotten_uuid_reused"
 
     occupied = OccupiedGraph([readded.mention_groups["g01"].entity_id])
     with pytest.raises(IntentError) as refused:

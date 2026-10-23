@@ -216,13 +216,12 @@ def ownership_snapshot(nodes, edges):
 
 
 def contribution_triples(plan):
-    """The identity edges a plan's source contributed to."""
+    """The edges a plan's source may have contributed to: its identity edges
+    and every edge it owned. Read only from fields a forgotten row's
+    scrubbed plan keeps, so a check after the forget covers what the forget
+    itself covered."""
     triples = {tuple(e) for e in plan["identity_edges"]}
-    triples.update(
-        (e["source"], e["target"], e["relation"])
-        for e in plan["edges"]
-        if "identity_contributions" in e.get("properties", {})
-    )
+    triples.update((e["source"], e["target"], e["relation"]) for e in plan["edges"])
     return triples
 
 

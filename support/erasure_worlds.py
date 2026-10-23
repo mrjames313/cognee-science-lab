@@ -10,7 +10,7 @@ rows need a steady world, where every group continues and nothing is new.
 
 from uuid import UUID, uuid5
 
-from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION
+from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION, Erasures
 from dependency_worlds import add_glossary, cite, glossary_span
 from occurrence_worlds import (
     ADMIT,
@@ -30,10 +30,33 @@ STEADY = "steady"
 ERASER = "forget_gloss_r2"
 UNRELATED = refuse("erasure_unrelated")
 INCOMPLETE = refuse("erasure_incomplete")
+UNBOUND = refuse("erasure_unbound")
 
 
 def glossary_id(payload):
     return str(uuid5(UUID(payload["dataset_id"]), "gloss"))
+
+
+def removed_entity(identity):
+    return str(uuid5(UUID(str(identity)), "removed:entity"))
+
+
+def read_entity(identity):
+    return str(uuid5(UUID(str(identity)), "read:entity"))
+
+
+def forgotten(old) -> Erasures:
+    """What the ledger lets every world's removal claim: the glossary is
+    forgotten and its forget removed one Entity; another saved source reads
+    one Entity as a corpus input."""
+    return Erasures(
+        {
+            uuid5(old.dataset_id, "gloss"): frozenset(
+                {UUID(removed_entity(old.identity_data_id))}
+            )
+        },
+        frozenset({UUID(read_entity(old.identity_data_id))}),
+    )
 
 
 def eraser(payload, *, document=None, removed=()):
@@ -141,10 +164,34 @@ def erase_another_document(old, new, ctx):
     eraser(new, document=str(uuid5(UUID(new["dataset_id"]), "other")))
 
 
+def claim_an_entity(old, new, ctx):
+    """The producer names an Entity the glossary's forget did not remove."""
+    drop_reading_variant(producer=False)(old, new, ctx)
+    eraser(new, removed=[HELIOS])
+
+
+def read_recipe(*, drop):
+    """v01 reads the glossary entry and names an Entity that only it
+    declares and another saved source reads as a corpus input."""
+
+    def change(old, new, ctx):
+        read = read_entity(ctx["identity"])
+        for payload in (old, new):
+            add_recipe(payload, read)
+            payload["variant_assignments"]["v01"]["target_entity_id"] = read
+        reads_glossary(old, "v01")
+        new["variant_assignments"].pop("v01")
+        if drop:
+            new["entity_constructions"].pop(read)
+        eraser(new)
+
+    return change
+
+
 def removed_entity_input(old, new, ctx):
     """The continuing resolution reads an Entity the forget removed."""
     rid = continuing_rid(ctx)
-    entity = str(uuid5(ctx["identity"], "removed:entity"))
+    entity = removed_entity(ctx["identity"])
     old["inputs"]["existing_Z"] = dict(old["inputs"]["existing_A"], entity_id=entity)
     cite(old, rid, "existing_Z")
     unresolved(new, rid)
@@ -256,12 +303,36 @@ ERASURE_DECISIONS = [
         same_text=UNRELATED,
     ),
     decision(
-        "erasure configured for another document drops a variant",
+        "erasure configured for a document no forgotten source held drops a variant",
         "rule 6",
         [STEADY],
         erase_another_document,
+        text_edit=UNBOUND,
+        same_text=UNBOUND,
+    ),
+    decision(
+        "erasure names an Entity its forget did not remove",
+        "rule 6",
+        [STEADY],
+        claim_an_entity,
+        text_edit=UNBOUND,
+        same_text=UNBOUND,
+    ),
+    decision(
+        "erasure drops a recipe another saved source reads",
+        "rule 6",
+        [STEADY],
+        read_recipe(drop=True),
         text_edit=UNRELATED,
         same_text=UNRELATED,
+    ),
+    decision(
+        "erasure keeps a recipe another saved source reads",
+        "rule 6",
+        [STEADY],
+        read_recipe(drop=False),
+        text_edit=UNRELATED,
+        same_text=ADMIT,
     ),
     decision(
         "erasure unresolves the continuing resolution citing a removed Entity",

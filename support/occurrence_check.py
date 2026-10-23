@@ -34,7 +34,7 @@ from cognee_lab.identity import admission, erasure_rules
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import IntentError, text_digest
 from dependency_worlds import DEPENDENCY_DECISIONS
-from erasure_worlds import ERASURE_DECISIONS, STEADY
+from erasure_worlds import ERASURE_DECISIONS, STEADY, forgotten
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import (
     ADMIT,
@@ -75,6 +75,7 @@ def general(case, mapping=None, first_attempt=True, **parts):
         parts["after"],
         admission.parse_occurrence_map(raw),
         first_attempt=first_attempt,
+        erasures=forgotten(parts["old"]),
     )
 
 

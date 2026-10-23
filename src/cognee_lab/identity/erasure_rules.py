@@ -11,6 +11,8 @@ the replace path and Publisher.readd call the rest. Nothing here imports
 admission.
 """
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import NamedTuple
 from uuid import UUID
 
@@ -18,6 +20,7 @@ from .models import (
     Accepted,
     ChunkInput,
     CorpusObjectInput,
+    IdentitySource,
     SourceTextInput,
     TextSpanInput,
     Unresolved,
@@ -37,16 +40,53 @@ ERASURE_IMPLEMENTATION = "removed by forget"
 
 
 class Erasure(NamedTuple):
-    """What a removal producer says a forget took away."""
+    """What a forget erased: the forgotten document and the Entities its
+    forget removed."""
 
-    producer: str
     document: UUID
     removed: frozenset[UUID]
 
 
-def erasure_of(old, source) -> Erasure | None:
-    """The removal producer this revision introduces, or None. Its
-    configuration names the forgotten document and the removed Entities."""
+class Erasures(NamedTuple):
+    """What the ledger says a removal revision may erase: the document of
+    each forgotten source with the Entities its forget removed, and the
+    Entities saved sources read as corpus inputs, which no removal drops."""
+
+    forgotten: Mapping[UUID, frozenset[UUID]] = MappingProxyType({})
+    readers: frozenset[UUID] = frozenset()
+
+
+NO_ERASURES = Erasures()
+
+
+def erasures_of(rows, source) -> Erasures:
+    """The forgotten sources and the corpus readers among saved rows other
+    than this source's."""
+    forgotten, readers = {}, set()
+    own = str(source.identity_data_id)
+    for row in rows:
+        if row.state == "forgotten":
+            tomb = row.tombstone
+            forgotten[tomb.original_data_id] = frozenset(tomb.removed_entity_ids)
+        elif not row.is_retired and row.source != own:
+            readers |= corpus_reads(IdentitySource.model_validate_json(row.description))
+    return Erasures(MappingProxyType(forgotten), frozenset(readers))
+
+
+def corpus_reads(description) -> set[UUID]:
+    """The Entities a description lists as corpus inputs."""
+    return {
+        i.entity_id
+        for i in description.inputs.values()
+        if isinstance(i, CorpusObjectInput)
+    }
+
+
+def erasure_of(old, source, erasures: Erasures) -> tuple[str, Erasure] | None:
+    """The removal producer this revision introduces, with what it erases,
+    or None. Its configuration names the forgotten document and the removed
+    Entities, and the ledger must agree: the document is a forgotten
+    source's, and its forget removed every Entity named."""
     found = [
         (key, p)
         for key, p in source.producers.items()
@@ -70,7 +110,13 @@ def erasure_of(old, source) -> Erasure | None:
         raise IntentError(
             "erasure_configuration", "An erasure removes another document's inputs"
         )
-    return Erasure(key, document, removed)
+    took = erasures.forgotten.get(document)
+    if took is None or not removed <= took:
+        raise IntentError(
+            "erasure_unbound",
+            "A removal producer names a forgotten source's document and only Entities its forget removed",
+        )
+    return key, Erasure(document, removed)
 
 
 def erased_inputs(description, erasure: Erasure) -> set[str]:
@@ -97,13 +143,8 @@ def erased_inputs(description, erasure: Erasure) -> set[str]:
     )
 
 
-def erased_decisions(old, source) -> set[str]:
-    """The old decisions an erasure removal revision removes: every one that
-    cites an erased input. Empty when the revision names no removal producer."""
-    erasure = erasure_of(old, source)
-    if erasure is None:
-        return set()
-    erased = erased_inputs(old, erasure)
+def erased_decisions(old, erased) -> set[str]:
+    """The old decisions that cite one of the erased input keys."""
     return {a for a, inputs in decision_inputs(old).items() if inputs & erased}
 
 
@@ -113,43 +154,61 @@ def without_erased(refs, erased, fallback):
     return [k for k in refs if k not in erased] or [fallback]
 
 
-def check_erasure_removals(old, source):
+class ErasureStep(NamedTuple):
+    """One erasure removal step as the rules check it: the old revision's
+    erased input keys and the decisions citing them, and the removal
+    producer's key."""
+
+    producer: str
+    erased: set[str]
+    citing: set[str]
+
+
+def erasure_step(old, found) -> "ErasureStep | None":
+    """The removal step `erasure_of` found, or None."""
+    if found is None:
+        return None
+    producer, erasure = found
+    erased = erased_inputs(old, erasure)
+    return ErasureStep(producer, erased, erased_decisions(old, erased))
+
+
+def check_erasure_removals(old, source, removal: ErasureStep | None, readers):
     """A revision that names a removal producer is an erasure removal, all
     of it and nothing else: it removes every decision citing what the forget
     removed (`check_erasure_complete`) and changes nothing more
     (`check_erasure_confined`)."""
-    erasure = erasure_of(old, source)
-    if erasure is None:
+    if removal is None:
         return
-    check_erasure_complete(old, source, erasure)
-    check_erasure_confined(old, source, erasure)
+    check_erasure_complete(old, source, removal)
+    check_erasure_confined(old, source, removal, readers)
 
 
-def check_erasure_retry(saved, source):
+def check_erasure_retry(saved, source, erasures: Erasures):
     """A retry replaces a failed replacement's saved revision only by its
     erasure removal: the same revision, one removal producer new, and the
     removal rules."""
-    if source.revision != saved.revision or erasure_of(saved, source) is None:
+    removal = erasure_step(saved, erasure_of(saved, source, erasures))
+    if source.revision != saved.revision or removal is None:
         raise IntentError(
             "revision_reuse", "Recovery must use the exact saved replacement intent"
         )
-    check_erasure_removals(saved, source)
+    check_erasure_removals(saved, source, removal, erasures.readers)
 
 
-def check_erasure_complete(old, source, erasure):
+def check_erasure_complete(old, source, removal: ErasureStep):
     """Every old decision citing what the forget removed is removed: a
     resolution becomes unresolved in place under the removal producer, with
     the erased inputs stripped, and a variant is dropped. No erased input
     remains, in the inputs or a group's."""
-    erased = erased_inputs(old, erasure)
-    citing = erased_decisions(old, source)
+    erased, citing = removal.erased, removal.citing
     for key in citing & set(old.mention_resolutions):
         was = old.mention_resolutions[key]
         removed = Unresolved(
             group_ref=was.group_ref,
             status="unresolved",
             input_refs=without_erased(was.input_refs, erased, old.original_input_ref),
-            producer_ref=erasure.producer,
+            producer_ref=removal.producer,
         )
         if source.mention_resolutions.get(key) != removed:
             raise IntentError(
@@ -166,13 +225,13 @@ def check_erasure_complete(old, source, erasure):
         raise IntentError("erasure_incomplete", "No erased input remains")
 
 
-def check_erasure_confined(old, source, erasure):
+def check_erasure_confined(old, source, removal: ErasureStep, readers):
     """Every other decision, group, input, recipe and producer is unchanged:
     groups lose only the erased inputs, inputs nothing cites any more go, the
     removal producer is the one producer added, and a reusable recipe goes
-    only when a removed decision named it and no remaining decision does."""
-    erased = erased_inputs(old, erasure)
-    citing = erased_decisions(old, source)
+    only when a removed decision named it, no remaining decision names it
+    and no saved source reads it as a corpus input (`check_dropped_unread`)."""
+    erased, citing = removal.erased, removal.citing
 
     def unrelated(message):
         raise IntentError("erasure_unrelated", "An erasure removal " + message)
@@ -197,7 +256,7 @@ def check_erasure_confined(old, source, erasure):
         unrelated("keeps every group and input but the erased ones")
     if source.producers != {
         **old.producers,
-        erasure.producer: source.producers[erasure.producer],
+        removal.producer: source.producers[removal.producer],
     }:
         unrelated("adds only its producer")
     removed_names = set().union(*(naming(old, k) for k in citing))
@@ -217,6 +276,19 @@ def check_erasure_confined(old, source, erasure):
             unrelated("keeps every recipe unchanged")
     if set(source.entity_constructions) - set(old.entity_constructions):
         unrelated("adds no recipe")
+    check_dropped_unread(old, source, readers)
+
+
+def check_dropped_unread(old, source, readers):
+    """An erasure removal drops no recipe that a saved source reads as a
+    corpus input, this one included: the last declaration's removal would
+    take the Entity out of the graph under its reader."""
+    dropped = set(old.entity_constructions) - set(source.entity_constructions)
+    if dropped & (set(readers) | corpus_reads(source)):
+        raise IntentError(
+            "erasure_unrelated",
+            "An erasure removal drops no recipe a saved source reads as a corpus input",
+        )
 
 
 def entity_ids_named(source):
@@ -236,13 +308,17 @@ def entity_ids_named(source):
     return named
 
 
-def check_removed_entity_ids(source, removed):
-    """A re-add does not bring back an Entity the forget removed. An old
-    recipe does not authorize recreating a retired object under its UUID."""
-    if removed & entity_ids_named(source):
+def check_removed_entity_ids(tombstone, source, removed):
+    """A re-add names no Entity the forget removed and no mention UUID the
+    forgotten revision used, in any role: an old recipe does not authorize
+    recreating a retired object under its UUID. A mention UUID is forbidden
+    whether or not its node was ever written, since a publication that
+    failed early leaves it out of the forget's plan."""
+    forbidden = set(removed) | set(tombstone.mention_ids.values())
+    if forbidden & entity_ids_named(source):
         raise IntentError(
             "forgotten_uuid_reused",
-            "A re-add does not recreate an Entity UUID the forget removed",
+            "A re-add does not recreate a mention or Entity UUID the forget removed",
         )
 
 
@@ -253,11 +329,12 @@ def replacement_entity_id(identity_data_id, revision, removed_id):
 
 
 def readd_ids(tombstone, source) -> set[UUID]:
-    """Reusable Entities a re-add creates: its recipes that the forgotten
-    revision did not use and no listed corpus input names as existing."""
+    """Reusable Entities a re-add creates: its recipes that were not reusable
+    Entities of the forgotten revision and that no listed corpus input names
+    as existing."""
     return (
         set(reusable_recipes(source))
-        - tombstone.used_entity_ids
+        - set(tombstone.entity_ids)
         - referenced_corpus_ids(source)
     )
 
@@ -314,7 +391,7 @@ async def admit_readd(graph, tombstone, source, removed):
                 "fresh_uuid_not_derived",
                 "A fresh group's Entity UUID derives from its source, revision and group key",
             )
-    check_removed_entity_ids(source, removed)
+    check_removed_entity_ids(tombstone, source, removed)
     check_readd_entity_ids(tombstone, source, removed)
     probes = [
         (source.mention_groups[k].entity_id, "fresh_uuid_in_graph", "mention")

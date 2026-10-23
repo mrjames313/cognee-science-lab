@@ -1,7 +1,13 @@
 """Identity revision replacement with explicit, durable forward recovery."""
 
 from .admission import admit, check_absent_from_graph, identity_map
-from .erasure_rules import check_erasure_retry
+from .erasure_rules import (
+    NO_ERASURES,
+    check_dropped_unread,
+    check_erasure_retry,
+    erasure_of,
+    erasures_of,
+)
 from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
@@ -39,13 +45,23 @@ def transition(old, texts, text_change):
     return text, text, identity_map(old)
 
 
-async def admit_replacement(graph, old, source, texts, text_change, *, retry):
+async def admit_replacement(
+    graph, old, source, texts, text_change, *, retry, erasures=NO_ERASURES
+):
     """The one admission of a replacement. A first attempt also probes the
     graph for the UUIDs the revision introduces. Without a text change nothing
     rebuilds the document, so a retired or fresh group, or an added occurrence,
     is refused."""
     before, after, occurrence_map = transition(old, texts, text_change)
-    fate = admit(old, source, before, after, occurrence_map, first_attempt=not retry)
+    fate = admit(
+        old,
+        source,
+        before,
+        after,
+        occurrence_map,
+        first_attempt=not retry,
+        erasures=erasures,
+    )
     if not retry:
         await check_absent_from_graph(graph, old, source, fate)
     mapped = sum(ref is not None for refs in occurrence_map.values() for ref in refs)
@@ -209,11 +225,18 @@ async def replace(
             "Text replacement requires explicit semantic writer and verifier",
         )
     bases = [IdentitySource.model_validate_json(d) for d in erased_from]
+    erasures = erasures_of(await records.rows(), source)
     await admit_replacement(
-        graph, old, bases[0] if bases else source, texts, text_change, retry=retry
+        graph,
+        old,
+        bases[0] if bases else source,
+        texts,
+        text_change,
+        retry=retry,
+        erasures=erasures,
     )
     for base, erased in zip(bases, [*bases[1:], source]):
-        check_erasure_retry(base, erased)
+        check_erasure_retry(base, erased, erasures)
     if text_change is not None:
         await text_change.preflight(
             publisher, old, source, texts, chunks, ctx, retry=retry
@@ -372,6 +395,12 @@ async def replace(
             raise IntentError(
                 "generated_source_changed", "Registered identity snapshot changed"
             )
+        # A source may have begun reading a recipe an erasure step drops
+        # since admission read the rows.
+        fresh = erasures_of(await records.rows(), source)
+        for before, after in zip([old, *bases], [*bases, source]):
+            if erasure_of(before, after, fresh) is not None:
+                check_dropped_unread(before, after, fresh.readers)
 
     async def withhold(_):
         # Before the text changes: the rows are durable before the edit can

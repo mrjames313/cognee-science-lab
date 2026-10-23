@@ -27,7 +27,12 @@ from .models import (
     SavedRecordInput,
     SourceTextInput,
 )
-from .erasure_rules import check_erasure_removals, erased_decisions
+from .erasure_rules import (
+    NO_ERASURES,
+    check_erasure_removals,
+    erasure_of,
+    erasure_step,
+)
 from .validation import (
     IntentError,
     cited_inputs,
@@ -103,12 +108,23 @@ class Origin:
     new: OccurrenceRef
 
 
-def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
+def admit(
+    old,
+    source,
+    before,
+    after,
+    occurrence_map,
+    *,
+    first_attempt=True,
+    erasures=NO_ERASURES,
+):
     """Admit any reviewed mix of kept, removed, added and regrouped occurrences,
     with changed or unchanged text.
 
     Only a first attempt chooses new UUIDs; a retry completes a saved plan,
-    which may predate the derivation rules.
+    which may predate the derivation rules. `erasures` is what the ledger
+    lets a removal producer claim (`erasure_rules.erasures_of`); without it
+    every removal producer is refused.
     """
     text_changed = before != after
     check_text_present(before, after)
@@ -134,11 +150,12 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
     check_reusable_recipes(old, source)
     if first_attempt:
         check_derived_entity_ids(old, source)
-    check_scoped_variants(old, source)
+    removal = erasure_step(old, erasure_of(old, source, erasures))
+    check_scoped_variants(old, source, removal)
     check_new_variant_keys(old, source)
     check_foreign_inputs(old, source)
     check_reconfirmations(old, source)
-    check_erasure_removals(old, source)
+    check_erasure_removals(old, source, removal, erasures.readers)
     if text_changed:
         check_continuing_decisions(old, source, fate)
         check_no_span_variants(source)
@@ -475,12 +492,12 @@ def scoped_variants(description, kinds):
     }
 
 
-def check_scoped_variants(old, source):
+def check_scoped_variants(old, source, removal=None):
     """Document-scoped variants may be added, dropped or retargeted. Corpus-
     and span-scoped ones reach beyond this edit, so they stay unchanged,
     except that an erasure removal drops one citing what the forget removed
     (`check_erasure_removals` then requires the drop)."""
-    erased = erased_decisions(old, source)
+    erased = removal.citing if removal else set()
     kept = {
         k: v for k, v in scoped_variants(old, FIXED_SCOPES).items() if k not in erased
     }

@@ -3,22 +3,26 @@ its token, the removal revision and its admission, what stays unfinished,
 and what a tombstone and a scrubbed plan keep."""
 
 import json
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
 
 from cognee_lab.identity.admission import admit, identity_map
-from cognee_lab.identity.erasure_rules import check_erasure_retry
+from cognee_lab.identity.erasure_rules import (
+    Erasures,
+    check_erasure_retry,
+    erasures_of,
+)
 from cognee_lab.identity.erasure import (
     impact,
     producer_key,
-    removal_producer,
     removal_revision,
     unfinished,
 )
 from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.models import IdentitySource, Tombstone
-from cognee_lab.identity.retirement import source_ids
+from cognee_lab.identity.retirement import contribution_triples, source_ids
 from cognee_lab.identity.storage import PublicationRow, scrubbed_plan
 from cognee_lab.identity.validation import IntentError, object_digest, text_digest
 
@@ -73,6 +77,13 @@ def glossary(payload):
     payload["mention_resolutions"] = {}
     payload["variant_assignments"] = {}
     return source_of(payload)
+
+
+def forgot(gloss, removed=(), readers=()):
+    """What the ledger lets a removal claim once `gloss` is forgotten."""
+    return Erasures(
+        {gloss.inputs["doc01"].data_id: frozenset(removed)}, frozenset(readers)
+    )
 
 
 def reader_of(source_payload, read, *, entity=None, scope=None):
@@ -169,7 +180,7 @@ def test_the_removal_revision_is_admitted_and_cites_nothing_forgotten(
         removed_entity_ids=[],
         impact_token="t" * 64,
     )
-    admit(doc01, revised, TEXT, TEXT, identity_map(doc01))
+    admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=forgot(gloss))
 
 
 def test_a_corpus_scoped_variant_citing_the_span_is_dropped(source_payload):
@@ -177,7 +188,7 @@ def test_a_corpus_scoped_variant_citing_the_span_is_dropped(source_payload):
     doc01 = reader_of(source_payload, gloss, scope=dict(kind="corpus"))
     revised, parts = removal_revision(doc01, source_ids(gloss), set())
     assert [r.assignment for r in parts["decisions"]] == ["r01", "v01"]
-    admit(doc01, revised, TEXT, TEXT, identity_map(doc01))
+    admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=forgot(gloss))
 
 
 def test_a_removed_entity_read_as_a_corpus_input_is_cited(source_payload):
@@ -215,6 +226,13 @@ def test_the_token_names_the_affected_decision_set(source_payload):
     other["inputs"]["doc01"]["data_id"] = str(uuid4())
     two = impact(gloss, plan, [row_of(gloss), row_of(doc01), row_of(source_of(other))])
     assert len(two.dependents) == 2 and two.token != one.token
+    # A dependent's next revision changes it even when the decisions it
+    # would lose are the same.
+    later = json.loads(doc01.model_dump_json())
+    later["revision"] += 1
+    assert impact(gloss, plan, [row_of(gloss), row_of(source_of(later))]).token != (
+        one.token
+    )
     # Withdrawn and forgotten sources read nothing.
     assert impact(gloss, plan, [row_of(gloss), row_of(doc01, "withdrawn")]).token == (
         alone.token
@@ -241,11 +259,11 @@ def test_a_failed_replacement_takes_the_removal_in_its_saved_revision(
     assert revised.mention_resolutions["r01"].producer_ref == producer_key(
         ids, saved.revision
     )
-    check_erasure_retry(saved, revised)
+    check_erasure_retry(saved, revised, forgot(gloss))
     changed = json.loads(saved.model_dump_json())
     changed["mention_resolutions"]["r01"]["explanation"] = "changed"
     with pytest.raises(IntentError) as refused:
-        check_erasure_retry(saved, source_of(changed))
+        check_erasure_retry(saved, source_of(changed), forgot(gloss))
     assert refused.value.code == "revision_reuse"
 
 
@@ -276,7 +294,14 @@ def erasure_case(source_payload, change):
     payload = json.loads(revised.model_dump_json())
     change(payload, doc01)
     with pytest.raises(IntentError) as refused:
-        admit(doc01, source_of(payload), TEXT, TEXT, identity_map(doc01))
+        admit(
+            doc01,
+            source_of(payload),
+            TEXT,
+            TEXT,
+            identity_map(doc01),
+            erasures=forgot(gloss),
+        )
     return refused.value.code
 
 
@@ -307,6 +332,12 @@ def wrong_document(payload, old):
     payload["producers"][key]["configuration"]["forgotten_document_id"] = str(uuid4())
 
 
+def claim_an_entity(payload, old):
+    """The producer names an Entity the glossary's forget did not remove."""
+    key = next(k for k in payload["producers"] if k.startswith("forget_"))
+    payload["producers"][key]["configuration"]["removed_entity_ids"] = [str(HELIOS)]
+
+
 def no_configuration(payload, old):
     key = next(k for k in payload["producers"] if k.startswith("forget_"))
     payload["producers"][key]["configuration"] = {}
@@ -320,12 +351,63 @@ def no_configuration(payload, old):
         # producer.
         (keep_r01_accepted, "reconfirm_unattested"),
         (drop_an_unrelated_recipe, "erasure_unrelated"),
-        (wrong_document, "erasure_unrelated"),
+        (wrong_document, "erasure_unbound"),
+        (claim_an_entity, "erasure_unbound"),
         (no_configuration, "erasure_configuration"),
     ],
 )
 def test_an_erasure_removal_is_complete_and_nothing_else(source_payload, change, code):
     assert erasure_case(source_payload, change) == code
+
+
+def test_a_removal_is_bound_to_a_forgotten_source(source_payload):
+    """A removal producer may only claim what the ledger shows a forget took:
+    naming a document no forgotten row held is refused, however it is
+    configured."""
+    gloss = glossary(source_payload)
+    doc01 = reader_of(source_payload, gloss)
+    revised, _ = removal_revision(doc01, source_ids(gloss), set())
+    live = erasures_of([row_of(gloss), row_of(doc01)], doc01)
+    assert dict(live.forgotten) == {}
+    with pytest.raises(IntentError) as refused:
+        admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=live)
+    assert refused.value.code == "erasure_unbound"
+    tombstone = Tombstone.of(gloss, forgotten_at="t", removed_entity_ids=[HC])
+    forgotten = replace(
+        row_of(gloss, "forgotten"), description=tombstone.model_dump_json()
+    )
+    bound = erasures_of([forgotten, row_of(doc01)], doc01)
+    assert dict(bound.forgotten) == {gloss.inputs["doc01"].data_id: frozenset({HC})}
+    admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=bound)
+
+
+def test_a_removal_never_drops_a_recipe_another_source_reads(source_payload):
+    """HC goes with v01 only while nothing reads it. A source that reads it
+    as a corpus input after the removal was computed makes admission refuse
+    the drop, and the readers come from the rows, the dependent's own
+    excluded."""
+    gloss = glossary(source_payload)
+    doc01 = reader_of(source_payload, gloss)
+    revised, parts = removal_revision(doc01, source_ids(gloss), set())
+    assert parts["dropped_entities"] == (str(HC),)
+    third = json.loads(json.dumps(source_payload))
+    third["identity_data_id"] = str(uuid4())
+    third["inputs"]["doc01"]["data_id"] = str(uuid4())
+    third["inputs"]["hc"] = dict(third["inputs"]["existing_A"], entity_id=str(HC))
+    third["variant_assignments"]["v01"]["input_refs"].append("hc")
+    rows = [row_of(doc01), row_of(source_of(third))]
+    assert HC in erasures_of(rows, doc01).readers
+    assert HC not in erasures_of([row_of(doc01)], doc01).readers
+    with pytest.raises(IntentError) as refused:
+        admit(
+            doc01,
+            revised,
+            TEXT,
+            TEXT,
+            identity_map(doc01),
+            erasures=forgot(gloss, readers=[HC]),
+        )
+    assert refused.value.code == "erasure_unrelated"
 
 
 def test_a_tombstone_keeps_identifiers_only(source_payload):
@@ -367,8 +449,21 @@ def test_a_scrubbed_plan_keeps_no_edge_property():
     )
 
 
-def test_the_removal_producer_names_what_the_forget_took_away(source_payload):
-    gloss = glossary(source_payload)
-    producer = removal_producer(source_ids(gloss), {HC}, None)
-    assert producer["implementation"] == "removed by forget"
-    assert producer["configuration"]["removed_entity_ids"] == [str(HC)]
+def test_a_scrubbed_plan_names_every_edge_the_contribution_check_reads():
+    """The fixture's check after a forget reads the scrubbed plan, so it
+    covers the same edges as the forget's own check: a shared identity edge
+    whose contribution property the scrub drops stays covered."""
+    plan = dict(
+        identity_edges=[["m", "e", "is_a"]],
+        edges=[
+            dict(
+                source="m2",
+                target="e",
+                relation="is_a",
+                refs=["r"],
+                properties={"identity_contributions": "[]"},
+            )
+        ],
+    )
+    assert contribution_triples(scrubbed_plan(plan)) == contribution_triples(plan)
+    assert ("m2", "e", "is_a") in contribution_triples(scrubbed_plan(plan))

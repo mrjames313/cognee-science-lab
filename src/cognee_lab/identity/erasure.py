@@ -22,6 +22,7 @@ from .erasure_rules import (
     ERASURE_IMPLEMENTATION,
     Erasure,
     erased_inputs,
+    erasures_of,
     without_erased,
 )
 from .models import Accepted, CorpusObjectInput, IdentitySource
@@ -78,7 +79,9 @@ class Impact:
 
     @property
     def token(self) -> str:
-        """A digest of the affected-decision set, which a caller confirms."""
+        """A digest of the affected-decision set, which a caller confirms.
+        It covers each dependent's revision, so it changes whenever anything
+        the report shows could change."""
         return object_digest(
             dict(
                 source=dict(
@@ -90,6 +93,7 @@ class Impact:
                 dependents=[
                     dict(
                         identity_data_id=d.identity_data_id,
+                        revision=d.revision,
                         assignments=sorted(r.assignment for r in d.decisions),
                         decisions=[
                             dict(
@@ -110,7 +114,7 @@ class Impact:
 
 
 def erasure_for(ids: SourceIds, removed) -> Erasure:
-    return Erasure("", ids.original_data_id, frozenset(UUID(str(e)) for e in removed))
+    return Erasure(ids.original_data_id, frozenset(UUID(str(e)) for e in removed))
 
 
 def citations(reader, erasure: Erasure) -> dict[str, Citation]:
@@ -224,21 +228,6 @@ def removal_revision(
     )
 
 
-def readers_of(rows, *skip) -> set[UUID]:
-    """Entities that saved sources other than `skip` list as corpus inputs."""
-    found = set()
-    for row in rows:
-        if row.is_retired or row.source in skip:
-            continue
-        reader = IdentitySource.model_validate_json(row.description)
-        found |= {
-            i.entity_id
-            for i in reader.inputs.values()
-            if isinstance(i, CorpusObjectInput)
-        }
-    return found
-
-
 def reads(reader, ids: SourceIds, removed) -> bool:
     return bool(erased_inputs(reader, erasure_for(ids, removed)))
 
@@ -266,7 +255,7 @@ def impact(source, plan, rows) -> Impact:
             reader,
             ids,
             removed,
-            readers_of(rows, row.source, str(ids.identity_data_id)),
+            erasures_of(rows, reader).readers,
             in_place=row.state != "current",
         )
         dependents.append(
@@ -424,7 +413,7 @@ async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
                     reader,
                     ids,
                     removed,
-                    readers_of(rows, row.source, str(ids.identity_data_id)),
+                    erasures_of(rows, reader).readers,
                     tombstone.impact_token,
                     in_place=row.state != "current",
                 )

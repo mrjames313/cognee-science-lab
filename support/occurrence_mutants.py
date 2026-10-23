@@ -5,6 +5,8 @@ erasure rules it imports (cognee_lab.identity.erasure_rules). The check
 must find a small world that the broken admitter decides wrongly.
 """
 
+from uuid import UUID
+
 from cognee_lab.identity import admission, erasure_rules
 
 
@@ -62,7 +64,7 @@ def attest_any_old_input(old, source):
                 raise admission.IntentError("reconfirm_unattested", "")
 
 
-def drop_scoped_variants_freely(old, source):
+def drop_scoped_variants_freely(old, source, removal=None):
     """Corpus- and span-scoped variants may be dropped without a removal
     producer; only a kept one must be unchanged."""
     kept = {
@@ -74,6 +76,24 @@ def drop_scoped_variants_freely(old, source):
         admission.scoped_variants(source, admission.FIXED_SCOPES)
     ) != admission.reviewed_decisions(kept):
         raise admission.IntentError("variant_changed", "")
+
+
+_bound_erasure_of = erasure_rules.erasure_of
+
+
+def trust_the_producer(old, source, erasures):
+    """A removal producer claims whatever its configuration names, as if the
+    ledger agreed."""
+    claimed = {}
+    for producer in source.producers.values():
+        config = producer.configuration or {}
+        try:
+            document = UUID(config["forgotten_document_id"])
+            removed = frozenset(UUID(e) for e in config["removed_entity_ids"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        claimed[document] = removed
+    return _bound_erasure_of(old, source, erasures._replace(forgotten=claimed))
 
 
 MUTANTS = {
@@ -120,6 +140,8 @@ MUTANTS = {
     "allow_any_erasure": ("check_erasure_removals", skip),
     "erase_partially": ("check_erasure_complete", skip),
     "erase_beyond_the_forgotten": ("check_erasure_confined", skip),
+    "erase_unbound": ("erasure_of", trust_the_producer),
+    "drop_read_recipes": ("check_dropped_unread", skip),
     "drop_scoped_variants_freely": (
         "check_scoped_variants",
         drop_scoped_variants_freely,
