@@ -46,16 +46,13 @@ async def withdraw(
     row = await records.row(source)
     if row is None:
         raise IntentError("source_missing", "No saved publication to withdraw")
-    if IdentitySource.model_validate_json(row["description"]) != source:
+    if IdentitySource.model_validate_json(row.description) != source:
         raise IntentError("revision_reuse", "Withdraw the exact saved description")
     owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
     # Keep the original retirement keys across interrupted retries, even after
     # native deletion has detached references or removed graph objects.
-    if (
-        row["state"] != "withdrawn"
-        and row["plan"].get("operation") == "identity_withdraw"
-    ):
-        plan = dict(row["plan"])
+    if row.state != "withdrawn" and row.operation == "identity_withdraw":
+        plan = dict(row.plan)
     else:
         nodes = await graph.get_node_delete_data(
             await graph.find_nodes_by_source_ref(owner)

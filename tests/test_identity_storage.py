@@ -18,7 +18,7 @@ async def test_guard_failure_event_and_explicit_reconciliation(source_payload):
     store = RecordStore()
     await store.initialize()
     first = await store.begin(source, expected_revision=0, plan={}, origin="test")
-    assert (await store.rows(source.dataset_id))[0]["state"] == "pending"
+    assert (await store.rows(source.dataset_id))[0].state == "pending"
     with pytest.raises(IntentError, match="writer"):
         await store.begin(source, expected_revision=1, plan={})
     event = await store.fail(
@@ -49,7 +49,7 @@ async def test_guard_failure_event_and_explicit_reconciliation(source_payload):
         await store.complete(source, first)
     await store.complete(source, second)
     row = (await store.rows(source.dataset_id))[0]
-    assert row["state"] == "current" and row["verified_revision"] == 1
+    assert row.state == "current" and row.verified_revision == 1
     records = await store.events(source.dataset_id)
     assert records[0]["recovery_event_id"] == event
     assert records[0]["resolved_at"] is not None
@@ -81,7 +81,7 @@ async def test_withdrawal_guard_and_completion(source_payload):
     )
     await store.complete(source, attempt, state="withdrawn")
     row = (await store.rows(source.dataset_id))[0]
-    assert row["state"] == "withdrawn" and row["verified_revision"] == 1
+    assert row.state == "withdrawn" and row.verified_revision == 1
     assert (await store.events(source.dataset_id))[0]["outcome"] == "withdrawn"
     with pytest.raises(IntentError, match="Withdrawn source"):
         await store.begin(source, expected_revision=1, plan={}, method="reconcile")
@@ -100,9 +100,9 @@ async def test_withdrawal_guard_and_completion(source_payload):
     row = next(
         r
         for r in await store.rows(partial.dataset_id)
-        if r["source"] == str(partial.identity_data_id)
+        if r.source == str(partial.identity_data_id)
     )
-    assert row["state"] == "withdrawn" and row["verified_revision"] == 0
+    assert row.state == "withdrawn" and row.verified_revision == 0
 
 
 @pytest.mark.asyncio
@@ -128,9 +128,9 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
     attempt = await store.begin(source, expected_revision=1, plan=plan, method="forget")
     await store.complete(source, attempt, state="forgotten")
     row = (await store.rows(source.dataset_id))[0]
-    assert row["state"] == "forgotten"
-    assert row["revision"] == 1 and row["verified_revision"] == 1
-    assert IdentitySource.model_validate_json(row["description"]) == source
+    assert row.state == "forgotten"
+    assert row.revision == 1 and row.verified_revision == 1
+    assert IdentitySource.model_validate_json(row.description) == source
     assert (await store.events(source.dataset_id))[0]["outcome"] == "forgotten"
     for method in ("reconcile", "withdraw", "forget", "replace"):
         with pytest.raises(IntentError, match="Forgotten source"):
@@ -141,8 +141,8 @@ async def test_forget_guard_recovery_and_readd_at_the_next_revision(source_paylo
     attempt = await store.begin(readded, expected_revision=1, plan={})
     await store.complete(readded, attempt)
     row = (await store.rows(source.dataset_id))[0]
-    assert row["state"] == "current"
-    assert row["revision"] == 2 and row["verified_revision"] == 2
+    assert row.state == "current"
+    assert row.revision == 2 and row.verified_revision == 2
 
     # Forget takes a current source only: a failed first publication must be
     # reconciled or withdrawn, and a withdrawn source stays withdrawn.
@@ -231,30 +231,28 @@ def caller_arguments(method, row):
     the saved one, and a retry keeps the saved plan."""
     if row is None:
         return 1, 0, {"operation": f"identity_{method}"}
-    operation = row["plan"].get("operation")
+    operation = row.operation
     if method == "publish":
-        return row["revision"] + 1, row["revision"], dict(PUBLISH)
-    retry = row["state"] == "failed" and operation == "identity_replace"
+        return row.revision + 1, row.revision, dict(PUBLISH)
+    retry = row.state == "failed" and operation == "identity_replace"
     if method == "replace" and not retry:
-        plan = dict(
-            operation="identity_replace", previous_description=row["description"]
-        )
-        return row["revision"] + 1, row["revision"], plan
+        plan = dict(operation="identity_replace", previous_description=row.description)
+        return row.revision + 1, row.revision, plan
     keep = {
         "reconcile": PUBLISH,
-        "replace": row["plan"],
+        "replace": row.plan,
         "withdraw": (
-            row["plan"]
-            if row["state"] != "withdrawn" and operation == "identity_withdraw"
+            row.plan
+            if row.state != "withdrawn" and operation == "identity_withdraw"
             else WITHDRAW
         ),
         "forget": (
-            row["plan"]
-            if row["state"] == "failed" and operation == "identity_forget"
+            row.plan
+            if row.state == "failed" and operation == "identity_forget"
             else FORGET
         ),
     }[method]
-    return row["revision"], row["revision"], dict(keep)
+    return row.revision, row.revision, dict(keep)
 
 
 METHODS = ("publish", "reconcile", "replace", "withdraw", "forget")
@@ -295,7 +293,7 @@ async def test_begin_transition_matrix(source_payload, row, method, expected):
     await reach(store, source, row)
     saved = next(iter(await store.rows()), None)
     if saved is not None:
-        source = IdentitySource.model_validate_json(saved["description"])
+        source = IdentitySource.model_validate_json(saved.description)
     revision, expected_revision, plan = caller_arguments(method, saved)
     try:
         await store.begin(

@@ -1,6 +1,7 @@
 """Two captured original documents sharing identity output in native stores."""
 
 import json
+from dataclasses import asdict
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .models import IdentitySource
@@ -152,11 +153,11 @@ def read_sources(root):
 
 async def current_sources(root, publisher):
     sources = read_sources(root)
-    rows = {r["source"]: r for r in await publisher.records.rows()}
+    rows = {r.source: r for r in await publisher.records.rows()}
     return {
         label: (
             IdentitySource.model_validate_json(
-                rows[str(source.identity_data_id)]["description"]
+                rows[str(source.identity_data_id)].description
             )
             if str(source.identity_data_id) in rows
             else source
@@ -238,7 +239,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         variant.target_entity_id,
         "resolves_to",
     )
-    rows = {r["source"]: r for r in await publisher.records.rows(first.dataset_id)}
+    rows = {r.source: r for r in await publisher.records.rows(first.dataset_id)}
     result = dict(
         result=await retrieve(publisher, first.dataset_id, query),
         sources={},
@@ -273,15 +274,15 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
         from .registered import read_registered
 
         row = rows[str(source.identity_data_id)]
-        if row["plan"].get("operation") == "identity_forget":
+        if row.operation == "identity_forget":
             from .forget_fixture import forget_checks
 
             result["sources"][label] = dict(
                 identity_data_id=str(source.identity_data_id),
-                state=row["state"],
+                state=row.state,
                 saved_revision=source.revision,
-                verified_revision=row["verified_revision"],
-                forget=await forget_checks(publisher, source, row["plan"], label),
+                verified_revision=row.verified_revision,
+                forget=await forget_checks(publisher, source, row.plan, label),
             )
             continue
         registered = await read_registered(source)
@@ -345,9 +346,9 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             )
         result["sources"][label] = dict(
             identity_data_id=str(source.identity_data_id),
-            state=rows[str(source.identity_data_id)]["state"],
+            state=rows[str(source.identity_data_id)].state,
             saved_revision=source.revision,
-            verified_revision=rows[str(source.identity_data_id)]["verified_revision"],
+            verified_revision=rows[str(source.identity_data_id)].verified_revision,
             registered_revision=registered.revision,
             registered_matches_saved=registered == source,
             resolution_target_entity_id=(
@@ -423,7 +424,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             if combined:
                 result["sources"][label]["combined_group_retirement"] = combined
     for row in rows.values():
-        if row["plan"].get("text_change") and row["state"] == "current":
+        if row.plan.get("text_change") and row.state == "current":
             from .text_fixture import transition_summary
 
             result.setdefault("text_changes", []).append(
@@ -497,29 +498,23 @@ async def run(args, root):
             )
         elif args.command == "reconcile":
             row = await publisher.records.row(selected)
-            if row["state"] == "forgotten":
+            if row.state == "forgotten":
                 from .storage import FORGOTTEN_SOURCE
 
                 raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
-            if (
-                row["state"] == "failed"
-                and row["plan"].get("operation") == "identity_forget"
-            ):
+            if row.state == "failed" and row.operation == "identity_forget":
                 await publisher.forget(
                     selected, expected_revision=selected.revision, origin="test"
                 )
-            elif (
-                row["state"] == "failed"
-                and row["plan"].get("operation") == "identity_replace"
-            ):
-                if row["plan"].get("text_change"):
+            elif row.state == "failed" and row.operation == "identity_replace":
+                if row.plan.get("text_change"):
                     from .text_fixture import maintain_one
                     from .text_changes import TextChange
 
                     await maintain_one(
                         publisher,
                         selected,
-                        TextChange.from_plan(row["plan"]),
+                        TextChange.from_plan(row.plan),
                         expected_revision=selected.revision,
                     )
                 else:
@@ -548,7 +543,9 @@ async def run(args, root):
     if len(sources) == 1:
         result = dict(
             result=await retrieve(publisher, selected.dataset_id, args.query),
-            publications=await publisher.records.rows(selected.dataset_id),
+            publications=[
+                asdict(row) for row in await publisher.records.rows(selected.dataset_id)
+            ],
             recovery_events=await publisher.records.events(selected.dataset_id),
         )
     else:

@@ -139,10 +139,10 @@ def view_of(s, row):
     if row is None:
         return None
     return View(
-        row["revision"],
-        row["state"],
-        Plan.of(s, row["plan"]),
-        variant_of(s, json.loads(row["description"])),
+        row.revision,
+        row.state,
+        Plan.of(s, row.plan),
+        variant_of(s, json.loads(row.description)),
     )
 
 

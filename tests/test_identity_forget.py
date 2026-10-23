@@ -12,6 +12,7 @@ from cognee_lab.identity.forget import refuse_dependents
 from cognee_lab.identity.forget_fixture import describe_readd
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.retirement import dependents, refuse_retiring_inputs
+from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import (
     IntentError,
     fresh_entity_id,
@@ -25,12 +26,13 @@ def source_of(payload):
 
 
 def row_of(source, state="current", plan=None):
-    return dict(
+    return PublicationRow(
         dataset=str(source.dataset_id),
         source=str(source.identity_data_id),
         state=state,
         revision=source.revision,
         verified_revision=source.revision,
+        attempt="attempt",
         description=source.model_dump_json(),
         plan=plan or {"operation": "identity_publish"},
     )

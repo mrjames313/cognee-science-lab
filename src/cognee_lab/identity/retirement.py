@@ -15,8 +15,6 @@ from .models import CorpusObjectInput, IdentitySource, SourceTextInput
 from .native import edge_metadata
 from .validation import IntentError
 
-RETIRED_STATES = frozenset({"withdrawn", "forgotten"})
-
 
 class Dependent(TypedDict):
     """One input through which a saved source consumed a retiring source."""
@@ -64,9 +62,9 @@ def dependents(source, rows, sole_owned=frozenset()):
     own = (str(source.dataset_id), str(source.identity_data_id))
     found = []
     for row in rows:
-        if (row["dataset"], row["source"]) == own or row["state"] in RETIRED_STATES:
+        if (row.dataset, row.source) == own or row.is_retired:
             continue
-        reader = IdentitySource.model_validate_json(row["description"])
+        reader = IdentitySource.model_validate_json(row.description)
         found += consumes(reader, source, sole_owned)
     return found
 
@@ -78,12 +76,12 @@ def retired_sources(rows):
     have retired between a failure and its retry."""
     retired = set()
     for r in rows:
-        operation = r["plan"].get("operation")
-        if operation == "identity_withdraw" and r["state"] in {"withdrawn", "failed"}:
-            retired.add((r["dataset"], r["source"]))
-        if operation == "identity_forget" and r["state"] in {"forgotten", "failed"}:
-            retired.add((r["dataset"], r["source"]))
-            retired.add((r["dataset"], r["plan"]["original_data_id"]))
+        operation = r.operation
+        if operation == "identity_withdraw" and r.state in {"withdrawn", "failed"}:
+            retired.add((r.dataset, r.source))
+        if operation == "identity_forget" and r.state in {"forgotten", "failed"}:
+            retired.add((r.dataset, r.source))
+            retired.add((r.dataset, r.plan["original_data_id"]))
     return retired
 
 
@@ -114,9 +112,7 @@ async def readd_removed(graph, source, plan, rows):
 
 
 def retiring_by_forget(row):
-    return row["state"] in {"failed", "pending"} and (
-        row["plan"].get("operation") == "identity_forget"
-    )
+    return row.state in {"failed", "pending"} and row.operation == "identity_forget"
 
 
 def refuse_retiring_inputs(source, rows):
@@ -125,12 +121,10 @@ def refuse_retiring_inputs(source, rows):
     the source half-forgotten."""
     own = (str(source.dataset_id), str(source.identity_data_id))
     for row in rows:
-        if (row["dataset"], row["source"]) == own or not retiring_by_forget(row):
+        if (row.dataset, row.source) == own or not retiring_by_forget(row):
             continue
-        retiring = IdentitySource.model_validate_json(row["description"])
-        found = consumes(
-            source, retiring, removed_entities(retiring, row["plan"], rows)
-        )
+        retiring = IdentitySource.model_validate_json(row.description)
+        found = consumes(source, retiring, removed_entities(retiring, row.plan, rows))
         if found:
             raise IntentError(
                 "retiring_source",

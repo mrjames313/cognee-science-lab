@@ -165,11 +165,7 @@ async def test_saved_replacement_is_guarded_and_retried_without_new_intent(
         },
     )
     row = (await store.rows(old.dataset_id))[0]
-    assert (
-        row["revision"] == 2
-        and row["verified_revision"] == 1
-        and row["state"] == "pending"
-    )
+    assert row.revision == 2 and row.verified_revision == 1 and row.state == "pending"
     await store.assert_pending(intended, attempt)
     with pytest.raises(IntentError, match="pending intent"):
         await store.assert_pending(old, attempt)
@@ -188,13 +184,11 @@ async def test_saved_replacement_is_guarded_and_retried_without_new_intent(
     with pytest.raises(IntentError, match="Saved revision changed"):
         await store.begin(intended, expected_revision=1, method="replace", plan={})
     retry = await store.begin(
-        intended, expected_revision=2, method="replace", plan=row["plan"]
+        intended, expected_revision=2, method="replace", plan=row.plan
     )
     await store.complete(intended, retry)
     row = (await store.rows(old.dataset_id))[0]
-    assert (
-        row["revision"] == row["verified_revision"] == 2 and row["state"] == "current"
-    )
+    assert row.revision == row.verified_revision == 2 and row.state == "current"
     incidents = await store.events(old.dataset_id)
     assert incidents[0]["recovery_event_id"] == event and incidents[0]["resolved_at"]
 

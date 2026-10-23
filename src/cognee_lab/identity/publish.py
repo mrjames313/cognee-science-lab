@@ -179,15 +179,15 @@ class Publisher:
         await validate_inputs(source, texts=texts, chunks=chunks, graph=self.graph)
         rows = await self.records.rows()
         descriptions = [
-            IdentitySource.model_validate_json(r["description"])
+            IdentitySource.model_validate_json(r.description)
             for r in rows
-            if (r["dataset"], r["source"])
+            if (r.dataset, r.source)
             != (str(source.dataset_id), str(source.identity_data_id))
         ]
         validate_uses([*descriptions, source])
         refuse_retiring_inputs(source, rows)
         previous = await self.records.row(source)
-        if previous and previous["revision"] != (saved_revision or source.revision):
+        if previous and previous.revision != (saved_revision or source.revision):
             raise IntentError(
                 "not_admitted",
                 "Use the guarded replacement operation to advance a revision",
@@ -274,10 +274,10 @@ class Publisher:
     async def publish(self, source: IdentitySource, *, texts, chunks, ctx, **run):
         """A first publication: the source has no row yet."""
         row = await self.records.row(source)
-        if row and row["state"] == "failed":
-            if row["plan"].get("operation") == "identity_replace":
+        if row and row.state == "failed":
+            if row.operation == "identity_replace":
                 raise IntentError("recovery_choice", FAILED_REPLACEMENT)
-            if row["plan"].get("operation") == "identity_forget":
+            if row.operation == "identity_forget":
                 raise IntentError("recovery_choice", FAILED_FORGET)
         return await self._publish(
             source, texts, chunks, ctx, expected_revision=0, method="publish", **run
@@ -287,10 +287,10 @@ class Publisher:
         """Complete the saved revision again: a healthy row is verified, a
         failed publication is finished."""
         row = await self.records.row(source)
-        if row and row["state"] == "failed":
-            if row["plan"].get("operation") == "identity_replace":
+        if row and row.state == "failed":
+            if row.operation == "identity_replace":
                 raise IntentError("recovery_choice", FAILED_REPLACEMENT)
-            if row["plan"].get("operation") == "identity_forget":
+            if row.operation == "identity_forget":
                 raise IntentError("recovery_choice", FAILED_FORGET)
         return await self._publish(
             source,
@@ -304,7 +304,7 @@ class Publisher:
 
     async def forgotten_row(self, source):
         row = await self.records.row(source)
-        if row is None or row["state"] != "forgotten":
+        if row is None or row.state != "forgotten":
             raise IntentError("forget_state", "Re-add needs a forgotten source")
         return row
 
@@ -315,12 +315,12 @@ class Publisher:
         from .retirement import readd_removed
 
         row = await self.forgotten_row(source)
-        forgotten = IdentitySource.model_validate_json(row["description"])
+        forgotten = IdentitySource.model_validate_json(row.description)
         removed = await readd_removed(
-            self.graph, forgotten, row["plan"], await self.records.rows()
+            self.graph, forgotten, row.plan, await self.records.rows()
         )
         await admit_readd(self.graph, forgotten, source, removed)
-        await self.admit_inputs(source, texts, chunks, saved_revision=row["revision"])
+        await self.admit_inputs(source, texts, chunks, saved_revision=row.revision)
         return row
 
     async def readd(
@@ -328,7 +328,7 @@ class Publisher:
     ):
         """Publish a forgotten source again at the next revision."""
         row = await self.admit_readd(source, texts, chunks)
-        if row["revision"] != expected_revision:
+        if row.revision != expected_revision:
             raise IntentError("stale_revision", STALE_REVISION)
         return await self._publish(
             source,
@@ -337,7 +337,7 @@ class Publisher:
             ctx,
             expected_revision=expected_revision,
             method="publish",
-            saved_revision=row["revision"],
+            saved_revision=row.revision,
             **run,
         )
 

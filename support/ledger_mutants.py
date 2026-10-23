@@ -78,12 +78,12 @@ MUTANTS = {
         "P3",
     ),
     "assert-pending-ignores-description": Mutant(
-        '            or IdentitySource.model_validate_json(row["description"]) != source\n',
+        "            or IdentitySource.model_validate_json(row.description) != source\n",
         "",
         "P3",
     ),
     "assert-pending-ignores-attempt": Mutant(
-        '            or row["attempt"] != attempt\n',
+        "            or row.attempt != attempt\n",
         "",
         "P3",
     ),

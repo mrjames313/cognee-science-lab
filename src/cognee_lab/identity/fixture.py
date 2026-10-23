@@ -1,6 +1,7 @@
 """Real Cognee storage, captured decisions, synthetic original documents only."""
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -312,7 +313,9 @@ async def run(args, root):
     args._fixture_publisher = publisher
     if args.command == "status":
         return dict(
-            publications=await publisher.records.rows(dataset_id),
+            publications=[
+                asdict(row) for row in await publisher.records.rows(dataset_id)
+            ],
             recovery_events=await publisher.records.events(dataset_id),
         )
     if args.command == "retrieve":

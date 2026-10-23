@@ -118,7 +118,7 @@ async def readd(publisher, root, label, forgotten, *, expected_revision, fault_s
     if text_digest(text) != doc.text_sha256:
         raise IntentError("source_changed", "Re-add the forgotten document's text")
     removed = await readd_removed(
-        publisher.graph, forgotten, row["plan"], await publisher.records.rows()
+        publisher.graph, forgotten, row.plan, await publisher.records.rows()
     )
     budget = chunk_budget(root)
     document = SimpleNamespace(

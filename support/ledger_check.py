@@ -62,7 +62,7 @@ ACCEPTED, REFUSED, HANDLED = "accepted", "refused", "handled"
 
 @dataclass(frozen=True)
 class Observation:
-    rows: dict  # source index -> row dict from RecordStore.rows()
+    rows: dict  # source index -> PublicationRow from RecordStore.rows()
     events: dict  # source index -> list of event details
     owner: str | None
 
@@ -72,8 +72,8 @@ def served(row):
     # tests/test_identity_ledger_check.py fails if that condition changes.
     return (
         row is not None
-        and row["state"] == "current"
-        and row["revision"] == row["verified_revision"]
+        and row.state == "current"
+        and row.revision == row.verified_revision
     )
 
 
@@ -111,7 +111,7 @@ class Harness:
 
     async def observe(self, sources):
         index = {source_id(s): s for s in range(sources)}
-        rows = {index[r["source"]]: r for r in await self.store.rows(DATASET)}
+        rows = {index[r.source]: r for r in await self.store.rows(DATASET)}
         events = {s: [] for s in range(sources)}
         for e in await self.store.events(DATASET):
             events[index[e["identity_data_id"]]].append(e)
@@ -350,16 +350,13 @@ def p1_withheld_until_complete(step):
                 f"S{s + 1} served={served(row)} but its last attempt is {ghost.outcome}"
             )
         if ghost.outcome == "current" and (
-            row["revision"] != ghost.revision
-            or json.loads(row["description"])
+            row.revision != ghost.revision
+            or json.loads(row.description)
             != canonical(s, ghost.revision, ghost.variant)
         ):
             yield f"S{s + 1} served a description other than the completed one"
-        if (
-            ghost.outcome in ("withdrawn", "forgotten")
-            and row["state"] != ghost.outcome
-        ):
-            yield f"S{s + 1} {ghost.outcome} completed but the row is {row['state']}"
+        if ghost.outcome in ("withdrawn", "forgotten") and row.state != ghost.outcome:
+            yield f"S{s + 1} {ghost.outcome} completed but the row is {row.state}"
 
 
 def p2_independent_sources(step):
@@ -395,7 +392,8 @@ def p3_stale_calls_refused(step):
                 "already ended or a later begin() replaced it"
             )
     if isinstance(op, Begin) and step.accepted:
-        actual = step.obs_before.rows.get(op.source, {}).get("revision", 0)
+        prior = step.obs_before.rows.get(op.source)
+        actual = prior.revision if prior else 0
         if op.expected != actual:
             yield (
                 f"begin with expected_revision={op.expected} accepted at saved "
@@ -427,10 +425,10 @@ def p5_explicit_forward_recovery(step):
     completing = isinstance(op, Finish) and op.stage is None and step.accepted
     for s in range(len(step.model_after.sources)):
         old, new = before.rows.get(s), after.rows.get(s)
-        if old and (new is None or new["revision"] < old["revision"]):
+        if old and (new is None or new.revision < old.revision):
             yield f"S{s + 1} revision went back"
         open_events = unresolved(after.events[s])
-        state = new["state"] if new else None
+        state = new.state if new else None
         allowed = {"failed": (1,), "pending": (0, 1)}.get(state, (0,))
         if len(open_events) not in allowed:
             yield f"S{s + 1} is {state} with {len(open_events)} unresolved recovery events"
@@ -470,8 +468,8 @@ def p5_explicit_forward_recovery(step):
 
 def begin_rules(op, prior):
     method = METHODS[op.method]
-    state = prior["state"] if prior else None
-    actual = prior["revision"] if prior else 0
+    state = prior.state if prior else None
+    actual = prior.revision if prior else 0
     advance = 1 if state in method.advances_from else 0
     if op.revision != actual + advance:
         yield f"begin moved S{op.source + 1} from revision {actual} to {op.revision} through {op.method}"
@@ -479,14 +477,14 @@ def begin_rules(op, prior):
         prior
         and op.revision == actual
         and canonical(op.source, op.revision, op.variant)
-        != json.loads(prior["description"])
+        != json.loads(prior.description)
     ):
         yield f"begin changed S{op.source + 1}'s description at saved revision {actual}"
     if method.requires_plan and op.plan.operation != method.requires_plan:
         yield f"{op.method} began with a {op.plan.operation} plan"
     if prior is None:
         return
-    saved = Plan.of(op.source, prior["plan"])
+    saved = Plan.of(op.source, prior.plan)
     if not (
         state in method.advances_from
         or state in method.begins_from
@@ -556,13 +554,13 @@ REACHABLE = (
 
 def tally(reached, step):
     for row in step.obs_after.rows.values():
-        reached[f"row {row['state']}"] += 1
+        reached[f"row {row.state}"] += 1
     if not step.accepted:
         return
     reached[f"accepted {step_kind(step.op)}"] += 1
     if isinstance(step.op, Begin) and step.op.method == "publish":
         prior = step.obs_before.rows.get(step.op.source)
-        if prior and prior["state"] == "forgotten":
+        if prior and prior.state == "forgotten":
             reached["accepted readd"] += 1
     if isinstance(step.op, Finish) and step.op.stage is None:
         attempt = step.model_before.writers[step.op.writer].holds
@@ -637,10 +635,10 @@ def render(world, obs):
             if e.get("resolving_attempt")
         )
         lines.append(
-            f"S{s + 1}: r{row['revision']}"
-            + ("alt" if variant_of(s, json.loads(row["description"])) else "")
-            + f"/{row['state']}/verified={row['verified_revision']}"
-            f"/plan={Plan.of(s, row['plan']).tag}/attempt={names.get(row['attempt'], '?')}"
+            f"S{s + 1}: r{row.revision}"
+            + ("alt" if variant_of(s, json.loads(row.description)) else "")
+            + f"/{row.state}/verified={row.verified_revision}"
+            f"/plan={Plan.of(s, row.plan).tag}/attempt={names.get(row.attempt, '?')}"
             f" events={len(events)} unresolved={len(unresolved(events))}"
             f" resolved_by={resolvers}"
         )
@@ -703,7 +701,7 @@ async def check_ledger(config: Config) -> Result:
             recovery = {}
             if not noop and after.owner is None:
                 for s, row in after.rows.items():
-                    if row["state"] == "failed":
+                    if row.state == "failed":
                         recovery[s] = await harness.recover(s, row)
             step = Step(world, child, before, after, op, outcome, recovery)
             tally(result.reached, step)

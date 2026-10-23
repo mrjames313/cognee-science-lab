@@ -94,12 +94,9 @@ async def maintain_one(
         from .fixture import load_chunks, verify_semantics
 
         for row in await publisher.records.rows(source.dataset_id):
-            if (
-                row["source"] == str(source.identity_data_id)
-                or row["state"] != "current"
-            ):
+            if row.source == str(source.identity_data_id) or row.state != "current":
                 continue
-            other = IdentitySource.model_validate_json(row["description"])
+            other = IdentitySource.model_validate_json(row.description)
             other_ctx = await original_context(other, generated)
             other_chunks = await load_chunks(other, other_ctx)
             await verify_semantics(publisher, other, other_chunks, other_ctx)
@@ -196,9 +193,9 @@ async def transition_summary(publisher, row):
     from .captured_chunks import fixture_mention_id
     from .native import mention_fact
 
-    old = IdentitySource.model_validate_json(row["plan"]["previous_description"])
-    source = IdentitySource.model_validate_json(row["description"])
-    change = TextChange.from_plan(row["plan"])
+    old = IdentitySource.model_validate_json(row.plan["previous_description"])
+    source = IdentitySource.model_validate_json(row.description)
+    change = TextChange.from_plan(row.plan)
     key = source.original_input_ref
     old_ids = {
         str(i.chunk_id) for i in old.inputs.values() if isinstance(i, ChunkInput)
@@ -317,11 +314,11 @@ async def run(args, root):
     sources = await current_sources(root, publisher)
     old = sources["doc01"]
     row = await publisher.records.row(old)
-    if row["revision"] != args.expected_revision:
+    if row.revision != args.expected_revision:
         from .storage import STALE_REVISION
 
         raise IntentError("stale_revision", STALE_REVISION)
-    if row["state"] != "current":
+    if row.state != "current":
         raise IntentError(
             "recovery_choice", "Reconcile the exact saved text replacement explicitly"
         )

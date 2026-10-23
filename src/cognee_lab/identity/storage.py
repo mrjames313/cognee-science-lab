@@ -1,6 +1,7 @@
 """Portable project bookkeeping through Cognee's configured relational sessions."""
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -43,6 +44,45 @@ class RecoveryEvent(Base):
     details: Mapped[str] = mapped_column(Text)
 
 
+RETIRED_STATES = frozenset({"withdrawn", "forgotten"})
+
+
+@dataclass(frozen=True)
+class PublicationRow:
+    """One saved publication, as RecordStore.rows() and row() read it."""
+
+    dataset: str
+    source: str
+    revision: int
+    verified_revision: int
+    state: str
+    attempt: str
+    description: str
+    plan: dict
+
+    @classmethod
+    def of(cls, record: Publication) -> "PublicationRow":
+        return cls(
+            dataset=record.dataset,
+            source=record.source,
+            revision=record.revision,
+            verified_revision=record.verified_revision,
+            state=record.state,
+            attempt=record.attempt,
+            description=record.description,
+            plan=json.loads(record.plan),
+        )
+
+    @property
+    def operation(self) -> str | None:
+        """The saved plan's operation: the intent in flight, or the last one."""
+        return self.plan.get("operation")
+
+    @property
+    def is_retired(self) -> bool:
+        return self.state in RETIRED_STATES
+
+
 FORGOTTEN_SOURCE = (
     "Forgotten source accepts only a new publication at the next revision"
 )
@@ -75,30 +115,18 @@ class RecordStore:
             await connection.run_sync(Base.metadata.create_all)
             await session.commit()
 
-    async def rows(self, dataset=None):
+    async def rows(self, dataset=None) -> list[PublicationRow]:
         async with self.session_factory() as session:
             statement = select(Publication)
             if dataset is not None:
                 statement = statement.where(Publication.dataset == str(dataset))
             rows = (await session.execute(statement)).scalars().all()
-            return [
-                dict(
-                    dataset=r.dataset,
-                    source=r.source,
-                    revision=r.revision,
-                    verified_revision=r.verified_revision,
-                    state=r.state,
-                    attempt=r.attempt,
-                    description=r.description,
-                    plan=json.loads(r.plan),
-                )
-                for r in rows
-            ]
+            return [PublicationRow.of(r) for r in rows]
 
-    async def row(self, source):
+    async def row(self, source) -> PublicationRow | None:
         """The publication row of one identity source, or None."""
         dataset, sid = str(source.dataset_id), str(source.identity_data_id)
-        return next((r for r in await self.rows(dataset) if r["source"] == sid), None)
+        return next((r for r in await self.rows(dataset) if r.source == sid), None)
 
     async def events(self, dataset):
         async with self.session_factory() as session:
@@ -119,9 +147,9 @@ class RecordStore:
         row = await self.row(source)
         if (
             row is None
-            or row["state"] != "pending"
-            or row["attempt"] != attempt
-            or IdentitySource.model_validate_json(row["description"]) != source
+            or row.state != "pending"
+            or row.attempt != attempt
+            or IdentitySource.model_validate_json(row.description) != source
         ):
             raise IntentError(
                 "stale_attempt", "Graph write does not match saved pending intent"

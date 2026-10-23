@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -9,6 +10,7 @@ from pydantic import ValidationError
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.admission import admit, identity_map, parse_occurrence_map
 from cognee_lab.identity.text_changes import TextChange
+from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.validation import IntentError, text_digest, validate_inputs
 
@@ -158,16 +160,19 @@ def test_dependent_source_requires_reconsideration_before_edit(source_payload):
 
     old, before, after, chunk, intended = example(source_payload)
     dependent = old.model_copy(update={"identity_data_id": uuid4()})
-    row = dict(
+    row = PublicationRow(
         source=str(dependent.identity_data_id),
         dataset=str(dependent.dataset_id),
         state="current",
+        revision=dependent.revision,
+        verified_revision=dependent.revision,
+        attempt="attempt",
         description=dependent.model_dump_json(),
+        plan={},
     )
     with pytest.raises(IntentError, match="reconsideration is required"):
         reject_dependents(old, [row])
-    row["state"] = "withdrawn"
-    reject_dependents(old, [row])
+    reject_dependents(old, [replace(row, state="withdrawn")])
 
 
 async def test_unretained_endpoint_cannot_cascade_into_another_owner_edge(

@@ -296,26 +296,24 @@ async def forget(
     row = await records.row(source)
     if row is None:
         raise IntentError("source_missing", "No saved publication to forget")
-    if IdentitySource.model_validate_json(row["description"]) != source:
+    if IdentitySource.model_validate_json(row.description) != source:
         raise IntentError("revision_reuse", "Forget the exact saved description")
-    if row["revision"] != expected_revision:
+    if row.revision != expected_revision:
         raise IntentError("stale_revision", STALE_REVISION)
-    retry = (
-        row["state"] == "failed" and row["plan"].get("operation") == "identity_forget"
-    )
+    retry = row.state == "failed" and row.operation == "identity_forget"
     if retry:
         # The saved plan keeps the ownership the first attempt found, which
         # native deletion has since detached or removed.
-        plan = dict(row["plan"])
+        plan = dict(row.plan)
         if "stored_files" not in plan:
             raise IntentError(
                 "recovery_plan",
                 "Failed forget plan predates stored_files; its sweep cannot be finished",
             )
     else:
-        if row["state"] == "forgotten":
+        if row.state == "forgotten":
             raise IntentError("forgotten_source", FORGOTTEN_SOURCE)
-        if row["state"] != "current":
+        if row.state != "current":
             raise IntentError("forget_state", FORGET_STATE)
         plan = await forget_plan(publisher, source)
     refuse_dependents(source, plan, await records.rows())

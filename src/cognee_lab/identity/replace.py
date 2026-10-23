@@ -95,18 +95,16 @@ async def replace(
     row = await records.row(source)
     if row is None:
         raise IntentError("source_missing", "Replacement requires a saved publication")
-    if row["revision"] != expected_revision:
+    if row.revision != expected_revision:
         raise IntentError("stale_revision", STALE_REVISION)
-    saved = IdentitySource.model_validate_json(row["description"])
-    retry = (
-        row["state"] == "failed" and row["plan"].get("operation") == "identity_replace"
-    )
+    saved = IdentitySource.model_validate_json(row.description)
+    retry = row.state == "failed" and row.operation == "identity_replace"
     if retry:
         if source != saved:
             raise IntentError(
                 "revision_reuse", "Recovery must use the exact saved replacement intent"
             )
-        plan = dict(row["plan"])
+        plan = dict(row.plan)
         try:
             old = IdentitySource.model_validate_json(plan["previous_description"])
             if (
@@ -119,7 +117,7 @@ async def replace(
                 "recovery_plan", "Saved replacement plan is missing or invalid"
             ) from exc
     else:
-        if row["state"] != "current" or source.revision != saved.revision + 1:
+        if row.state != "current" or source.revision != saved.revision + 1:
             raise IntentError(
                 "revision_sequence",
                 "Replace a current description with exactly the next revision",
@@ -169,7 +167,7 @@ async def replace(
         chunks,
         ctx,
         registered_source=registered,
-        saved_revision=row["revision"],
+        saved_revision=row.revision,
         prepared_text=text_change is not None,
     )
     if verify_semantics is not None and text_change is None:
@@ -300,11 +298,9 @@ async def replace(
                     )
         current_rows = await records.rows()
         foreign_intent = {
-            (r["dataset"], r["source"]): IdentitySource.model_validate_json(
-                r["description"]
-            )
+            (r.dataset, r.source): IdentitySource.model_validate_json(r.description)
             for r in current_rows
-            if r["state"] == "current"
+            if r.state == "current"
         }
         for prior in plan["previous_edges"]:
             edge = await edge_metadata(

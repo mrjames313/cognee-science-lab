@@ -186,11 +186,11 @@ async def run(args, root):
     args._fixture_publisher = publisher
     old = (await current_sources(root, publisher))["doc01"]
     row = await publisher.records.row(old)
-    if row["revision"] != args.expected_revision:
+    if row.revision != args.expected_revision:
         from .storage import STALE_REVISION
 
         raise IntentError("stale_revision", STALE_REVISION)
-    if row["state"] != "current":
+    if row.state != "current":
         raise IntentError(
             "recovery_choice", "Reconcile the exact saved replacement explicitly"
         )

@@ -7,7 +7,6 @@ from uuid import UUID
 from .models import Accepted, ChunkInput, IdentitySource
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
-from .retirement import RETIRED_STATES
 from .validation import IntentError, validate_inputs
 
 
@@ -17,29 +16,29 @@ async def valid_sources(publisher, dataset_id, rows):
     valid, unavailable = [], []
     events = await publisher.records.events(dataset_id)
     for row in rows:
-        if row["state"] != "current" or row["revision"] != row["verified_revision"]:
+        if row.state != "current" or row.revision != row.verified_revision:
             # A deliberate retirement is not unavailable: nothing is withheld.
-            if row["state"] not in RETIRED_STATES:
+            if not row.is_retired:
                 incident = next(
                     (
                         e
                         for e in reversed(events)
-                        if e["identity_data_id"] == row["source"]
+                        if e["identity_data_id"] == row.source
                         and e.get("resolved_at") is None
                     ),
                     None,
                 )
                 unavailable.append(
                     dict(
-                        identity_data_id=row["source"],
-                        reason="publication_" + row["state"],
+                        identity_data_id=row.source,
+                        reason="publication_" + row.state,
                         recovery_event_id=(
                             incident["recovery_event_id"] if incident else None
                         ),
                     )
                 )
             continue
-        source = IdentitySource.model_validate_json(row["description"])
+        source = IdentitySource.model_validate_json(row.description)
         try:
             if await read_registered(source) != source:
                 raise IntentError(
@@ -73,11 +72,11 @@ async def valid_sources(publisher, dataset_id, rows):
             valid.append((source, row))
         except IntentError as exc:
             event = await publisher.records.fail(
-                source, row["attempt"], "retrieval_validation", exc
+                source, row.attempt, "retrieval_validation", exc
             )
             unavailable.append(
                 dict(
-                    identity_data_id=row["source"],
+                    identity_data_id=row.source,
                     reason=exc.code,
                     recovery_event_id=event,
                 )
@@ -131,7 +130,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
         str(g.entity_id)
         for row in rows
         for g in IdentitySource.model_validate_json(
-            row["description"]
+            row.description
         ).mention_groups.values()
     }
     if not await publisher.vector.has_collection("Entity_name"):
@@ -315,12 +314,11 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
                 seen.add(str(edge_id))
     # Recheck ledger to avoid delivering a source superseded during this read.
     after = {
-        r["source"]: (r["state"], r["revision"], r["attempt"])
+        r.source: (r.state, r.revision, r.attempt)
         for r in await publisher.records.rows(dataset_id)
     }
     if any(
-        after.get(r["source"]) != ("current", r["revision"], r["attempt"])
-        for _, r in current
+        after.get(r.source) != ("current", r.revision, r.attempt) for _, r in current
     ):
         raise IntentError(
             "retrieval_changed", "Publication changed during retrieval; retry query"
