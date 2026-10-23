@@ -1,8 +1,10 @@
 """Portable project bookkeeping through Cognee's configured relational sessions."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from types import MappingProxyType
 from typing import NamedTuple
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -86,7 +88,7 @@ class PublicationRow:
     @property
     def resumed_by(self) -> str | None:
         """The method that alone resumes this row's saved plan, if it failed."""
-        return OWNERS.get(self.operation) if self.state == "failed" else None
+        return cell_for(self).owner
 
 
 class Refusal(NamedTuple):
@@ -151,18 +153,26 @@ class Transition(NamedTuple):
     1 takes the next. `refuses` turns a method away before any argument is
     read, and `otherwise` turns away every other method that `admits` lacks.
     A method in none of them meets its own row refusal (REQUIRED_PLANS) after
-    its plan check. `sequence` refuses an advance to any revision but the next.
+    its plan check. `sequence` refuses a step-1 method at any revision but the
+    next; on a missing row begin()'s final check gives that refusal. `owner`
+    is the one method that resumes a failed row's saved plan.
     """
 
-    admits: dict[str, int]
-    refuses: dict[str, Refusal] = {}
+    admits: Mapping[str, int]
+    refuses: Mapping[str, Refusal] = MappingProxyType({})
     otherwise: Refusal | None = None
     sequence: Refusal | None = None
+    owner: str | None = None
 
 
-def saved(admits, otherwise=None, sequence=None):
+def lineage_row(admits, otherwise=None, sequence=None, owner=None):
     """A saved row other than a forgotten one: a publish would restart it."""
-    return Transition(admits, {"publish": SAVED_LINEAGE}, otherwise, sequence)
+    return Transition(admits, {"publish": SAVED_LINEAGE}, otherwise, sequence, owner)
+
+
+def owned(method, otherwise):
+    """A failed row whose saved plan only `method` resumes."""
+    return lineage_row({method: 0}, otherwise, owner=method)
 
 
 # Keyed by (row state, saved plan operation); a row with no entry for its
@@ -171,18 +181,16 @@ TRANSITIONS = {
     (None, None): Transition(
         {"publish": 1, "reconcile": 1, "withdraw": 1},
         {"replace": REPLACEMENT_MISSING, "forget": FORGET_MISSING},
-        sequence=NEW_REVISION,
     ),
     ("pending", None): Transition({}, otherwise=PENDING),
-    ("current", None): saved(
+    ("current", None): lineage_row(
         {"reconcile": 0, "replace": 1, "withdraw": 0, "forget": 0},
         sequence=REPLACEMENT_REVISION,
     ),
-    ("failed", None): saved({"reconcile": 0, "withdraw": 0}),
-    # A failed row whose saved plan one method owns resumes only through it.
-    ("failed", "identity_withdraw"): saved({"withdraw": 0}, FAILED_WITHDRAWAL),
-    ("failed", "identity_forget"): saved({"forget": 0}, FAILED_FORGET),
-    ("failed", "identity_replace"): saved({"replace": 0}, FAILED_REPLACEMENT),
+    ("failed", None): lineage_row({"reconcile": 0, "withdraw": 0}),
+    ("failed", "identity_withdraw"): owned("withdraw", FAILED_WITHDRAWAL),
+    ("failed", "identity_forget"): owned("forget", FAILED_FORGET),
+    ("failed", "identity_replace"): owned("replace", FAILED_REPLACEMENT),
     ("withdrawn", None): Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE),
     ("forgotten", None): Transition(
         {"publish": 1}, otherwise=FORGOTTEN_SOURCE, sequence=READD_REVISION
@@ -193,33 +201,40 @@ TRANSITIONS = {
 class RequiredPlan(NamedTuple):
     operation: str  # the plan operation begin() requires
     refusal: Refusal  # for a plan of any other operation
-    off_row: Refusal  # on a row the table neither admits nor refuses it on
+    # On a row the table neither admits nor refuses it on, and for a retry
+    # of a failed row whose plan differs in a preserved field.
+    off_row: Refusal
+    preserved: tuple[str, ...] = ()  # plan fields a retry keeps
 
 
 REQUIRED_PLANS = {
-    "replace": RequiredPlan("identity_replace", REPLACEMENT_PLAN, PRESERVE_REPLACEMENT),
+    # A replacement retry keeps what the failed attempt planned to retire.
+    "replace": RequiredPlan(
+        "identity_replace",
+        REPLACEMENT_PLAN,
+        PRESERVE_REPLACEMENT,
+        preserved=("previous_description", "text_change"),
+    ),
     "forget": RequiredPlan("identity_forget", FORGET_PLAN, FORGET_STATE),
 }
-# A replacement retry keeps what the failed attempt planned to retire.
-PRESERVED_ON_RETRY = ("previous_description", "text_change")
 
 
-def transition(row: PublicationRow | None) -> Transition:
+def cell_for(row: PublicationRow | None) -> Transition:
+    """The TRANSITIONS entry that governs this saved row (None: no row)."""
     if row is None:
         return TRANSITIONS[None, None]
-    return TRANSITIONS.get((row.state, row.operation)) or TRANSITIONS[row.state, None]
-
-
-# The method that alone resumes a failed row's saved plan, by plan operation.
-OWNERS = {op: next(iter(t.admits)) for (_, op), t in TRANSITIONS.items() if op}
+    for key in ((row.state, row.operation), (row.state, None)):
+        if key in TRANSITIONS:
+            return TRANSITIONS[key]
+    raise IntentError("unknown_state", f"Saved row state {row.state!r} is unknown")
 
 
 def admissible(row, method, plan, revision) -> Refusal | None:
     """The refusal begin() gives `method` with this plan and description
     revision on this saved row (None: no row), or None when it may begin.
-    begin() checks the expected revision before and, at the saved revision,
-    the description after."""
-    cell = transition(row)
+    begin() checks the expected revision before and, after, the description
+    at the saved revision and that any advance takes exactly the next one."""
+    cell = cell_for(row)
     actual = row.revision if row else 0
     step = cell.admits.get(method)
     if step is None and (refusal := cell.refuses.get(method, cell.otherwise)):
@@ -231,11 +246,11 @@ def admissible(row, method, plan, revision) -> Refusal | None:
         return required.refusal
     if step is None:
         return required.off_row
-    if step == 1 and revision != actual + 1:
+    if step == 1 and revision != actual + 1 and cell.sequence:
         return cell.sequence
-    if method == "replace" and row.state == "failed":
-        if any(plan.get(f) != row.plan.get(f) for f in PRESERVED_ON_RETRY):
-            return PRESERVE_REPLACEMENT
+    if required and row and row.state == "failed":
+        if any(plan.get(f) != row.plan.get(f) for f in required.preserved):
+            return required.off_row
     return None
 
 
@@ -343,6 +358,8 @@ class RecordStore:
             if row and source.revision == actual_revision:
                 if json.loads(payload) != json.loads(row.description):
                     raise IntentError(*REVISION_REUSE)
+            elif source.revision != actual_revision + 1:
+                raise IntentError(*NEW_REVISION)
             if row is None:
                 row = Publication(dataset=dataset, source=sid, verified_revision=0)
                 session.add(row)

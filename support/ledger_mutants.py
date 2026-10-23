@@ -113,20 +113,20 @@ MUTANTS = {
         "P5",
     ),
     "no-replace-recovery-choice": Mutant(
-        'saved({"replace": 0}, FAILED_REPLACEMENT)',
-        'saved({"replace": 0, "reconcile": 0}, FAILED_REPLACEMENT)',
+        'owned("replace", FAILED_REPLACEMENT)',
+        'lineage_row({"replace": 0, "reconcile": 0}, FAILED_REPLACEMENT, owner="replace")',
         "P5",
     ),
     # The failed withdrawal row falls back to the plain failed row's entry.
     "no-withdraw-recovery-choice": Mutant(
-        '    ("failed", "identity_withdraw"): saved({"withdraw": 0}, FAILED_WITHDRAWAL),\n',
+        '    ("failed", "identity_withdraw"): owned("withdraw", FAILED_WITHDRAWAL),\n',
         "",
         "P5",
     ),
     # Without the guard a withdrawn row took reconcile and a replace retry.
     "no-withdrawn-guard": Mutant(
         'Transition({"withdraw": 0}, otherwise=WITHDRAWN_SOURCE)',
-        'saved({"withdraw": 0, "reconcile": 0, "replace": 0})',
+        'lineage_row({"withdraw": 0, "reconcile": 0, "replace": 0})',
         "P5",
     ),
     "no-forgotten-guard": Mutant(
@@ -135,11 +135,12 @@ MUTANTS = {
         " sequence=READD_REVISION",
         "P5",
     ),
-    # Publish admitted on every saved row that no method owns.
+    # Publish admitted at the next revision on every saved row that no method
+    # owns, as main's break kept the re-add's revision check.
     "publish-restarts-saved-row": Mutant(
-        '    return Transition(admits, {"publish": SAVED_LINEAGE}, otherwise, sequence)\n',
+        '    return Transition(admits, {"publish": SAVED_LINEAGE}, otherwise, sequence, owner)\n',
         '    return Transition({"publish": 1, **admits} if otherwise is None else admits,'
-        " {}, otherwise, sequence)\n",
+        " {}, otherwise, sequence or READD_REVISION, owner)\n",
         "P5",
     ),
     "readd-at-forgotten-revision": Mutant(
@@ -147,10 +148,10 @@ MUTANTS = {
         "otherwise=FORGOTTEN_SOURCE, sequence=None",
         "P5",
     ),
-    # The failed forget row loses its owner but keeps admitting forget.
+    # The failed forget row admits reconcile and withdraw besides forget.
     "no-forget-recovery-choice": Mutant(
-        'saved({"forget": 0}, FAILED_FORGET)',
-        'saved({"forget": 0, "reconcile": 0, "withdraw": 0})',
+        'owned("forget", FAILED_FORGET)',
+        'lineage_row({"forget": 0, "reconcile": 0, "withdraw": 0}, owner="forget")',
         "P5",
     ),
     "forget-from-any-failed-row": Mutant(
@@ -188,8 +189,8 @@ MUTANTS = {
     ),
     # A first publication may skip revisions.
     "no-plus-one": Mutant(
-        "        sequence=NEW_REVISION,\n",
-        "        sequence=None,\n",
+        "            elif source.revision != actual_revision + 1:",
+        "            elif source.revision <= actual_revision:",
         "P5",
     ),
     "no-replace-plan-check": Mutant(
@@ -197,24 +198,15 @@ MUTANTS = {
         '    if required and method != "replace" and plan.get("operation") != required.operation:\n',
         "P5",
     ),
-    # A replace on a failed row is never held to the saved replacement plan.
+    # A replace retry is never held to the saved replacement plan.
     "no-replace-plan-preservation": Mutant(
-        "    if step is None:\n"
-        "        return required.off_row\n"
-        "    if step == 1 and revision != actual + 1:\n"
-        "        return cell.sequence\n"
-        '    if method == "replace" and row.state == "failed":\n'
-        "        if any(plan.get(f) != row.plan.get(f) for f in PRESERVED_ON_RETRY):\n"
-        "            return PRESERVE_REPLACEMENT\n",
-        '    if step is None and method != "replace":\n'
-        "        return required.off_row\n"
-        "    if step == 1 and revision != actual + 1:\n"
-        "        return cell.sequence\n",
+        'preserved=("previous_description", "text_change")',
+        "preserved=()",
         "P5",
     ),
     "no-text-change-preservation": Mutant(
-        'PRESERVED_ON_RETRY = ("previous_description", "text_change")',
-        'PRESERVED_ON_RETRY = ("previous_description",)',
+        'preserved=("previous_description", "text_change")',
+        'preserved=("previous_description",)',
         "P5",
     ),
     "begin-resolves-open-event": Mutant(
@@ -254,8 +246,8 @@ MUTANTS = {
     ),
     # Every failed row is refused as a pending one.
     "failed-row-never-recoverable": Mutant(
-        "    return TRANSITIONS.get((row.state, row.operation)) or TRANSITIONS[row.state, None]\n",
-        '    return TRANSITIONS["pending" if row.state == "failed" else row.state, None]\n',
+        "    for key in ((row.state, row.operation), (row.state, None)):\n",
+        '    for key in [("pending" if row.state == "failed" else row.state, None)]:\n',
         "P6",
     ),
     "advance-guard-refuses-readd": Mutant(

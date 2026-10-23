@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
 from .native import edge_metadata, require_graph_methods
 from .retirement import refuse_retiring_inputs
-from .storage import STALE_REVISION, RecordStore, encode, transition
+from .storage import STALE_REVISION, RecordStore, cell_for, encode
 from .validation import IntentError, validate_inputs, validate_uses
 
 
@@ -271,7 +271,7 @@ class Publisher:
         reservation."""
         row = await self.records.row(source)
         if row and row.resumed_by in ("replace", "forget"):
-            raise IntentError(*transition(row).otherwise)
+            raise IntentError(*cell_for(row).otherwise)
 
     async def publish(self, source: IdentitySource, *, texts, chunks, ctx, **run):
         """A first publication: the source has no row yet."""
