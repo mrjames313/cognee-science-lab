@@ -562,19 +562,26 @@ def foreign_citations(description):
 
 
 def check_reconfirmations(old, source):
-    """A decision that keeps its reviewed fields but cites other foreign
-    inputs, by losing, replacing or adding a key, is a re-confirm: it names
-    a producer new in this revision, which records who attested it."""
+    """A producer attests what its decisions read. So a decision under any
+    key, continuing, changed or new, that cites a foreign input key the old
+    revision lacks names a producer new in this revision. So does a
+    continuing decision that keeps its reviewed fields but cites other
+    foreign inputs, by losing, replacing or adding a key. A pure move keeps
+    its key and needs neither."""
     before, after = foreign_citations(old), foreign_citations(source)
     for kind in ("mention_resolutions", "variant_assignments"):
         was, now = getattr(old, kind), getattr(source, kind)
-        for key in set(was) & set(now):
-            if (
-                before[key] != after[key]
-                and reviewed_decisions({key: now[key]})
+        for key, decision in now.items():
+            if decision.producer_ref not in old.producers:
+                continue
+            unseen = after[key] - set(old.inputs)
+            recited = (
+                key in was
+                and before[key] != after[key]
+                and reviewed_decisions({key: decision})
                 == reviewed_decisions({key: was[key]})
-                and now[key].producer_ref in old.producers
-            ):
+            )
+            if unseen or recited:
                 raise IntentError(
                     "reconfirm_unattested",
                     "A decision that cites other foreign inputs names a producer new in this revision",

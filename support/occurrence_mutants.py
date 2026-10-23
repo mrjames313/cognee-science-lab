@@ -22,6 +22,23 @@ def own_foreign_refs(description):
     }
 
 
+def attest_continuing_keys_only(old, source):
+    """The re-confirm rule checked only keys in both revisions, so a renamed,
+    changed or new decision could cite a new foreign input unattested."""
+    before = admission.foreign_citations(old)
+    after = admission.foreign_citations(source)
+    for kind in ("mention_resolutions", "variant_assignments"):
+        was, now = getattr(old, kind), getattr(source, kind)
+        for key in set(was) & set(now):
+            if (
+                before[key] != after[key]
+                and admission.reviewed_decisions({key: now[key]})
+                == admission.reviewed_decisions({key: was[key]})
+                and now[key].producer_ref in old.producers
+            ):
+                raise admission.IntentError("reconfirm_unattested", "")
+
+
 MUTANTS = {
     "continue_with_any_uuid": ("same_identity", lambda *_: True),
     "continue_after_merge": (
@@ -58,5 +75,9 @@ MUTANTS = {
     "allow_changed_foreign_inputs": ("check_foreign_inputs", skip),
     "allow_unattested_reconfirms": ("check_reconfirmations", skip),
     "reconfirm_by_own_refs": ("foreign_citations", own_foreign_refs),
+    "attest_continuing_keys_only": (
+        "check_reconfirmations",
+        attest_continuing_keys_only,
+    ),
 }
 assert all(hasattr(admission, attribute) for attribute, _ in MUTANTS.values())

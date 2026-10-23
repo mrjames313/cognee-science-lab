@@ -402,6 +402,7 @@ def add_corpus_entity(old, new, ctx, *, referenced):
     new["variant_assignments"]["v02"] = variant(HC, entity_id, DOCUMENT)
     if referenced:
         new["variant_assignments"]["v02"]["input_refs"].append("existing_Z")
+        attest(new, "v02")
 
 
 def add_corpus_referenced_entity(old, new, ctx):
@@ -603,11 +604,40 @@ def move_group_to_new_input(*, producer):
     return change
 
 
-def add_variant_reading_new_span(old, new, ctx):
-    add_glossary(new)
-    glossary_span(new)
-    new["variant_assignments"]["v02"] = variant(HELIOS, HC, DOCUMENT)
-    cite(new, "v02", "gloss_hc")
+def add_variant_reading_new_span(*, producer):
+    def change(old, new, ctx):
+        add_glossary(new)
+        glossary_span(new)
+        new["variant_assignments"]["v02"] = variant(HELIOS, HC, DOCUMENT)
+        cite(new, "v02", "gloss_hc")
+        if producer:
+            attest(new, "v02")
+
+    return change
+
+
+def rename_variant_onto_new_span(*, producer):
+    """v01 reads the glossary entry; the new revision renames it v01b and
+    points it at the changed entry under a new key."""
+
+    def change(old, new, ctx):
+        reconfirm("v01", producer=False)(old, new, ctx)
+        new["variant_assignments"]["v01b"] = new["variant_assignments"].pop("v01")
+        if producer:
+            attest(new, "v01b")
+
+    return change
+
+
+def retarget_resolution_onto_new_span(*, producer):
+    """The continuing resolution reads the glossary entry; the new revision
+    retargets it and points it at the changed entry under a new key."""
+
+    def change(old, new, ctx):
+        reconfirm(continuing_rid, producer=producer)(old, new, ctx)
+        retarget_continuing_to_hc(old, new, ctx)
+
+    return change
 
 
 def add_text_of_another_dataset(old, new, ctx):
@@ -947,11 +977,51 @@ DECISIONS = [
         same_text=ADMIT,
     ),
     decision(
-        "new variant reads a new span",
+        "new variant reads a new span under its old producer",
         "rule 5",
         [],
-        add_variant_reading_new_span,
+        add_variant_reading_new_span(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "new variant reads a new span under a new producer",
+        "rule 5",
+        [],
+        add_variant_reading_new_span(producer=True),
         text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "document variant renamed onto a new span under its old producer",
+        "rule 5",
+        [],
+        rename_variant_onto_new_span(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "document variant renamed onto a new span under a new producer",
+        "rule 5",
+        [],
+        rename_variant_onto_new_span(producer=True),
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "continuing resolution retargeted onto a new span under its old producer",
+        "rule 5",
+        [CONTINUING],
+        retarget_resolution_onto_new_span(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "continuing resolution retargeted onto a new span under a new producer",
+        "rule 5",
+        [CONTINUING],
+        retarget_resolution_onto_new_span(producer=True),
+        text_edit=refuse("continuing_decision_changed"),
         same_text=ADMIT,
     ),
     decision(

@@ -450,6 +450,24 @@ def test_a_reconfirm_is_copy_on_write_under_a_new_producer(source_payload):
     assert refused.value.code == "reconfirm_unattested"
 
 
+def test_renaming_a_variant_onto_a_new_span_is_still_a_reconfirm(source_payload):
+    old = glossary_doc01(source_payload)
+    payload = old.model_dump(mode="json")
+    payload["revision"] += 1
+    payload["inputs"]["glossary_hc_r2"] = span_for(CASES["cosmetic"](GLOSSARY_TEXT))
+    v01 = payload["variant_assignments"].pop("v01")
+    payload["variant_assignments"]["v01b"] = dict(
+        v01, input_refs=[v01["input_refs"][0], "glossary_hc_r2"]
+    )
+    unattested = IdentitySource.model_validate_json(json.dumps(payload))
+    with pytest.raises(IntentError) as refused:
+        admit_same_text(old, unattested)
+    assert refused.value.code == "reconfirm_unattested"
+    payload["producers"]["review_v01b"] = producer("re-confirmed")
+    payload["variant_assignments"]["v01b"]["producer_ref"] = "review_v01b"
+    admit_same_text(old, IdentitySource.model_validate_json(json.dumps(payload)))
+
+
 def test_a_substantive_change_replaces_v01_with_a_derived_variant(source_payload):
     old = glossary_doc01(source_payload)
     span = span_for(CASES["substantive"](GLOSSARY_TEXT))
