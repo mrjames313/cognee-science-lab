@@ -43,5 +43,8 @@ MUTANTS = {
     "allow_changed_scoped_variants": ("check_scoped_variants", skip),
     "allow_old_keys_on_new_variants": ("check_new_variant_keys", skip),
     "allow_span_variants": ("check_no_span_variants", skip),
+    "allow_any_input_kinds": ("check_input_kinds", skip),
+    "allow_changed_foreign_inputs": ("check_foreign_inputs", skip),
+    "allow_unattested_reconfirms": ("check_reconfirmations", skip),
 }
 assert all(hasattr(admission, attribute) for attribute, _ in MUTANTS.values())

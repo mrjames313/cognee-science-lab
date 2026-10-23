@@ -7,7 +7,10 @@ over kinds of edit, so removal, addition, split, combination, a prefix shift,
 a correction with unchanged text and their mixtures are particular maps.
 Whether the text changed decides three rules: with unchanged text every mapped
 occurrence keeps its span and a continuing group may change its decision in
-place; with changed text span-scoped variants are refused. Functions below
+place; with changed text span-scoped variants are refused. Another
+document's inputs and corpus objects keep their content under one key: a
+span may only move, and a decision re-confirmed on a new input names a new
+producer. Functions below
 follow the order in which `admit` applies them. `check_absent_from_graph` is
 the one rule that reads the graph: on a first attempt no UUID the revision
 introduces may be a node yet, so the caller runs it after `admit`.
@@ -16,8 +19,19 @@ introduces may be a node yet, so the caller runs it after `admit`.
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from .models import Accepted, ChunkInput, CorpusObjectInput, SourceTextInput
-from .validation import IntentError, fresh_entity_id, fresh_mention_id, text_digest
+from .models import (
+    Accepted,
+    CorpusObjectInput,
+    SavedRecordInput,
+    SourceTextInput,
+)
+from .validation import (
+    IntentError,
+    fresh_entity_id,
+    fresh_mention_id,
+    is_foreign,
+    text_digest,
+)
 
 
 class OccurrenceRef(NamedTuple):
@@ -114,6 +128,8 @@ def admit(old, source, before, after, occurrence_map, *, first_attempt=True):
         check_derived_entity_ids(old, source)
     check_scoped_variants(old, source)
     check_new_variant_keys(old, source)
+    check_foreign_inputs(old, source)
+    check_reconfirmations(old, source)
     if text_changed:
         check_continuing_decisions(old, source, fate)
         check_no_span_variants(source)
@@ -136,20 +152,7 @@ def check_source_identity(old, source, before, after):
             "not_admitted", "Text replacement must preserve source identity"
         )
     for value in [old, source]:
-        if any(
-            not isinstance(i, (SourceTextInput, ChunkInput, CorpusObjectInput))
-            for i in value.inputs.values()
-        ):
-            raise IntentError(
-                "not_admitted",
-                "This text slice does not remap span/record dependencies",
-            )
-        if [k for k, i in value.inputs.items() if isinstance(i, SourceTextInput)] != [
-            key
-        ]:
-            raise IntentError(
-                "not_admitted", "Text slice replaces exactly one original"
-            )
+        check_input_kinds(value)
     a, b = old.inputs[key], source.inputs[key]
     if a.data_id != b.data_id or a.dataset_id != b.dataset_id:
         raise IntentError("not_admitted", "Original Data identity must remain stable")
@@ -157,6 +160,27 @@ def check_source_identity(old, source, before, after):
         raise IntentError(
             "source_changed", "Saved text transition fingerprints disagree"
         )
+
+
+def check_input_kinds(description):
+    """Inputs are texts, spans, chunks and corpus objects. Every text but the
+    original is another document of the same dataset. Saved-record inputs
+    are not remapped yet."""
+    own = description.inputs[description.original_input_ref]
+    for key, item in description.inputs.items():
+        if isinstance(item, SavedRecordInput):
+            raise IntentError(
+                "not_admitted", "This revision does not remap saved-record inputs"
+            )
+        if (
+            isinstance(item, SourceTextInput)
+            and key != description.original_input_ref
+            and (item.dataset_id != own.dataset_id or item.data_id == own.data_id)
+        ):
+            raise IntentError(
+                "not_admitted",
+                "Another text input is a different document of the same dataset",
+            )
 
 
 def check_next_revision(old, source):
@@ -499,6 +523,50 @@ def check_new_variant_keys(old, source):
         raise IntentError(
             "variant_key_reused", "A new variant key is not an old resolution key"
         )
+
+
+def without_range(item):
+    return {k: v for k, v in item.model_dump(mode="json").items() if k not in RANGE}
+
+
+RANGE = frozenset({"start", "end"})
+
+
+def check_foreign_inputs(old, source):
+    """Another document's input, or a corpus object, that both descriptions
+    hold under one key keeps its kind, document and digest. Only a span's
+    range may change, with its digest unchanged: a pure move. A changed
+    input takes a new key; an uncited key may be dropped."""
+    for key in set(old.inputs) & set(source.inputs):
+        if not (is_foreign(old, key) or is_foreign(source, key)):
+            continue
+        if without_range(old.inputs[key]) != without_range(source.inputs[key]):
+            raise IntentError(
+                "foreign_input_changed",
+                "Another document's input keeps its kind, document and digest; only a span may move",
+            )
+
+
+def check_reconfirmations(old, source):
+    """A decision that keeps its reviewed fields and cites a foreign input
+    key new in this revision is a re-confirm: it names a producer new in
+    this revision, which records who attested it."""
+    new_foreign = {
+        k for k in set(source.inputs) - set(old.inputs) if is_foreign(source, k)
+    }
+    for kind in ("mention_resolutions", "variant_assignments"):
+        before, after = getattr(old, kind), getattr(source, kind)
+        for key in set(before) & set(after):
+            if (
+                new_foreign & set(after[key].input_refs)
+                and reviewed_decisions({key: after[key]})
+                == reviewed_decisions({key: before[key]})
+                and after[key].producer_ref in old.producers
+            ):
+                raise IntentError(
+                    "reconfirm_unattested",
+                    "A decision re-confirmed on a new input names a producer new in this revision",
+                )
 
 
 def check_no_span_variants(source):
