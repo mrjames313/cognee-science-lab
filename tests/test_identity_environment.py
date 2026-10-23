@@ -312,3 +312,21 @@ def test_reopen_problem_reports_a_missing_operator_file_and_a_bad_marker(
     assert reopen_problem(root) == f"COGNEE_ENV_FILE={absent} does not name a file"
     (root / MARKER).write_text("{not json")
     assert reopen_problem(root) == "Root marker embedding record is malformed"
+
+
+def test_the_marker_records_the_fixture_kind_the_cli_routes_by(tmp_path):
+    from cognee_lab.identity.environment import create_root, read_fixture
+
+    root = tmp_path / "glossary"
+    create_root(root, "loopback", "glossary-fixture")
+    marker = json.loads((root / MARKER).read_text())
+    assert marker["fixture"] == "glossary-fixture"
+    assert read_fixture(root) == "glossary-fixture"
+    with pytest.raises(ValueError, match="fixture kind"):
+        create_root(tmp_path / "other", "loopback", "retrieve")
+    assert not (tmp_path / "other").exists()
+    (root / MARKER).write_text(json.dumps({**marker, "fixture": "unknown"}))
+    with pytest.raises(ValueError, match="fixture kind"):
+        read_fixture(root)
+    (root / MARKER).write_text(json.dumps({"kind": MARKER_KIND}))
+    assert read_fixture(root) is None

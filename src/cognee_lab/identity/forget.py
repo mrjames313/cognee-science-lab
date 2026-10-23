@@ -289,10 +289,11 @@ async def clear_withholdings(publisher, source):
     )
 
 
-def forgettable(row):
-    """Refuse, earlier than begin(), a row forget neither begins nor resumes:
-    a pending one, or a failed replacement or withdrawal, which only its own
-    method resumes. begin() refuses the same rows under the reservation."""
+def resumes(row):
+    """Whether forget resumes this row's failed forget. Refuses, earlier than
+    begin(), a row forget neither begins nor resumes: a pending one, or a
+    failed replacement or withdrawal, which only its own method resumes.
+    begin() refuses the same rows under the reservation."""
     retry = row.resumed_by == "forget"
     fresh = row.state in ("current", "withdrawn") or (
         row.state == "failed" and row.resumed_by is None
@@ -306,7 +307,7 @@ async def plan_for(publisher, source, row):
     """A failed forget's saved plan, which keeps the ownership the first
     attempt found before native deletion detached or removed it; otherwise a
     new plan from the graph."""
-    if not forgettable(row):
+    if not resumes(row):
         return await forget_plan(publisher, source)
     plan = dict(row.plan)
     if "stored_files" not in plan:
@@ -410,7 +411,7 @@ async def forget(
             publisher, row.tombstone, fault_stage=dependents_fault
         )
         return dict(attempt_id=None, state="forgotten", **removal)
-    retry = forgettable(row)
+    retry = resumes(row)
     plan = await plan_for(publisher, source, row)
     found = impact(source, plan, await records.rows())
     if not confirmed(found, plan, confirm, retry):

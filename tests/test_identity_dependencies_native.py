@@ -251,7 +251,8 @@ def test_native_readd_after_an_interrupted_refresh_leaves_no_decision_stuck(
     tmp_path,
 ):
     """doc01 is forgotten after its interrupted refresh finished, the glossary
-    entry then moves, and doc01 is re-added with the range it had. No edit
+    entry then moves, and doc01 is re-added from its caller file, whose span
+    holds the entry's first range. No edit
     classified that move, so only live validation finds it. status and the
     reviewer see the same withheld decisions retrieval does."""
     root = tmp_path / "readd"

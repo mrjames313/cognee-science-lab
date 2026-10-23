@@ -382,8 +382,8 @@ async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
     (`dependent_unfinished`) until that attempt finishes and a rerun of
     forget or reconcile removes it. Stops at the first failure and reports
     it, not raised: the forget before it already completed. `fault_stage`
-    "interrupted" stops before the first revision begins; any other fails
-    each removal revision there."""
+    "interrupted" stops before the first revision begins, when there is
+    one; any other fails each removal revision there."""
     from .revisions import replace_one
 
     ids = source_ids(tombstone)
@@ -391,12 +391,13 @@ async def remove_dependents(publisher, tombstone, *, fault_stage=None) -> dict:
     rows = await publisher.records.rows()
     revised, waiting = [], []
     try:
-        if fault_stage == "interrupted":
+        todo = unfinished(tombstone, rows)
+        if todo and fault_stage == "interrupted":
             raise IntentError(
                 "injected_failure",
                 "Injected failure before the dependents' removal revisions",
             )
-        for row in unfinished(tombstone, rows):
+        for row in todo:
             if removal_of(row, ids):
                 description = IdentitySource.model_validate_json(row.description)
             elif row.state != "current":

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cognee_lab.identity.forget import COMMITTED_FAULTS, FAULT_STAGES
+from cognee_lab.identity.forget import COMMITTED_FAULTS, DEPENDENT_FAULTS, STAGES
 from test_identity_native import command
 
 ABSENT = dict(
@@ -25,6 +25,13 @@ ABSENT = dict(
     owned_nodes=0,
     owned_edges=0,
 )
+
+
+def erased(report):
+    """The forget report shows nothing of the source left."""
+    return {k: report[k] for k in ABSENT} == ABSENT and (
+        report["removed_entities_present"] == []
+    )
 
 
 def result_of(root):
@@ -59,7 +66,7 @@ def test_native_forget_removes_one_source_and_a_readd_continues_the_revision(
     gone = one["sources"][first]
     assert gone["state"] == "forgotten"
     assert gone["saved_revision"] == 1 and gone["verified_revision"] == 1
-    assert gone["forget"] == ABSENT
+    assert erased(gone["forget"])
     intact(initial, one, other)
     other_id = one["sources"][other]["identity_data_id"]
     assert [c["identity_data_id"] for c in one["shared_variant"]["contributions"]] == [
@@ -85,6 +92,16 @@ def test_native_forget_removes_one_source_and_a_readd_continues_the_revision(
     forgotten_row = next(p for p in status["publications"] if p["state"] == "forgotten")
     assert forgotten_row["revision"] == 1 and forgotten_row["verified_revision"] == 1
     assert forgotten_row["plan"]["operation"] == "identity_forget"
+    tombstone = json.loads(forgotten_row["description"])
+    assert tombstone["kind"] == "identity_source_tombstone"
+    assert (
+        tombstone["mention_ids"]["g01"]
+        == initial["sources"][first]["mention_entity_id"]
+    )
+    for content in ("The controller", "instrument", "limits oscillations"):
+        assert content not in json.dumps(forgotten_row)
+    assert "runtime_profile" not in forgotten_row["plan"]
+    assert all("properties" not in e for e in forgotten_row["plan"]["edges"])
 
     for operation in ("forget", "reconcile"):
         refused = command(
@@ -239,7 +256,7 @@ def test_native_forget_finishes_when_another_item_keeps_the_stored_file(tmp_path
     command(root, "forget", "--source", "doc01", "--expected-revision", "1")
     final = result_of(root)
     assert final["sources"]["doc01"]["state"] == "forgotten"
-    assert final["sources"]["doc01"]["forget"] == ABSENT
+    assert erased(final["sources"]["doc01"]["forget"])
     status = json.loads(command(root, "status").stdout)
     plan = next(p for p in status["publications"] if p["state"] == "forgotten")["plan"]
     kept = [
@@ -250,8 +267,34 @@ def test_native_forget_finishes_when_another_item_keeps_the_stored_file(tmp_path
     assert kept and all(Path(k).exists() for k in kept)
 
 
+def token_of(root, label):
+    """The dry run's token for forgetting a source at revision 1."""
+    report = json.loads(
+        command(
+            root, "forget", "--source", label, "--expected-revision", "1", "--dry-run"
+        ).stdout
+    )
+    return report["token"], report
+
+
+def removed(entry):
+    """doc02's r01 no longer reads doc01: unresolved under the removal
+    producer, with doc01's inputs dropped."""
+    r01 = entry["decisions"]["r01"]
+    return (
+        entry["resolution_status"] == "unresolved"
+        and r01["producer_ref"].startswith("forget_")
+        and r01["input_refs"] == ["doc01", "existing_A"]
+        and not {"doc01_text", "doc01_instrument"} & set(entry["input_keys"])
+    )
+
+
 @pytest.mark.integration
-def test_native_forget_refuses_a_dependent_until_it_is_withdrawn(tmp_path):
+def test_native_forget_removes_a_dependents_decision_once_confirmed(tmp_path):
+    """doc02's r01 read doc01's text and private singleton. The forget is
+    refused without the dry run's token, writes nothing on a dry run, and
+    with the token erases doc01 and then unresolves doc02's r01 in a revision
+    of its own. A re-add of doc01 does not bring the decision back."""
     root = tmp_path / "dependent"
     command(root, "multi-fixture", "--dependent")
     initial = result_of(root)
@@ -264,37 +307,301 @@ def test_native_forget_refuses_a_dependent_until_it_is_withdrawn(tmp_path):
         == initial["sources"]["doc01"]["identity_data_id"]
     )
 
-    refused = command(
-        root, "forget", "--source", "doc01", "--expected-revision", "1", expect=1
-    )
-    report = error_of(refused)
-    assert "reconsider the dependents" in report["message"]
-    found = report["details"]["dependents"]
-    assert {d["identity_data_id"] for d in found} == {reader}
-    assert sorted((d["input_ref"], d["kind"]) for d in found) == [
+    token, report = token_of(root, "doc01")
+    assert report["confirmation_required"]
+    (dependent,) = report["dependents"]
+    assert dependent["identity_data_id"] == reader and not dependent["blocked"]
+    (r01,) = dependent["decisions"]
+    assert (r01["assignment"], r01["outcome"]) == ("r01", "unresolved")
+    assert sorted((c["input_ref"], c["kind"]) for c in r01["citing"]) == [
         ("doc01_instrument", "corpus_object"),
         ("doc01_text", "source_text"),
     ]
-    assert next(d["consumed"] for d in found if d["kind"] == "source_text") == document
+    assert (
+        next(c for c in r01["citing"] if c["kind"] == "source_text")["consumed"]
+        == document
+    )
+    assert dependent["unlinked_mentions"] == [
+        initial["sources"]["doc02"]["mention_entity_id"]
+    ]
+    assert any(str(root) in f for f in report["caller_files"])
+
+    refused = command(
+        root, "forget", "--source", "doc01", "--expected-revision", "1", expect=1
+    )
+    answer = error_of(refused)
+    assert answer["message"].startswith("This forget removes other sources")
+    assert answer["details"]["token"] == token
     unchanged = json.loads(command(root, "retrieve").stdout)
     assert len(unchanged["facts"]) == 2 and unchanged["unavailable_sources"] == []
     status = json.loads(command(root, "status").stdout)
     assert [p["state"] for p in status["publications"]] == ["current", "current"]
     assert status["recovery_events"] == []
 
-    command(root, "withdraw", "--source", "doc02")
-    command(root, "forget", "--source", "doc01", "--expected-revision", "1")
+    command(
+        root,
+        "forget",
+        "--source",
+        "doc01",
+        "--expected-revision",
+        "1",
+        "--confirm",
+        token,
+    )
     final = result_of(root)
     assert final["sources"]["doc01"]["state"] == "forgotten"
-    assert final["sources"]["doc01"]["forget"] == ABSENT
-    withdrawn = final["sources"]["doc02"]
-    assert withdrawn["state"] == "withdrawn"
-    assert withdrawn["original_fact_present"] and withdrawn["original_evidence_present"]
-    assert not final["hc_entity"]["present"]
-    assert not final["shared_singleton_present"]
+    assert erased(final["sources"]["doc01"]["forget"])
+    assert final["forget"]["dependents_revised"] == [
+        dict(identity_data_id=reader, revision=2)
+    ]
+    assert final["dependents_failed"] is None
+    doc02 = final["sources"]["doc02"]
+    assert doc02["state"] == "current" and doc02["verified_revision"] == 2
+    assert removed(doc02)
+    # The local fact stays; no identity query reaches it.
+    assert doc02["original_fact_present"] and doc02["original_evidence_present"]
     assert final["result"]["facts"] == []
     assert final["result"]["unavailable_sources"] == []
     assert final["recovery_events"] == []
+
+    command(root, "readd", "--source", "doc01", "--expected-revision", "1")
+    back = result_of(root)
+    assert back["sources"]["doc01"]["state"] == "current"
+    assert removed(back["sources"]["doc02"])
+    assert [f["source_id"] for f in back["result"]["facts"]] == [
+        back["sources"]["doc01"]["mention_entity_id"]
+    ]
+
+
+@pytest.mark.integration
+def test_native_forget_refuses_a_token_whose_impact_changed(tmp_path):
+    """The dry run of doc01's forget finds no dependent while doc02 is
+    forgotten. doc02's re-add reads doc01 again, so that token no longer
+    matches, and the forget is refused before any write."""
+    root = tmp_path / "stale"
+    command(root, "multi-fixture", "--dependent")
+    command(root, "forget", "--source", "doc02", "--expected-revision", "1")
+    token, report = token_of(root, "doc01")
+    assert not report["confirmation_required"] and report["dependents"] == []
+    command(root, "readd", "--source", "doc02", "--expected-revision", "1")
+    refused = command(
+        root,
+        "forget",
+        "--source",
+        "doc01",
+        "--expected-revision",
+        "1",
+        "--confirm",
+        token,
+        expect=1,
+    )
+    answer = error_of(refused)
+    assert answer["message"].startswith("The impact changed")
+    assert answer["details"]["token"] != token
+    assert len(answer["details"]["dependents"]) == 1
+    status = json.loads(command(root, "status").stdout)
+    assert [p["state"] for p in status["publications"]] == ["current", "current"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("fault", sorted(DEPENDENT_FAULTS))
+def test_native_an_interrupted_removal_resumes_through_reconcile(tmp_path, fault):
+    """The forget completes and its dependent's removal is interrupted:
+    before the removal revision begins, doc02's r01 still reads doc01 and is
+    withheld as input_removed; when the removal revision fails, doc02 is
+    withheld whole. A re-add waits. reconcile on doc01 finishes the
+    removal."""
+    root = tmp_path / "interrupted"
+    command(root, "multi-fixture", "--dependent")
+    token, _ = token_of(root, "doc01")
+    command(
+        root,
+        "forget",
+        "--source",
+        "doc01",
+        "--expected-revision",
+        "1",
+        "--confirm",
+        token,
+        "--fault-stage",
+        fault,
+        expect=1,
+    )
+    stopped = result_of(root)
+    assert stopped["sources"]["doc01"]["state"] == "forgotten"
+    assert stopped["dependents_failed"]["code"] in (
+        "injected_failure",
+        "recovery_required",
+    )
+    query = json.loads(command(root, "retrieve").stdout)
+    assert query["facts"] == []
+    reasons = [(u["assignment_id"], u["reason"]) for u in query["unavailable_sources"]]
+    if fault == "forget_dependents":
+        assert stopped["sources"]["doc02"]["saved_revision"] == 1
+        assert reasons == [("r01", "input_removed")]
+    else:
+        assert stopped["sources"]["doc02"]["state"] == "failed"
+        assert reasons == [(None, "publication_failed")]
+    waiting = command(
+        root, "readd", "--source", "doc01", "--expected-revision", "1", expect=1
+    )
+    assert "has not revised every dependent" in error_of(waiting)["message"]
+
+    command(root, "reconcile", "--source", "doc01")
+    done = result_of(root)
+    doc02 = done["sources"]["doc02"]
+    assert doc02["state"] == "current" and doc02["verified_revision"] == 2
+    assert removed(doc02)
+    assert done["result"]["unavailable_sources"] == []
+    assert all(e["resolved_at"] for e in done["recovery_events"])
+    refused = command(
+        root, "forget", "--source", "doc01", "--expected-revision", "1", expect=1
+    )
+    assert "Forgotten source" in error_of(refused)["message"]
+
+
+@pytest.mark.integration
+def test_native_a_dependent_with_an_unfinished_attempt_waits(tmp_path):
+    """doc02's withdrawal failed, so it is a blocked dependent: the token
+    names it, the forget completes, and its removal waits. Once its
+    withdrawal finishes it reads nothing, and the forget has nothing left."""
+    root = tmp_path / "blocked"
+    command(root, "multi-fixture", "--dependent")
+    command(
+        root,
+        "withdraw",
+        "--source",
+        "doc02",
+        "--fault-stage",
+        "withdraw_contributions",
+        expect=1,
+    )
+    token, report = token_of(root, "doc01")
+    assert [d["blocked"] for d in report["dependents"]] == [True]
+    command(
+        root,
+        "forget",
+        "--source",
+        "doc01",
+        "--expected-revision",
+        "1",
+        "--confirm",
+        token,
+        expect=1,
+    )
+    waiting = result_of(root)
+    assert waiting["sources"]["doc01"]["state"] == "forgotten"
+    assert waiting["dependents_failed"]["code"] == "dependent_unfinished"
+    assert [d["state"] for d in waiting["forget"]["dependents_waiting"]] == ["failed"]
+    command(root, "withdraw", "--source", "doc02")
+    refused = command(root, "reconcile", "--source", "doc01", expect=1)
+    assert "Forgotten source" in error_of(refused)["message"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("prior", ["withdrawn", "failed"])
+def test_native_any_source_can_be_forgotten(tmp_path, prior):
+    """A withdrawn doc02 keeps its document, facts and evidence until the
+    forget removes them; a doc02 whose first publication failed is forgotten
+    as it stands."""
+    root = tmp_path / prior
+    if prior == "withdrawn":
+        command(root, "multi-fixture")
+        command(root, "withdraw", "--source", "doc02")
+    else:
+        command(
+            root,
+            "multi-fixture",
+            "--source",
+            "doc02",
+            "--fault-stage",
+            "nodes",
+            expect=1,
+        )
+    command(root, "forget", "--source", "doc02", "--expected-revision", "1")
+    final = result_of(root)
+    assert final["sources"]["doc02"]["state"] == "forgotten"
+    assert erased(final["sources"]["doc02"]["forget"])
+    assert final["sources"]["doc01"]["state"] == "current"
+    assert [f["source_id"] for f in final["result"]["facts"]] == [
+        final["sources"]["doc01"]["mention_entity_id"]
+    ]
+    assert all(
+        e["resolved_at"] and e["message"] is None for e in final["recovery_events"]
+    )
+
+
+@pytest.mark.integration
+def test_native_readd_takes_the_callers_changed_files(tmp_path):
+    """A re-add is a fresh publication from the caller's files: here doc01's
+    text gains a sentence, and its identity file states the new digest."""
+    from cognee_lab.identity.validation import text_digest
+
+    root = tmp_path / "changed"
+    command(root, "multi-fixture")
+    command(root, "forget", "--source", "doc01", "--expected-revision", "1")
+    text = (root / "source.txt").read_text().rstrip("\n") + " HC was serviced.\n"
+    (root / "source.txt").write_text(text)
+    refused = command(
+        root, "readd", "--source", "doc01", "--expected-revision", "1", expect=1
+    )
+    assert "text file and identity file disagree" in error_of(refused)["message"]
+    identity = json.loads((root / "identity.json").read_text())
+    identity["inputs"]["doc01"]["text_sha256"] = text_digest(text)
+    (root / "identity.json").write_text(json.dumps(identity))
+    command(root, "readd", "--source", "doc01", "--expected-revision", "1")
+    back = result_of(root)
+    doc01 = back["sources"]["doc01"]
+    assert doc01["state"] == "current" and doc01["verified_revision"] == 2
+    assert doc01["original_fact_present"] and doc01["registered_matches_saved"]
+    assert len(back["result"]["facts"]) == 2
+    readded = readded_description(root, "doc01")
+    assert readded.inputs["doc01"].text_sha256 == text_digest(text)
+
+
+@pytest.mark.integration
+def test_native_forget_of_the_glossary_removes_what_doc01_read(tmp_path):
+    """doc01's r01 and v01 read the glossary's HC entry. Forgetting the
+    glossary unresolves r01, drops v01 and HC, which only v01 named, and
+    keeps the Helios controller, which doc01 still reads as a corpus input.
+    The glossary comes back from its files; the decisions do not."""
+    root = tmp_path / "glossary"
+    command(root, "glossary-fixture")
+    token, report = token_of(root, "glossary")
+    (dependent,) = report["dependents"]
+    assert [(d["assignment"], d["outcome"]) for d in dependent["decisions"]] == [
+        ("r01", "unresolved"),
+        ("v01", "dropped"),
+    ]
+    assert dependent["dropped_entities"] == ["9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"]
+    assert dependent["kept_entities"] == ["8b4bff50-907b-56b6-bc80-3b0a7018714a"]
+    assert dependent["dropped_inputs"] == ["glossary", "glossary_hc"]
+    command(
+        root,
+        "forget",
+        "--source",
+        "glossary",
+        "--expected-revision",
+        "1",
+        "--confirm",
+        token,
+    )
+    final = json.loads((root / "glossary_result.json").read_text())
+    assert final["sources"]["glossary"]["state"] == "forgotten"
+    doc01 = final["sources"]["doc01"]
+    assert doc01["state"] == "current" and doc01["saved_revision"] == 2
+    assert list(doc01["decisions"]) == ["r01"]
+    assert doc01["decisions"]["r01"]["producer_ref"].startswith("forget_")
+    assert doc01["glossary_spans"] == {}
+    assert final["glossary"]["text"] is None
+    assert final["result"]["facts"] == [] and final["helios"]["facts"] == []
+    assert final["result"]["unavailable_sources"] == []
+    command(root, "readd", "--source", "glossary", "--expected-revision", "1")
+    back = json.loads((root / "glossary_result.json").read_text())
+    assert back["sources"]["glossary"]["state"] == "current"
+    assert back["glossary"]["hc_entry"]["start"] == 10
+    assert list(back["sources"]["doc01"]["decisions"]) == ["r01"]
+    assert back["helios"]["facts"] == []
 
 
 @pytest.mark.integration
@@ -331,14 +638,14 @@ def test_native_readd_of_a_consumer_waits_for_the_unfinished_forget(tmp_path):
     command(root, "reconcile", "--source", "doc01")
     recovered = result_of(root)
     assert recovered["sources"]["doc01"]["state"] == "forgotten"
-    assert recovered["sources"]["doc01"]["forget"] == ABSENT
+    assert erased(recovered["sources"]["doc01"]["forget"])
     # The refused re-add came before any write: nothing of doc02 came back.
     assert recovered["sources"]["doc02"]["state"] == "forgotten"
-    assert recovered["sources"]["doc02"]["forget"] == ABSENT
+    assert erased(recovered["sources"]["doc02"]["forget"])
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("fault", FAULT_STAGES)
+@pytest.mark.parametrize("fault", [*STAGES, *COMMITTED_FAULTS])
 def test_native_forget_failure_withholds_the_source_and_reconcile_finishes_it(
     tmp_path, fault
 ):
@@ -374,7 +681,7 @@ def test_native_forget_failure_withholds_the_source_and_reconcile_finishes_it(
     command(root, "reconcile", "--source", "doc01")
     recovered = result_of(root)
     assert recovered["sources"]["doc01"]["state"] == "forgotten"
-    assert recovered["sources"]["doc01"]["forget"] == ABSENT
+    assert erased(recovered["sources"]["doc01"]["forget"])
     intact(initial, recovered, "doc02")
     assert [f["source_id"] for f in recovered["result"]["facts"]] == [
         initial["sources"]["doc02"]["mention_entity_id"]
