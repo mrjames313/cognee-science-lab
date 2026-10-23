@@ -1,7 +1,7 @@
 """Exact input checks. No identity judgments or approximate substring matching."""
 
 from hashlib import sha256
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID, uuid5
 
 import rfc8785
@@ -125,6 +125,88 @@ def checked_inputs(source: IdentitySource, withheld) -> set[str]:
     return used
 
 
+class Failure(NamedTuple):
+    """Why one input fails: the code that fails the source when the input is
+    its own, the reason that withholds decisions when it is foreign."""
+
+    code: str
+    reason: str
+    message: str
+
+
+async def input_failure(
+    source, key, *, texts, chunks, mapping, graph, saved_record_reader
+) -> Failure | None:
+    """Check one input against the supplied texts and chunks, the graph or
+    the saved-record reader. None when it validates."""
+    item = source.inputs[key]
+    document = getattr(item, "document_ref", None)
+    text = texts.get(document if document else key)
+    if isinstance(item, (SourceTextInput, ChunkInput, TextSpanInput)) and text is None:
+        return Failure("source_changed", INPUT_REMOVED, f"Text missing: {key}")
+    if isinstance(item, SourceTextInput):
+        if text_digest(text) != item.text_sha256:
+            return Failure("source_changed", INPUT_CHANGED, f"Text changed: {key}")
+    elif isinstance(item, TextSpanInput):
+        if (
+            item.end > len(text)
+            or text_digest(text[item.start : item.end]) != item.text_sha256
+        ):
+            return Failure(
+                "input_changed", INPUT_CHANGED, f"Span missing/changed: {key}"
+            )
+    elif isinstance(item, CorpusObjectInput):
+        node = await graph.get_node(str(item.entity_id))
+        if node is None:
+            return Failure(
+                "missing_reasoning_input", INPUT_REMOVED, f"Corpus input missing: {key}"
+            )
+        if any(field not in node for field in item.selected_fields) or (
+            object_digest({field: node[field] for field in item.selected_fields})
+            != item.content_sha256
+        ):
+            return Failure(
+                "input_changed", INPUT_CHANGED, f"Corpus fields changed: {key}"
+            )
+    elif isinstance(item, SavedRecordInput):
+        if saved_record_reader is None:
+            raise IntentError("unsupported_input", "A saved-record reader is required")
+        value, revision = await saved_record_reader(item)
+        if (
+            revision != item.representation_revision
+            or object_digest(value) != item.content_sha256
+        ):
+            return Failure(
+                "input_changed", INPUT_CHANGED, f"Saved record changed: {key}"
+            )
+    elif isinstance(item, ChunkInput):
+        chunk = chunks.get(str(item.chunk_id))
+        parent = source.inputs[item.document_ref]
+        if (
+            chunk is None
+            or str(chunk.is_part_of.id) != str(parent.data_id)
+            or item.end > len(text)
+            or chunk.text != text[item.start : item.end]
+        ):
+            return Failure(
+                "chunk_mapping",
+                INPUT_CHANGED,
+                f"Chunk missing or mapping changed: {key}",
+            )
+        # Only the own document's chunks are all supplied, so only they are
+        # checked against the ordered native tiling.
+        if not is_foreign(source, key) and mapping.get(str(item.chunk_id)) != (
+            item.start,
+            item.end,
+        ):
+            return Failure(
+                "chunk_mapping",
+                INPUT_CHANGED,
+                f"Chunk range differs from ordered native mapping: {key}",
+            )
+    return None
+
+
 async def validate_inputs(
     source: IdentitySource,
     *,
@@ -138,7 +220,6 @@ async def validate_inputs(
     `withheld` consume. An own input that fails raises. A foreign input that
     fails is returned with its reason (`input_changed` or `input_removed`),
     so the caller withholds the decisions citing it instead of the source."""
-    used = checked_inputs(source, withheld)
     own_ref = source.original_input_ref
     own = source.inputs[own_ref]
     if own_ref not in texts or text_digest(texts[own_ref]) != own.text_sha256:
@@ -149,75 +230,21 @@ async def validate_inputs(
         mapping = map_chunks(texts[own_ref], matching)
 
     drift = {}
-    for key in sorted(used):
-        item = source.inputs[key]
-        foreign = is_foreign(source, key)
-        document = getattr(item, "document_ref", None)
-        text = texts.get(document if document else key)
-        if foreign and isinstance(item, (SourceTextInput, ChunkInput, TextSpanInput)):
-            if text is None:
-                drift[key] = INPUT_REMOVED
-                continue
-        if isinstance(item, SourceTextInput):
-            if text is None or text_digest(text) != item.text_sha256:
-                if foreign:
-                    drift[key] = INPUT_CHANGED
-                    continue
-                raise IntentError("source_changed", f"Text missing/changed: {key}")
-        elif isinstance(item, TextSpanInput):
-            if (
-                item.end > len(text)
-                or text_digest(text[item.start : item.end]) != item.text_sha256
-            ):
-                if foreign:
-                    drift[key] = INPUT_CHANGED
-                    continue
-                raise IntentError("input_changed", f"Span missing/changed: {key}")
-        elif isinstance(item, CorpusObjectInput):
-            node = await graph.get_node(str(item.entity_id))
-            if node is None:
-                drift[key] = INPUT_REMOVED
-            elif any(field not in node for field in item.selected_fields) or (
-                object_digest({field: node[field] for field in item.selected_fields})
-                != item.content_sha256
-            ):
-                drift[key] = INPUT_CHANGED
-        elif isinstance(item, SavedRecordInput):
-            if saved_record_reader is None:
-                raise IntentError(
-                    "unsupported_input", "A saved-record reader is required"
-                )
-            value, revision = await saved_record_reader(item)
-            if (
-                revision != item.representation_revision
-                or object_digest(value) != item.content_sha256
-            ):
-                raise IntentError("input_changed", f"Saved record changed: {key}")
-        elif isinstance(item, ChunkInput):
-            chunk = chunks.get(str(item.chunk_id))
-            parent = source.inputs[item.document_ref]
-            if (
-                chunk is None
-                or str(chunk.is_part_of.id) != str(parent.data_id)
-                or item.end > len(text)
-                or chunk.text != text[item.start : item.end]
-            ):
-                if foreign:
-                    drift[key] = INPUT_CHANGED
-                    continue
-                raise IntentError(
-                    "chunk_mapping", f"Chunk missing or mapping changed: {key}"
-                )
-            # Only the own document's chunks are all supplied, so only they
-            # are checked against the ordered native tiling.
-            if not foreign and mapping.get(str(item.chunk_id)) != (
-                item.start,
-                item.end,
-            ):
-                raise IntentError(
-                    "chunk_mapping",
-                    f"Chunk range differs from ordered native mapping: {key}",
-                )
+    for key in sorted(checked_inputs(source, withheld) - {own_ref}):
+        failure = await input_failure(
+            source,
+            key,
+            texts=texts,
+            chunks=chunks,
+            mapping=mapping,
+            graph=graph,
+            saved_record_reader=saved_record_reader,
+        )
+        if failure is None:
+            continue
+        if not is_foreign(source, key):
+            raise IntentError(failure.code, failure.message)
+        drift[key] = failure.reason
 
     for group in source.mention_groups.values():
         text = texts[group.document_ref]

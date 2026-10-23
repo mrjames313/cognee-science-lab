@@ -10,7 +10,6 @@ from .publish import contributions, identity_edges
 from .validation import (
     IntentError,
     decision_inputs,
-    is_foreign,
     validate_inputs,
     withheld_by,
 )
@@ -29,7 +28,7 @@ async def live_drift(publisher, source, withheld) -> dict[str, str]:
             "Registered identity snapshot differs from saved current intent",
         )
     texts, chunks = await read_texts(source), {}
-    for key, item in source.inputs.items():
+    for item in source.inputs.values():
         if isinstance(item, ChunkInput):
             node = await publisher.graph.get_node(str(item.chunk_id))
             parent = source.inputs[item.document_ref]
@@ -40,12 +39,9 @@ async def live_drift(publisher, source, withheld) -> dict[str, str]:
                     publisher.graph, item.chunk_id, parent.data_id, "is_part_of"
                 )
             ):
-                # Another document's chunk is checked per decision below.
-                if is_foreign(source, key):
-                    continue
-                raise IntentError(
-                    "chunk_mapping", "Original chunk or document link missing"
-                )
+                # validate_inputs fails an own chunk that is missing and
+                # withholds the decisions citing a foreign one.
+                continue
             chunks[str(item.chunk_id)] = SimpleNamespace(
                 id=item.chunk_id,
                 chunk_index=node["chunk_index"],
