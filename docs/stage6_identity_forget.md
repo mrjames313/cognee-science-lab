@@ -1,6 +1,6 @@
 # Stage 6 forget: erase a source and remove what depended on it
 
-**Date:** 2026-10-23 (checkpoint I). **Status:** implemented and verified by the assistant on the user's Mac with loopback embeddings. No user-reviewed fixture root exists yet. The [history note](#history) at the end records what checkpoint F built on 2026-10-22 and what this checkpoint changed.
+**Date:** 2026-10-23 (checkpoint I); 2026-10-24 (checkpoint J2, [the cascade](#the-cascade)). **Status:** implemented and verified by the assistant on the user's Mac with loopback embeddings. No user-reviewed fixture root exists yet. The [history note](#history) at the end records what checkpoint F built on 2026-10-22 and what the later checkpoints changed.
 
 `forget` erases one source: its original document, its generated identity source and everything only they owned. The ledger row keeps a tombstone of identifiers and no content. Other sources keep their own interpretations, the shared Entities they own and the shared edges with only their contributions. When another source based a decision on the forgotten source, the forget removes that decision too, in a revision of that source, after the caller confirms the forget's impact. `withdraw` stays separate: it retires a source's identity interpretation and keeps the document, its facts, markers and evidence.
 
@@ -15,13 +15,13 @@ The user decided on 2026-10-23:
 7. Any source can be forgotten: current, withdrawn, or one whose first publication failed.
 8. Old formats are not read: a forgotten row that still holds its description is refused. Development roots that hold one are regenerated. The reviewed roots under `outputs/stage6_*` are never touched.
 9. Withholding stays for text edits (checkpoint H), where the input still exists and may be re-confirmed.
-10. Saved-record inputs, chains of dependents and the non-identity example are deferred to the next checkpoint.
+10. Saved-record inputs, chains of dependents and the non-identity example are deferred to the next checkpoint. (Checkpoint J1 added saved-record inputs. On 2026-10-23 the user decided that erasure cascades down a chain in dependency order, with one dry run, one token and one confirmation for every level; checkpoint J2 builds it, in [The cascade](#the-cascade).)
 
 A review of the spec (2026-10-23, verdict proceed) fixed the order, the token, the admission rule and the tombstone shape; those resolutions are built as stated below.
 
 ## Commands
 
-On a `multi-fixture` root, and on a `glossary-fixture` root for `doc01` or `glossary`:
+On a `multi-fixture` root, and on a `glossary-fixture` root for `doc01` or `glossary` (and `doc03` on a `--chain` root):
 
 - `forget --source <doc> --expected-revision N --dry-run` reports what the forget would do and the token to confirm. It writes nothing, and it returns before any result file is written.
 - `forget --source <doc> --expected-revision N` forgets a source nothing depends on.
@@ -105,18 +105,20 @@ Readers of a forgotten row read the tombstone: `stages.saved_row` skips the desc
 
 `erasure.impact` computes, from the saved descriptions and the forget plan's ownership snapshot and never from the live graph, each dependent and what its removal revision would do:
 
-- Each decision it removes, with the input that causes it: `input_ref`, `kind` and the `consumed` UUID (the document for a text, span or chunk; the Entity for a corpus object). A resolution becomes unresolved; a variant is dropped.
+- Each decision it removes, with its `record_type` and the input that causes it: `input_ref`, `kind` and the `consumed` UUID (the document for a text, span or chunk; the Entity for a corpus object; the cited identity source for a saved record). A resolution becomes unresolved; a variant is dropped.
+- `level`, `removed_records` and `cited_records` (since checkpoint J2): the dependent's place in the cascade, the records its removal removes and the removed records of other dependents it cites. See [The cascade](#the-cascade).
 - `dropped_entities`: the reusable recipes that a removed decision named and no remaining decision names. Other owners keep the Entity, because the replacement only retires this source's declaration.
 - `kept_entities`: such recipes that stay because a saved source still lists the Entity as a corpus input. A third source counts, and so does the dependent itself; dropping its last declaration could take the Entity out of the graph under a reader.
 - `unlinked_mentions`: the mentions whose facts lose their identity link.
 - `dropped_inputs`: the inputs nothing cites any more.
 - `blocked`: the dependent's own attempt is pending, or failed and not a replacement (a failed withdrawal or publication). Such a dependent does not block the forget; its removal waits (`dependent_unfinished`) until its own method finishes it, and a rerun of `forget` or `reconcile` then removes it. A failed replacement is not blocked: its removal applies to its saved revision.
 
-The token is `object_digest` over the source's dataset, identity ID and revision, the removed Entity IDs, and per dependent its identity ID, its revision, its state, assignment keys, each decision's citing inputs, kind and outcome, its dropped Entity IDs and its blocked flag. The dependent's revision and state are in it (the state since fix round 2) so that the token changes whenever anything the report shows could change, even when the decisions it would remove stay the same. `forget` checks it before `begin` and again in `forget_impact`. Without a token, a forget with dependents is refused with `confirmation_required`, and a stale token with `impact_changed`; both carry the dry-run report in `details`. A retry of a failed forget without a token keeps the impact its first attempt confirmed.
+The token is `object_digest` over the source's dataset, identity ID and revision, the removed Entity IDs, and per dependent its identity ID, its revision, its state, its level, assignment keys, each decision's citing inputs, record type and outcome, its dropped Entity IDs, its removed and cited records and its blocked flag. The dependent's revision and state are in it (the state since fix round 2) so that the token changes whenever anything the report shows could change, even when the decisions it would remove stay the same. `forget` checks it before `begin` and again in `forget_impact`. Without a token, a forget with dependents is refused with `confirmation_required`, and a stale token with `impact_changed`; both carry the dry-run report in `details`. A retry of a failed forget without a token keeps the impact its first attempt confirmed.
 
 The dry run returns the impact and:
 
-- `counts`: dependents, blocked dependents, decisions, unresolved, dropped, dropped Entities and facts that lose their identity link.
+- `levels`: each level with its dependents, in order.
+- `counts`: dependents, levels, blocked dependents, decisions, unresolved, dropped, dropped Entities and facts that lose their identity link.
 - `scrubbed`: what the tombstone drops: the occurrences, recipes and explanations of the description, the plan's edges with properties, and the source's recovery-event messages.
 - `residue`: what erasure leaves physically. LanceDB marks deleted vector rows and keeps their bytes until a compaction and a cleanup of old table versions. The graph store and SQLite keep deleted rows in their files until a checkpoint and `VACUUM`. Erasure is logical.
 - `caller_files`: the root files that hold the source's own inputs and the commands' results (`source.txt`, `identity.json`, `identity_doc01_revision*.json` and `multisource_result.json` for doc01, for example). They are listed, never deleted. The fixture side (`forget_fixture.py`) adds them to the dry run, to a refusal's report and to the forget's result; `forget`, `preview` and `erasure.report` know nothing of files.
@@ -124,15 +126,16 @@ The dry run returns the impact and:
 
 ## The removal revision
 
-`erasure.revisions` yields each dependent's removal revision (`removal_revision`) with what it does, parsing each row once; `impact` reports them and `finish_dependents` writes them. A current dependent takes its next revision with unchanged text:
+`erasure.cascade` lists each dependent's removal revision (`removal_revision`) with what it does, in level order; `impact` reports them and `finish_dependents` writes them. A current dependent takes its next revision with unchanged text:
 
 - A resolution citing what the forget removed becomes `unresolved` in place: the same key and group, its input refs without the erased keys (the original document when nothing else remains), and a producer new in the revision.
 - A variant citing it is dropped, with this dependent's contribution to that edge.
+- Since checkpoint J2 each record type says how it is removed (`records.REGISTRY`, the hook `removed`), and `removal_revision` and `check_erasure_complete` both ask it.
 - Groups lose the erased input keys, with the same fallback.
 - A recipe goes as `dropped_entities` above says.
 - Inputs nothing cites any more are dropped.
 
-The producer is `forget_<forgotten identity ID>_r<revision>`: method `captured_fixture`, implementation `removed by forget`, and a configuration that names `forgotten_identity_data_id`, `forgotten_document_id`, `removed_entity_ids` and `impact_token`.
+The producer is `forget_<forgotten identity ID>_r<revision>`: method `captured_fixture`, implementation `removed by forget`, and a configuration that names `forgotten_identity_data_id`, `forgotten_document_id`, `removed_entity_ids`, `impact_token` and, since checkpoint J2, `removed_records` and `cited_records` (see [The cascade](#the-cascade)).
 
 **Erasure retry.** A dependent whose replacement or publication failed keeps a saved revision that only its own retry finishes, and that revision may cite the forgotten document, which can never be registered again. `finish_dependents` applies the removal to that saved description at the same revision and sends it as that retry. `erasure.removal_writer` picks the writer from the row's `failed_attempt` (publish, replace, text_change, withdraw or forget): a pending row and a failed withdrawal or forget wait, the rest write.
 
@@ -141,6 +144,39 @@ The producer is `forget_<forgotten identity ID>_r<revision>`: method `captured_f
 - A failed first publication, reconcile or re-add finishes through `finish_publication`, which registers the removal's description and calls `Publisher.reconcile` with it. `Publisher.superseded` keeps the saved `erased_from` and adds the saved description when the description differs (`superseding_plan`). A reconcile whose plan carries `erased_from` plans the retirement of the superseded descriptions (`replace.plan_retirement`) and runs the replacement's cleanup after its writes (`replace.retire` and `verify_retired`): the recipes, nodes, name vectors and identity-edge contributions the failed attempt wrote and the removal no longer declares go. `finish_publication` registers the removal's description before `begin`; a refusal leaves that snapshot written, and a rerun converges on it.
 
 Each step of the chain must cite what its forget removed (`erasure_empty`), name exactly the Entities that forget removed (`erasure_unbound`) and keep the dataset, identity source and document (`erasure_unrelated`). `RecordStore.begin` enforces the same chain under the writer reservation, against the forgotten rows it reads there (see "The ledger").
+
+## The cascade
+
+Checkpoint J2, built 2026-10-24 from the user's decision of 2026-10-23: erasure cascades down a chain of citations in dependency order, one dry run and one token cover every level, and one confirmation covers all of it. The decisions of Checkpoint I still hold: dependents are removed, not withheld; a dependent never blocks the forget; a pending or failed dependent waits and resumes.
+
+**Levels.** A dependent at level 1 reads the forgotten source directly: its document, a removed Entity or any of its saved records. A dependent that cites a record another dependent's removal removes is one level below that dependent, at its longest path: its level is one more than the deepest removal it cites. Each dependent gets one removal revision for everything it loses, at that level.
+
+**A removed record** (`records.RemovedRecord`) names its source, record type and key, the fingerprint it had before the removal and `last_revision`, the last revision of its source that held it. A citation reads it when it pins that fingerprint at that revision or before. So:
+
+- a citation pinned at an older fingerprint is not part of the cascade (review resolution 12); live withholding holds it, as it did before;
+- a citation made after the removal reads the record as it is now and keeps nothing unfinished, even if the record later returns to its old fingerprint.
+
+**The cascade from the rows.** `erasure.cascade` finds every removal the forget still has to write, from the saved rows, to a fixpoint: the records that written removals removed (`erasure_rules.bound_removals`), the records that failed removal revisions remove, and the records planned removals will remove. A dependent is a saved source that reads the forgotten source or one of those records as it was. The steps come in level order, then by source. `impact`, `remaining`, `unfinished` and `finish_dependents` all read it, so a resume after a crash continues where the rows say it stopped. Nothing new is stored in the ledger.
+
+**The token and the dry run.** The token covers every level: each dependent's level and the records it removes and cites are in it. The dry run lists `levels`, each with its dependents, and `counts.levels`. One `--confirm <token>` covers the whole cascade.
+
+**Writing it.** `finish_dependents` writes the removal revisions in level order, each under its own writer reservation. A blocked dependent waits (`dependent_unfinished`), and so does every removal below it that cites a record it removes (`waits_for` in `dependents_waiting`): those records are not removed yet, and the removals below bind only to written ones. The first failure stops the pass and is reported beside the completed forget. `forget` or `reconcile` on the forgotten source resumes, and `readd` waits while any level is unfinished. The fault stage `forget_cascade_revision` fails each removal revision below level 1, once level 1 is written.
+
+**The inductive gate.** The removal producer's configuration lists `removed_records`, exactly the records its revision removes as the old revision held them (`check_erasure_records`), and `cited_records`, the removed records of other dependents it cites (empty at level 1). Admission (`erasure_of`) accepts the cited records only when each one is bound and they are exactly the bound ones the old revision reads. A record is bound when a written removal producer for the same forget lists it, and that producer is bound in turn: it names the forgotten document and exactly the Entities that forget removed, and every record it cites is bound. The binding reaches back to the tombstone, so a removal written out of order binds nothing below it. A producer counts as written unless the row's own pending or failed attempt introduced it; producers are immutable, so a later revision still carries it.
+
+**Targets only shrink after confirmation** (review resolution 13). The fence (`erasure.refuse_retiring_inputs`) simulates the cascade from the rows for every forget not finished (`under_way`) and refuses, with `retiring_source`, a new citation of any record any level will remove, as that record is now. A citation of a removed record as it is after its removal is admitted. `support/cascade_check.py` checks that no citation the fence, the record checks and the cycle check admit, while the forget is pending or after any removal is written, adds a removal outside the confirmed token.
+
+**Removal producers are immutable** (review resolution 14). `check_removal_producers_kept`, which `admit` runs on every revision, refuses a later revision that drops or changes a removal producer (`removal_producer_changed`): the removals below it read what it removed from its configuration.
+
+On a `glossary-fixture --chain` root:
+
+```bash
+uv run python -m cognee_lab.identity forget --root outputs/<new root> --source glossary --expected-revision 1 --dry-run
+# levels: doc01 (718efce2-...) at 1, doc03 (bbbc442e-...) at 2
+uv run python -m cognee_lab.identity forget --root outputs/<new root> --source glossary --expected-revision 1 --confirm <token>
+```
+
+The dry run lists doc01 at level 1 (r01 unresolved and v01 dropped, citing `glossary_hc`) and doc03 at level 2 (c01 unresolved and c02 dropped, citing `doc01_r01` and `doc01_v01`). doc03's `cited_records` are doc01's `removed_records`: r01 with fingerprint `1d2e8913...` and v01 with `6a899169...`, each with `last_revision` 1. With the token the glossary is forgotten, doc01 goes to revision 2 at level 1, then doc03 to revision 2 at level 2, with c01 alone, unresolved, citing only `doc03`. HC goes from both, since no remaining decision of either names it. Nothing is withheld afterwards. Journeys F16 to F19 in `.claude/skills/verify/features/source-lifecycle.md` cover the two-level forget, a token refused when a new level appears, a crash at the level-2 removal with its resume and the re-add that waits for it, and a blocked level-2 dependent.
 
 ## The ledger
 
@@ -265,7 +301,10 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 
 ## Scope
 
-- A forget removes a dependent's decisions that cite the forgotten source directly. A decision that depends on another source's removed decision, through a saved record, is not followed: saved-record inputs are not admitted yet (next checkpoint).
+- A forget removes a dependent's decisions that cite the forgotten source and, since checkpoint J2, down every chain of saved-record citations, each decision that cites a removed record as it was ([The cascade](#the-cascade)).
+- Removing a resolution that was already unresolved keeps its fingerprint. A citation of it made before the removal is still removed, since the removal lists the record; one made after it is not (checkpoint J2, a reversible choice).
+- The cascade reads saved sources that are not retired. When an intermediate dependent is withdrawn before its removal is written, a decision that cites its records is no longer part of the cascade; live withholding holds it with `input_removed`, as for any withdrawn upstream (checkpoint J1).
+- A withdrawal or forget of a dependent that failed before the forget keeps its saved plan, with the Entity owners it found then. When another dependent's removal revision drops its declaration of an Entity they share, finishing that withdrawal or forget fails its survivor check (`Independent Entity ownership was lost`). On a `--chain` root a failed withdrawal of doc03 shows it once doc01's removal drops HC; journey F19 stops before that step. It is a tracked follow-up from checkpoint J2: the resume could plan the retirement again against the current owners, as an erasure retry already does for a reconcile.
 - The tombstone keeps the last revision's mention and reusable UUIDs and, since the re-add follow-ups, those of each earlier forgotten life. UUIDs that an edit retired in the middle of a life are not kept; the derivation rules cover them. A per-source table of every UUID at every revision is a tracked follow-up.
 - The decisions digest names a reusable Entity by its roles in the decisions, which name it by key. A re-add that renames decision keys therefore reports other decisions, even when the outcomes match.
 - A re-add starts from the caller's identity file as written. When the forgotten revision was later than that file, the re-add publishes the file's decisions, not the forgotten revision's.
@@ -293,6 +332,7 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 - Fix round 2: `erasure_rules.check_retry_chain` and `check_erasure_cites`; `storage.admissible` takes the description and every row, folds `erased_from` into `RequiredPlan.preserved` and checks the chain; `REQUIRED_PLANS["reconcile"]`; `erasure.write_removal` and `finish_dependents(publisher, tombstone, rows, fault, rebuild_text)`; `revisions.finish_publication`; `Publisher.superseded`; `text_fixture.rebuild` split from `maintain_one`; `forget.split_fault`, with `DEPENDENT_FAULTS` a tuple of stage names; `forget.resume_dependents` is gone; `dependency.py` holds the one dependency predicate.
 - Fix round 3: `Publisher._publish` retires what a superseded description wrote, through `replace.retire` and `verify_retired`, split out of `replace()`; `storage.superseding_plan`, used by `replace`, `Publisher.superseded` and `admissible`; `storage.erasure_chain`, so that `begin` reads every row only for an erasure retry; `PublicationRow.failed_attempt`; `erasure.removal_writer` with `write_replacement`, `write_text_change` and `write_publication` replaces `write_removal`; `finish_dependents(publisher, tombstone, rows, fault)` and `forget` lose `rebuild_text`; `check_retry_chain(chain, erasures)` loses `first`.
 - `environment.py` and `__main__.py`: the fixture kind in the root marker and routing by it; `--dry-run`, `--confirm`, the two dependent fault stages, and exit 1 when `dependents_failed` is set.
+- Checkpoint J2 (2026-10-24): `records.RemovedRecord`, `RecordKind.removed` and `without_erased`; `dependency.Target.records` and `read_records`; `erasure.cascade` and `Step` replace `revisions` and `dependents_of`, `DependentImpact` gains `level`, `removed_records` and `cited_records`, `Removal.kind` became `record_type`, `removal_producer` lists `removed_records` and `cited_records`, `finish_dependents` writes in level order with `waits_for`, and `impact_checked` (the J1 interim refusal `chain_erasure_pending`) is gone; `erasure_rules.producer_key`, `RemovalClaim`, `removal_claim`, `written_claims`, `bound_removals`, `Erasures.records`, `Erasure`, `check_erasure_records` and `check_removal_producers_kept`, which `admission.admit` runs; `forget.DEPENDENT_FAULTS` gains `forget_cascade_revision`; `withdraw` on a glossary root routes to the glossary driver.
 
 - Re-add follow-ups (2026-10-23): `models.Tombstone` gains `decisions_sha256`, `earlier_mention_ids`, `earlier_entity_ids`, `carrying` and `forgotten_mention_ids`; `validation.decisions_digest` and `uses_of`; `erasure_rules.differs_from_forgotten`, and `check_removed_entity_ids` reads every forgotten life; `storage.Publication.last_tombstone` and `PublicationRow.last_tombstone`, written by `complete`; `Publisher.admit_inputs` counts a re-added source's `last_tombstone`; `retirement.readd_removed` adds the reusable Entities of earlier forgotten lives that the graph no longer holds; `forget_fixture.readd` returns the report, which both drivers print.
 - Re-add follow-ups fix round 2 (2026-10-23): `decisions.roles` names a reusable Entity in `decisions_digest` by its role in each decision; `forget_fixture.describe_readd` renames a removed Entity among an open resolution's candidates too, where before the re-add kept the removed UUID and `admit_readd` refused it as `forgotten_uuid_reused`. `tests/test_identity_decisions.py` applies each single decision change to three descriptions and asserts the digest changes, and each change it must ignore and asserts it does not.
@@ -314,7 +354,18 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 
 **2026-10-23, re-add follow-ups fix round 1.** A review found that the decisions digest missed a regrouping with unchanged text, that the ledger check could not see `last_tombstone`, that a root from before the follow-ups failed with a raw sqlite error, and that a third life refused an earlier life's Entity still in the graph. The digest now counts occurrences, the ledger check has P8, old roots are refused by name, and every forgotten life's reusable Entities may return. A forgotten row now holds its tombstone once: `last_tombstone` lives only on a row re-added since, and `forget.py`, not `complete`, builds the carried tombstone.
 
+**2026-10-24, checkpoint J2.** The user decided on 2026-10-23 that erasure cascades down a chain of citations. Until then a forget that would remove a record another source cites was refused (`chain_erasure_pending`, checkpoint J1). The refusal is gone: the cascade removes each level in order under one token ([The cascade](#the-cascade)).
+
 ## Evidence
+
+**Checkpoint J2.** The assistant (a subagent) ran these on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-cascade`: the cascade at `3ebd8bb`, the chain check at `104fefa` and the test and journey updates at `6ba8caf` and `7ff6c9f`. The native tests, the checks and the journeys partly ran concurrently, so their times are inflated.
+
+- `uv run pytest -q -m 'not integration'`: 497 passed, 87 deselected on `3ebd8bb`; 503 passed, 87 deselected with the chain check's tests (exit 0 each).
+- `uv run python support/occurrence_check.py`: `PASS` on 540,045 worlds, with nine new rule-6 rows (a removal citing an upstream removed record; one that does not name it, names it at another fingerprint, names it pinned after its removal, or keeps the citer; one that lists no removed record; an earlier removal producer kept, widened and dropped). `--mutants`: `PASS`, with the new breaks `trust_cited_records`, `erasure_records_unchecked` and `removal_producers_mutable` caught.
+- `uv run python support/chain_check.py`: `PASS`, 0 disagreements on 543 acyclic graphs, 16,384 cycle cases, 2,224,128 withholding worlds and 14,661 cascade worlds (cascade depth 0: 5,400, 1: 4,563, 2: 3,402, 3: 1,296), in 312 s. `--mutants`: all eight breaks caught, the five cascade ones among them, in 12 s.
+- `uv run python support/ledger_check.py`: `PASS verified within bound` at depth 5 with `PINNED` unchanged at 8504 nodes and 8349 sequences. `--mutants`: all 52 breaks caught (exit 0).
+- `uv run pytest -q -m integration tests/test_identity_forget_native.py tests/test_identity_chains_native.py tests/test_identity_erasure_retry_native.py tests/test_identity_dependencies_native.py`: 40 passed and 2 failed in 953 s on `3ebd8bb`. Both failures were test expectations: a revised dependent now reports its `level`, and the interrupted-removal test was parametrized over every dependent fault, the new one included, which never fires on its one-level fixture. After `6ba8caf` the three affected cases passed (87 s). New: `test_native_chain_cascade_resumes_a_failed_level_two_removal`.
+- Verify journeys, each with 0 FAIL rows: F1 to F15 (363 PASS, the same total as before), F16 (13, new), F17 (12, new), F18 (12, new), F19 (9, new), D1 to D6 (128), D7 to D11 (63; D11 now checks the glossary's two-level dry run) and G1 to G4 (109); 709 PASS in all. F2 failed one check on its first run, an exact match on `dependents_revised` that lacked the new `level`; `7ff6c9f` updated the check and F2 then gave 28 PASS. `journey all` was not run.
 
 **Re-add follow-ups fix round 1.** The assistant (a subagent) ran these on the user's Mac on 2026-10-23 with loopback embeddings, on branch `stage6-readd-followups` at `284340f`. The checks, the native tests and the journeys ran concurrently, so their times are inflated; the journeys ran with only this guide, the handoff and the ledger skill changed in the working tree.
 

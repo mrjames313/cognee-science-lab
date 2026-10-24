@@ -1,6 +1,6 @@
 # Stage 6 chains: decisions that cite other sources' decisions
 
-**Date:** 2026-10-23. **Status:** checkpoint J1, implemented and verified by the assistant on the user's Mac with loopback embeddings, then revised in fix round 1 the same day (see [Fix round 1](#fix-round-1)) and found merge-ready by a final review (see [Checkpoint runs](#checkpoint-runs)). No user-reviewed fixture root exists yet. Checkpoint J2 (erasure down a chain) is not built.
+**Date:** 2026-10-23. **Status:** checkpoint J1, implemented and verified by the assistant on the user's Mac with loopback embeddings, then revised in fix round 1 the same day (see [Fix round 1](#fix-round-1)) and found merge-ready by a final review (see [Checkpoint runs](#checkpoint-runs)). No user-reviewed fixture root exists yet. Checkpoint J2 (2026-10-24) built erasure down a chain; see [Forget of a cited source](#forget-of-a-cited-source) and the [forget guide](stage6_identity_forget.md#the-cascade).
 
 Before this checkpoint a source could read another document (a glossary entry, a protocol) but not another source's saved decision. Admission refused every saved-record input. Now a resolution or a variant assignment may cite a resolution or a variant assignment of another source in the same dataset. When the cited decision is withheld, changed or gone, the citing decision is withheld too, and the withholding spreads down the whole chain of citations.
 
@@ -8,7 +8,7 @@ The user decided this on 2026-10-23:
 
 1. Citable records are decisions only: mention resolutions and variant assignments. The citation format and the chain logic stay generic over record type, so another type needs no redesign. Facts are not citable yet; they need a separate discussion, because they overlap the semantic-output item. Native Cognee edges stay outside withholding.
 2. Withholding spreads down the whole chain. It is derived when retrieval runs, with no new rows, and the reason shown is the existing `input_changed`. A re-confirm upstream releases downstream. A replacement upstream changes the cited record, so downstream needs its own review. Admission refuses cycles.
-3. Erasure cascades down the chain in dependency order, with one dry run, one token and one confirmation for every level. This is checkpoint J2. J1 has an interim refusal instead (see [Forget of a cited source](#forget-of-a-cited-source)).
+3. Erasure cascades down the chain in dependency order, with one dry run, one token and one confirmation for every level. Checkpoint J2 built this (see [Forget of a cited source](#forget-of-a-cited-source)); J1 had an interim refusal.
 4. The non-identity example is deferred.
 
 A reviewer checked the spec against these decisions and the code before implementation and gave the verdict "proceed", with 16 resolutions. The first split the work into J1 (citations, admission, cycles, withholding down the chain, the reviewer commands, the chain fixture and its checks) and J2 (the erasure cascade).
@@ -77,12 +77,12 @@ Nothing is written. When the cited decision is released, the citing one is relea
 
 A source that cites the forgotten source's records is a level-1 dependent (`dependency.Target.sources`), like one that reads its document. Its removal revision makes a citing resolution unresolved and drops a citing variant, under the removal producer, and the erasure rules admit it: `erasure_rules.Erasures.sources` maps each forgotten document to its identity source from the ledger, so `erasure_of` erases that source's records with its document.
 
-J1 has no cascade. `erasure.impact_checked` refuses a forget with `chain_erasure_pending` when a level-1 removal would remove a record that another source cites, and lists those citations. It runs in the dry run, before `begin`, again in the stage `forget_impact`, and, on a forgotten source with dependents left, in the resume path and its dry run (on `erasure.remaining`, what the completed forget still has to do). Chains did not exist before this checkpoint, so the refusal removes no capability. J2 replaces it with the cascade; it is one function to delete.
+**The cascade (checkpoint J2, 2026-10-24).** A decision that cites a record a removal removes, as that record was before the removal, is a dependent one level below, and so on down the chain. Each dependent has one removal revision at its longest path. One dry run lists every level, one token covers them, and one confirmation writes them in level order. The removal producer lists the records it removes (`removed_records`) and the removed records it cites (`cited_records`), and admission binds the cited ones inductively back to the tombstone. A removed record carries its pre-removal fingerprint and the last revision that held it, so only a citation made before the removal is cascaded. The [forget guide](stage6_identity_forget.md#the-cascade) states the rules. Before J2, `erasure.impact_checked` refused such a forget with `chain_erasure_pending`; it is gone.
 
-The fence (`erasure.refuse_retiring_inputs`, moved from `retirement.py` beside the impact it simulates) refuses, with `retiring_source`:
+The fence (`erasure.refuse_retiring_inputs`) refuses, with `retiring_source`:
 
 - a description that reads the document, a removed Entity or a saved record of a source whose forget is pending or failed;
-- a citation of any record that a level-1 removal revision of a forget not finished will remove: one pending or failed (by its saved plan) or one completed with dependents left (`erasure.under_way`). Without it, a new source could cite a level-1 dependent's record after the forget began; the removal would then remove the record, and the citer would be withheld and never cascaded. This is review resolution 13 brought forward for level 1; J2 widens it to every level.
+- a citation of any record that a removal revision of a forget not finished will remove, at any level: one pending or failed (by its saved plan) or one completed with dependents left (`erasure.under_way`), as the record is now. The fence simulates the cascade from the rows, so once a forget is confirmed what it removes can only shrink (review resolution 13). J1 covered level 1 only.
 
 ## The chain fixture
 
@@ -135,12 +135,13 @@ uv run python -m cognee_lab.identity retrieve --root outputs/stage6_chain_check
 
 Expected: after the edit, `status` withholds r01 and v01 (`refresh_needed`) and c01 and c02 (`upstream_withheld`), and `refresh_needed` lists only r01 and v01. After both re-confirms nothing is withheld and doc03 is still at revision 1.
 
-Journeys D7 to D11 in `.claude/skills/verify/features/dependencies.md` cover the chain hold, the release by an upstream re-confirm with no doc03 revision, the replacement under a new key, the in-place replacement with doc03's re-confirm, and the refused citations with the interim erasure refusal, the level-1 removal and an unfinished upstream.
+Journeys D7 to D11 in `.claude/skills/verify/features/dependencies.md` cover the chain hold, the release by an upstream re-confirm with no doc03 revision, the replacement under a new key, the in-place replacement with doc03's re-confirm, and the refused citations with the glossary's two-level dry run, the level-1 removal and an unfinished upstream. Journeys F16 to F19 in `source-lifecycle.md` cover the cascade (J2).
 
 ## The checks
 
 - **`support/chain_check.py`**, bounded exhaustive. On every citation graph of up to four sources (`support/chain_worlds.py`: each source has a resolution `d` and a variant `v`; a source that cites another cites its `d` from its `d` and its `v` from its `v`), it checks that admission refuses a source's citations if and only if a path of citations leads back to it (16,384 cases on four sources), and, on each of the 543 acyclic graphs with every source in each of eight states (ok, held by a table row on `d`, both decisions replaced in place, `d` rekeyed, pending, unverified, withdrawn, own input invalid), that the withheld-decision set equals an oracle written from the user's decisions: reason, status and withholding inputs per decision (2,224,128 worlds). The held and rekeyed states touch `d` only, so the check shows withholding follows the decision, not the source. The code under test is `check_citation_cycles`, `record_reader`, `withheld_decisions` and `live_pass` itself; only `retrieve.live_drift` is replaced, by a drift built from the reader that raises for an invalid source. `--mutants` breaks the cycle check, the closure (one level instead of the whole chain) and the reader (a removed record read as changed), and each must fail. CI runs it at four sources (about 200 s since fix round 1, up from 67 s, for the eighth state and the variant); the unit suite runs three sources and every mutant.
 - **The occurrence check** calls `chains.check_citation_scope` before `admit`, as a replacement's preflight does, and patches it in `chains` for its mutant. It gains nine rule-5 rows in `support/dependency_worlds.py` (self-citation; another dataset; a new citation under a new and under the old producer; a dropped citation under the old and under a new producer; a changed digest and a changed revision under an old key; a continuing group citing a saved record) and three rule-6 rows in `support/erasure_worlds.py` (a removal that unresolves a resolution or drops a variant citing the forgotten source's record, admitted; one that keeps the citing resolution, refused). The old row "saved-record input", refused as `not_admitted`, now refuses as `self_citation`, since its citation named the citing source. Two mutants: saved records not foreign, and self-citation allowed.
+- **The cascade half of `support/chain_check.py`** (J2, `support/cascade_check.py` over `support/cascade_worlds.py`). With s0 forgotten and every other source ok, blocked (a failed withdrawal) or drifted (its `d` cites at an older fingerprint), on every acyclic graph of up to four sources (14,661 worlds), it checks the dry run's levels, removed decisions and cited records against an oracle written from the user's decisions; that the token tells apart any two different cascades; that admission admits each removal written in the cascade's order and refuses (`erasure_unbound`) a removal below level 1 before its upstream is written, or below a removal written out of order; that the cascade read again after each write plans the same revisions; that what is left waits for a blocked removal; and that no new citation the fence, the record checks and the cycle check admit, while the forget is pending or after any write, adds a removal outside the confirmed token. Its five mutants: a one-level cascade, the steps in source order, a gate without induction, a level-1 fence and a removed record read at any fingerprint.
 - **Unit tests** in `tests/test_identity_chains.py` pin the fingerprint, the admission codes, the reader, the derived rule, the closure and the small-bound chain check. **Native tests** in `tests/test_identity_chains_native.py` drive the chain, the replacements, the refusals with the level-1 removal, and an unfinished upstream through the real stores.
 
 ## Choices the assistant made
@@ -155,12 +156,11 @@ The spec left these open or worded them two ways. Each is reversible.
 - **The original fixture's captured groups belong to its lineage.** `captured_chunks.CAPTURED_GROUPS` names the original fixture's producer (`identity-handoff-example`) as g01's creator instead of none. Before, every source without a g01 counted g01 as retired, so an unchanged-text replacement of doc03 failed its semantic verification; the glossary avoided it only by passing no verifier.
 - **A source's citation of a record of the forgotten source counts as reading it** for the fence and for `erasure.unfinished`, so a level-1 removal finishes like any other.
 - **Record checks run before the reservation only** (review finding L1, dismissed). `check_record_citations` reads the rows in `admit_inputs`, before `begin`, and not again under the writer reservation. A record that drifts between the check and `begin` is caught by live withholding: the citation fails the reader at the next retrieval and its decision is withheld, as any drift is. A retry must reuse its saved intent, so a later recheck could only refuse a retry forever (resolution 5).
-- **Removals stay decision-shaped.** `erasure.removed_records` and `impact_checked` name a removed record by its decision key, since only decisions are removed today. The citation format and the closure are generic over record type; J2 makes the removal side generic when it builds the cascade.
+- **Removals stay decision-shaped** (J1). `erasure.removed_records` and `impact_checked` named a removed record by its decision key. Since J2 a removed record is a `records.RemovedRecord` (source, type, key, fingerprint, last revision), and each record type says how it is removed (`RecordKind.removed`).
 
 ## Not in this checkpoint
 
-- The erasure cascade (J2): removal revisions level by level, the token and dry run over every level, the inductive gate on `removed_records` and `cited_records`, removed records with their pre-removal digest, and journeys for them. Until then `chain_erasure_pending` refuses.
-- The fence covers level-1 removals only; J2 widens it to every level of a cascade (review resolution 13).
+- The erasure cascade was J2, built on 2026-10-24.
 - Facts as citable records (user decision 1).
 - A citation's `representation_revision` is not checked after the first attempt, by design. Nothing records which revision a re-confirm saw beyond the new citation's pin.
 - Per-decision acyclicity. The source-level rule refuses mutual citation between two sources even when no decision cycle exists.
@@ -205,3 +205,11 @@ Run by the assistant and its subagents on the user's Mac on 2026-10-23 with loop
 - `support/occurrence_check.py` now holds 33 rule-5 rows and 23 rule-6 rows in all.
 - A final targeted review of `8167c25` found the branch merge-ready. `2002a77` changed the fence's remedy to "run forget on that source again first" and corrected the citation-scope comment in `support/occurrence_check.py`.
 - `uv run pytest -q -m 'not integration'` on `2002a77`: 487 passed, 85 deselected.
+
+## Checkpoint J2
+
+The assistant (a subagent) ran these on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-cascade`. The [forget guide](stage6_identity_forget.md#evidence) has the full list.
+
+- `uv run python support/chain_check.py`: `PASS`, with the cascade half on 14,661 worlds (312 s for both halves). `--mutants`: all eight breaks caught.
+- `uv run pytest -q -m 'not integration'`: 503 passed, 87 deselected.
+- Journeys D7 to D11: 63 PASS rows, 0 FAIL. F16 to F19: 46 PASS rows, 0 FAIL.
