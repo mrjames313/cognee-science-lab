@@ -1,16 +1,22 @@
 """Small worlds of sources that cite one another's saved records.
 
-Each source has its own document and one decision, resolution `d` of its
-group `g`, accepted to the Helios controller. `d` may cite `d` of any other
-source as a saved record pinned at that source's revision 1. Each source is
-in one state, which decides its ledger row, its current decision and the
+Each source has its own document and two decisions: resolution `d` of its
+group `g`, accepted to the Helios controller, and variant `v`, HC as the
+Helios controller within its document. A source that cites another cites
+both of its records, each from its own kind of decision: its `d` cites the
+other's `d` and its `v` the other's `v`, each pinned at that source's
+revision 1. So the worlds cover both record types and show that
+withholding follows the decision, not the source. Each source is in one
+state, which decides its ledger row, its current decisions and the
 withholding table:
 
 - ok: current and served.
 - held: served, and a table row withholds its `d` for review.
-- replaced: served, its `d` retargeted in place, so its fingerprint differs.
-- rekeyed: served, its decision renamed to `e`, so `d` is gone.
+- replaced: served, its `d` and `v` changed in place, so their fingerprints
+  differ.
+- rekeyed: served, its resolution renamed to `e`, so `d` is gone.
 - pending: its latest attempt is pending.
+- unverified: current, but its verified revision is behind its saved one.
 - withdrawn: withdrawn.
 - invalid: current, but an own input fails live validation.
 
@@ -31,7 +37,16 @@ from cognee_lab.identity.validation import Reason, object_digest, text_digest
 from cognee_lab.identity.withholding import Status, Withheld, WithholdingRow
 
 LABELS = ("s0", "s1", "s2", "s3")
-STATES = ("ok", "held", "replaced", "rekeyed", "pending", "withdrawn", "invalid")
+STATES = (
+    "ok",
+    "held",
+    "replaced",
+    "rekeyed",
+    "pending",
+    "unverified",
+    "withdrawn",
+    "invalid",
+)
 SERVED = frozenset({"ok", "held", "replaced", "rekeyed"})
 DATASET = uuid5(NAMESPACE_URL, "cognee-lab:chain-worlds:dataset")
 HELIOS = "8b4bff50-907b-56b6-bc80-3b0a7018714a"
@@ -44,8 +59,13 @@ def identity(label) -> UUID:
     return uuid5(DATASET, f"{label}:identity")
 
 
-def record_key(label) -> str:
-    return f"rec_{label}"
+# Each decision of a source, with the prefix of the input keys under which
+# a citing source's decision of the same kind cites it.
+DECISIONS = {"d": "rec", "v": "var"}
+
+
+def record_key(label, decision="d") -> str:
+    return f"{DECISIONS[decision]}_{label}"
 
 
 def producer():
@@ -58,9 +78,11 @@ def producer():
     )
 
 
-def payload_of(label, *, key="d", target=HELIOS, cites=()) -> dict:
-    """One source's description: its document, one chunk, one group and
-    the decision under `key`, citing `d` of each source in `cites`."""
+def payload_of(label, *, key="d", replaced=False, cites=()) -> dict:
+    """One source's description: its document, one chunk, one group, the
+    resolution under `key` and variant `v`, each citing the record of the
+    same kind of each source in `cites`. `replaced` changes both decisions
+    in place."""
     own = identity(label)
     mention = str(uuid5(own, "mention:g"))
     payload = dict(
@@ -112,16 +134,30 @@ def payload_of(label, *, key="d", target=HELIOS, cites=()) -> dict:
             key: dict(
                 group_ref="g",
                 status="accepted",
-                target_entity_id=target,
+                target_entity_id=HC if replaced else HELIOS,
                 input_refs=["doc", "existing_A"],
                 producer_ref="fixture",
             )
         },
-        variant_assignments={},
+        variant_assignments=dict(
+            v=dict(
+                status="accepted",
+                source_entity_id=HELIOS if replaced else HC,
+                target_entity_id=HC if replaced else HELIOS,
+                applicability=dict(kind="document", document_ref="doc"),
+                input_refs=["doc", "existing_A"],
+                producer_ref="fixture",
+            )
+        ),
+    )
+    decisions = dict(
+        d=payload["mention_resolutions"][key], v=payload["variant_assignments"]["v"]
     )
     for cited in sorted(cites):
-        payload["inputs"][record_key(cited)] = citation(original(cited), "d")
-        payload["mention_resolutions"][key]["input_refs"].append(record_key(cited))
+        for decision, record in decisions.items():
+            ref = record_key(cited, decision)
+            payload["inputs"][ref] = citation(original(cited), decision)
+            record["input_refs"].append(ref)
     return payload
 
 
@@ -134,9 +170,7 @@ def original(label) -> IdentitySource:
 @cache
 def described(label, cites: frozenset, state="ok") -> IdentitySource:
     """The source's current description in this state, citing `cites`."""
-    options = dict(cites=cites)
-    if state == "replaced":
-        options["target"] = HC
+    options = dict(cites=cites, replaced=state == "replaced")
     if state == "rekeyed":
         options["key"] = "e"
     return IdentitySource.model_validate_json(json.dumps(payload_of(label, **options)))
@@ -144,11 +178,12 @@ def described(label, cites: frozenset, state="ok") -> IdentitySource:
 
 def row_of(source, state) -> PublicationRow:
     ledger = {"pending": "pending", "withdrawn": "withdrawn"}.get(state, "current")
+    verified = ledger == "current" and state != "unverified"
     return PublicationRow(
         dataset=str(source.dataset_id),
         source=str(source.identity_data_id),
         revision=source.revision,
-        verified_revision=source.revision if ledger == "current" else 0,
+        verified_revision=source.revision if verified else 0,
         state=ledger,
         attempt=str(uuid4()),
         description=source,
@@ -211,13 +246,15 @@ def world_rows(graph, states):
     return rows, table
 
 
-# What each upstream state gives a decision that cites its `d` directly.
+# What each upstream state gives a decision that cites one of its records
+# directly, by the kind of the cited decision.
 DIRECT = {
-    "replaced": (Reason.CHANGED, Status.REFRESH_NEEDED),
-    "rekeyed": (Reason.REMOVED, Status.REFRESH_NEEDED),
-    "pending": (Reason.CHANGED, Status.EDIT_UNFINISHED),
-    "withdrawn": (Reason.REMOVED, Status.REFRESH_NEEDED),
-    "invalid": (Reason.CHANGED, Status.EDIT_UNFINISHED),
+    "replaced": dict.fromkeys(DECISIONS, (Reason.CHANGED, Status.REFRESH_NEEDED)),
+    "rekeyed": dict(d=(Reason.REMOVED, Status.REFRESH_NEEDED)),
+    "pending": dict.fromkeys(DECISIONS, (Reason.CHANGED, Status.EDIT_UNFINISHED)),
+    "unverified": dict.fromkeys(DECISIONS, (Reason.CHANGED, Status.EDIT_UNFINISHED)),
+    "withdrawn": dict.fromkeys(DECISIONS, (Reason.REMOVED, Status.REFRESH_NEEDED)),
+    "invalid": dict.fromkeys(DECISIONS, (Reason.CHANGED, Status.EDIT_UNFINISHED)),
 }
 
 
@@ -233,38 +270,46 @@ def oracle(graph, states) -> dict[str, dict[str, Withheld]]:
     unfinished source, and, down the whole chain, when a record it cites is
     withheld (`input_changed`, `upstream_withheld`). Keys are source
     identities, as the code reports them."""
-    causes = {label: [] for label in graph}
+    causes = {(label, d): [] for label in graph for d in DECISIONS}
     for label in graph:
         if states[label] == "held":
-            causes[label].append((Reason.CHANGED, Status.REFRESH_NEEDED, "existing_A"))
+            causes[label, "d"].append(
+                (Reason.CHANGED, Status.REFRESH_NEEDED, "existing_A")
+            )
         for cited in graph[label]:
-            if states[cited] in DIRECT:
-                causes[label].append((*DIRECT[states[cited]], record_key(cited)))
-    held = {label for label in graph if causes[label]}
+            for d, direct in DIRECT.get(states[cited], {}).items():
+                causes[label, d].append((*direct, record_key(cited, d)))
     grew = True
     while grew:
         grew = False
         for label in graph:
             for cited in graph[label]:
-                upstream = (
-                    states[cited] in SERVED
-                    and states[cited] != "rekeyed"
-                    and cited in held
-                )
-                cause = (Reason.CHANGED, Status.UPSTREAM_WITHHELD, record_key(cited))
-                if upstream and cause not in causes[label]:
-                    causes[label].append(cause)
-                    held.add(label)
-                    grew = True
+                for d in DECISIONS:
+                    upstream = (
+                        states[cited] in SERVED
+                        and not (states[cited] == "rekeyed" and d == "d")
+                        and causes[cited, d]
+                    )
+                    cause = (
+                        Reason.CHANGED,
+                        Status.UPSTREAM_WITHHELD,
+                        record_key(cited, d),
+                    )
+                    if upstream and cause not in causes[label, d]:
+                        causes[label, d].append(cause)
+                        grew = True
     found = {}
     for label in graph:
-        if states[label] not in SERVED or not causes[label]:
+        if states[label] not in SERVED:
             continue
-        reason, status = causes[label][0][:2]
-        for r, s, _ in causes[label][1:]:
-            reason, status = stronger(reason, r), stronger(status, s)
-        key = "e" if states[label] == "rekeyed" else "d"
-        found[str(identity(label))] = {
-            key: Withheld(reason, status, frozenset(c[2] for c in causes[label]))
-        }
+        for d in DECISIONS:
+            if not causes[label, d]:
+                continue
+            reason, status = causes[label, d][0][:2]
+            for r, s, _ in causes[label, d][1:]:
+                reason, status = stronger(reason, r), stronger(status, s)
+            key = "e" if (d, states[label]) == ("d", "rekeyed") else d
+            found.setdefault(str(identity(label)), {})[key] = Withheld(
+                reason, status, frozenset(c[2] for c in causes[label, d])
+            )
     return found

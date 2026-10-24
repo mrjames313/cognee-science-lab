@@ -25,11 +25,11 @@ from cognee_lab.identity.validation import (
     IntentError,
     text_digest,
     validate_inputs,
-    withheld_by,
 )
 from cognee_lab.identity import revisions
 from cognee_lab.identity.revisions import reconfirmed, refresh_dependents, remapped
 from cognee_lab.identity.withholding import (
+    held_by,
     WithholdingRow,
     WithholdingStore,
     classify,
@@ -46,6 +46,12 @@ ELSEWHERE = CASES["elsewhere"](GLOSSARY)
 KEYS = {"glossary", "glossary_hc"}
 GLOSSARY_ID = str(uuid5(NAMESPACE_URL, "test:glossary"))
 TEXT = (Path(__file__).parent / "fixtures/identity/source.txt").read_text()
+
+
+def withheld_reasons(source, drift):
+    """Each decision live drift withholds, with its reason."""
+    found = held_by(source, {}, drift, lambda item: None)
+    return {key: entry.reason for key, entry in found.items()}
 
 
 def citing(payload, glossary=GLOSSARY, *, cite_text=False):
@@ -132,7 +138,7 @@ async def test_a_moved_or_changed_span_withholds_each_decision_citing_it(
     for edited in (INSERTED, COSMETIC):
         drift = await drift_of(source, edited)
         assert drift == {"glossary_hc": "input_changed"}
-        assert withheld_by(source, drift) == {
+        assert withheld_reasons(source, drift) == {
             "r01": "input_changed",
             "v01": "input_changed",
         }
@@ -142,14 +148,14 @@ async def test_a_glossary_that_is_gone_is_an_input_removed(source_payload):
     source = citing(strip_corpus(source_payload))
     drift = await drift_of(source, None)
     assert drift == {"glossary_hc": "input_removed"}
-    assert set(withheld_by(source, drift).values()) == {"input_removed"}
+    assert set(withheld_reasons(source, drift).values()) == {"input_removed"}
 
 
 async def test_a_directly_cited_text_is_digest_checked(source_payload):
     source = citing(strip_corpus(source_payload), cite_text=True)
     drift = await drift_of(source, ELSEWHERE)
     assert drift == {"glossary": "input_changed"}
-    assert withheld_by(source, drift) == {"r01": "input_changed"}
+    assert withheld_reasons(source, drift) == {"r01": "input_changed"}
 
 
 async def test_inputs_of_withheld_decisions_are_not_checked(source_payload):
@@ -708,16 +714,19 @@ def test_live_drift_that_no_row_records_needs_review(source_payload):
     """A drifted input that no edit classified (corpus-field drift, a span
     stale after a re-add) withholds its decisions for a reviewer, beside
     what the rows already withhold."""
-    from cognee_lab.identity.chains import held_by
     from cognee_lab.identity.validation import Reason
-    from cognee_lab.identity.withholding import Status, Withheld
+    from cognee_lab.identity.withholding import Status, Withheld, held_by
 
     source = citing(source_payload)
     recorded = {
         "v01": Withheld(Reason.CHANGED, Status.REMAP, frozenset(["glossary_hc"]))
     }
-    assert held_by(source, recorded, {}) == recorded
-    held = held_by(source, recorded, {"glossary_hc": "input_removed"})
+
+    def read(item):
+        return None
+
+    assert held_by(source, recorded, {}, read) == recorded
+    held = held_by(source, recorded, {"glossary_hc": "input_removed"}, read)
     assert held == {
         "r01": ("input_removed", "refresh_needed", {"glossary_hc"}),
         "v01": ("input_removed", "refresh_needed", {"glossary_hc"}),

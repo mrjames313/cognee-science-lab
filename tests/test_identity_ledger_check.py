@@ -125,8 +125,8 @@ def test_replay_takes_no_skip_probability():
 
 
 def test_served_copies_the_retrieval_eligibility_test():
-    retrieve = Path(__file__).parents[1] / "src/cognee_lab/identity/retrieve.py"
+    storage = Path(__file__).parents[1] / "src/cognee_lab/identity/storage.py"
     assert (
-        'return row.state == "current" and row.revision == row.verified_revision'
-        in retrieve.read_text()
-    ), "retrieve.py changed its eligibility test: update served() in support/ledger_check.py"
+        'return self.state == "current" and self.revision == self.verified_revision'
+        in storage.read_text()
+    ), "PublicationRow.is_served changed: update served() in support/ledger_properties.py"

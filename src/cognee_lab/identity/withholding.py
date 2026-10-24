@@ -16,16 +16,18 @@ that document is withheld, so a crash before the rows are written never
 serves a dependent stale. Withholding writes no recovery events.
 """
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
+from functools import reduce
 from typing import NamedTuple
 
 from sqlalchemy import Integer, String, delete, select, tuple_
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-from .models import IdentitySource, SourceTextInput, TextSpanInput
+from .models import IdentitySource, SavedRecordInput, SourceTextInput, TextSpanInput
 from .dependency import Target, citations
-from .records import saved_records
+from .records import cited_row, record_digest, saved_records
 from .validation import (
     Reason,
     decision_inputs,
@@ -332,22 +334,76 @@ def unfinished_edits(rows):
     ]
 
 
-def unfinished_sources(rows) -> set[str]:
-    """Sources whose latest attempt is pending or failed."""
-    return {r.source for r in rows if r.state in ("pending", "failed")}
+# What a cited record gives the decisions citing it: why, and what answers it.
+Verdict = tuple[Reason, Status]
+RecordReader = Callable[[SavedRecordInput], Verdict | None]
+UNFINISHED: Verdict = (Reason.CHANGED, Status.EDIT_UNFINISHED)
+REMOVED: Verdict = (Reason.REMOVED, Status.REFRESH_NEEDED)
+CHANGED: Verdict = (Reason.CHANGED, Status.REFRESH_NEEDED)
 
 
-def citing_unfinished(held: WithheldSet, readers, unfinished):
-    """Withhold each decision of `readers` that cites a saved record of a
-    source in `unfinished`: `input_changed`, status `edit_unfinished`."""
-    for source, reader in readers.items():
-        for key, item in saved_records(reader).items():
-            if str(item.identity_data_id) in unfinished:
-                entry = Withheld(
-                    Reason.CHANGED, Status.EDIT_UNFINISHED, frozenset([key])
-                )
-                for assignment in citing(reader, [key]):
-                    merge(held, source, assignment, entry)
+def unfinished(row, failed=frozenset()) -> bool:
+    """Whether a cited source's row is unfinished: not retired and not
+    served (an attempt pending, failed or unverified), or its own input
+    failed live validation (`failed`). The one rule for every decision
+    citing one of its records: `edit_unfinished`."""
+    return not row.is_retired and (not row.is_served or row.source in failed)
+
+
+def record_reader(rows, failed=frozenset()) -> RecordReader:
+    """What a decision citing one saved record gets, from the ledger rows:
+    None while the cited source is served with the record under its type
+    and pinned fingerprint. A withdrawn, forgotten or missing source, or a
+    key its current revision lacks, is removed. A source whose attempt is
+    unfinished (pending, failed or unverified) or whose own input failed
+    live validation (`failed`) gives `edit_unfinished`, which no reviewer
+    answers; it is checked before the record, so a pending upstream never
+    shows `input_removed`. Another fingerprint needs review."""
+    digests = {}
+
+    def read(item: SavedRecordInput) -> Verdict | None:
+        row = cited_row(rows, item)
+        if row is None or row.is_retired:
+            return REMOVED
+        if unfinished(row, failed):
+            return UNFINISHED
+        key = (row.source, item.record_type, item.record_id)
+        if key not in digests:
+            digests[key] = record_digest(row.description, *key[1:])
+        if digests[key] is None:
+            return REMOVED
+        return None if digests[key] == item.content_sha256 else CHANGED
+
+    return read
+
+
+def held_by(source, recorded, drift, read: RecordReader) -> dict[str, Withheld]:
+    """The source's withheld decisions: `recorded`, its entries of the
+    withheld-decision set, combined with every decision citing an input
+    that fails. `drift` is what live validation found for its other inputs,
+    which a reviewer answers; a saved record is answered by `read`. Drift
+    that a recorded entry already holds, for a reason no stronger, adds
+    nothing: a recorded move still waits for its refresh."""
+    found = {k: (Reason(r), Status.REFRESH_NEEDED) for k, r in drift.items()}
+    for key, item in saved_records(source).items():
+        found.pop(key, None)
+        if (verdict := read(item)) is not None:
+            found[key] = verdict
+    held = dict(recorded)
+    for key, inputs in decision_inputs(source).items():
+        if not (failing := inputs & found.keys()):
+            continue
+        reason = reduce(stronger, (found[i][0] for i in sorted(failing)))
+        status = reduce(stronger, (found[i][1] for i in sorted(failing)))
+        entry = recorded.get(key)
+        if (
+            entry
+            and failing <= entry.inputs
+            and stronger(reason, entry.reason) == entry.reason
+        ):
+            continue
+        held[key] = combine(entry, Withheld(reason, status, frozenset(failing)))
+    return held
 
 
 def recorded_rows(readers, table) -> list[WithholdingRow]:
@@ -366,10 +422,11 @@ def withheld_decisions(rows, table) -> WithheldSet:
     """The withheld-decision set of the ledger rows and the withholding
     table: the recorded rows that still apply, every decision citing a
     document whose text change is pending or failed, and every decision
-    citing a saved record of a source with any attempt pending or failed
-    (both `input_changed`, status `edit_unfinished`). Withholding down a
-    chain needs live validation, so `chains.upstream_closure` adds it where
-    retrieval and `status` read this set."""
+    citing a saved record of a source whose attempt is unfinished (both
+    `input_changed`, status `edit_unfinished`, the second as `unfinished`
+    decides it for `record_reader` too). Withholding down a chain needs live
+    validation, so `chains.live_pass` adds it where retrieval and `status`
+    read this set."""
     readers = current_readers(rows)
     held: WithheldSet = {}
     for w in recorded_rows(readers, table):
@@ -387,7 +444,12 @@ def withheld_decisions(rows, table) -> WithheldSet:
                         Reason.CHANGED, Status.EDIT_UNFINISHED, inputs & keys
                     )
                     merge(held, source, assignment, entry)
-    citing_unfinished(held, readers, unfinished_sources(rows))
+    for source, reader in readers.items():
+        for key, item in saved_records(reader).items():
+            if (row := cited_row(rows, item)) and unfinished(row):
+                entry = Withheld(*UNFINISHED, frozenset([key]))
+                for assignment in citing(reader, [key]):
+                    merge(held, source, assignment, entry)
     return held
 
 

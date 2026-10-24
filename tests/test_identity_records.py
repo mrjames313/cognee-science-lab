@@ -14,8 +14,15 @@ from cognee_lab.identity.validation import (
     text_digest,
     validate_inputs,
     validate_uses,
-    withheld_by,
 )
+
+from cognee_lab.identity.withholding import held_by
+
+
+def withheld_reasons(source, drift):
+    """Each decision live drift withholds, with its reason."""
+    found = held_by(source, {}, drift, lambda item: None)
+    return {key: entry.reason for key, entry in found.items()}
 
 
 def parse(value):
@@ -142,4 +149,4 @@ async def test_recipe_does_not_replace_missing_or_changed_reasoning_input(
         source, texts={"doc01": text}, chunks={str(chunk.id): chunk}, graph=Graph()
     )
     assert drift == {"existing_A": reason}
-    assert withheld_by(source, drift) == {"r01": reason, "v01": reason}
+    assert withheld_reasons(source, drift) == {"r01": reason, "v01": reason}

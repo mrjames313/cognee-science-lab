@@ -1,6 +1,7 @@
 """Saved-record citations: what a citation pins, and how withholding spreads
 down a chain of citing sources."""
 
+import asyncio
 import dataclasses
 import json
 from uuid import NAMESPACE_URL, uuid5
@@ -15,7 +16,6 @@ from cognee_lab.identity.chains import (
     check_citation_scope,
     check_record_citations,
     new_citations,
-    record_reader,
 )
 from cognee_lab.identity.erasure import (
     impact_checked,
@@ -25,7 +25,15 @@ from cognee_lab.identity.erasure import (
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.records import citation, record_digest
 from cognee_lab.identity.validation import IntentError, Reason
-from cognee_lab.identity.withholding import Status, Withheld, withheld_decisions
+from cognee_lab.identity.withholding import (
+    CHANGED,
+    REMOVED,
+    UNFINISHED,
+    Status,
+    Withheld,
+    record_reader,
+    withheld_decisions,
+)
 
 
 def described(payload, change=None):
@@ -157,9 +165,10 @@ def test_a_new_citation_pins_a_served_record_as_it_is_now():
 def test_only_a_first_attempt_checks_its_new_citations():
     source = world_source("s0", CHAIN["s0"])
     later = described(source.model_dump(mode="json") | {"revision": 2})
-    assert new_citations(source, None) == {"rec_s1"}
+    assert new_citations(source, None) == {"rec_s1", "var_s1"}
     assert new_citations(later, row_of(world_source("s0", frozenset()), "ok")) == {
-        "rec_s1"
+        "rec_s1",
+        "var_s1",
     }
     assert new_citations(later, row_of(source, "ok")) == set()
     # A retry reuses its saved intent: the failed row holds the description.
@@ -182,33 +191,43 @@ def test_admission_refuses_a_citation_that_closes_a_cycle():
     check_citation_cycles(closing, retired)
 
 
-def test_the_reader_tells_a_changed_record_from_a_removed_one():
+def test_the_reader_tells_a_changed_record_from_a_removed_or_unfinished_one():
     item = world_source("s0", CHAIN["s0"]).inputs["rec_s1"]
-    for state, reason in (
+    for state, verdict in (
         ("ok", None),
         ("held", None),
-        ("replaced", Reason.CHANGED),
-        ("rekeyed", Reason.REMOVED),
-        ("pending", Reason.CHANGED),
-        ("withdrawn", Reason.REMOVED),
+        ("replaced", CHANGED),
+        ("rekeyed", REMOVED),
+        ("pending", UNFINISHED),
+        ("unverified", UNFINISHED),
+        ("withdrawn", REMOVED),
     ):
-        assert record_reader(chain_rows(s1=state))(item) == reason, state
+        assert record_reader(chain_rows(s1=state))(item) == verdict, state
+    # A source whose own input failed live validation is unfinished too.
+    failed = {str(identity("s1"))}
+    assert record_reader(chain_rows(), failed)(item) == UNFINISHED
 
 
 def test_an_unfinished_cited_source_withholds_its_citers_from_the_rows():
     held = withheld_decisions(chain_rows(s1="pending"), [])
     assert held[str(identity("s0"))] == {
-        "d": Withheld(Reason.CHANGED, Status.EDIT_UNFINISHED, frozenset({"rec_s1"}))
+        "d": Withheld(*UNFINISHED, frozenset({"rec_s1"})),
+        "v": Withheld(*UNFINISHED, frozenset({"var_s1"})),
     }
 
 
+def held_now(**states):
+    world = {label: states.get(label, "ok") for label in CHAIN}
+    return asyncio.run(chain_check.held_now(CHAIN, world))
+
+
 def test_withholding_spreads_down_the_whole_chain_and_releases_with_its_cause():
-    held = chain_check.held_now(CHAIN, {"s0": "ok", "s1": "ok", "s2": "held"})
-    assert held[str(identity("s0"))]["d"] == Withheld(
-        Reason.CHANGED, Status.UPSTREAM_WITHHELD, frozenset({"rec_s1"})
-    )
+    # s2's resolution is withheld, its variant is not: s0's variant is served.
+    assert held_now(s2="held")[str(identity("s0"))] == {
+        "d": Withheld(Reason.CHANGED, Status.UPSTREAM_WITHHELD, frozenset({"rec_s1"}))
+    }
     # A re-confirm upstream keeps the fingerprint: nothing is withheld.
-    assert chain_check.held_now(CHAIN, dict.fromkeys(CHAIN, "ok")) == {}
+    assert held_now() == {}
 
 
 def test_chains_agree_with_the_oracle_on_three_sources():
@@ -254,7 +273,7 @@ def test_a_new_citation_of_a_record_a_forget_under_way_removes_is_refused(state)
     assert [
         (d["identity_data_id"], d["input_ref"])
         for d in refused.value.details["dependents"]
-    ] == [(str(identity("s0")), "rec_s1")]
+    ] == [(str(identity("s0")), "rec_s1"), (str(identity("s0")), "var_s1")]
     # Once s1's removal revision is written, nothing is left to remove.
     revised = world_source("s1", frozenset())
     refuse_retiring_inputs(citer, [rows[0], row_of(revised, "ok")])
@@ -265,3 +284,12 @@ def test_resuming_a_forget_refuses_a_citation_of_a_record_it_removes():
     with pytest.raises(IntentError) as refused:
         impact_checked(remaining(rows[0].tombstone, rows), rows)
     assert refused.value.code == "chain_erasure_pending"
+
+
+def test_an_unverified_cited_source_waits_for_its_attempt_not_for_a_review():
+    unfinished = Withheld(Reason.CHANGED, Status.EDIT_UNFINISHED, frozenset({"rec_s1"}))
+    item = world_source("s0", CHAIN["s0"]).inputs["rec_s1"]
+    rows = chain_rows(s1="unverified")
+    assert record_reader(rows)(item) == unfinished[:2]
+    assert withheld_decisions(rows, [])[str(identity("s0"))]["d"] == unfinished
+    assert held_now(s1="unverified")[str(identity("s0"))]["d"] == unfinished

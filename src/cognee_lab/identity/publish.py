@@ -5,6 +5,12 @@ import json
 from dataclasses import dataclass
 
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
+from .chains import (
+    check_citation_cycles,
+    check_citation_scope,
+    check_record_citations,
+    new_citations,
+)
 from .erasure import refuse_retiring_inputs
 from .native import edge_metadata, require_graph_methods
 from .storage import (
@@ -16,6 +22,7 @@ from .storage import (
     superseding_plan,
 )
 from .validation import IntentError, validate_inputs, validate_uses
+from .withholding import record_reader
 
 
 def contribution(source, assignment_id, kind, applicability):
@@ -187,14 +194,6 @@ class Publisher:
         citations stay in their dataset and off the citing source, a new
         one pins its record as it is now, and none closes a cycle
         (chains.py)."""
-        from .chains import (
-            check_citation_cycles,
-            check_citation_scope,
-            check_record_citations,
-            new_citations,
-            record_reader,
-        )
-
         rows = await self.records.rows()
         check_citation_scope(source)
         # Another document's drift withholds decisions, never the source.
@@ -640,8 +639,6 @@ class Publisher:
                     raise IntentError(
                         "verify_owner", "Original-chunk marker owner missing"
                     )
-            from .chains import record_reader
-
             rows = await self.records.rows()
             await validate_inputs(
                 source,

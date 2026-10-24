@@ -6,16 +6,18 @@ On every citation graph of up to four sources (chain_worlds.py), it checks:
   exactly when a path of citations leads from that source back to it, so a
   graph is admitted if and only if it is acyclic.
 - Withholding. On every acyclic graph, with every source in every state
-  (ok, held, replaced, rekeyed, pending, withdrawn, invalid), the
-  withheld-decision set that retrieval and `status` read equals the
-  oracle's: each decision's reason, status and withholding inputs, with
-  withholding spread down the whole chain as `input_changed` and
-  `upstream_withheld`.
+  (ok, held, replaced, rekeyed, pending, unverified, withdrawn, invalid),
+  the withheld-decision set that retrieval and `status` read equals the
+  oracle's: each decision's reason, status and withholding inputs, for a
+  resolution and a variant of each source, with withholding spread down
+  the whole chain as `input_changed` and `upstream_withheld`.
 
-The code under test is chains.check_citation_cycles, chains.record_reader,
-withholding.withheld_decisions and chains.close_live, which retrieve's live
-pass calls. Live validation of the documents is replaced by the reader's
-answer for each cited record and, for an invalid source, its IntentError.
+The code under test is chains.check_citation_cycles,
+withholding.record_reader, withholding.withheld_decisions and
+chains.live_pass, the pass that retrieval and `status` run. Only live
+validation itself (retrieve.live_drift) is replaced: `drift_of` returns the
+reader's answer for each cited record, as validate_inputs does, and raises
+for an invalid source.
 
 With --mutants, each scratch break in MUTANTS must make the check fail.
 
@@ -24,6 +26,7 @@ With --mutants, each scratch break in MUTANTS must make the check fail.
 """
 
 import argparse
+import asyncio
 import sys
 import time
 from collections import Counter
@@ -41,9 +44,8 @@ from chain_worlds import (
     oracle,
     world_rows,
 )
-from cognee_lab.identity import chains
-from cognee_lab.identity.records import saved_records
-from cognee_lab.identity.retrieve import is_served
+from cognee_lab.identity import chains, withholding
+from cognee_lab.identity.records import REGISTRY, saved_records
 from cognee_lab.identity.validation import IntentError
 from cognee_lab.identity.withholding import (
     Status,
@@ -66,34 +68,29 @@ def refused(graph, label) -> bool:
     return False
 
 
-def held_now(graph, states):
+async def held_now(graph, states):
     """The withheld-decision set of the served sources that validate."""
     rows, table = world_rows(graph, states)
-    withheld = withheld_decisions(rows, table)
-    reader = chains.record_reader(rows)
     invalid = {str(identity(label)) for label in graph if states[label] == "invalid"}
-    found = {}
-    for row in rows:
-        if not is_served(row):
-            continue
-        source = row.description
-        if row.source in invalid:
-            found[row.source] = (source, row, IntentError("source_changed", "x"))
-            continue
-        drift = {
-            key: reason
+
+    async def drift_of(source, read):
+        if str(source.identity_data_id) in invalid:
+            raise IntentError("source_changed", "An own input fails")
+        return {
+            key: found[0]
             for key, item in saved_records(source).items()
-            if (reason := reader(item)) is not None
+            if (found := read(item)) is not None
         }
-        found[row.source] = (source, row, drift)
+
+    live = await chains.live_pass(rows, withheld_decisions(rows, table), drift_of)
     return {
         key: held
-        for key, (_, _, held) in chains.close_live(found, withheld).items()
+        for key, (_, _, held) in live.items()
         if not isinstance(held, IntentError) and held
     }
 
 
-def run(count=len(LABELS), states=STATES):
+async def search(count, states):
     labels = LABELS[:count]
     tally, failures = Counter(), []
     for graph in graphs(labels):
@@ -108,24 +105,30 @@ def run(count=len(LABELS), states=STATES):
         for chosen in product(states, repeat=count):
             world = dict(zip(labels, chosen))
             tally["withholding worlds"] += 1
-            want, got = oracle(graph, world), held_now(graph, world)
+            want, got = oracle(graph, world), await held_now(graph, world)
             if want != got:
                 failures.append(("withholding", graph, world, want, got))
     return tally, failures
+
+
+def run(count=len(LABELS), states=STATES):
+    return asyncio.run(search(count, states))
 
 
 def skip(*_):
     return None
 
 
-def one_level_closure(held, readers, failed=frozenset()):
+def one_level_closure(held, readers):
     """Withholding spreads one citation down, not down the whole chain."""
+    above = {source: dict(entries) for source, entries in held.items()}
     held = {source: dict(entries) for source, entries in held.items()}
-    chains.citing_unfinished(held, readers, failed)
-    above = {source: set(entries) for source, entries in held.items()}
     for source, reader in sorted(readers.items()):
         for key, item in saved_records(reader).items():
-            if item.record_id in above.get(str(item.identity_data_id), ()):
+            cited = str(item.identity_data_id)
+            if cited in readers and REGISTRY[item.record_type].held(
+                above.get(cited, {}), readers[cited], item.record_id
+            ):
                 entry = Withheld(
                     chains.Reason.CHANGED, Status.UPSTREAM_WITHHELD, frozenset([key])
                 )
@@ -135,16 +138,13 @@ def one_level_closure(held, readers, failed=frozenset()):
     return held
 
 
-_bound_reader = chains.record_reader
-
-
-def removed_reads_changed(rows):
+def removed_reads_changed(rows, failed=frozenset()):
     """A record gone from its source reads as changed, not removed."""
-    read = _bound_reader(rows)
+    read = withholding.record_reader(rows, failed)
 
     def changed(item):
-        reason = read(item)
-        return chains.Reason.CHANGED if reason is not None else None
+        found = read(item)
+        return withholding.CHANGED if found == withholding.REMOVED else found
 
     return changed
 

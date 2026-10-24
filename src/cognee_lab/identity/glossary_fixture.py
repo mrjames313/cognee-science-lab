@@ -302,10 +302,11 @@ async def review_gate(publisher, source, decision, command):
     from .retrieve import withheld_now
     from .validation import Reason
     from .withholding import (
+        UNFINISHED,
         Status,
         document_inputs,
+        record_reader,
         unfinished_edits,
-        unfinished_sources,
     )
 
     rows = await publisher.records.rows()
@@ -315,17 +316,19 @@ async def review_gate(publisher, source, decision, command):
                 "edit_unfinished",
                 "Reconcile the edit of a document this source reads before a review",
             )
-    cited = {str(i.identity_data_id) for i in saved_records(source).values()}
-    if cited & unfinished_sources(rows):
-        raise IntentError(
-            "edit_unfinished",
-            "Reconcile the attempt of a source whose records this source cites before a review",
-        )
+    read = record_reader(rows)
     entry = (
         (await withheld_now(publisher, rows))
         .get(str(source.identity_data_id), {})
         .get(decision)
     )
+    if any(read(i) == UNFINISHED for i in saved_records(source).values()) or (
+        entry is not None and entry.status == Status.EDIT_UNFINISHED
+    ):
+        raise IntentError(
+            "edit_unfinished",
+            "Reconcile the attempt of a source whose records this source cites before a review",
+        )
     if entry is not None and entry.status == Status.UPSTREAM_WITHHELD:
         raise IntentError(
             "upstream_withheld",

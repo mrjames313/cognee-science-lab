@@ -31,10 +31,16 @@ from cognee_lab.identity.validation import (
     IntentError,
     fresh_mention_id,
     validate_inputs,
-    withheld_by,
 )
+from cognee_lab.identity.withholding import held_by
 
 HC = UUID(HC_ID)
+
+
+def withheld_reasons(source, drift):
+    """Each decision live drift withholds, with its reason."""
+    found = held_by(source, {}, drift, lambda item: None)
+    return {key: entry.reason for key, entry in found.items()}
 
 
 def revisions(payload):
@@ -138,7 +144,7 @@ async def test_the_listed_corpus_input_matches_the_hc_entity_in_the_graph(
     )
     # A changed corpus field withholds the decision that read it, not the source.
     assert drift == {"existing_HC": "input_changed"}
-    assert withheld_by(reusable, drift) == {"v02": "input_changed"}
+    assert withheld_reasons(reusable, drift) == {"v02": "input_changed"}
 
 
 async def test_a_fresh_group_needs_a_rebuild_even_when_the_text_is_unchanged(

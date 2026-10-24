@@ -6,23 +6,25 @@ A source cites another source's record through a saved-record input
 edge from A to B when A cites any record of B. Admission keeps it acyclic,
 so every chain has a top. Nothing here writes: withholding down a chain is
 derived each time from the ledger rows, the withholding table and live
-validation, and releases as soon as its cause does.
+validation (`live_pass`), and releases as soon as its cause does.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 
-from .models import IdentitySource, SavedRecordInput
-from .records import record_digest, saved_records
+from .models import IdentitySource
+from .records import REGISTRY, cited_row, record_digest, saved_records
 from .storage import PublicationRow
-from .validation import IntentError, Reason, decision_inputs, stronger, withheld_by
+from .validation import IntentError, Reason
 from .withholding import (
+    RecordReader,
     Status,
     Withheld,
     WithheldSet,
     citing,
-    citing_unfinished,
     combine,
+    held_by,
     merge,
+    record_reader,
 )
 
 
@@ -42,35 +44,6 @@ def check_citation_scope(description):
             )
 
 
-RecordReader = Callable[[SavedRecordInput], Reason | None]
-
-
-def record_reader(rows) -> RecordReader:
-    """What validation asks of one cited record, from the ledger rows: None
-    while the cited source is served with the record under its type and
-    pinned fingerprint. A withdrawn, forgotten or missing source, or a key
-    its current revision lacks, gives `input_removed`. A pending, failed or
-    unverified source, or another fingerprint, gives `input_changed`. An
-    unfinished source is checked before anything else, so a pending
-    upstream never shows `input_removed`."""
-    from .retrieve import is_served
-
-    by_source = {(r.dataset, r.source): r for r in rows}
-
-    def read(item: SavedRecordInput) -> Reason | None:
-        row = by_source.get((str(item.dataset_id), str(item.identity_data_id)))
-        if row is None or row.is_retired:
-            return Reason.REMOVED
-        if not is_served(row):
-            return Reason.CHANGED
-        digest = record_digest(row.description, item.record_type, item.record_id)
-        if digest is None:
-            return Reason.REMOVED
-        return None if digest == item.content_sha256 else Reason.CHANGED
-
-    return read
-
-
 def new_citations(source, previous) -> set[str]:
     """The saved-record keys a first attempt adds: every key of a first
     publication or a re-add, and on a replacement the keys the current
@@ -88,13 +61,10 @@ def check_record_citations(source, rows, keys):
     """Each newly cited record is, as the citation pins it, a record of a
     served source at that source's current revision. Only a first attempt
     checks this (`new_citations`)."""
-    from .retrieve import is_served
-
-    by_source = {(r.dataset, r.source): r for r in rows}
     for key in sorted(keys):
         item = source.inputs[key]
-        row = by_source.get((str(item.dataset_id), str(item.identity_data_id)))
-        if row is None or not is_served(row):
+        row = cited_row(rows, item)
+        if row is None or not row.is_served:
             raise IntentError(
                 "record_source_unavailable",
                 f"The cited source is not served: {key}",
@@ -150,24 +120,28 @@ def check_citation_cycles(source, rows):
 
 
 def upstream_closure(
-    held: WithheldSet, readers: Mapping[str, IdentitySource], failed=frozenset()
+    held: WithheldSet, readers: Mapping[str, IdentitySource]
 ) -> WithheldSet:
-    """`held` with withholding spread down every chain. A decision of one of
-    `readers` that cites a record of a source in `failed` (its own input
-    failed live validation) is withheld as one citing an unfinished source.
-    Then a decision that cites a withheld record is withheld too, with
-    `input_changed` and status `upstream_withheld`, which no reviewer
-    answers. This repeats until nothing changes, which reaches the same set
-    as one pass in the topological order of the source graph. Nothing is
-    written: an entry releases when the one above it does."""
+    """`held` with withholding spread down every chain. `readers` are the
+    served sources that validate. A decision of one of them that cites a
+    withheld record of another is withheld too, with `input_changed` and
+    status `upstream_withheld`, which no reviewer answers; whether a record
+    is withheld is its type's to say (records.REGISTRY). A cited source
+    that is not one of `readers` already gave its citers their entry
+    through the record reader. This repeats until nothing changes, which
+    reaches the same set as one pass in the topological order of the source
+    graph and ends on a cycle that a race could leave. Nothing is written:
+    an entry releases when the one above it does."""
     held = {source: dict(entries) for source, entries in held.items()}
-    citing_unfinished(held, readers, failed)
     grew = True
     while grew:
         grew = False
         for source, reader in sorted(readers.items()):
             for key, item in sorted(saved_records(reader).items()):
-                if item.record_id not in held.get(str(item.identity_data_id), {}):
+                cited = str(item.identity_data_id)
+                if cited not in readers or not REGISTRY[item.record_type].held(
+                    held.get(cited, {}), readers[cited], item.record_id
+                ):
                     continue
                 entry = Withheld(
                     Reason.CHANGED, Status.UPSTREAM_WITHHELD, frozenset([key])
@@ -180,54 +154,39 @@ def upstream_closure(
     return held
 
 
-def held_by(source, recorded, drift):
-    """The source's withheld decisions: `recorded`, its entries of the
-    withheld-decision set, combined with every decision citing an input that
-    failed live validation. Live drift that a recorded entry already holds,
-    for a reason no stronger, adds nothing: a recorded move still waits for
-    its refresh. Anything else no edit classified, so a reviewer answers it
-    (`refresh_needed`)."""
-    held = dict(recorded)
-    cited = decision_inputs(source)
-    for key, reason in withheld_by(source, drift).items():
-        inputs = cited[key] & set(drift)
-        entry = recorded.get(key)
-        if (
-            entry
-            and inputs <= entry.inputs
-            and stronger(reason, entry.reason) == entry.reason
-        ):
-            continue
-        held[key] = combine(entry, Withheld(reason, Status.REFRESH_NEEDED, inputs))
-    return held
-
-
-# One served row after live validation: its source, its row, and its
-# withheld decisions or the IntentError of an own input that failed.
+# One served row after the live pass: its source, its row, and its withheld
+# decisions or the IntentError of an own input that failed.
 Live = tuple[IdentitySource, PublicationRow, dict[str, Withheld] | IntentError]
+DriftOf = Callable[[IdentitySource, RecordReader], Awaitable[dict]]
 
 
-def close_live(found, withheld: WithheldSet) -> dict[str, Live]:
-    """The live pass's result, with withholding spread down every chain.
-    `found` maps each served source to (source, row, drift): what live
-    validation returned, or the IntentError of an own input that failed.
-    Each source's held decisions combine `withheld`, its entries of the
-    withheld-decision set, with its drift (`held_by`); then
-    `upstream_closure` spreads them, and a source that failed counts as
-    unfinished for the decisions citing it."""
-    held, readers, failed = {}, {}, set()
-    for key, (source, _, drift) in found.items():
-        if isinstance(drift, IntentError):
-            failed.add(key)
+async def live_pass(rows, withheld: WithheldSet, drift_of: DriftOf) -> dict[str, Live]:
+    """The one live-validation pass that retrieval and `status` share.
+    `drift_of` (retrieve.live_drift) validates each served source with a
+    record reader: it returns the foreign inputs that fail, with their
+    reasons, or raises the IntentError of an own input that fails. Each
+    source that validates holds `withheld`, its entries of the
+    withheld-decision set, combined with that drift (withholding.held_by),
+    a saved record answered by a reader that counts a cited source that
+    failed as unfinished. Then `upstream_closure` spreads withholding down
+    every chain."""
+    read = record_reader(rows)
+    found = {}
+    for row in rows:
+        if not row.is_served:
             continue
-        readers[key] = source
-        held[key] = held_by(source, withheld.get(key, {}), drift)
-    closed = upstream_closure({**withheld, **held}, readers, failed)
+        try:
+            found[row.source] = (row, await drift_of(row.description, read))
+        except IntentError as exc:
+            found[row.source] = (row, exc)
+    if failed := {k for k, (_, d) in found.items() if isinstance(d, IntentError)}:
+        read = record_reader(rows, failed)
+    readers = {k: row.description for k, (row, _) in found.items() if k not in failed}
+    held = {
+        k: held_by(readers[k], withheld.get(k, {}), found[k][1], read) for k in readers
+    }
+    closed = upstream_closure(held, readers)
     return {
-        key: (
-            source,
-            row,
-            drift if isinstance(drift, IntentError) else closed.get(key, {}),
-        )
-        for key, (source, row, drift) in found.items()
+        k: (row.description, row, drift if k in failed else closed[k])
+        for k, (row, drift) in found.items()
     }

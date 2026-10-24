@@ -40,7 +40,7 @@ class Observation:
 
 
 def served(row):
-    # retrieve.py is_served, the retrieval eligibility test. The test in
+    # storage.py PublicationRow.is_served, the retrieval eligibility test. The test in
     # tests/test_identity_ledger_check.py fails if that condition changes.
     return (
         row is not None

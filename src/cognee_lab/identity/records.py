@@ -14,10 +14,10 @@ resolution key and group key that come back later with the same target
 fingerprint differently.
 """
 
-from collections.abc import Callable
-from typing import NamedTuple
+from collections.abc import Callable, Mapping
+from typing import NamedTuple, get_args
 
-from .models import IdentitySource, SavedRecordInput
+from .models import IdentitySource, RecordType, SavedRecordInput
 from .validation import object_digest
 
 ATTRIBUTION_FIELDS = frozenset({"producer_ref", "input_refs", "explanation"})
@@ -36,11 +36,14 @@ def reviewed_decisions(values):
 
 
 class RecordKind(NamedTuple):
-    """Where one record type lives in a description (its attribute) and the
-    fields a citation of one of its records pins."""
+    """Where one record type lives in a description (its attribute), the
+    fields a citation of one of its records pins, and whether one of its
+    records is withheld, given its source's withheld decisions (entries of
+    the withheld-decision set), its source and its key."""
 
     field: str
     fingerprint: Callable[[IdentitySource, str], dict]
+    held: Callable[[Mapping[str, object], IdentitySource, str], bool]
 
 
 def resolution_fingerprint(description, key) -> dict:
@@ -55,10 +58,21 @@ def variant_fingerprint(description, key) -> dict:
     return reviewed_decisions({key: description.variant_assignments[key]})[key]
 
 
+def decision_held(entries, description, key) -> bool:
+    """A decision is withheld when the withheld-decision set holds its key."""
+    return key in entries
+
+
 REGISTRY: dict[str, RecordKind] = {
-    "mention_resolution": RecordKind("mention_resolutions", resolution_fingerprint),
-    "variant_assignment": RecordKind("variant_assignments", variant_fingerprint),
+    "mention_resolution": RecordKind(
+        "mention_resolutions", resolution_fingerprint, decision_held
+    ),
+    "variant_assignment": RecordKind(
+        "variant_assignments", variant_fingerprint, decision_held
+    ),
 }
+if set(get_args(RecordType)) != REGISTRY.keys():
+    raise TypeError("models.RecordType and records.REGISTRY name different types")
 
 
 def record_digest(description, record_type, record_id) -> str | None:
@@ -80,6 +94,19 @@ def record_type_of(description, record_id) -> str | None:
             t
             for t, kind in REGISTRY.items()
             if record_id in getattr(description, kind.field)
+        ),
+        None,
+    )
+
+
+def cited_row(rows, item: SavedRecordInput):
+    """The ledger row of the source a citation names, or None."""
+    return next(
+        (
+            r
+            for r in rows
+            if (r.dataset, r.source)
+            == (str(item.dataset_id), str(item.identity_data_id))
         ),
         None,
     )

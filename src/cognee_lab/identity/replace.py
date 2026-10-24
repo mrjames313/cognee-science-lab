@@ -437,7 +437,7 @@ async def replace(
         table = await publisher.withholdings.rows(source.dataset_id)
         if not any(w.source == own for w in table):
             return
-        from .chains import record_reader
+        from .withholding import record_reader
 
         drift = await validate_inputs(
             source,

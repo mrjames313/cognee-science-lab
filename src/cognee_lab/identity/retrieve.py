@@ -2,10 +2,11 @@
 
 import re
 from dataclasses import asdict
+from functools import partial
 from types import SimpleNamespace
 from uuid import UUID
 
-from .chains import Live, close_live, record_reader
+from .chains import live_pass
 from .models import Accepted, ChunkInput
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
@@ -22,8 +23,9 @@ from .withholding import (
 async def live_drift(publisher, source, reader) -> dict[str, Reason]:
     """Validate one current source as retrieval does: its registered snapshot,
     its own chunks in the graph and every input of every decision, a cited
-    saved record through `reader` (chains.record_reader). An own failure
-    raises; a foreign input that fails is returned with its reason."""
+    saved record through `reader` (withholding.record_reader). An own
+    failure raises; a foreign input that fails is returned with its reason.
+    chains.live_pass calls it for each served source."""
     from .registered import read_registered, read_texts
 
     if await read_registered(source) != source:
@@ -61,36 +63,6 @@ async def live_drift(publisher, source, reader) -> dict[str, Reason]:
     )
 
 
-def is_served(row) -> bool:
-    """The retrieval eligibility test. support/ledger_check.py copies it as
-    served()."""
-    return row.state == "current" and row.revision == row.verified_revision
-
-
-async def live_held(publisher, rows, withheld: WithheldSet) -> dict[str, Live]:
-    """The one live-validation pass that retrieval and status share, with
-    withholding spread down every chain of citations. Each served row maps
-    to (source, row, held): its withheld decisions, `withheld` combined
-    with what live validation finds in every decision and with what a
-    withheld record above it holds (chains.close_live), or the IntentError
-    of an own input that failed."""
-    reader = record_reader(rows)
-    found = {}
-    for row in rows:
-        if not is_served(row):
-            continue
-        source = row.description
-        try:
-            found[row.source] = (
-                source,
-                row,
-                await live_drift(publisher, source, reader),
-            )
-        except IntentError as exc:
-            found[row.source] = (source, row, exc)
-    return close_live(found, withheld)
-
-
 async def withheld_now(publisher, rows, table=None) -> WithheldSet:
     """The withheld-decision set retrieval applies: the rows and the derived
     rule (withholding.withheld_decisions) with the live-validation pass.
@@ -101,7 +73,8 @@ async def withheld_now(publisher, rows, table=None) -> WithheldSet:
     if table is None:
         table = await publisher.withholdings.rows()
     held = withheld_decisions(rows, table)
-    for source, (_, _, found) in (await live_held(publisher, rows, held)).items():
+    live = await live_pass(rows, held, partial(live_drift, publisher))
+    for source, (_, _, found) in live.items():
         if not isinstance(found, IntentError):
             held[source] = found
     return held
@@ -144,7 +117,7 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
     live = {
         key: (source, found)
         for key, (source, _, found) in (
-            await live_held(publisher, rows, withheld)
+            await live_pass(rows, withheld, partial(live_drift, publisher))
         ).items()
     }
     for row in rows:

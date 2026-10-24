@@ -168,6 +168,12 @@ class PublicationRow:
         return self.state in RETIRED_STATES
 
     @property
+    def is_served(self) -> bool:
+        """The retrieval eligibility test. support/ledger_properties.py
+        copies it as served()."""
+        return self.state == "current" and self.revision == self.verified_revision
+
+    @property
     def resumed_by(self) -> str | None:
         """The method that alone resumes this row's saved plan, if it failed."""
         return cell_for(self).owner

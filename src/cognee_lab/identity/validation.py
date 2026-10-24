@@ -1,7 +1,6 @@
 """Exact input checks. No identity judgments or approximate substring matching."""
 
 from enum import StrEnum
-from functools import reduce
 from hashlib import sha256
 from typing import Any, NamedTuple
 from uuid import UUID, uuid5
@@ -149,18 +148,6 @@ def naming(description, key) -> set[UUID]:
     return {variant.source_entity_id, variant.target_entity_id}
 
 
-def withheld_by(source: IdentitySource, drift: dict[str, Reason]) -> dict[str, Reason]:
-    """The decisions that cite a drifted input, each with its strongest
-    reason. A decision citing several inputs is valid only when all of them
-    are."""
-    withheld = {}
-    for key, inputs in decision_inputs(source).items():
-        reasons = [Reason(drift[i]) for i in sorted(inputs) if i in drift]
-        if reasons:
-            withheld[key] = reduce(stronger, reasons)
-    return withheld
-
-
 def checked_inputs(source: IdentitySource, withheld=frozenset()) -> set[str]:
     """The inputs to validate: the original text and the groups' own structure
     always, and every input a decision outside `withheld` cites. A text reached
@@ -235,14 +222,13 @@ async def input_failure(
                 "input_changed", Reason.CHANGED, f"Corpus fields changed: {key}"
             )
     elif isinstance(item, SavedRecordInput):
-        # chains.record_reader: the cited source's row, the record under its
-        # type and its fingerprint; the pinned revision is provenance only.
+        # withholding.record_reader: the cited source's row, the record under
+        # its type and its fingerprint; the pinned revision is provenance only.
         if saved_record_reader is None:
             raise IntentError("unsupported_input", "A saved-record reader is required")
-        reason = saved_record_reader(item)
-        if reason is not None:
+        if (found := saved_record_reader(item)) is not None:
             return Failure(
-                "input_changed", reason, f"Saved record changed or removed: {key}"
+                "input_changed", found[0], f"Saved record changed or removed: {key}"
             )
     elif isinstance(item, ChunkInput):
         chunk = chunks.get(str(item.chunk_id))
