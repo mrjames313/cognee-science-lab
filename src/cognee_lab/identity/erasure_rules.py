@@ -286,18 +286,21 @@ def check_removal_producers_kept(old, source):
             )
 
 
-def check_erasure_removals(old, source, removal: ErasureStep | None, readers):
+def check_erasure_removals(
+    old, source, removal: ErasureStep | None, readers, served: int
+):
     """A revision that names a removal producer is an erasure removal, all
     of it and nothing else: it cites what the forget removed, removes every
     decision citing it (`check_erasure_complete`), changes nothing more
     (`check_erasure_confined`) and its producer lists what it removed
-    (`check_erasure_records`)."""
+    (`check_erasure_records`). `served` is the last revision of the source
+    the ledger verified: the old one, for a removal at the next revision."""
     if removal is None:
         return
     check_erasure_cites(removal)
     check_erasure_complete(old, source, removal)
     check_erasure_confined(old, source, removal, readers)
-    check_erasure_records(old, source, removal)
+    check_erasure_records(old, source, removal, served)
 
 
 def check_erasure_cites(removal: ErasureStep):
@@ -310,32 +313,34 @@ def check_erasure_cites(removal: ErasureStep):
         )
 
 
-def check_erasure_records(old, source, removal: ErasureStep):
+def check_erasure_records(old, source, removal: ErasureStep, served: int):
     """The removal producer lists exactly the records its revision removes,
-    as the old revision held them: the removals below it bind to that list
-    (`bound_removals`). A removal at the old revision is an erasure retry in
-    place (`RemovedRecord.of`)."""
-    in_place = source.revision == old.revision
-    if removal.removed_records != {
-        RemovedRecord.of(old, k, in_place=in_place) for k in removal.citing
-    }:
+    as the old revision held them and as last served (`RemovedRecord.of`):
+    the removals below it bind to that list (`bound_removals`). A retry
+    checks a step in place again after its row may have been served at the
+    step's own revision, so such a step may also list the revision before."""
+    if removal.removed_records not in [
+        {RemovedRecord.of(old, k, last) for k in removal.citing}
+        for last in (served, source.revision - 1)
+    ]:
         raise IntentError(
             "erasure_incomplete",
             "A removal producer lists exactly the records its revision removes, as they were before",
         )
 
 
-def check_retry_chain(chain, erasures: Erasures):
+def check_retry_chain(chain, erasures: Erasures, served: int):
     """An erasure-retry chain: the saved descriptions that erasure retries
     superseded, in order, then the description the attempt begins with.
     Each step is an erasure removal in place of the one before
     (`check_erasure_retry`). A replacement's own step, from its previous
-    revision to the chain's first description, is admission's."""
+    revision to the chain's first description, is admission's. `served` is
+    the row's verified revision."""
     for saved, source in pairwise(chain):
-        check_erasure_retry(saved, source, erasures)
+        check_erasure_retry(saved, source, erasures, served)
 
 
-def check_erasure_retry(saved, source, erasures: Erasures):
+def check_erasure_retry(saved, source, erasures: Erasures, served: int):
     """A retry replaces a failed attempt's saved revision only by its
     erasure removal: the same revision, one removal producer new, and the
     removal rules."""
@@ -344,7 +349,7 @@ def check_erasure_retry(saved, source, erasures: Erasures):
         raise IntentError(
             "revision_reuse", "Recovery must use the exact saved replacement intent"
         )
-    check_erasure_removals(saved, source, removal, erasures.readers)
+    check_erasure_removals(saved, source, removal, erasures.readers, served)
 
 
 def check_erasure_complete(old, source, removal: ErasureStep):

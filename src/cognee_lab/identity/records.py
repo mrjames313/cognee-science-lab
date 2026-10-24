@@ -15,8 +15,8 @@ fingerprint differently.
 
 An erasure removes a record that cites what a forget took away
 (`RecordKind.removed`). A removed record is named with the fingerprint it
-had and the last revision that held it (`RemovedRecord`), so a citation
-made before the removal matches it and a later one does not.
+had and the last served revision that held it (`RemovedRecord`), so a
+citation made before the removal matches it and a later one does not.
 """
 
 from collections.abc import Callable, Mapping
@@ -172,9 +172,10 @@ def citation(description, record_id) -> dict:
 
 class RemovedRecord(NamedTuple):
     """A record an erasure removed or will remove: its source, type and key,
-    the fingerprint it had, and the last revision of its source that held
-    it. A citation reads it when it pins that fingerprint at that revision
-    or before (`reads`); a citation made after the removal reads the record
+    the fingerprint it had, and the last served revision of its source
+    that held it. A citation reads it when it pins that fingerprint at that
+    revision or before (`reads`); a citation made after the removal reads
+    the record
     as it is now, even when it comes back with the same fingerprint."""
 
     identity_data_id: str
@@ -184,19 +185,21 @@ class RemovedRecord(NamedTuple):
     last_revision: int
 
     @classmethod
-    def of(cls, description, record_id, *, in_place=False) -> "RemovedRecord":
-        """The record as `description` holds it, before its removal. A
+    def of(cls, description, record_id, served: int) -> "RemovedRecord":
+        """The record as `description` holds it, before its removal.
+        `served` is the last revision of its source that the ledger
+        verified (`PublicationRow.verified_revision`): a citation pins a
+        served record, so no citation pins one at a later revision. A
         removal in place of a failed attempt's saved revision (an erasure
-        retry) removes a record no citation could pin at that revision,
-        which was never served, so the last revision that held it for a
-        citer is the one before."""
+        retry) holds a record last served at the revision before, or at the
+        same revision when a reconcile of a served row failed."""
         record_type = record_type_of(description, record_id)
         return cls(
             str(description.identity_data_id),
             record_type,
             record_id,
             record_digest(description, record_type, record_id),
-            description.revision - 1 if in_place else description.revision,
+            min(description.revision, served),
         )
 
     @classmethod

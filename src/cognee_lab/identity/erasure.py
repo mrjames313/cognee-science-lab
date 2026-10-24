@@ -220,8 +220,9 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
     ) & set(reader.entity_constructions)
     revision = reader.revision + 1 if row.state == "current" else reader.revision
     key = producer_key(ids.identity_data_id, revision)
-    in_place = row.state != "current" and not blocked(row)
-    removed_records = {RemovedRecord.of(reader, k, in_place=in_place) for k in citing}
+    removed_records = {
+        RemovedRecord.of(reader, k, row.verified_revision) for k in citing
+    }
     cited_records = read_records(reader, records)
     after = {}
     for k in sorted(citing):

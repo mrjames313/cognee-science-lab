@@ -133,7 +133,7 @@ def settle(old, new):
         if new[field].get(key) != record
     )
     producer["configuration"]["removed_records"] = [
-        RemovedRecord.of(before, key)._asdict() for key in changed
+        RemovedRecord.of(before, key, before.revision)._asdict() for key in changed
     ]
 
 

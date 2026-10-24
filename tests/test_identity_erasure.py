@@ -35,16 +35,19 @@ def source_of(payload):
 
 
 def row_of(source, state="current", plan=None):
+    """A saved row; a failed replacement's revision was never verified."""
+    plan = plan or {"operation": "identity_publish"}
+    unverified = state == "failed" and plan["operation"] == "identity_replace"
     return PublicationRow(
         dataset=str(source.dataset_id),
         source=str(source.identity_data_id),
         state=state,
         revision=source.revision,
-        verified_revision=source.revision,
+        verified_revision=source.revision - unverified,
         attempt="attempt",
         description=source,
         tombstone=None,
-        plan=plan or {"operation": "identity_publish"},
+        plan=plan,
     )
 
 
@@ -189,7 +192,8 @@ def test_the_removal_revision_is_admitted_and_cites_nothing_forgotten(
         removed_entity_ids=[],
         impact_token="t" * 64,
         removed_records=[
-            RemovedRecord.of(doc01, key)._asdict() for key in ("r01", "v01")
+            RemovedRecord.of(doc01, key, doc01.revision)._asdict()
+            for key in ("r01", "v01")
         ],
         cited_records=[],
     )
@@ -283,11 +287,13 @@ def test_a_failed_replacement_takes_the_removal_in_its_saved_revision(
     assert {r["last_revision"] for r in removed.configuration["removed_records"]} == {
         saved.revision - 1
     }
-    check_erasure_retry(saved, revised, forgot(gloss))
+    check_erasure_retry(saved, revised, forgot(gloss), saved.revision - 1)
     changed = json.loads(saved.model_dump_json())
     changed["mention_resolutions"]["r01"]["explanation"] = "changed"
     with pytest.raises(IntentError) as refused:
-        check_erasure_retry(saved, source_of(changed), forgot(gloss))
+        check_erasure_retry(
+            saved, source_of(changed), forgot(gloss), saved.revision - 1
+        )
     assert refused.value.code == "revision_reuse"
 
 
@@ -442,7 +448,12 @@ def test_an_erasure_retry_step_removes_something(source_payload):
     gloss = glossary(source_payload)
     saved = source_of(source_payload)
     with pytest.raises(IntentError) as refused:
-        check_erasure_retry(saved, with_removal_producer(saved, gloss), forgot(gloss))
+        check_erasure_retry(
+            saved,
+            with_removal_producer(saved, gloss),
+            forgot(gloss),
+            saved.revision - 1,
+        )
     assert refused.value.code == "erasure_empty"
 
 
@@ -453,7 +464,7 @@ def test_an_erasure_retry_step_keeps_the_identity_source(source_payload):
     moved = json.loads(revised.model_dump_json())
     moved["identity_data_id"] = str(uuid4())
     with pytest.raises(IntentError) as refused:
-        check_erasure_retry(saved, source_of(moved), forgot(gloss))
+        check_erasure_retry(saved, source_of(moved), forgot(gloss), saved.revision - 1)
     assert refused.value.code == "erasure_unrelated"
 
 
@@ -465,14 +476,14 @@ def test_every_step_of_a_retry_chain_is_an_erasure_removal(source_payload):
     saved = reader_of(source_payload, gloss)
     saved = source_of(dict(json.loads(saved.model_dump_json()), revision=2))
     revised, _ = removal(saved, gloss, state="failed", plan=REPLACING)
-    check_retry_chain([saved, revised], forgot(gloss))
-    check_retry_chain([revised], forgot(gloss))
+    check_retry_chain([saved, revised], forgot(gloss), 1)
+    check_retry_chain([revised], forgot(gloss), 1)
     with pytest.raises(IntentError) as refused:
-        check_retry_chain([old, saved], forgot(gloss))
+        check_retry_chain([old, saved], forgot(gloss), 1)
     assert refused.value.code == "revision_reuse"
     with pytest.raises(IntentError) as refused:
         check_retry_chain(
-            [saved, revised, with_removal_producer(revised, gloss)], forgot(gloss)
+            [saved, revised, with_removal_producer(revised, gloss)], forgot(gloss), 1
         )
     assert refused.value.code == "revision_reuse"
 

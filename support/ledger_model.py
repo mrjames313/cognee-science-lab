@@ -108,7 +108,7 @@ def description(s, revision, variant=0):
             impact_token=None,
             removed_records=[
                 RemovedRecord.of(
-                    description(s, revision), "r01", in_place=True
+                    description(s, revision), "r01", revision - 1
                 )._asdict()
             ],
             cited_records=[],

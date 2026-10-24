@@ -435,7 +435,9 @@ def admissible(row, method, plan, source, rows=()) -> Refusal | None:
         return REVISION_REUSE
     if chain := erasure_chain(row, method, plan):
         try:
-            check_retry_chain([*chain, source], erasures_of(rows, source))
+            check_retry_chain(
+                [*chain, source], erasures_of(rows, source), row.verified_revision
+            )
         except IntentError as refused:
             return Refusal(refused.code, str(refused))
     return None
