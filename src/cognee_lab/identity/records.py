@@ -21,8 +21,17 @@ citation made before the removal matches it and a later one does not.
 
 from collections.abc import Callable, Mapping
 from typing import NamedTuple, get_args
+from uuid import UUID
 
-from .models import IdentitySource, RecordType, SavedRecordInput, Unresolved
+from .models import (
+    Accepted,
+    DecisionBase,
+    IdentitySource,
+    RecordType,
+    SavedRecordInput,
+    Unresolved,
+    Variant,
+)
 from .validation import object_digest
 
 ATTRIBUTION_FIELDS = frozenset({"producer_ref", "input_refs", "explanation"})
@@ -40,19 +49,38 @@ def reviewed_decisions(values):
     }
 
 
+Record = DecisionBase | Variant
+
+
 class RecordKind(NamedTuple):
-    """Where one record type lives in a description (its attribute), the
-    fields a citation of one of its records pins, whether one of its
-    records is withheld, given its source's withheld decisions (entries of
-    the withheld-decision set), its source and its key, and what an
-    erasure leaves of a record (`removed`: the record after the removal, or
-    None when the removal drops it), given its source, its key, the erased
-    input keys and the removal producer's key."""
+    """One citable record type: everything the chain logic asks of it, so
+    no other module names a record type's fields.
+
+    - `field`: the description attribute that holds its records, by key.
+    - `fingerprint`: what a citation of a record pins, given its source and
+      key.
+    - `inputs`: the input keys a record cites directly, given its source and
+      key.
+    - `held`: whether a record is withheld, given its source's entries of
+      the withheld-decision set, its source and its key.
+    - `removed`: what an erasure leaves of a record, given its source, its
+      key, the erased input keys and the removal producer's key: the record
+      after the removal, or None when the removal drops it.
+    - `outcome`: the name of what an erasure leaves (`unresolved`,
+      `dropped`).
+    - `stripped`: the other parts of a description that hold its records'
+      inputs, by field, with the erased input keys stripped.
+    - `unlinked`: the mention Entities whose facts lose their identity link
+      when a record is removed, given its source and key."""
 
     field: str
     fingerprint: Callable[[IdentitySource, str], dict]
+    inputs: Callable[[IdentitySource, str], frozenset[str]]
     held: Callable[[Mapping[str, object], IdentitySource, str], bool]
-    removed: Callable[[IdentitySource, str, set[str], str], object | None]
+    removed: Callable[[IdentitySource, str, set[str], str], Record | None]
+    outcome: str
+    stripped: Callable[[IdentitySource, set[str]], dict[str, dict]]
+    unlinked: Callable[[IdentitySource, str], frozenset[UUID]]
 
 
 def resolution_fingerprint(description, key) -> dict:
@@ -65,6 +93,21 @@ def resolution_fingerprint(description, key) -> dict:
 
 def variant_fingerprint(description, key) -> dict:
     return reviewed_decisions({key: description.variant_assignments[key]})[key]
+
+
+def resolution_inputs(description, key) -> frozenset[str]:
+    """A resolution is one unit with its group, so it cites the group's
+    inputs too."""
+    decision = description.mention_resolutions[key]
+    group = description.mention_groups[decision.group_ref]
+    return frozenset([*decision.input_refs, *group.input_refs])
+
+
+def variant_inputs(description, key) -> frozenset[str]:
+    """A variant cites its scope's document too."""
+    variant = description.variant_assignments[key]
+    scope = getattr(variant.applicability, "document_ref", None)
+    return frozenset([*variant.input_refs, *([scope] if scope else [])])
 
 
 def decision_held(entries, description, key) -> bool:
@@ -97,12 +140,56 @@ def variant_removed(description, key, erased, producer):
     return None
 
 
+def groups_stripped(description, erased) -> dict[str, dict]:
+    """Every group, which a resolution's inputs include, loses the erased
+    inputs."""
+    fallback = description.original_input_ref
+    return dict(
+        mention_groups={
+            k: g.model_copy(
+                update=dict(input_refs=without_erased(g.input_refs, erased, fallback))
+            )
+            for k, g in description.mention_groups.items()
+        }
+    )
+
+
+def nothing_stripped(description, erased) -> dict[str, dict]:
+    return {}
+
+
+def resolution_unlinked(description, key) -> frozenset[UUID]:
+    """An accepted resolution linked its group's mention to an Entity."""
+    decision = description.mention_resolutions[key]
+    if not isinstance(decision, Accepted):
+        return frozenset()
+    return frozenset([description.mention_groups[decision.group_ref].entity_id])
+
+
+def nothing_unlinked(description, key) -> frozenset[UUID]:
+    return frozenset()
+
+
 REGISTRY: dict[str, RecordKind] = {
     "mention_resolution": RecordKind(
-        "mention_resolutions", resolution_fingerprint, decision_held, resolution_removed
+        field="mention_resolutions",
+        fingerprint=resolution_fingerprint,
+        inputs=resolution_inputs,
+        held=decision_held,
+        removed=resolution_removed,
+        outcome="unresolved",
+        stripped=groups_stripped,
+        unlinked=resolution_unlinked,
     ),
     "variant_assignment": RecordKind(
-        "variant_assignments", variant_fingerprint, decision_held, variant_removed
+        field="variant_assignments",
+        fingerprint=variant_fingerprint,
+        inputs=variant_inputs,
+        held=decision_held,
+        removed=variant_removed,
+        outcome="dropped",
+        stripped=nothing_stripped,
+        unlinked=nothing_unlinked,
     ),
 }
 if set(get_args(RecordType)) != REGISTRY.keys():
@@ -131,6 +218,11 @@ def record_type_of(description, record_id) -> str | None:
         ),
         None,
     )
+
+
+def record_keys(description) -> list[str]:
+    """Every record key of the description, of every type."""
+    return [k for kind in REGISTRY.values() for k in getattr(description, kind.field)]
 
 
 def cited_row(rows, item: SavedRecordInput):

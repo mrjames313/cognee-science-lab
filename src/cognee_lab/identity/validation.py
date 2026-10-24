@@ -98,17 +98,15 @@ def is_foreign(source: IdentitySource, key: str) -> bool:
 
 
 def decision_inputs(source: IdentitySource) -> dict[str, frozenset[str]]:
-    """The input keys each decision cites directly. A resolution is one unit
-    with its group, so it cites the group's inputs too; a variant cites its
-    scope's document."""
-    cited = {}
-    for key, decision in source.mention_resolutions.items():
-        group = source.mention_groups[decision.group_ref]
-        cited[key] = frozenset([*decision.input_refs, *group.input_refs])
-    for key, variant in source.variant_assignments.items():
-        scope = getattr(variant.applicability, "document_ref", None)
-        cited[key] = frozenset([*variant.input_refs, *([scope] if scope else [])])
-    return cited
+    """The input keys each record cites directly, as its record type says
+    (records.RecordKind.inputs)."""
+    from .records import REGISTRY  # records imports this module
+
+    return {
+        key: kind.inputs(source, key)
+        for kind in REGISTRY.values()
+        for key in getattr(source, kind.field)
+    }
 
 
 def reusable_recipes(description):

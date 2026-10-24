@@ -36,14 +36,8 @@ from .erasure_rules import (
     producer_key,
     removal_claim,
 )
-from .models import Accepted, CorpusObjectInput, IdentitySource
-from .records import (
-    REGISTRY,
-    RemovedRecord,
-    record_type_of,
-    saved_records,
-    without_erased,
-)
+from .models import CorpusObjectInput, IdentitySource
+from .records import REGISTRY, RemovedRecord, record_type_of, saved_records
 from .retirement import (
     Dependent,
     SourceIds,
@@ -224,21 +218,22 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
     key = producer_key(ids.identity_data_id, revision)
     removed_records = removes(row, cited)
     cited_records = read_records(reader, records)
-    after = {}
-    for k in sorted(citing):
-        kind = REGISTRY[record_type_of(reader, k)]
-        after[k] = (kind.field, kind.removed(reader, k, erased, key))
+    kinds = {k: REGISTRY[record_type_of(reader, k)] for k in sorted(citing)}
 
     def change(payload):
-        for k, (field, record) in after.items():
+        for k, kind in kinds.items():
+            record = kind.removed(reader, k, erased, key)
             if record is None:
-                payload[field].pop(k)
+                payload[kind.field].pop(k)
             else:
-                payload[field][k] = record.model_dump(mode="json", exclude_none=True)
-        for group in payload["mention_groups"].values():
-            group["input_refs"] = without_erased(
-                group["input_refs"], erased, reader.original_input_ref
-            )
+                payload[kind.field][k] = record.model_dump(
+                    mode="json", exclude_none=True
+                )
+        for kind in REGISTRY.values():
+            for field, parts in kind.stripped(reader, erased).items():
+                payload[field] = {
+                    k: part.model_dump(mode="json") for k, part in parts.items()
+                }
         payload["producers"][key] = removal_producer(
             ids, removed, token, removed_records, cited_records
         )
@@ -265,18 +260,16 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
             Removal(
                 k,
                 record_type_of(reader, k),
-                "dropped" if record is None else record.status,
+                kind.outcome,
                 tuple(cited[i] for i in sorted(by_decision[k] & erased)),
             )
-            for k, (_, record) in after.items()
+            for k, kind in kinds.items()
         ),
         dropped_entities=tuple(sorted(str(e) for e in dropped)),
         kept_entities=tuple(sorted(str(e) for e in candidates - dropped)),
         unlinked_mentions=tuple(
             sorted(
-                str(reader.mention_groups[d.group_ref].entity_id)
-                for k, d in reader.mention_resolutions.items()
-                if k in citing and isinstance(d, Accepted)
+                str(e) for k, kind in kinds.items() for e in kind.unlinked(reader, k)
             )
         ),
         dropped_inputs=tuple(sorted(set(reader.inputs) - set(revised.inputs))),

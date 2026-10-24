@@ -26,7 +26,7 @@ from uuid import UUID
 from .decisions import decisions_digest, naming_keys
 from .dependency import Target, citations, read_records
 from .models import Accepted, CorpusObjectInput
-from .records import REGISTRY, RemovedRecord, record_type_of, without_erased
+from .records import REGISTRY, RemovedRecord, record_keys, record_type_of
 from .validation import (
     IntentError,
     decision_inputs,
@@ -374,8 +374,8 @@ def check_erasure_complete(old, source, removal: ErasureStep):
     """Every old decision citing what the forget removed is removed as its
     record type says (records.REGISTRY): a resolution becomes unresolved in
     place under the removal producer, with the erased inputs stripped, and
-    a variant is dropped. No erased input remains, in the inputs or a
-    group's."""
+    a variant is dropped. No erased input remains, in the inputs or in the
+    other parts that hold a record's inputs (`RecordKind.stripped`)."""
     erased, citing = removal.erased, removal.citing
     for key in sorted(citing):
         kind = REGISTRY[record_type_of(old, key)]
@@ -385,9 +385,13 @@ def check_erasure_complete(old, source, removal: ErasureStep):
                 "erasure_incomplete",
                 "A decision citing what the forget removed is removed: a resolution becomes unresolved under the removal producer and a variant is dropped",
             )
-    if set(source.inputs) & erased or any(
-        set(g.input_refs) & erased for g in source.mention_groups.values()
-    ):
+    held = [
+        part.input_refs
+        for kind in REGISTRY.values()
+        for field in kind.stripped(old, erased)
+        for part in getattr(source, field).values()
+    ]
+    if set(source.inputs) & erased or any(set(refs) & erased for refs in held):
         raise IntentError("erasure_incomplete", "No erased input remains")
 
 
@@ -406,21 +410,18 @@ def check_erasure_confined(old, source, removal: ErasureStep, readers):
     if any(getattr(old, f) != getattr(source, f) for f in fields):
         unrelated("keeps the dataset, the identity source and its document")
 
-    for kind in ("mention_resolutions", "variant_assignments"):
-        was, now = getattr(old, kind), getattr(source, kind)
+    for kind in REGISTRY.values():
+        was, now = getattr(old, kind.field), getattr(source, kind.field)
         if {k: v for k, v in now.items() if k not in citing} != {
             k: v for k, v in was.items() if k not in citing
         }:
             unrelated("changes only the decisions citing what the forget removed")
     stripped = {
-        k: g.model_copy(
-            update=dict(
-                input_refs=without_erased(g.input_refs, erased, old.original_input_ref)
-            )
-        )
-        for k, g in old.mention_groups.items()
+        field: parts
+        for kind in REGISTRY.values()
+        for field, parts in kind.stripped(old, erased).items()
     }
-    if source.mention_groups != stripped or any(
+    if any(getattr(source, field) != parts for field, parts in stripped.items()) or any(
         old.inputs.get(k) != item for k, item in source.inputs.items()
     ):
         unrelated("keeps every group and input but the erased ones")
@@ -430,12 +431,7 @@ def check_erasure_confined(old, source, removal: ErasureStep, readers):
     }:
         unrelated("adds only its producer")
     removed_names = set().union(*(naming(old, k) for k in citing))
-    remaining = set().union(
-        *(
-            naming(source, k)
-            for k in [*source.mention_resolutions, *source.variant_assignments]
-        )
-    )
+    remaining = set().union(*(naming(source, k) for k in record_keys(source)))
     for eid, recipe in old.entity_constructions.items():
         kept = source.entity_constructions.get(eid)
         if kept is None and (eid not in removed_names or eid in remaining):
