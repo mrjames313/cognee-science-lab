@@ -76,6 +76,29 @@ def describe_to_mention(
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
+def declare_hc_variant(payload, old, key, target, input_refs):
+    """doc01 declares the HC recipe again, reads the HC Entity through the
+    corpus input `existing_HC` and names it in the document-scoped variant
+    `key`, which resolves HC to `target` and lists `input_refs`."""
+    payload["entity_constructions"][HC_ID] = HC_RECIPE
+    payload["inputs"]["existing_HC"] = dict(
+        kind="corpus_object",
+        dataset_id=str(old.dataset_id),
+        entity_id=HC_ID,
+        selected_fields=list(HC_RECIPE),
+        content_sha256=object_digest(HC_RECIPE),
+    )
+    payload["variant_assignments"][key] = dict(
+        status="accepted",
+        source_entity_id=HC_ID,
+        target_entity_id=str(target),
+        applicability=dict(kind="document", document_ref=old.original_input_ref),
+        input_refs=input_refs,
+        producer_ref=REUSABLE_REF,
+        explanation=None,
+    )
+
+
 def describe_to_reusable(old, before, chunks):
     """g09 retires. doc01 declares the HC recipe again, reads doc02's HC Entity
     through a corpus input that the new variant v02 lists, and names it in v02."""
@@ -90,24 +113,13 @@ def describe_to_reusable(old, before, chunks):
     payload = begin_revision(
         old, BEFORE, REUSABLE_REF, TO_REUSABLE, "explicit-mention-to-reusable-v1"
     )
-    helios = old.inputs["existing_A"].entity_id
     retire_group(payload, "g09")
-    payload["entity_constructions"][HC_ID] = HC_RECIPE
-    payload["inputs"]["existing_HC"] = dict(
-        kind="corpus_object",
-        dataset_id=str(old.dataset_id),
-        entity_id=HC_ID,
-        selected_fields=list(HC_RECIPE),
-        content_sha256=object_digest(HC_RECIPE),
-    )
-    payload["variant_assignments"]["v02"] = dict(
-        status="accepted",
-        source_entity_id=HC_ID,
-        target_entity_id=str(helios),
-        applicability=dict(kind="document", document_ref=old.original_input_ref),
-        input_refs=[old.original_input_ref, "existing_A", "existing_HC"],
-        producer_ref=REUSABLE_REF,
-        explanation=None,
+    declare_hc_variant(
+        payload,
+        old,
+        "v02",
+        old.inputs["existing_A"].entity_id,
+        [old.original_input_ref, "existing_A", "existing_HC"],
     )
     stamp_producer(payload, REUSABLE_REF)
     bind_chunks(payload, BEFORE, chunks)

@@ -322,6 +322,15 @@ def cited_row(rows, item: SavedRecordInput):
     )
 
 
+def current_record(rows, identity_data_id: str, record_id) -> dict | None:
+    """A citation of one record as the source `identity_data_id` holds it
+    now, or None when no saved description of that source holds it."""
+    upstream = next((r.description for r in rows if r.source == identity_data_id), None)
+    if upstream is None or record_type_of(upstream, record_id) is None:
+        return None
+    return citation(upstream, record_id)
+
+
 def saved_records(description) -> dict[str, SavedRecordInput]:
     """The description's saved-record inputs, by key."""
     return {

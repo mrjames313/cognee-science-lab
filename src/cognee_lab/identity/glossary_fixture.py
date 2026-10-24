@@ -300,28 +300,19 @@ async def reconcile(publisher, label, selected):
     """Finish the selected source's failed attempt. A glossary edit refreshes
     its dependents when it completes; return what it refreshed."""
     from .fixture import context_for, load_chunks
-    from .multisource import publish_one
-    from .text_changes import TextChange
-
-    from .revisions import replace_one
-
     from .forget_fixture import CALLER_FILES, reconcile_forget
+    from .multisource import publish_one
+    from .revisions import replace_one
+    from .text_changes import TextChange
+    from .text_fixture import maintain_one
 
     row = await publisher.records.row(selected)
     if (finished := await reconcile_forget(publisher, row, selected)) is not None:
         return dict(no_refresh(), **finished)
-    if row.resumed_by == "replace" and label == "glossary":
-        return await change_glossary(
-            publisher,
-            selected,
-            TextChange.from_plan(row.plan),
-            expected_revision=selected.revision,
-        )
     if row.resumed_by == "replace" and row.plan.get("text_change"):
-        # doc01's kind change (chain_kind_change.py) is a text change.
-        from .text_fixture import maintain_one
-
-        return await maintain_one(
+        # The glossary's edit, or doc01's kind change (chain_kind_change.py).
+        resume = change_glossary if label == "glossary" else maintain_one
+        return await resume(
             publisher,
             selected,
             TextChange.from_plan(row.plan),

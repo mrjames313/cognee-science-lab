@@ -1,8 +1,8 @@
 """A captured stand-in for an outside writer of a native Entity.
 
 `edit-entity` changes the Helios controller Entity that doc01 reads as a
-corpus input (`existing_A`, then its re-reads), through Cognee's own `graph.update_node`, as a
-writer outside the lab would. It writes no ledger row and takes no writer
+corpus input (`existing_A`, then its re-reads), through Cognee's own
+`graph.update_node`, as a writer outside the lab would. It writes no ledger row and takes no writer
 reservation: nothing in the lab records the edit. Live validation finds it
 at the next read (validation.input_failure digests a corpus input's
 selected fields), so every decision that cites the Entity is withheld with

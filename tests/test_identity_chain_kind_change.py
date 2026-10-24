@@ -74,9 +74,10 @@ def test_to_reusable_brings_v01_back_on_the_listed_hc_entity(source_payload):
     assert fate.retired == {"g09"}
     v01 = reusable.variant_assignments["v01"]
     assert str(v01.source_entity_id) == HC_ID and "existing_HC" in v01.input_refs
-    with pytest.raises(IntentError) as refused:
-        describe_to_reusable(old, TEXT, [chunk_of(old)])
-    assert refused.value.code == "fixture_scope"
+    for wrong, text in ((old, TEXT), (mention, TEXT + "\nAnother line.\n")):
+        with pytest.raises(IntentError) as refused:
+            describe_to_reusable(wrong, text, [chunk_of(old)])
+        assert refused.value.code == "fixture_scope"
 
 
 def test_a_mention_becomes_a_new_shared_entity_under_a_derived_uuid(source_payload):

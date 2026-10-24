@@ -45,6 +45,13 @@ CALLER_FILES = {
 RESULT_FILES = ("*_result.json", "result.json")
 
 
+def write_revision(root, label, intended):
+    """The caller's file for a reviewed or cited revision of a source, named
+    as `CALLER_FILES` names that source's revisions."""
+    name = CALLER_FILES[label].revisions[0].replace("*", str(intended.revision))
+    (root / name).write_text(intended.model_dump_json(indent=2) + "\n")
+
+
 def add_dependency(payload, first, text):
     """doc02 consumed doc01: its r01 decision lists doc01's text and doc01's
     private singleton as inputs, so forgetting doc01 removes that decision."""

@@ -19,8 +19,8 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from .digests import object_digest
 from .fixture import expect_current
 from .models import IdentitySource
-from .records import citation
-from .review import current_record, write_revision
+from .forget_fixture import write_revision
+from .records import citation, current_record
 from .revisions import next_revision, replace_one
 from .validation import IntentError, fresh_mention_id, text_digest
 

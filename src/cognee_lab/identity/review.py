@@ -25,7 +25,7 @@ The review decisions are captured fixture input, not Describe.
 
 from .erasure_rules import corpus_readers, drop_unnamed_recipes
 from .fixture import expect_current
-from .forget_fixture import CALLER_FILES
+from .forget_fixture import write_revision
 from .glossary_fixture import INFO, hc_entry
 from .models import CorpusObjectInput, SavedRecordInput, TextSpanInput
 from .multisource import current_sources
@@ -33,7 +33,7 @@ from .records import (
     REGISTRY,
     apply_removal,
     cited_row,
-    citation,
+    current_record,
     drops,
     record_type_of,
     saved_records,
@@ -158,15 +158,6 @@ def review_producer(entry, command, source, now: Now):
         ),
         run_id=None,
     )
-
-
-def current_record(rows, identity_data_id: str, record_id) -> dict | None:
-    """A citation of one record as the source `identity_data_id` holds it
-    now, or None when no saved description of that source holds it."""
-    upstream = next((r.description for r in rows if r.source == identity_data_id), None)
-    if upstream is None or record_type_of(upstream, record_id) is None:
-        return None
-    return citation(upstream, record_id)
 
 
 async def record_now(publisher, rows, source, item):
@@ -362,13 +353,6 @@ def intended_revision(
         replace = REPLACEMENTS.get(record_type_of(source, decision), no_replacement)
         return replace(source, decision, now, producer_key, producer, readers)
     return reconfirmed(source, decision, now, producer_key, producer)
-
-
-def write_revision(root, label, intended):
-    """The caller's file for a reviewed or cited revision of a source, named
-    as forget_fixture.CALLER_FILES names that source's revisions."""
-    name = CALLER_FILES[label].revisions[0].replace("*", str(intended.revision))
-    (root / name).write_text(intended.model_dump_json(indent=2) + "\n")
 
 
 async def review(
