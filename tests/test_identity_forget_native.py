@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cognee_lab.identity.forget import COMMITTED_FAULTS, DEPENDENT_FAULTS, STAGES
+from cognee_lab.identity.forget import COMMITTED_FAULTS, STAGES
 from test_identity_native import command
 
 ABSENT = dict(
@@ -352,7 +352,7 @@ def test_native_forget_removes_a_dependents_decision_once_confirmed(tmp_path):
     assert final["sources"]["doc01"]["state"] == "forgotten"
     assert erased(final["sources"]["doc01"]["forget"])
     assert final["forget"]["dependents_revised"] == [
-        dict(identity_data_id=reader, revision=2)
+        dict(identity_data_id=reader, revision=2, level=1)
     ]
     assert final["dependents_failed"] is None
     doc02 = final["sources"]["doc02"]
@@ -404,7 +404,8 @@ def test_native_forget_refuses_a_token_whose_impact_changed(tmp_path):
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("fault", sorted(DEPENDENT_FAULTS))
+# The fixture has one level, which forget_cascade_revision never fails.
+@pytest.mark.parametrize("fault", ["forget_dependent_revision", "forget_dependents"])
 def test_native_an_interrupted_removal_resumes_through_reconcile(tmp_path, fault):
     """The forget completes and its dependent's removal is interrupted:
     before the removal revision begins, doc02's r01 still reads doc01 and is
