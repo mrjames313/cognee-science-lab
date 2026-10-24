@@ -1,6 +1,6 @@
 # Stage 6 entity edits: readers of a changed or retired Entity or record
 
-**Date:** 2026-10-24. **Status:** checkpoint K, implemented and verified by the assistant on the user's Mac with loopback embeddings, on branch `stage6-entity-edits`. No user-reviewed fixture root exists yet. See [Evidence](#evidence).
+**Date:** 2026-10-24. **Status:** checkpoint K, implemented, reviewed in two fix rounds and verified by the assistant and its subagents on the user's Mac with loopback embeddings, on branch `stage6-entity-edits`. The final `journey all` gave 1658 PASS and 0 FAIL in 101 runs. No user-reviewed fixture root exists yet. See [Evidence](#evidence).
 
 Checkpoint K answers one question: what happens to the readers of an Entity or a saved record that changed or went. Before it, live validation already withheld a decision whose corpus input changed in the graph, but no command drove such a change, and no reviewer could answer it. A citer of a removed record (journey D9's c02) had no reviewer path at all, a dropped record key could come back and be served to an old citation, and a source could read another source's mention UUID as a corpus object.
 
@@ -19,6 +19,13 @@ Defaults the orchestrator reported to the user before the work:
 - A dropped record key cannot come back while another source cites it (`record_key_reused`).
 - `replace-citation --cite|--drop` is the reviewer path for a citer of a removed record.
 - Citers of a retired record stay withheld `input_removed` until a reviewer answers them. There is no successor record and no remap analogue for an Entity edit. Scoped variants stay refused.
+- `cognify` cannot overwrite an Entity the lab declares, because Cognee derives an extracted Entity's ID another way. The overwrite concern applies only to a Cognee-extracted Entity that a decision cites.
+
+Behaviour changes from the fix rounds, also reported to the user:
+
+- A `replace-decision` of a variant whose input went drops the variant as an erasure drops it, with the recipes only it named.
+- An erasure, like `--drop`, strips only the citing resolutions' own groups, not every group that cites the removed record.
+- A glossary replacement row with no `text_change` resumes as a plain replacement.
 
 ## What changes for users
 
@@ -162,7 +169,19 @@ Each is reversible.
 
 ## Evidence
 
-Run by the assistant on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-entity-edits`.
+**Checkpoint K runs.** The assistant and its subagents ran `.claude/skills/verify/scripts/verify.py journey all` on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-entity-edits`. P5 calls the embedding API and did not run. The map has 75 journey blocks, and `journey all` runs the 74 loopback blocks as 101 runs.
+
+- On `40d7d20` (the implementation, before its rebase onto `main` at `9c6f16e` as `3237563`): 1658 PASS and 0 FAIL in 101 runs.
+- On `94d54bb` (after fix round 1): 1658 PASS and 0 FAIL in 101 runs.
+- On `5e0c314` (after fix round 2): 1658 PASS and 0 FAIL in 101 runs. The next commit, `514c0bb`, only rewraps the `entity_edit.py` docstring. The unit suite gave 560 passed on `514c0bb`.
+
+**Reviews.** Each round was a `/pstack:thermos` pair (bug and quality).
+
+- The first bug review of `40d7d20` found one medium item, a decision withheld by a removed corpus input with no working reviewer path, three low ones and a note for this guide. The quality review found that the branch needed a rebase, that the review drop repeated the erasure's removal, and that new code named decision fields outside `records.py`. Fix round 1 answered each ([Fix round 1](#fix-round-1-2026-10-24)).
+- Both re-reviews of `94d54bb` found the branch merge-ready. The bug review raised two probed low items: a review producer that named an input the revision drops, and a recipe left behind after a review drop. Fix round 2 answered them with the quality items ([Fix round 2](#fix-round-2-2026-10-24)).
+- Both re-reviews of round 2 found the branch merge-ready, with no blockers. The quality review left two small items, tracked in the handoff: `erasure_rules.corpus_readers` repeats the reader filter of the Erasures builder, and three review docstrings restate `drop_unnamed_recipes`.
+
+**The implementation.** Run by the assistant (a subagent) on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-entity-edits`.
 
 - `uv run pytest -q -m 'not integration'`: 552 passed, 86 deselected, on `2243a35` (533 passed on `a4cc0d5`).
 - `uv run python support/occurrence_check.py`: PASS on all 540,045 fate worlds with the new rows (130 s). `--mutants`: every break caught, including `allow_mention_inputs` and `mention_inputs_of_the_candidate_only` (97 s).
@@ -175,7 +194,7 @@ The values in this guide come from these runs: the keys, digests and refusal mes
 
 ### Fix round 1 (2026-10-24)
 
-Run by the assistant on the user's Mac with loopback embeddings, on branch `stage6-entity-edits` rebased onto `main` at `9c6f16e` (the chain check as its own CI job).
+Run by the assistant (a subagent) on the user's Mac with loopback embeddings, on branch `stage6-entity-edits` rebased onto `main` at `9c6f16e` (the chain check as its own CI job).
 
 - Each bug got a test that failed on the code before the fix: the review of a decision whose corpus input or glossary span went (`input_removed` from `corpus_now`; a missing glossary info file from `span_now`), the drop that stripped a sibling's group (`review.dropped` left g2 with `['doc']`, shown by a scratch script on the old code), `edit-entity` on an Entity without `description` (`KeyError`), the input found by key name, and a re-added source reading its own forgotten mention (no refusal).
 - `uv run pytest -q -m 'not integration'`: 559 passed, 86 deselected; each commit was gated on the unit suite over its own staged tree.
@@ -188,7 +207,7 @@ Run by the assistant on the user's Mac with loopback embeddings, on branch `stag
 
 ### Fix round 2 (2026-10-24)
 
-Run by the assistant on the user's Mac with loopback embeddings, on branch `stage6-entity-edits` at `f763831`.
+Run by the assistant (a subagent) on the user's Mac with loopback embeddings, on branch `stage6-entity-edits` at `f763831`.
 
 - Each bug got a test that failed on the code before the fix. A `replace-decision` of v01 with one input gone and one changed recorded `existing_A_r2` in `new_digests`, though the revision dropped that input. A review that dropped a variant kept the HC recipe that only the variant named, on both the input-gone path and `--drop`. A resolution whose every input went said "changed or went". The glossary root's to-reusable accepted another text; it now goes through `require_root`.
 - Quality follow-ups. `kind_change.declare_hc_variant` now builds both to-reusable variants. `records.current_record` and `forget_fixture.write_revision` moved, so `change_kind` imports at module level. The glossary reconcile resumes every text change through one arm. `intended_revision` now owns the removal branch.

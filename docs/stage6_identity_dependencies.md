@@ -245,5 +245,5 @@ Checkpoint K (2026-10-24) implements user decision 6: a direct edit of a native 
 
 - `edit-entity --case description|unselected|revert` edits the Entity doc01's `existing_A` names, with no ledger row. Live validation already withheld its citers; the edit now has a CLI driver and journeys (D12 to D15).
 - `reconfirm` reads every withholding input as it is now through one table keyed by input kind, so a corpus object is re-confirmed under `existing_A_r<revision>` and one revision answers a decision withheld by a span and an Entity together. Every review producer now records `old_digests` and `new_digests`; a span re-confirm recorded `new_digest` before.
-- `replace-decision --decision r01` leaves g01 unresolved on whatever changed; v01 keeps its glossary-only replacement and refuses an Entity edit (`fixture_scope`).
+- `replace-decision --decision r01` leaves g01 unresolved on whatever changed; v01 keeps its glossary-only replacement and refuses an Entity edit (`fixture_scope`). Since fix round 1 an input that went is stripped from the decision as an erasure strips it, and since fix round 2 a dropped variant takes the recipes only it named.
 - Rule 5 gains two occurrence-check rows: a corpus re-confirm under a new producer is admitted, under the old producer refused (`reconfirm_unattested`).

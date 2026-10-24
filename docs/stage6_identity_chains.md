@@ -266,6 +266,6 @@ Run by the assistant and its subagents on the user's Mac on 2026-10-24 with loop
 Checkpoint K (2026-10-24) added the reviewer path for a citer of a removed record and two refusals that keep citations single-meaning. See the [entity edits guide](stage6_identity_entity_edits.md).
 
 - `replace-citation --cite <source>:<record>` re-cites a decision withheld by a saved record on a current record under a new key, its reviewed fields unchanged; `--drop` removes the decision as an erasure would. D9's c02 had no reviewer path before. Journey D16.
-- `record_key_reused`: a record key that comes back in a later revision, or in a re-add, is refused while another source that is not retired cites it at that source (`chains.check_record_key_reuse`, first attempt only). The chain check proves it with key-reuse cases and two mutants.
+- `record_key_reused`: a record key that comes back in a later revision, or in a re-add, is refused while another source that is not retired cites it at that source (`chains.check_record_key_reuse`, first attempt only). The chain check proves it on 814,500 key-reuse cases, for resolution and variant keys, with three mutants.
 - `mention_input`: a corpus input may not name a mention UUID of any saved source; a source that depends on a mention cites its resolution instead.
 - A kind change on the chain root leaves c02 withheld `input_removed` and c01 untouched (journey K6).
