@@ -10,6 +10,8 @@ state:
 - drifted: current, but its `d` cites each cited source's `d` at a
   fingerprint that record no longer has, so a removal of that record does
   not reach it (review resolution 12); its `v` cites as usual.
+- reconciled: served, then a reconcile at the same revision failed, so its
+  removal applies in place to a revision its citers pinned (fix round 1).
 
 `cascade_oracle` states the cascade as the user decided it, not as the code
 computes it: a decision that cites the forgotten source, or a record a
@@ -26,7 +28,7 @@ from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.validation import text_digest
 
 FORGOTTEN = "s0"
-CASCADE_STATES = ("ok", "blocked", "drifted")
+CASCADE_STATES = ("ok", "blocked", "drifted", "reconciled")
 STALE = text_digest("an earlier fingerprint")
 
 
@@ -45,6 +47,10 @@ def source_row(label, cites, state):
     if state == "blocked":
         row = dataclasses.replace(
             row, state="failed", plan=dict(operation="identity_withdraw")
+        )
+    if state == "reconciled":
+        row = dataclasses.replace(
+            row, state="failed", plan=dict(operation="identity_publish")
         )
     return row
 

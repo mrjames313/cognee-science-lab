@@ -251,13 +251,15 @@ def test_each_chain_mutant_is_caught(name):
 def test_the_cascade_agrees_with_the_oracle_on_three_sources():
     tally, failures = cascade_check.search(3)
     assert failures == []
-    assert tally["cascade worlds"] == 225 and tally["cascade depth 2"] == 36
+    assert tally["cascade worlds"] == 400 and tally["cascade depth 2"] == 64
 
 
 @pytest.mark.parametrize("name", sorted(cascade_check.MUTANTS))
 def test_each_cascade_mutant_is_caught(name):
     with cascade_check.patched(name):
-        _, failures = cascade_check.search(4, ("ok", "drifted"), first=True)
+        _, failures = cascade_check.search(
+            4, ("ok", "drifted", "reconciled"), first=True
+        )
     assert failures
 
 
