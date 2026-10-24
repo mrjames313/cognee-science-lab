@@ -13,7 +13,7 @@ from itertools import pairwise
 
 from ledger_model import (
     CONTENT_FREE_PLAN,
-    ERASURE_STEP,
+    ERASURE_STEPS,
     METHODS,
     Begin,
     Finish,
@@ -24,6 +24,7 @@ from ledger_model import (
     World,
     canonical,
     canonical_tombstone,
+    removal,
     saved_json,
     scrubbed,
     variant_of,
@@ -246,8 +247,16 @@ def begin_rules(op, prior):
         if superseding and same and op.plan.erased != saved.erased:
             yield f"{op.method} retry changed the saved plan's erased"
         chain = (*op.plan.erased, op.variant)
-        if op.plan.erased and any(step != ERASURE_STEP for step in pairwise(chain)):
+        if op.plan.erased and any(
+            step not in ERASURE_STEPS for step in pairwise(chain)
+        ):
             yield f"{op.method} began an erasure retry whose steps {chain} are not each the erasure removal"
+        if (
+            superseding
+            and not same
+            and op.variant != removal(actual, prior.verified_revision)
+        ):
+            yield f"{op.method} began an erasure removal that lists r01 as last served at another revision than S{op.source + 1}'s verified {prior.verified_revision}"
     if not (state in method.begins or method.owns(state, saved.operation)):
         yield f"{op.method} began on a {state} {saved.operation} row"
     owners = {m.name for m in METHODS.values() if m.owns(state, saved.operation)}

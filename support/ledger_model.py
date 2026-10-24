@@ -72,11 +72,14 @@ def background():
 def description(s, revision, variant=0):
     """The description of source s at a revision.
 
-    Variant 0 cites the forgotten background document from r01. Variant 1 is
-    its erasure removal at the same revision, as forget writes it: r01
-    unresolved under the removal producer and the background input dropped.
-    So variant 1 is the one description an erasure retry may supersede
-    variant 0 with, and any other change at a saved revision is refused.
+    Variant 0 cites the forgotten background document from r01. Variants 1
+    and 2 are its erasure removal at the same revision, as forget writes
+    it: r01 unresolved under the removal producer and the background input
+    dropped. The producer lists r01 as last served at the revision before
+    (variant 1) or at this revision (variant 2); forget lists the row's
+    verified revision (`removal`). So a removal is the one description an
+    erasure retry may supersede variant 0 with, and any other change at a
+    saved revision is refused.
     """
     payload = json.loads(json.dumps(fixture()))
     payload.update(identity_data_id=source_id(s), revision=revision)
@@ -108,7 +111,7 @@ def description(s, revision, variant=0):
             impact_token=None,
             removed_records=[
                 RemovedRecord.of(
-                    description(s, revision), "r01", revision - 1
+                    description(s, revision), "r01", revision - 2 + variant
                 )._asdict()
             ],
             cited_records=[],
@@ -118,8 +121,23 @@ def description(s, revision, variant=0):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-# The one erasure removal among the variants: 0 superseded by 1.
-ERASURE_STEP = (0, 1)
+# The erasure removals among the variants: 0 superseded by 1 or 2.
+ERASURE_STEPS = frozenset({(0, 1), (0, 2)})
+VARIANTS = (0, 1, 2)
+# How labels and plan tags name each variant.
+VARIANT_TAGS = {0: "", 1: "alt", 2: "served"}
+
+
+def removal(revision, verified):
+    """The removal variant forget writes in place on a row at `revision`
+    the ledger verified at `verified`: its records listed as last served at
+    the verified revision (erasure.removes)."""
+    return 2 if verified >= revision else 1
+
+
+def other(variant):
+    """A description other than `variant` at the same revision."""
+    return 0 if variant else 1
 
 
 @cache
@@ -130,7 +148,7 @@ def canonical(s, revision, variant):
 def variant_of(s, saved):
     """Which variant a saved description (a parsed JSON dict) is. A forgotten
     row's tombstone keeps the original text digest, which tells them apart."""
-    for variant in (0, 1):
+    for variant in VARIANTS:
         if saved == canonical(s, saved["revision"], variant):
             return variant
         if saved == canonical_tombstone(s, saved["revision"], variant):
@@ -176,7 +194,7 @@ class Plan:
             return self.operation + erased
         revision, variant = self.previous
         kind = self.change or "replace"
-        return f"{kind}<r{revision}" + ("alt" if variant else "") + erased
+        return f"{kind}<r{revision}" + VARIANT_TAGS[variant] + erased
 
     def as_dict(self, s):
         plan = dict(
@@ -227,6 +245,19 @@ class View(NamedTuple):
     state: str
     plan: Plan
     variant: int
+    verified: int
+
+    @property
+    def other(self):
+        """The description other than the saved one a caller sends: the
+        removal it would write for a saved variant 0, else variant 0."""
+        return removal(self.revision, self.verified) if self.variant == 0 else 0
+
+    @property
+    def early(self):
+        """The removal that lists another revision than the verified one,
+        which begin must refuse as an erasure retry's new step."""
+        return 3 - removal(self.revision, self.verified)
 
 
 def saved_json(row):
@@ -242,6 +273,7 @@ def view_of(s, row):
         row.state,
         Plan.of(s, row.plan),
         variant_of(s, saved_json(row)),
+        row.verified_revision,
     )
 
 
@@ -260,7 +292,7 @@ class Begin:
         return (
             f"W{self.writer + 1} {self.method} S{self.source + 1} "
             f"rev={self.revision} expect={self.expected} plan={self.plan.tag}"
-            + (" desc=alt" if self.variant else "")
+            + (f" desc={VARIANT_TAGS[self.variant]}" if self.variant else "")
         )
 
 
@@ -344,15 +376,36 @@ def reconcile_intents(w, s, view):
     plan = Plan("publish", r, erased=kept)
     ops = [
         Begin(w, s, "reconcile", r, r, plan, v),
-        Begin(w, s, "reconcile", r, r, plan, 1 - v),
+        Begin(w, s, "reconcile", r, r, plan, view.other),
         Begin(w, s, "reconcile", r, r + 1, Plan("publish", r + 1)),
     ]
     if view.state == "failed":
         ops += [
-            Begin(w, s, "reconcile", r, r, superseding_plan(view, plan, 1 - v), 1 - v),
+            Begin(
+                w,
+                s,
+                "reconcile",
+                r,
+                r,
+                superseding_plan(view, plan, view.other),
+                view.other,
+            ),
             # Names the description it begins with, not the saved one.
-            Begin(w, s, "reconcile", r, r, superseding(plan, 1 - v), v),
+            Begin(w, s, "reconcile", r, r, superseding(plan, view.other), v),
         ]
+        if v == 0:
+            # Lists the removed record at another revision than verified.
+            ops.append(
+                Begin(
+                    w,
+                    s,
+                    "reconcile",
+                    r,
+                    r,
+                    superseding_plan(view, plan, view.early),
+                    view.early,
+                )
+            )
     if kept:
         ops.append(Begin(w, s, "reconcile", r, r, Plan("publish", r), v))
     return ops
@@ -377,7 +430,7 @@ def replace_intents(w, s, view):
         prior, prior_variant = saved.previous
         ops += [
             Begin(w, s, "replace", r, r, saved, v),
-            Begin(w, s, "replace", r, r, saved, 1 - v),
+            Begin(w, s, "replace", r, r, saved, view.other),
             *[
                 Begin(w, s, "replace", r, r, replace(saved, change=change), v)
                 for change in TEXT_PLANS
@@ -389,17 +442,38 @@ def replace_intents(w, s, view):
                 "replace",
                 r,
                 r,
-                replace(saved, previous=(prior, 1 - prior_variant)),
+                replace(saved, previous=(prior, other(prior_variant))),
                 v,
             ),
             # An erasure retry supersedes the saved description with another
             # one at the same revision, and names the one it supersedes; the
             # rest name the wrong one or supersede nothing.
-            Begin(w, s, "replace", r, r, superseding_plan(view, saved, 1 - v), 1 - v),
-            Begin(w, s, "replace", r, r, superseding(saved, 1 - v), 1 - v),
+            Begin(
+                w,
+                s,
+                "replace",
+                r,
+                r,
+                superseding_plan(view, saved, view.other),
+                view.other,
+            ),
+            Begin(w, s, "replace", r, r, superseding(saved, view.other), view.other),
             Begin(w, s, "replace", r, r, superseding(saved, v), v),
-            Begin(w, s, "replace", r, r, superseding(saved, 1 - v), v),
+            Begin(w, s, "replace", r, r, superseding(saved, view.other), v),
         ]
+        if v == 0:
+            # Lists the removed record at another revision than verified.
+            ops.append(
+                Begin(
+                    w,
+                    s,
+                    "replace",
+                    r,
+                    r,
+                    superseding_plan(view, saved, view.early),
+                    view.early,
+                )
+            )
         if saved.erased:
             ops.append(Begin(w, s, "replace", r, r, replace(saved, erased=()), v))
     return ops
@@ -425,7 +499,7 @@ def withdraw_intents(w, s, view):
     plan = view.plan if reuse else Plan("withdraw", r)  # as withdraw() chooses
     return [
         Begin(w, s, "withdraw", r, r, plan, v),
-        Begin(w, s, "withdraw", r, r, plan, 1 - v),
+        Begin(w, s, "withdraw", r, r, plan, view.other),
         Begin(w, s, "withdraw", r, r + 1, Plan("withdraw", r + 1)),
     ]
 
@@ -439,7 +513,7 @@ def forget_intents(w, s, view):
     plan = view.plan if reuse else Plan("forget", r)  # as forget() chooses
     return [
         Begin(w, s, "forget", r, r, plan, v),
-        Begin(w, s, "forget", r, r, plan, 1 - v),
+        Begin(w, s, "forget", r, r, plan, view.other),
         Begin(w, s, "forget", r, r + 1, Plan("forget", r + 1)),
         Begin(w, s, "forget", r, r, Plan("publish", r), v),
     ]

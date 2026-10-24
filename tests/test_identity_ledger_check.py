@@ -10,7 +10,7 @@ from cognee_lab.identity.group_regrouping import SPLIT_MAP
 
 # The default-bound search size. A change to the step list, the symmetry rule
 # or the no-op rule changes it; update it on purpose and say so in the commit.
-PINNED = dict(nodes=8427, sequences=8274)
+PINNED = dict(nodes=9205, sequences=9050)
 
 
 @pytest.fixture(scope="module")

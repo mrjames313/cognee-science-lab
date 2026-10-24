@@ -269,6 +269,14 @@ MUTANTS = {
         "        preserved=(ERASED_FROM,),\n",
         "INCONCLUSIVE",
     ),
+    # The store checks the step new in an erasure retry as one an earlier
+    # begin admitted, so it may list its removed records as last served at
+    # the revision before the verified one (fix round 2's M1').
+    "retry-new-step-as-admitted": Mutant(
+        "                row.verified_revision,\n                row.description,\n",
+        "                row.verified_revision,\n                source,\n",
+        "P5",
+    ),
     # The store begins an erasure retry without checking that each step of
     # its chain is the removal a forget allows (erasure_rules).
     "erasure-chain-unchecked": Mutant(

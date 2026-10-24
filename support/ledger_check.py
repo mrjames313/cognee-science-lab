@@ -38,6 +38,7 @@ from ledger_model import (
     Crash,
     Finish,
     FORGOTTEN_AT,
+    VARIANT_TAGS,
     Ghost,
     Plan,
     Reject,
@@ -49,6 +50,7 @@ from ledger_model import (
     candidates,
     description,
     completion,
+    other,
     source_id,
     saved_json,
     variant_of,
@@ -212,7 +214,9 @@ class Harness:
                 attempt = writer.holds
                 method = METHODS[attempt.method]
                 source = description(
-                    attempt.source, attempt.revision, attempt.variant ^ op.alt
+                    attempt.source,
+                    attempt.revision,
+                    other(attempt.variant) if op.alt else attempt.variant,
                 )
                 if method.asserts_pending:
                     ok, _ = await call(self.store.assert_pending(source, attempt.id))
@@ -472,7 +476,7 @@ def render(world, obs):
         )
         lines.append(
             f"S{s + 1}: r{row.revision}"
-            + ("alt" if variant_of(s, saved_json(row)) else "")
+            + VARIANT_TAGS[variant_of(s, saved_json(row))]
             + f"/{row.state}/verified={row.verified_revision}"
             f"/plan={Plan.of(s, row.plan).tag}/attempt={names.get(row.attempt, '?')}"
             f" events={len(events)} unresolved={len(unresolved(events))}"
