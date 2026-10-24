@@ -2,14 +2,14 @@
 
 `edit-entity` changes the Helios controller Entity that doc01 reads as a
 corpus input (`existing_A`, then its re-reads), through Cognee's own
-`graph.update_node`, as a writer outside the lab would. It writes no ledger row and takes no writer
-reservation: nothing in the lab records the edit. Live validation finds it
-at the next read (validation.input_failure digests a corpus input's
-selected fields), so every decision that cites the Entity is withheld with
-`input_changed` until a reviewer re-confirms or replaces it, or the edit
-is reverted. The user decided this on 2026-10-24: a direct edit of a native
-Entity withholds its dependents as a text edit of a consumed document
-does.
+`graph.update_node`, as a writer outside the lab would. It writes no
+ledger row and takes no writer reservation: nothing in the lab records
+the edit. Live validation finds it at the next read
+(validation.input_failure digests a corpus input's selected fields), so
+every decision that cites the Entity is withheld with `input_changed`
+until a reviewer re-confirms or replaces it, or the edit is reverted.
+The user decided this on 2026-10-24: a direct edit of a native Entity
+withholds its dependents as a text edit of a consumed document does.
 
 - `description` changes a selected field.
 - `unselected` sets a property no corpus input selects.
