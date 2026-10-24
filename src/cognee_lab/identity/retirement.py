@@ -47,22 +47,17 @@ class Dependent(TypedDict):
     consumed: str
 
 
-def consumes(reader, target, removed=frozenset(), *, records=False) -> list[Dependent]:
-    """The inputs through which `reader` reads `target`'s document, an
-    Entity in `removed` or, with `records`, a saved record of `target`, as
+def consumes(reader, target: Target) -> list[Dependent]:
+    """The inputs through which `reader` reads `target`, as
     `dependency.citations` decides it, each named with its reader for a
     refusal's details."""
-    ids = source_ids(target)
-    sources = frozenset([ids.identity_data_id]) if records else frozenset()
     return [
         Dependent(
             dataset_id=str(reader.dataset_id),
             identity_data_id=str(reader.identity_data_id),
             **c._asdict(),
         )
-        for c in citations(
-            reader, Target(ids.original_data_id, frozenset(removed), sources)
-        ).values()
+        for c in citations(reader, target).values()
     ]
 
 
@@ -75,7 +70,9 @@ def dependents(source, rows, sole_owned=frozenset()):
     for row in rows:
         if (row.dataset, row.source) == own or row.is_retired:
             continue
-        found += consumes(row.description, ids, sole_owned)
+        found += consumes(
+            row.description, Target(ids.original_data_id, frozenset(sole_owned))
+        )
     return found
 
 
@@ -125,29 +122,6 @@ async def readd_removed(graph, source, plan, rows):
 
 def retiring_by_forget(row):
     return row.state in {"failed", "pending"} and row.operation == "identity_forget"
-
-
-def refuse_retiring_inputs(source, rows):
-    """Refuse a description that consumes a source whose forget is pending or
-    failed, its saved records included. Admitting it would leave that forget
-    refused by its dependent and the source half-forgotten."""
-    own = (str(source.dataset_id), str(source.identity_data_id))
-    for row in rows:
-        if (row.dataset, row.source) == own or not retiring_by_forget(row):
-            continue
-        retiring = row.description
-        found = consumes(
-            source,
-            retiring,
-            removed_entities(retiring, row.plan, rows),
-            records=True,
-        )
-        if found:
-            raise IntentError(
-                "retiring_source",
-                "An input is a document or Entity whose forget is not finished; reconcile that forget first",
-                details=dict(dependents=found),
-            )
 
 
 def owned_by(source, *, document):

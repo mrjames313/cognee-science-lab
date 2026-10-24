@@ -27,7 +27,14 @@ from .erasure_rules import (
 from .dependency import Citation, Target, citations
 from .models import Accepted, CorpusObjectInput, IdentitySource
 from .records import saved_records
-from .retirement import SourceIds, removed_entities, source_ids
+from .retirement import (
+    Dependent,
+    SourceIds,
+    consumes,
+    removed_entities,
+    retiring_by_forget,
+    source_ids,
+)
 from .validation import IntentError, decision_inputs, naming, object_digest
 
 RESIDUE = (
@@ -263,57 +270,121 @@ def revisions(rows, ids: SourceIds, removed, token=None):
         yield row, *removal_revision(row, cited, ids, removed, readers, token)
 
 
-def impact(source, plan, rows) -> Impact:
-    """What forgetting `source` with this plan does to the other saved
-    sources, from their descriptions and the plan's ownership snapshot."""
-    ids = source_ids(source)
-    removed = removed_entities(ids, plan, rows)
+def impact_of(ids: SourceIds, revision, removed, rows) -> Impact:
     return Impact(
         ids,
-        plan["revision"],
+        revision,
         tuple(sorted(str(e) for e in removed)),
         tuple(found for _, _, found in revisions(rows, ids, removed)),
     )
 
 
-def chained_citations(found: Impact, rows) -> list[dict]:
-    """The citations, by saved sources other than the forgotten one, of a
-    record that a removal revision of this forget removes (makes
-    unresolved or drops)."""
-    removing = {
+def impact(source, plan, rows) -> Impact:
+    """What forgetting `source` with this plan does to the other saved
+    sources, from their descriptions and the plan's ownership snapshot."""
+    ids = source_ids(source)
+    return impact_of(ids, plan["revision"], removed_entities(ids, plan, rows), rows)
+
+
+def remaining(tombstone, rows) -> Impact:
+    """What a completed forget has still to do: the removal revisions of
+    the dependents it has not revised yet."""
+    return impact_of(
+        source_ids(tombstone),
+        tombstone.revision,
+        set(tombstone.removed_entity_ids),
+        rows,
+    )
+
+
+def under_way(rows):
+    """The impact of each forget not finished: a pending or failed one, by
+    its saved plan, and a completed one with dependents left."""
+    for row in rows:
+        if retiring_by_forget(row):
+            yield impact(row.description, row.plan, rows)
+        elif row.tombstone is not None:
+            yield remaining(row.tombstone, rows)
+
+
+def removed_records(found: Impact) -> set[tuple[str, str]]:
+    """(source, record key) of each record a removal revision of this
+    impact removes: a resolution it makes unresolved or a variant it drops.
+    J2 widens this to every level of a chain; the citation shape is already
+    generic, but removals are decisions."""
+    return {
         (d.identity_data_id, r.assignment)
         for d in found.dependents
         for r in d.decisions
     }
+
+
+def impact_checked(found: Impact, rows) -> Impact:
+    """`found`, refused (`chain_erasure_pending`) when a removal revision
+    would remove a record that a saved source other than the forgotten one
+    cites. Removing the citers in turn, level by level, is checkpoint J2,
+    which deletes this refusal. Chains did not exist before saved-record
+    citations, so it removes no earlier capability. A direct citer of the
+    forgotten source's own records is an ordinary dependent."""
+    removing = removed_records(found)
     forgotten = str(found.source.identity_data_id)
-    hits = []
-    for row in sorted(rows, key=lambda r: r.source):
-        if row.is_retired or row.source == forgotten:
-            continue
-        for key, item in sorted(saved_records(row.description).items()):
-            if (str(item.identity_data_id), item.record_id) in removing:
-                hits.append(
-                    dict(
-                        identity_data_id=row.source,
-                        input_ref=key,
-                        cited_source=str(item.identity_data_id),
-                        record_id=item.record_id,
-                    )
-                )
-    return hits
-
-
-def refuse_chained(found: Impact, rows):
-    """Refuse a forget that would remove a record another source cites.
-    Removing the citers in turn, level by level, is not built yet, and
-    chains did not exist before saved-record citations, so this removes no
-    earlier capability. A direct citer of the forgotten source's own records
-    is an ordinary dependent."""
-    if hits := chained_citations(found, rows):
+    hits = [
+        dict(
+            identity_data_id=row.source,
+            input_ref=key,
+            cited_source=str(item.identity_data_id),
+            record_id=item.record_id,
+        )
+        for row in sorted(rows, key=lambda r: r.source)
+        if not row.is_retired and row.source != forgotten
+        for key, item in sorted(saved_records(row.description).items())
+        if (str(item.identity_data_id), item.record_id) in removing
+    ]
+    if hits:
         raise IntentError(
             "chain_erasure_pending",
             "This forget would remove a decision another source cites; erasure down a chain of citations is not built yet",
             details=dict(citations=hits),
+        )
+    return found
+
+
+def refuse_retiring_inputs(source, rows):
+    """Refuse a description that reads what a forget not finished removes:
+    the document, an Entity or a saved record of a source whose forget is
+    pending or failed, or a record that a removal revision of a pending,
+    failed or completed forget has still to remove. Admitting it would
+    leave that forget refused by its new dependent, the source
+    half-forgotten, or a citation of a record the forget then removes."""
+    own = (str(source.dataset_id), str(source.identity_data_id))
+    found = []
+    for row in rows:
+        if (row.dataset, row.source) == own or not retiring_by_forget(row):
+            continue
+        ids = source_ids(row.description)
+        removed = removed_entities(row.description, row.plan, rows)
+        target = Target(
+            ids.original_data_id, frozenset(removed), frozenset([ids.identity_data_id])
+        )
+        found += consumes(source, target)
+    if cited := saved_records(source):
+        doomed = set().union(*map(removed_records, under_way(rows)))
+        found += [
+            Dependent(
+                dataset_id=str(source.dataset_id),
+                identity_data_id=str(source.identity_data_id),
+                input_ref=key,
+                kind=item.kind,
+                consumed=str(item.identity_data_id),
+            )
+            for key, item in sorted(cited.items())
+            if (str(item.identity_data_id), item.record_id) in doomed
+        ]
+    if found:
+        raise IntentError(
+            "retiring_source",
+            "An input is a document, Entity or saved record that an unfinished forget removes; finish that forget first",
+            details=dict(dependents=found),
         )
 
 

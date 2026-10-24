@@ -17,7 +17,12 @@ from cognee_lab.identity.chains import (
     new_citations,
     record_reader,
 )
-from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.erasure import (
+    impact_checked,
+    refuse_retiring_inputs,
+    remaining,
+)
+from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.records import citation, record_digest
 from cognee_lab.identity.validation import IntentError, Reason
 from cognee_lab.identity.withholding import Status, Withheld, withheld_decisions
@@ -217,3 +222,46 @@ def test_each_chain_mutant_is_caught(name):
     with chain_check.patched(name):
         _, failures = chain_check.run(3)
     assert failures
+
+
+def forget_rows(state):
+    """s2's forget under way while s1, which cites s2's `d`, is not revised
+    yet: s2's forget is pending or failed, or it completed and left s1."""
+    s2 = world_source("s2", CHAIN["s2"])
+    doc = s2.inputs[s2.original_input_ref]
+    plan = dict(
+        operation="identity_forget",
+        entities={},
+        revision=s2.revision,
+        original_data_id=str(doc.data_id),
+    )
+    forgotten = dataclasses.replace(row_of(s2, "ok"), state=state, plan=plan)
+    if state == "forgotten":
+        tombstone = Tombstone.of(s2, forgotten_at="t", removed_entity_ids=())
+        forgotten = dataclasses.replace(
+            forgotten, description=None, tombstone=tombstone
+        )
+    return [forgotten, row_of(world_source("s1", CHAIN["s1"]), "ok")]
+
+
+@pytest.mark.parametrize("state", ["pending", "failed", "forgotten"])
+def test_a_new_citation_of_a_record_a_forget_under_way_removes_is_refused(state):
+    rows = forget_rows(state)
+    citer = world_source("s0", CHAIN["s0"])
+    with pytest.raises(IntentError) as refused:
+        refuse_retiring_inputs(citer, rows)
+    assert refused.value.code == "retiring_source"
+    assert [
+        (d["identity_data_id"], d["input_ref"])
+        for d in refused.value.details["dependents"]
+    ] == [(str(identity("s0")), "rec_s1")]
+    # Once s1's removal revision is written, nothing is left to remove.
+    revised = world_source("s1", frozenset())
+    refuse_retiring_inputs(citer, [rows[0], row_of(revised, "ok")])
+
+
+def test_resuming_a_forget_refuses_a_citation_of_a_record_it_removes():
+    rows = forget_rows("forgotten") + [row_of(world_source("s0", CHAIN["s0"]), "ok")]
+    with pytest.raises(IntentError) as refused:
+        impact_checked(remaining(rows[0].tombstone, rows), rows)
+    assert refused.value.code == "chain_erasure_pending"

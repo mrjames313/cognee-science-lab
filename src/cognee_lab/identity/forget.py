@@ -329,7 +329,7 @@ async def preview(publisher, source, *, expected_revision):
     """The dry run: what `forget` would do, with the token it would need.
     Writes nothing. On a forgotten source, the dependents it has not revised
     yet."""
-    from .erasure import impact, refuse_chained, report, unfinished
+    from .erasure import impact, impact_checked, remaining, report, unfinished
 
     records = publisher.records
     row = await saved_row(records, source, "No saved publication to forget")
@@ -337,6 +337,7 @@ async def preview(publisher, source, *, expected_revision):
         raise IntentError(*STALE_REVISION)
     rows = await records.rows()
     if row.tombstone is not None:
+        impact_checked(remaining(row.tombstone, rows), rows)
         return dict(
             dry_run=True,
             forgotten=True,
@@ -344,8 +345,7 @@ async def preview(publisher, source, *, expected_revision):
         )
     description = row.description
     plan = await plan_for(publisher, description, row)
-    found = impact(description, plan, rows)
-    refuse_chained(found, rows)
+    found = impact_checked(impact(description, plan, rows), rows)
     return report(
         found,
         plan=plan,
@@ -383,7 +383,14 @@ async def forget(
     from cognee import forget as native_forget
     from cognee.modules.users.methods import get_default_user
 
-    from .erasure import finish_dependents, impact, refuse_chained, report, unfinished
+    from .erasure import (
+        finish_dependents,
+        impact,
+        impact_checked,
+        remaining,
+        report,
+        unfinished,
+    )
 
     graph, records = publisher.graph, publisher.records
     require_graph_methods(
@@ -413,6 +420,7 @@ async def forget(
         rows = await records.rows()
         if not unfinished(row.tombstone, rows):
             raise IntentError(*FORGOTTEN_SOURCE)
+        impact_checked(remaining(row.tombstone, rows), rows)
         removal = await finish_dependents(
             publisher, row.tombstone, rows, dependents_fault
         )
@@ -420,8 +428,7 @@ async def forget(
     retry = resumes(row)
     plan = await plan_for(publisher, source, row)
     rows = await records.rows()
-    found = impact(source, plan, rows)
-    refuse_chained(found, rows)
+    found = impact_checked(impact(source, plan, rows), rows)
     if not confirmed(found, plan, confirm, retry):
         code, message = (
             (
@@ -452,8 +459,7 @@ async def forget(
         # may have published or changed between the check above and begin.
         nonlocal found
         rows = await records.rows()
-        found = impact(source, plan, rows)
-        refuse_chained(found, rows)
+        found = impact_checked(impact(source, plan, rows), rows)
         if found.token != plan["impact_token"]:
             raise IntentError(*IMPACT_CHANGED)
 

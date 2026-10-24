@@ -5,8 +5,8 @@ import json
 from dataclasses import dataclass
 
 from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
+from .erasure import refuse_retiring_inputs
 from .native import edge_metadata, require_graph_methods
-from .retirement import refuse_retiring_inputs
 from .storage import (
     STALE_REVISION,
     RecordStore,
