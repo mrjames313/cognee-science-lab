@@ -1,13 +1,14 @@
 """Scratch breaks of the general admitter, one rule each.
 
-Each mutant replaces one function in cognee_lab.identity.admission, or in the
-erasure rules it imports (cognee_lab.identity.erasure_rules). The check
-must find a small world that the broken admitter decides wrongly.
+Each mutant replaces one function in cognee_lab.identity.admission, in the
+erasure rules it imports (cognee_lab.identity.erasure_rules), or in the
+citation scope that preflight checks first (cognee_lab.identity.chains).
+The check must find a small world that the broken admitter decides wrongly.
 """
 
 from uuid import UUID
 
-from cognee_lab.identity import admission, erasure_rules, validation
+from cognee_lab.identity import admission, chains, erasure_rules, validation
 from cognee_lab.identity.models import SavedRecordInput
 from cognee_lab.identity.records import saved_records
 
@@ -168,6 +169,6 @@ MUTANTS = {
     ),
 }
 assert all(
-    hasattr(admission, attribute) or hasattr(erasure_rules, attribute)
+    any(hasattr(m, attribute) for m in (admission, erasure_rules, chains))
     for attribute, _ in MUTANTS.values()
 )

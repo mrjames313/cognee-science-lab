@@ -17,9 +17,9 @@ from cognee_lab.identity.glossary_fixture import (
     GLOSSARY_TEXT,
     glossary_inputs,
     hc_entry,
-    replaced_variant,
 )
 from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.review import replaced_variant
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import (
     IntentError,

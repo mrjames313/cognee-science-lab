@@ -22,7 +22,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from .chains import check_citation_scope
 from .models import (
     CorpusObjectInput,
     SourceTextInput,
@@ -191,10 +190,9 @@ def check_source_identity(old, source, before, after):
 
 def check_input_kinds(description):
     """Inputs are texts, spans, chunks, corpus objects and saved records.
-    Every text but the original is another document of the same dataset,
-    and every saved record another source's of the same dataset
-    (`check_citation_scope`)."""
-    check_citation_scope(description)
+    Every text but the original is another document of the same dataset.
+    Publisher.admit_inputs, which every path runs, keeps each saved record
+    another source's of the same dataset (chains.check_citation_scope)."""
     own = description.inputs[description.original_input_ref]
     for key, item in description.inputs.items():
         if (

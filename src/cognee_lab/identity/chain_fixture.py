@@ -16,8 +16,11 @@ not Describe.
 import json
 from uuid import NAMESPACE_URL, uuid5
 
+from .fixture import expect_current
 from .models import IdentitySource
-from .records import citation, saved_records
+from .records import citation
+from .review import cited_now, write_revision
+from .revisions import next_revision, replace_one
 from .validation import IntentError, fresh_mention_id, text_digest
 
 DOC03_TEXT = "Operations log\n\nThe regulator kept HC stable during the run.\n"
@@ -136,60 +139,35 @@ async def prepare_doc03(root, doc01):
     return doc03, chunks, ctx
 
 
-def cited_now(rows, source) -> dict[str, IdentitySource]:
-    """The current description of each source `source` cites, by identity."""
-    wanted = {str(i.identity_data_id) for i in saved_records(source).values()}
-    return {r.source: r.description for r in rows if r.source in wanted}
-
-
-def recited(source, entry, rows, revision):
-    """A re-confirm of a decision withheld by saved-record drift: each
-    withholding citation again, under a new key, as the cited record is
-    now. Returns the replacements (old key to new key and input) and what
-    the producer records."""
-    current = cited_now(rows, source)
-    replacements, old_digests, new_digests = {}, {}, {}
-    for key in sorted(entry.inputs):
-        item = source.inputs[key]
-        upstream = current.get(str(item.identity_data_id))
-        if upstream is None:
-            raise IntentError("input_removed", f"The cited source is gone: {key}")
-        new_key = f"{key}_r{revision}"
-        replacements[key] = (new_key, citation(upstream, item.record_id))
-        old_digests[key] = item.content_sha256
-        new_digests[new_key] = replacements[key][1]["content_sha256"]
-    return replacements, dict(old_digests=old_digests, new_digests=new_digests)
-
-
-def unresolved_in_place(doc01, decision, old_key, span_key, span, key, review):
-    """r01 resolved g01 to the Helios controller. The glossary entry it
-    read changed, and the reviewer now leaves g01 unresolved: r01 keeps its
-    key and changes in place, so its fingerprint changes."""
-    from .revisions import next_revision
-
-    if decision != "r01" or decision not in doc01.mention_resolutions:
-        raise IntentError("fixture_scope", "Only r01 has an in-place replacement")
-
-    def change(payload):
-        old = payload["mention_resolutions"]["r01"]
-        payload["inputs"][span_key] = span
-        payload["producers"][key] = review
-        payload["mention_resolutions"]["r01"] = dict(
-            group_ref=old["group_ref"],
-            status="unresolved",
-            input_refs=[span_key if k == old_key else k for k in old["input_refs"]],
-            producer_ref=key,
-            explanation="The glossary entry for HC changed; g01 is left unresolved.",
+async def cite(publisher, root, args, sources):
+    """`cite-record`: the next revision of the selected source with one
+    new citation (`citing_revision`), which admission refuses."""
+    if "doc03" not in sources:
+        raise IntentError(
+            "fixture_scope", "cite-record needs a glossary-fixture --chain root"
         )
-
-    return next_revision(doc01, change)
+    selected = sources[args.source]
+    await expect_current(
+        publisher,
+        selected,
+        args.expected_revision,
+        "Reconcile the source before it cites a record",
+    )
+    intended = citing_revision(
+        selected, args.citation, sources, await publisher.records.rows()
+    )
+    write_revision(root, args.source, intended)
+    await replace_one(
+        publisher,
+        intended,
+        expected_revision=args.expected_revision,
+        fault_stage=args.fault_stage,
+    )
 
 
 def citing_revision(source, case, sources, rows):
     """The next revision of the citing source for one refused `cite-record`
     case, under a producer new in that revision."""
-    from .revisions import next_revision
-
     doc01, doc03 = sources["doc01"], sources["doc03"]
     revision = source.revision + 1
     key = f"chain_{case}_r{revision}"

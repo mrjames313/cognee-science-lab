@@ -30,7 +30,7 @@ from collections import Counter
 from contextlib import contextmanager
 from uuid import UUID
 
-from cognee_lab.identity import admission, erasure_rules
+from cognee_lab.identity import admission, chains, erasure_rules
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import IntentError, text_digest
 from dependency_worlds import DEPENDENCY_DECISIONS
@@ -68,15 +68,22 @@ def outcome(admit):
 def general(case, mapping=None, first_attempt=True, **parts):
     parts = {**case, **parts}
     raw = parts["general"] if mapping is None else mapping
-    return lambda: admission.admit(
-        parts["old"],
-        parts["new"],
-        parts["before"],
-        parts["after"],
-        admission.parse_occurrence_map(raw),
-        first_attempt=first_attempt,
-        erasures=forgotten(parts["old"]),
-    )
+
+    def admit():
+        # A replacement's preflight (Publisher.admit_inputs) checks citation
+        # scope before admit runs; admit no longer repeats it.
+        chains.check_citation_scope(parts["new"])
+        return admission.admit(
+            parts["old"],
+            parts["new"],
+            parts["before"],
+            parts["after"],
+            admission.parse_occurrence_map(raw),
+            first_attempt=first_attempt,
+            erasures=forgotten(parts["old"]),
+        )
+
+    return admit
 
 
 def agrees(expected, got):
@@ -342,10 +349,11 @@ def run(shapes=OLD_SHAPES, max_additions=1, checks=CHECKS):
 
 @contextmanager
 def patched(name):
-    """Replace one rule where its callers look it up: admission, and the
-    erasure rules that admission imports."""
+    """Replace one rule where its callers look it up: admission, the
+    erasure rules that admission imports, and the citation scope that
+    preflight checks (chains)."""
     attribute, replacement = MUTANTS[name]
-    modules = [m for m in (admission, erasure_rules) if hasattr(m, attribute)]
+    modules = [m for m in (admission, erasure_rules, chains) if hasattr(m, attribute)]
     originals = [getattr(m, attribute) for m in modules]
     for m in modules:
         setattr(m, attribute, replacement)
