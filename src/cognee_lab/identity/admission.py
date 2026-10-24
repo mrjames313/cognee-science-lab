@@ -122,7 +122,10 @@ def admit(
     with changed or unchanged text.
 
     Only a first attempt chooses new UUIDs; a retry completes a saved plan,
-    which may predate the derivation rules. `erasures` is what the ledger
+    which may predate the derivation rules. Only a first attempt checks that
+    the removed records a removal cites are bound now: an upstream that
+    retired since unbinds them without undoing the removal
+    (`erasure_rules.erasure_of`). `erasures` is what the ledger
     lets a removal producer claim (`erasure_rules.erasures_of`); without it
     every removal producer is refused.
     """
@@ -150,7 +153,7 @@ def admit(
     check_reusable_recipes(old, source)
     if first_attempt:
         check_derived_entity_ids(old, source)
-    removal = erasure_step(old, erasure_of(old, source, erasures))
+    removal = erasure_step(old, erasure_of(old, source, erasures, bind=first_attempt))
     check_scoped_variants(old, source, removal)
     check_new_variant_keys(old, source)
     check_foreign_inputs(old, source)

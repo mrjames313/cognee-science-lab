@@ -624,6 +624,9 @@ ERASURE_DECISIONS = [
         claim_an_unbound_record,
         text_edit=UNBOUND,
         same_text=UNBOUND,
+        # A retry completes a removal its first attempt found bound: an
+        # upstream that retired since unbinds what it cites.
+        retry=dict(text_edit=UNRELATED, same_text=ADMIT),
     ),
     decision(
         "erasure names an upstream record the citer pinned after its removal",

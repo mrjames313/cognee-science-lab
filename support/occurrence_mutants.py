@@ -84,7 +84,7 @@ def drop_scoped_variants_freely(old, source, removal=None):
 _bound_erasure_of = erasure_rules.erasure_of
 
 
-def trust_the_producer(old, source, erasures):
+def trust_the_producer(old, source, erasures, **options):
     """A removal producer claims whatever its configuration names, as if the
     ledger agreed."""
     claimed = {}
@@ -96,7 +96,9 @@ def trust_the_producer(old, source, erasures):
         except (KeyError, TypeError, ValueError):
             continue
         claimed[document] = removed
-    return _bound_erasure_of(old, source, erasures._replace(forgotten=claimed))
+    return _bound_erasure_of(
+        old, source, erasures._replace(forgotten=claimed), **options
+    )
 
 
 class AnyKey:
@@ -116,7 +118,7 @@ def any_producer_key(identity_data_id, revision):
     return AnyKey()
 
 
-def trust_cited_records(old, source, erasures):
+def trust_cited_records(old, source, erasures, **options):
     """A removal may cite whatever removed records its configuration names,
     as if a bound removal listed each one."""
     claimed = {}
@@ -126,7 +128,13 @@ def trust_cited_records(old, source, erasures):
         except validation.IntentError:
             continue
         claimed[claim.document] = claim.cited_records
-    return _bound_erasure_of(old, source, erasures._replace(records=claimed))
+    return _bound_erasure_of(old, source, erasures._replace(records=claimed), **options)
+
+
+def bind_on_retry(old, source, erasures, **options):
+    """A retry's saved removal must cite records bound now, as a first
+    attempt's must."""
+    return _bound_erasure_of(old, source, erasures)
 
 
 def saved_records_not_foreign(source, key):
@@ -191,6 +199,7 @@ MUTANTS = {
     "erase_beyond_the_forgotten": ("check_erasure_confined", skip),
     "erase_unbound": ("erasure_of", trust_the_producer),
     "trust_cited_records": ("erasure_of", trust_cited_records),
+    "bind_on_retry": ("erasure_of", bind_on_retry),
     "erasure_under_any_key": ("producer_key", any_producer_key),
     "erasure_records_unchecked": ("check_erasure_records", skip),
     "removal_producers_mutable": ("check_removal_producers_kept", skip),

@@ -6,8 +6,9 @@ import dataclasses
 import pytest
 
 from cascade_worlds import cascade_rows
-from chain_worlds import identity, row_of
+from chain_worlds import TEXT, identity, row_of
 from cognee_lab.identity import erasure
+from cognee_lab.identity.admission import admit, identity_map
 from cognee_lab.identity.erasure_rules import check_retry_chain, erasures_of
 from cognee_lab.identity.retirement import source_ids
 from cognee_lab.identity.storage import admissible
@@ -279,3 +280,36 @@ def test_a_completed_removal_retry_rejected_after_its_upstream_retired_recovers(
     rejected = dataclasses.replace(by_label(rows, "s2"), state="failed")
     rows = replaced(rows, "s2", rejected)
     assert admissible(rejected, "replace", plan, rejected.description, rows) is None
+
+
+def test_a_completed_removal_rejected_after_its_upstream_retired_is_admitted_again():
+    """s2's removal at the next revision completed and the cascade
+    finished; s1 withdrew, and then retrieval rejected s2. The
+    replacement's retry with the saved removal passes admission: the first
+    attempt found what it cites bound, and s1 retiring since does not undo
+    the removal. A first attempt with the same removal is refused, since
+    nothing binds what it cites any more."""
+    rows = rows_of()
+    ids = source_ids(rows[0].tombstone)
+    step = erasure.cascade(rows, ids, ())[0]
+    rows = replaced(rows, "s1", row_of(step.description, "ok"))
+    (step,) = erasure.cascade(rows, ids, ())
+    old, removal = step.row.description, step.description
+    assert removal.revision == old.revision + 1
+    rows = replaced(rows, "s2", row_of(removal, "ok"))
+    assert erasure.unfinished(rows[0].tombstone, rows) == []
+    s1 = by_label(rows, "s1")
+    rows = replaced(rows, "s1", dataclasses.replace(s1, state="withdrawn"))
+    erasures = erasures_of(rows, removal)
+    admit(
+        old,
+        removal,
+        TEXT,
+        TEXT,
+        identity_map(old),
+        first_attempt=False,
+        erasures=erasures,
+    )
+    with pytest.raises(IntentError) as refused:
+        admit(old, removal, TEXT, TEXT, identity_map(old), erasures=erasures)
+    assert refused.value.code == "erasure_unbound"

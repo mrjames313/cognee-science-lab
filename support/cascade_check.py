@@ -26,9 +26,10 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   removal and retiring it would drop another source from what the forget
   has left; a source whose own failed removal is all that is left may
   retire.
-- A rejected retry. A removal in place below level 1 that completed, then
-  lost every source whose records it cites to a withdrawal, then was
-  rejected at retrieval, is admitted again with its saved removal.
+- A rejected retry. A removal below level 1 that completed, then lost
+  every source whose records it cites to a withdrawal, then was rejected
+  at retrieval, is admitted again with its saved removal: in place through
+  the erasure-retry chain check, at the next revision through admission.
 - The served revision. A removal in place that lists its records as last
   served at another revision than the ledger verified is refused.
 - The inductive gate. Admission refuses (`erasure_unbound`) a removal below
@@ -295,24 +296,36 @@ def retired_upstream(rows, step, ids, tomb):
 
 
 def rejected_after_upstream_retired(rows, step):
-    """Disagreements when `step`, a removal in place below level 1,
-    completed as an erasure retry, every source whose records it cites
-    withdrew, and retrieval then rejected it: the retry with the saved
-    removal is admitted, since its binding was checked when it began."""
-    if step.level == 1 or step.description.revision != step.row.revision:
+    """Disagreements when `step`, a removal below level 1, completed, every
+    source whose records it cites withdrew, and retrieval then rejected
+    it: the retry with the saved removal is admitted, since its first
+    attempt found what it cites bound. A removal in place is an erasure
+    retry, which begin checks; one at the next revision is a replacement's
+    retry, which admission checks."""
+    if step.level == 1:
         return []
-    rejected = dataclasses.replace(row_of(step.description, "ok"), state="failed")
+    old, removal = step.row.description, step.description
+    rejected = dataclasses.replace(row_of(removal, "ok"), state="failed")
     after = withdrawn(
         [rejected if r.source == rejected.source else r for r in rows],
         {r.identity_data_id for r in step.cited_records},
     )
+    erasures = erasure_rules.erasures_of(after, removal)
     try:
-        erasure_rules.check_retry_chain(
-            [step.row.description, step.description],
-            erasure_rules.erasures_of(after, step.description),
-            rejected.verified_revision,
-            step.description,
-        )
+        if removal.revision == old.revision:
+            erasure_rules.check_retry_chain(
+                [old, removal], erasures, rejected.verified_revision, removal
+            )
+        else:
+            admit(
+                old,
+                removal,
+                TEXT,
+                TEXT,
+                identity_map(old),
+                first_attempt=False,
+                erasures=erasures,
+            )
     except IntentError as exc:
         return [("rejected after upstream retired", rejected.source, exc.code)]
     return []
@@ -496,6 +509,12 @@ def bind_every_step(chain, erasures, served, saved):
         _check_erasure_retry(before, after, erasures, last)
 
 
+def bind_on_retry(old, source, erasures, **options):
+    """A retry's saved removal must cite records bound now, as a first
+    attempt's must."""
+    return _erasure_of(old, source, erasures)
+
+
 def served_or_before(chain, erasures, served, saved):
     """Every step of a retry chain may list the revision before the served
     one, also the step new in this begin."""
@@ -510,6 +529,7 @@ _cascade = erasure.cascade
 _removes = erasure.removes
 _levels = erasure_rules.levels
 _check_erasure_retry = erasure_rules.check_erasure_retry
+_erasure_of = erasure_rules.erasure_of
 # Each mutant: its replacement and the (owner, name) of the original. Every
 # other binding of the original in a cognee_lab.identity module, which a
 # caller imported by name, is patched too (`patched`).
@@ -536,6 +556,7 @@ MUTANTS = {
     ),
     "served_or_before": (served_or_before, (erasure_rules, "check_retry_chain")),
     "bind_every_step": (bind_every_step, (erasure_rules, "check_retry_chain")),
+    "bind_on_retry": (bind_on_retry, (erasure_rules, "erasure_of")),
 }
 
 

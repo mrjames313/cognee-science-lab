@@ -232,10 +232,12 @@ def erasure_of(old, source, erasures: Erasures, *, bind=True) -> Erasure | None:
     erases with its document. The removed records it cites are exactly the
     bound ones (`bound_removals`) its old revision reads, so a removal
     neither leaves a citer of one nor claims one no bound removal lists.
-    Without `bind`, for a retry-chain step an earlier begin admitted, they
-    need only be records its old revision reads: that begin found them
-    bound, and an upstream that retired since unbinds them without undoing
-    the removal (`check_retry_chain`)."""
+    Without `bind`, for a retry's saved removal or a retry-chain step an
+    earlier begin admitted, the records it cites count as bound too, so it
+    still names every bound record its old revision reads and only records
+    it reads: the attempt that admitted it found them bound, and an
+    upstream that retired since unbinds them without undoing the removal
+    (`admission.admit`, `check_retry_chain`)."""
     found = [
         (key, p)
         for key, p in source.producers.items()
@@ -264,11 +266,9 @@ def erasure_of(old, source, erasures: Erasures, *, bind=True) -> Erasure | None:
             "erasure_unbound",
             "A removal producer names a forgotten source's document and exactly the Entities its forget removed",
         )
-    bound = (
-        erasures.records.get(claim.document, frozenset())
-        if bind
-        else claim.cited_records
-    )
+    bound = erasures.records.get(claim.document, frozenset())
+    if not bind:
+        bound |= claim.cited_records
     if not claim.cited_records <= bound or claim.cited_records != read_records(
         old, bound
     ):
