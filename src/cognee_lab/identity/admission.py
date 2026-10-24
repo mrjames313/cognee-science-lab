@@ -157,7 +157,9 @@ def admit(
     check_foreign_inputs(old, source)
     check_reconfirmations(old, source)
     check_removal_producers_kept(old, source)
-    check_erasure_removals(old, source, removal, erasures.readers, old.revision)
+    check_erasure_removals(
+        old, source, removal, erasures.readers, frozenset([old.revision])
+    )
     if text_changed:
         check_continuing_decisions(old, source, fate)
         check_no_span_variants(source)

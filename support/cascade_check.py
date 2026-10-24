@@ -18,6 +18,13 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   removal saved by a failed attempt resumes at its level, and once every
   source whose records it cites withdraws, it leaves the cascade and no
   reader of the cascade raises.
+- A failed attempt on a written removal. After each write, a reconcile at
+  the written revision or a withdrawal that fails leaves the cascade
+  planning the same revisions for the rest, and while any is left, every
+  source that holds a removal is refused a withdrawal or forget
+  (`cascade_unfinished`) and every other source is not.
+- The served revision. A removal in place that lists its records as last
+  served at another revision than the ledger verified is refused.
 - The inductive gate. Admission refuses (`erasure_unbound`) a removal below
   level 1 before the removals above it are written, and one below a
   removal that was written out of order.
@@ -28,16 +35,17 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
 
 The code under test is erasure.cascade, erasure.remaining, the token,
 erasure.ready, erasure_rules.bound_removals and erasure_of through
-admission.admit and check_retry_chain, and erasure.refuse_retiring_inputs.
-Nothing is replaced.
+admission.admit and check_retry_chain, erasure.refuse_retiring_inputs and
+erasure.refuse_unfinished_cascade. Nothing is replaced.
 
     uv run python support/chain_check.py   # runs both halves
 """
 
 import dataclasses
+import sys
 from collections import Counter
 from contextlib import contextmanager
-from itertools import product
+from itertools import pairwise, product
 from types import MappingProxyType
 
 from cascade_worlds import (
@@ -64,6 +72,7 @@ from cognee_lab.identity.chains import (
     new_citations,
 )
 from cognee_lab.identity.retirement import source_ids
+from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import IntentError
 
 
@@ -76,7 +85,7 @@ def refusal(rows, step):
     try:
         if step.description.revision == old.revision:
             erasure_rules.check_retry_chain(
-                [old, step.description], erasures, step.row.verified_revision
+                [old, step.description], erasures, step.row.verified_revision, old
             )
         else:
             admit(
@@ -85,6 +94,80 @@ def refusal(rows, step):
     except IntentError as exc:
         return exc.code
     return None
+
+
+def relisted(step, last):
+    """`step` with its removal producer's records relisted as last served
+    at `last`."""
+    description = step.description
+    (key,) = set(description.producers) - set(step.row.description.producers)
+    producer = description.producers[key]
+    config = producer.model_dump(mode="json")
+    for record in config["configuration"]["removed_records"]:
+        record["last_revision"] = last
+    producers = {**description.producers, key: type(producer).model_validate(config)}
+    return step._replace(
+        description=description.model_copy(update=dict(producers=producers))
+    )
+
+
+def misdated(rows, steps):
+    """Disagreements when a removal in place that admission admits lists
+    its records as last served one revision before the ledger verified."""
+    return [
+        ("served revision", step.row.source)
+        for step in steps
+        if step.impact is not None
+        and step.description.revision == step.row.revision
+        and step.impact.removed_records
+        and refusal(rows, step) is None
+        and refusal(rows, relisted(step, step.row.verified_revision - 1))
+        != "erasure_incomplete"
+    ]
+
+
+def holds_removal(row) -> bool:
+    return row.description is not None and any(
+        p.implementation == erasure_rules.ERASURE_IMPLEMENTATION
+        for p in row.description.producers.values()
+    )
+
+
+def failed_after_written(rows, step, ids, tomb):
+    """Disagreements once `step` is written: a failed reconcile at its
+    revision, or a failed withdrawal, changes nothing the cascade plans for
+    the rest, and while anything is left, a withdrawal or forget of a
+    source that holds a removal is refused, and of any other source not."""
+    failures = []
+    plan = {
+        (s.row.source, s.level, s.description.model_dump_json())
+        for s in erasure.cascade(rows, ids, ())
+    }
+    source = step.row.source
+    for operation in ("identity_publish", "identity_withdraw"):
+        row = next(r for r in rows if r.source == source)
+        failed = dataclasses.replace(
+            row, state="failed", plan=dict(operation=operation)
+        )
+        after = [failed if r.source == source else r for r in rows]
+        found = {
+            (s.row.source, s.level, s.description.model_dump_json())
+            for s in erasure.cascade(after, ids, ())
+        }
+        if found != plan:
+            failures.append(("written then failed", source, operation))
+    left = bool(erasure.unfinished(tomb, rows))
+    for row in rows:
+        if row.description is None:
+            continue
+        try:
+            erasure.refuse_unfinished_cascade(row.description, rows)
+            refused = False
+        except IntentError as exc:
+            refused = exc.code == "cascade_unfinished"
+        if refused != (left and holds_removal(row)):
+            failures.append(("retire while unfinished", row.source, refused))
+    return failures
 
 
 def written(rows, step):
@@ -146,12 +229,18 @@ def retired_upstream(rows, step, ids, tomb):
     stay, and leaves the cascade once they withdraw, with no reader of the
     cascade raising."""
     source = step.row.source
-    operation = "identity_replace" if step.row.state == "current" else None
+    if step.row.state == "current":
+        plan = dict(operation="identity_replace")
+    else:
+        plan = dict(
+            operation=step.row.plan["operation"],
+            erased_from=[step.row.description.model_dump_json()],
+        )
     failed = dataclasses.replace(
         row_of(step.description, "ok"),
         state="failed",
         verified_revision=step.row.verified_revision,
-        plan=dict(operation=operation or step.row.plan["operation"]),
+        plan=plan,
     )
     after = [failed if r.source == source else r for r in rows]
     resumed = next(
@@ -192,6 +281,7 @@ def check_world(graph, states, tokens, *, shrink):
     if tokens.setdefault(found.token, signature) != signature:
         failures.append(("token", found.token))
     planned = {s.row.source: s for s in erasure.cascade(rows, ids, ())}
+    failures += misdated(rows, planned.values())
     for step in planned.values():
         if step.level > 1 and not erasure.blocked(step.row):
             if refusal(rows, step) != "erasure_unbound":
@@ -236,6 +326,7 @@ def check_world(graph, states, tokens, *, shrink):
             failures.append(("write in order", step.row.source, code))
             break
         rows = written(rows, step)
+        failures += failed_after_written(rows, step, ids, tomb)
     left = {s.row.source for s in erasure.cascade(rows, ids, ())}
     if left != waiting:
         failures.append(("waiting", left))
@@ -318,48 +409,88 @@ def any_fingerprint(self, item):
     ) and item.representation_revision <= self.last_revision
 
 
+def written_only_current(self):
+    """Only a current row's removal is written: a failed attempt on a
+    written removal frees the citers below it."""
+    return self.state == "current"
+
+
+def served_despite_supersede(self):
+    """A failed row verified at its revision holds what was served, even
+    after an erasure retry superseded that description."""
+    return self.state == "current" or self.verified_revision >= self.revision
+
+
+def retire_anytime(source, rows):
+    """Withdrawing or forgetting a source that holds a removal is never
+    refused."""
+
+
+def served_or_before(chain, erasures, served, saved):
+    """Every step of a retry chain may list the revision before the served
+    one, also the step new in this begin."""
+    for before, after in pairwise(chain):
+        _check_erasure_retry(
+            before, after, erasures, frozenset({served, after.revision - 1})
+        )
+
+
 _citations = dependency.citations
 _cascade = erasure.cascade
 _removes = erasure.removes
 _levels = erasure_rules.levels
-# Each mutant: its replacement and every (module, name) that binds the
-# original, so callers that imported it see the mutant too.
+_check_erasure_retry = erasure_rules.check_erasure_retry
+# Each mutant: its replacement and the (owner, name) of the original. Every
+# other binding of the original in a cognee_lab.identity module, which a
+# caller imported by name, is patched too (`patched`).
 MUTANTS = {
-    "one_level_cascade": (
-        one_level,
-        [
-            (m, "citations")
-            for m in (dependency, erasure, erasure_rules, retirement, withholding)
-        ],
+    "one_level_cascade": (one_level, (dependency, "citations")),
+    "cascade_out_of_order": (by_source, (erasure, "cascade")),
+    "bound_without_induction": (without_induction, (erasure_rules, "bound_removals")),
+    "level_one_fence": (level_one_fence, (erasure, "removed_records")),
+    "removed_before_served": (removes_before_served, (erasure, "removes")),
+    "unbound_retries": (unbound_retries, (erasure_rules, "levels")),
+    "removed_any_fingerprint": (any_fingerprint, (records.RemovedRecord, "reads")),
+    "written_only_current": (
+        property(written_only_current),
+        (PublicationRow, "holds_served"),
     ),
-    "cascade_out_of_order": (by_source, [(erasure, "cascade")]),
-    "bound_without_induction": (
-        without_induction,
-        [(erasure, "bound_removals"), (erasure_rules, "bound_removals")],
+    "served_despite_supersede": (
+        property(served_despite_supersede),
+        (PublicationRow, "holds_served"),
     ),
-    "level_one_fence": (level_one_fence, [(erasure, "removed_records")]),
-    "removed_before_served": (removes_before_served, [(erasure, "removes")]),
-    "unbound_retries": (
-        unbound_retries,
-        [(erasure, "levels"), (erasure_rules, "levels")],
-    ),
-    "removed_any_fingerprint": (any_fingerprint, [(records.RemovedRecord, "reads")]),
+    "retire_anytime": (retire_anytime, (erasure, "refuse_unfinished_cascade")),
+    "served_or_before": (served_or_before, (erasure_rules, "check_retry_chain")),
 }
+
+
+def bindings(owner, attribute):
+    """`(owner, attribute)` and every module-level name in a
+    cognee_lab.identity module bound to the same object."""
+    original = (
+        vars(owner)[attribute] if isinstance(owner, type) else getattr(owner, attribute)
+    )
+    found = [(owner, attribute, original)]
+    for name, module in list(sys.modules.items()):
+        if module is None or not name.startswith("cognee_lab.identity"):
+            continue
+        for key, value in list(vars(module).items()):
+            if value is original and (module, key) != (owner, attribute):
+                found.append((module, key, original))
+    return found
 
 
 @contextmanager
 def patched(name):
-    replacement, bindings = MUTANTS[name]
-    originals = [
-        (owner, attribute, getattr(owner, attribute)) for owner, attribute in bindings
-    ]
-    for owner, attribute, _ in originals:
-        setattr(owner, attribute, replacement)
+    replacement, (owner, attribute) = MUTANTS[name]
+    originals = bindings(owner, attribute)
+    for target, key, _ in originals:
+        setattr(target, key, replacement)
     try:
         yield
     finally:
-        for owner, attribute, original in originals:
-            setattr(owner, attribute, original)
+        for target, key, original in originals:
+            setattr(target, key, original)
 
 
 def run_mutants(count=4, states=("ok", "drifted", "reconciled")):

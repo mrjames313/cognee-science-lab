@@ -91,10 +91,15 @@ def removal_claim(producer) -> RemovalClaim:
 def written_claims(rows, document, entities) -> list[RemovalClaim]:
     """The removals written for the forget of `document` that removed
     `entities`: each removal producer of a saved source that names them,
-    unless the row's own pending or failed attempt introduced it. Producers
-    are immutable (`check_removal_producers_kept`), so a later revision
-    still carries a written one. A producer that does not parse binds
-    nothing."""
+    unless it is new in the row's revision and only a pending or failed
+    attempt holds it (`PublicationRow.holds_served`): a removal served
+    before a later attempt at its revision failed is written, and citers
+    may pin what it removed.
+    Producers are immutable (`check_removal_producers_kept`), so a later
+    revision still carries a written one. A retired row's removals bind
+    nothing: a withdrawal or forget of a source holding a removal waits for
+    that forget's cascade (erasure.refuse_unfinished_cascade). A producer
+    that does not parse binds nothing."""
     found = []
     for row in rows:
         if row.description is None or row.is_retired:
@@ -109,7 +114,7 @@ def written_claims(rows, document, entities) -> list[RemovalClaim]:
             if (claim.document, claim.removed_entities) != (document, entities):
                 continue
             introduced = key == producer_key(claim.forgotten, row.revision)
-            if row.state != "current" and introduced:
+            if introduced and not row.holds_served:
                 continue
             found.append(claim)
     return found
@@ -305,14 +310,15 @@ def check_removal_producers_kept(old, source):
 
 
 def check_erasure_removals(
-    old, source, removal: ErasureStep | None, readers, served: int
+    old, source, removal: ErasureStep | None, readers, served: frozenset[int]
 ):
     """A revision that names a removal producer is an erasure removal, all
     of it and nothing else: it cites what the forget removed, removes every
     decision citing it (`check_erasure_complete`), changes nothing more
     (`check_erasure_confined`) and its producer lists what it removed
-    (`check_erasure_records`). `served` is the last revision of the source
-    the ledger verified: the old one, for a removal at the next revision."""
+    (`check_erasure_records`). `served` holds the revisions the removal may
+    name as the last the ledger served of its source: the old one, for a
+    removal at the next revision."""
     if removal is None:
         return
     check_erasure_cites(removal)
@@ -331,15 +337,13 @@ def check_erasure_cites(removal: ErasureStep):
         )
 
 
-def check_erasure_records(old, source, removal: ErasureStep, served: int):
+def check_erasure_records(old, source, removal: ErasureStep, served: frozenset[int]):
     """The removal producer lists exactly the records its revision removes,
-    as the old revision held them and as last served (`RemovedRecord.of`):
-    the removals below it bind to that list (`bound_removals`). A retry
-    checks a step in place again after its row may have been served at the
-    step's own revision, so such a step may also list the revision before."""
+    as the old revision held them and as last served (`RemovedRecord.of`),
+    at one of the `served` revisions: the removals below it bind to that
+    list (`bound_removals`)."""
     if removal.removed_records not in [
-        {RemovedRecord.of(old, k, last) for k in removal.citing}
-        for last in (served, source.revision - 1)
+        {RemovedRecord.of(old, k, last) for k in removal.citing} for last in served
     ]:
         raise IntentError(
             "erasure_incomplete",
@@ -347,18 +351,27 @@ def check_erasure_records(old, source, removal: ErasureStep, served: int):
         )
 
 
-def check_retry_chain(chain, erasures: Erasures, served: int):
+def check_retry_chain(chain, erasures: Erasures, served: int, saved):
     """An erasure-retry chain: the saved descriptions that erasure retries
     superseded, in order, then the description the attempt begins with.
     Each step is an erasure removal in place of the one before
     (`check_erasure_retry`). A replacement's own step, from its previous
     revision to the chain's first description, is admission's. `served` is
-    the row's verified revision."""
-    for saved, source in pairwise(chain):
-        check_erasure_retry(saved, source, erasures, served)
+    the row's verified revision and `saved` the description its failed
+    attempt saved. A step that ends after `saved` is new in this begin and
+    lists its records as last served at exactly `served`. A step up to
+    `saved` was admitted by an earlier begin, and the row may have been
+    served at the step's own revision since (the retry completed, and a
+    later attempt at its revision failed), so it may also list the
+    revision before."""
+    steps = list(pairwise(chain))
+    for i, (before, after) in enumerate(steps):
+        new = i == len(steps) - 1 and after != saved
+        last = frozenset({served} if new else {served, after.revision - 1})
+        check_erasure_retry(before, after, erasures, last)
 
 
-def check_erasure_retry(saved, source, erasures: Erasures, served: int):
+def check_erasure_retry(saved, source, erasures: Erasures, served: frozenset[int]):
     """A retry replaces a failed attempt's saved revision only by its
     erasure removal: the same revision, one removal producer new, and the
     removal rules."""

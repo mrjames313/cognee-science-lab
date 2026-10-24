@@ -8,7 +8,9 @@ import pytest
 from cascade_worlds import cascade_rows
 from chain_worlds import identity, row_of
 from cognee_lab.identity import erasure
+from cognee_lab.identity.erasure_rules import check_retry_chain, erasures_of
 from cognee_lab.identity.retirement import source_ids
+from cognee_lab.identity.validation import IntentError
 
 # s0 is forgotten; s1 cites it and s2 cites s1.
 CHAIN = {"s0": set(), "s1": {"s0"}, "s2": {"s1"}}
@@ -75,24 +77,137 @@ def saved_level_two_removal(upstream_state):
     return replaced(rows, "s1", dataclasses.replace(s1, state=upstream_state))
 
 
-@pytest.mark.parametrize("upstream_state", ["withdrawn", "failed_withdrawal"])
-def test_a_failed_removal_whose_upstream_retired_leaves_the_cascade(upstream_state):
+def test_a_failed_removal_whose_upstream_withdrew_leaves_the_cascade():
     """The records s2's failed removal cites are bound by no removal any
-    more: s1 is withdrawn, or its withdrawal failed. s2 leaves the cascade,
-    as a citer of a withdrawn intermediate does, and every reader of the
-    cascade answers instead of raising."""
-    state = "withdrawn" if upstream_state == "withdrawn" else "failed"
-    rows = saved_level_two_removal(state)
-    if upstream_state == "failed_withdrawal":
-        s1 = by_label(rows, "s1")
-        rows = replaced(
-            rows,
-            "s1",
-            dataclasses.replace(s1, plan=dict(operation="identity_withdraw")),
-        )
+    more: s1 is withdrawn. s2 leaves the cascade, as a citer of a withdrawn
+    intermediate does, and every reader of the cascade answers instead of
+    raising."""
+    rows = saved_level_two_removal("withdrawn")
     tomb = rows[0].tombstone
     assert erasure.cascade(rows, source_ids(tomb), ()) == ()
     assert erasure.unfinished(tomb, rows) == []
     assert erasure.remaining(tomb, rows).dependents == ()
     assert [i.dependents for i in erasure.under_way(rows)] == [()]
     erasure.refuse_retiring_inputs(by_label(rows, "s2").description, rows)
+
+
+def test_a_failed_removal_stays_while_its_upstream_withdrawal_fails():
+    """s1's withdrawal failed after its removal was written: the removal was
+    served, so it still binds, and s2's failed removal resumes at level 2."""
+    rows = saved_level_two_removal("failed")
+    s1 = by_label(rows, "s1")
+    rows = replaced(
+        rows, "s1", dataclasses.replace(s1, plan=dict(operation="identity_withdraw"))
+    )
+    (retry,) = erasure.cascade(rows, source_ids(rows[0].tombstone), ())
+    assert (retry.row.source, retry.level) == (str(identity("s2")), 2)
+    assert erasure.ready([retry]) == ([retry], [])
+
+
+LONG_CHAIN = {"s0": set(), "s1": {"s0"}, "s2": {"s1"}, "s3": {"s2"}}
+
+
+def two_levels_written():
+    """s1's and s2's removals are written; s3's is still to write."""
+    rows = cascade_rows(LONG_CHAIN, {"s1": "ok", "s2": "ok", "s3": "ok"})
+    ids = source_ids(rows[0].tombstone)
+    for _ in range(2):
+        step = erasure.cascade(rows, ids, ())[0]
+        rows = [
+            row_of(step.description, "ok") if r.source == step.row.source else r
+            for r in rows
+        ]
+    return rows, ids
+
+
+@pytest.mark.parametrize("operation", ["identity_publish", "identity_withdraw"])
+def test_a_failed_attempt_on_a_written_intermediate_keeps_the_citers_below(operation):
+    """s1's removal was written and served; then a reconcile at the same
+    revision, or a withdrawal, failed. The removal still binds, so s3 is
+    still a level-3 dependent and the forget is not finished, and s1 is not
+    a removal to write again."""
+    rows, ids = two_levels_written()
+    s1 = by_label(rows, "s1")
+    rows = replaced(
+        rows,
+        "s1",
+        dataclasses.replace(s1, state="failed", plan=dict(operation=operation)),
+    )
+    steps = erasure.cascade(rows, ids, ())
+    assert [(s.row.source, s.level) for s in steps] == [(str(identity("s3")), 3)]
+    assert erasure.unfinished(rows[0].tombstone, rows) == [by_label(rows, "s3")]
+
+
+def test_a_failed_removal_in_place_of_a_served_revision_resumes():
+    """s1 was served at revision 1 and a reconcile there failed; its removal
+    then failed in place, superseding the served description (an erasure
+    retry). The saved removal was never served, so it is still a removal
+    to write at level 1, with s2 below it."""
+    rows = rows_of(s1="reconciled")
+    step, _ = erasure.cascade(rows, source_ids(rows[0].tombstone), ())
+    failed = dataclasses.replace(
+        row_of(step.description, "ok"),
+        state="failed",
+        plan=dict(
+            operation="identity_publish",
+            erased_from=[step.row.description.model_dump_json()],
+        ),
+    )
+    rows = replaced(rows, "s1", failed)
+    steps = erasure.cascade(rows, source_ids(rows[0].tombstone), ())
+    assert [(s.row.source, s.level, s.impact is None) for s in steps] == [
+        (str(identity("s1")), 1, True),
+        (str(identity("s2")), 2, False),
+    ]
+
+
+def test_a_source_holding_a_removal_retires_only_once_the_cascade_finishes():
+    """s1 and s2 hold written removals and s3's is still to write: neither
+    may be withdrawn or forgotten until it is. The forgotten source itself
+    holds none, and a source that holds no removal is never refused."""
+    rows, ids = two_levels_written()
+    for label in ("s1", "s2"):
+        with pytest.raises(IntentError) as refused:
+            erasure.refuse_unfinished_cascade(by_label(rows, label).description, rows)
+        assert refused.value.code == "cascade_unfinished"
+        assert refused.value.details["unfinished"] == [str(identity("s3"))]
+    erasure.refuse_unfinished_cascade(by_label(rows, "s3").description, rows)
+    (step,) = erasure.cascade(rows, ids, ())
+    rows = replaced(rows, "s3", row_of(step.description, "ok"))
+    for label in ("s1", "s2", "s3"):
+        erasure.refuse_unfinished_cascade(by_label(rows, label).description, rows)
+
+
+def removal_listing(description, key, last):
+    """The removal revision with its producer's removed records relisted as
+    last served at `last`."""
+    producer = description.producers[key]
+    config = producer.model_dump(mode="json")
+    for record in config["configuration"]["removed_records"]:
+        record["last_revision"] = last
+    return description.model_copy(
+        update=dict(
+            producers={
+                **description.producers,
+                key: type(producer).model_validate(config),
+            }
+        )
+    )
+
+
+def test_a_new_removal_in_place_lists_exactly_the_served_revision():
+    """s1 was served at revision 1, which s2 pins, and a reconcile there
+    failed. A removal in place that lists its records as last served at
+    revision 0 would leave s2 out of the cascade: it is refused when new in
+    a begin, and tolerated only as a step an earlier begin admitted."""
+    rows = rows_of(s1="reconciled")
+    step, _ = erasure.cascade(rows, source_ids(rows[0].tombstone), ())
+    saved = step.row.description
+    (key,) = set(step.description.producers) - set(saved.producers)
+    erasures = erasures_of(rows, saved)
+    check_retry_chain([saved, step.description], erasures, 1, saved)
+    forged = removal_listing(step.description, key, 0)
+    with pytest.raises(IntentError) as refused:
+        check_retry_chain([saved, forged], erasures, 1, saved)
+    assert refused.value.code == "erasure_incomplete"
+    check_retry_chain([saved, forged], erasures, 1, forged)

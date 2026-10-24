@@ -390,7 +390,13 @@ async def forget(
     from cognee import forget as native_forget
     from cognee.modules.users.methods import get_default_user
 
-    from .erasure import finish_dependents, impact, report, unfinished
+    from .erasure import (
+        finish_dependents,
+        impact,
+        refuse_unfinished_cascade,
+        report,
+        unfinished,
+    )
 
     graph, records = publisher.graph, publisher.records
     require_graph_methods(
@@ -427,6 +433,7 @@ async def forget(
     retry = resumes(row)
     plan = await plan_for(publisher, source, row)
     rows = await records.rows()
+    refuse_unfinished_cascade(source, rows)
     found = impact(source, plan, rows)
     if not confirmed(found, plan, confirm, retry):
         code, message = (

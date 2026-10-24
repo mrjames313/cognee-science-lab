@@ -356,7 +356,7 @@ async def replace(
         await admit_replacement(
             graph, old, chain[1], texts, text_change, retry=retry, erasures=erasures
         )
-        check_retry_chain(chain[1:], erasures, row.verified_revision)
+        check_retry_chain(chain[1:], erasures, row.verified_revision, row.description)
 
     await admit_chain()
     if text_change is not None:

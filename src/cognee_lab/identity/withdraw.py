@@ -3,6 +3,7 @@
 `forget` is the sibling orchestration; `retirement.py` holds what both use.
 """
 
+from .erasure import refuse_unfinished_cascade
 from .native import require_graph_methods
 from .retirement import (
     contribution_triples,
@@ -55,6 +56,7 @@ async def withdraw(
         "No saved publication to withdraw",
         "Withdraw the exact saved description",
     )
+    refuse_unfinished_cascade(source, await records.rows())
     owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
     # Keep the original retirement keys across interrupted retries, even after
     # native deletion has detached references or removed graph objects.

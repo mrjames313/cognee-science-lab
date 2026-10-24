@@ -32,6 +32,7 @@ from .erasure_rules import (
     bound_removals,
     corpus_reads,
     erased_decisions,
+    is_removal_producer,
     levels,
     producer_key,
     removal_claim,
@@ -294,9 +295,11 @@ class Step(NamedTuple):
 def removal_of(row, ids: SourceIds):
     """The claim of a failed row's removal revision for this forget: a
     publication, replacement or text change whose saved revision introduced
-    this source's removal producer, or None. A later revision that only
-    carries that producer forward is not one."""
-    if row.failed_attempt is None or blocked(row):
+    this source's removal producer and was never served, or None. A later
+    revision that only carries that producer forward is not one, nor is a
+    removal served before a later attempt at its revision failed: it is
+    written (`PublicationRow.holds_served`)."""
+    if row.failed_attempt is None or blocked(row) or row.holds_served:
         return None
     producer = row.description.producers.get(
         producer_key(ids.identity_data_id, row.revision)
@@ -480,6 +483,42 @@ def unfinished(tombstone, rows) -> list:
     revision that failed. Derived from the rows, not stored."""
     steps = cascade(rows, source_ids(tombstone), tombstone.removed_entity_ids)
     return sorted((s.row for s in steps), key=lambda r: r.source)
+
+
+def refuse_unfinished_cascade(source, rows):
+    """Refuse withdrawing or forgetting a source that holds a removal
+    producer, written or saved by a failed attempt, of a forget whose
+    cascade is not finished (`unfinished`). The removals below it bind to
+    that producer (erasure_rules.written_claims), so retiring the source
+    first would free every citer further down, and the forget would report
+    finished. Transitive, since `unfinished` covers every level. The
+    forgotten source itself holds no removal of its own forget, so finishing
+    it is never refused."""
+    tombstones = {
+        r.tombstone.identity_data_id: r.tombstone for r in rows if r.tombstone
+    }
+    for producer in source.producers.values():
+        if not is_removal_producer(producer):
+            continue
+        try:
+            claim = removal_claim(producer)
+        except IntentError:
+            continue
+        tomb = tombstones.get(claim.forgotten)
+        if tomb is None or (claim.document, claim.removed_entities) != (
+            tomb.original_data_id,
+            frozenset(tomb.removed_entity_ids),
+        ):
+            continue
+        if left := unfinished(tomb, rows):
+            raise IntentError(
+                "cascade_unfinished",
+                "This source holds a removal of a forget whose cascade is not finished; run forget on the forgotten source again first",
+                details=dict(
+                    forgotten=str(claim.forgotten),
+                    unfinished=[r.source for r in left],
+                ),
+            )
 
 
 def dependent_json(d: DependentImpact) -> dict:

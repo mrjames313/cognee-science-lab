@@ -174,6 +174,18 @@ class PublicationRow:
         return self.state == "current" and self.revision == self.verified_revision
 
     @property
+    def holds_served(self) -> bool:
+        """Whether the description the row holds is one the ledger served:
+        the row is current, or it completed at this revision before a later
+        attempt at the same revision (a reconcile, a withdrawal or a forget)
+        failed. False once an erasure retry superseded a description at this
+        revision (`erased_from`), even if that retry completed later: the
+        row does not tell which, so it answers as for one not served."""
+        return self.state == "current" or (
+            self.verified_revision >= self.revision and not self.plan.get(ERASED_FROM)
+        )
+
+    @property
     def resumed_by(self) -> str | None:
         """The method that alone resumes this row's saved plan, if it failed."""
         return cell_for(self).owner
@@ -436,7 +448,10 @@ def admissible(row, method, plan, source, rows=()) -> Refusal | None:
     if chain := erasure_chain(row, method, plan):
         try:
             check_retry_chain(
-                [*chain, source], erasures_of(rows, source), row.verified_revision
+                [*chain, source],
+                erasures_of(rows, source),
+                row.verified_revision,
+                row.description,
             )
         except IntentError as refused:
             return Refusal(refused.code, str(refused))

@@ -284,7 +284,13 @@ class RemovedRecord(NamedTuple):
         served record, so no citation pins one at a later revision. A
         removal in place of a failed attempt's saved revision (an erasure
         retry) holds a record last served at the revision before, or at the
-        same revision when a reconcile of a served row failed."""
+        same revision when a reconcile of a served row failed. A re-add's
+        failed attempt still carries the verified revision of the source's
+        forgotten life, which no record of the new life was served at.
+        Listing it is harmless: the forget's cascade removed every citation
+        of that life before the re-add was admitted
+        (Publisher.admit_readd waits for it), and a new citation needs a
+        served row, so none pins a revision that old."""
         record_type = record_type_of(description, record_id)
         return cls(
             str(description.identity_data_id),
