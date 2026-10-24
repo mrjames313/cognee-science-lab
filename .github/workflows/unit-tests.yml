@@ -16,5 +16,14 @@ jobs:
       - run: uv run pytest -q -m 'not integration'
       # The unit suite runs the occurrence check on small worlds only; this is the default bound.
       - run: uv run python support/occurrence_check.py
+
+  # Its own job so it runs beside the unit suite; it alone took over 20 minutes on a runner.
+  chains:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --group dev --locked
       # Every citation graph of four sources, withholding and the erasure cascade; the unit suite covers three.
       - run: uv run python support/chain_check.py
