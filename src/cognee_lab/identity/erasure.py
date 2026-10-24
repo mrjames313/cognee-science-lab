@@ -31,6 +31,8 @@ from .erasure_rules import (
     ERASURE_IMPLEMENTATION,
     bound_removals,
     corpus_reads,
+    erased_decisions,
+    levels,
     producer_key,
     removal_claim,
 )
@@ -220,9 +222,7 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
     ) & set(reader.entity_constructions)
     revision = reader.revision + 1 if row.state == "current" else reader.revision
     key = producer_key(ids.identity_data_id, revision)
-    removed_records = {
-        RemovedRecord.of(reader, k, row.verified_revision) for k in citing
-    }
+    removed_records = removes(row, cited)
     cited_records = read_records(reader, records)
     after = {}
     for k in sorted(citing):
@@ -311,76 +311,91 @@ def removal_of(row, ids: SourceIds):
     return removal_claim(producer) if producer is not None else None
 
 
+def forget_target(ids: SourceIds, removed) -> Target:
+    """What a forget takes away: its source's document, the Entities it
+    removes and every saved record of its source."""
+    return Target(
+        ids.original_data_id, frozenset(removed), frozenset([ids.identity_data_id])
+    )
+
+
+def removes(row, cited) -> frozenset[RemovedRecord]:
+    """The records a row's removal removes, given the inputs through which
+    it reads what the forget removed, as last served."""
+    reader = row.description
+    return frozenset(
+        RemovedRecord.of(reader, k, row.verified_revision)
+        for k in erased_decisions(reader, set(cited))
+    )
+
+
 def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
     """Every removal revision the forget of this source still has to write,
-    derived from the rows, in level order. The records that written
-    removals removed (erasure_rules.bound_removals), that failed removal
-    revisions remove and that planned ones will remove are found to a
-    fixpoint: each saved source that reads the forgotten source, or a
-    removed record as it was before, is a dependent with one removal
-    revision for all it reads. A dependent's level is one more than the
-    deepest removal it cites, or 1."""
+    derived from the rows, in level order. The removals that bind are found
+    to a fixpoint from the written ones (erasure_rules.bound_removals): a
+    failed removal revision whose cited records are all removed by a bound
+    removal, and each other saved source that reads the forgotten source,
+    or a record a bound removal removes as it was before, with one removal
+    revision for all it reads. A failed removal revision whose cited
+    records no bound removal lists any more, because the source that
+    removed them retired, leaves the cascade, as a citer of a withdrawn
+    intermediate does. A dependent's level is one more than the deepest
+    removal it cites, or 1 (erasure_rules.levels)."""
     forgotten = str(ids.identity_data_id)
     removed = frozenset(UUID(str(e)) for e in removed)
-    live = sorted(
-        (r for r in rows if not r.is_retired and r.source != forgotten),
-        key=lambda r: r.source,
-    )
-    written = bound_removals(rows, ids.original_data_id, removed)
-    retries = {r.source: (r, claim) for r in live if (claim := removal_of(r, ids))}
-    base = Target(ids.original_data_id, removed, frozenset([ids.identity_data_id]))
-    reads = {r.source: corpus_reads(r.description) for r in rows if not r.is_retired}
-    remover = {
-        record: source
-        for source, (_, claim) in retries.items()
-        for record in claim.removed_records
+    live = {
+        r.source: r
+        for r in sorted(rows, key=lambda r: r.source)
+        if not r.is_retired and r.source != forgotten
     }
-    found: dict[str, tuple] = {}
-    grew = True
-    while grew:
-        grew = False
-        records = frozenset(written) | frozenset(remover)
+    written = bound_removals(rows, ids.original_data_id, removed)
+    claims = {s: claim for s, r in live.items() if (claim := removal_of(r, ids))}
+    base = forget_target(ids, removed)
+    records = frozenset(written)
+    while True:
         target = base._replace(records=records)
-        for row in live:
-            if row.source in retries:
-                continue
-            cited = citations(row.description, target)
-            if not cited or found.get(row.source, (None,))[0] == cited:
-                continue
-            readers = set().union(*(e for k, e in reads.items() if k != row.source))
-            revised, impact = removal_revision(
-                row, cited, ids, removed, readers, records, token
-            )
-            found[row.source] = (cited, row, revised, impact)
-            remover.update(dict.fromkeys(impact.removed_records, row.source))
-            grew = True
+        cited = {
+            s: found
+            for s, r in live.items()
+            if s not in claims and (found := citations(r.description, target))
+        }
+        level, bound = levels(
+            {s: (c.cited_records, c.removed_records) for s, c in claims.items()}
+            | {
+                s: (
+                    frozenset(read_records(live[s].description, records)),
+                    removes(live[s], c),
+                )
+                for s, c in cited.items()
+            },
+            written,
+        )
+        if bound.keys() <= records:
+            break
+        records |= bound.keys()
 
-    cited_of = {s: claim.cited_records for s, (_, claim) in retries.items()}
-    cited_of.update({s: frozenset(f[3].cited_records) for s, f in found.items()})
-    levels: dict[str, int] = {}
-
-    def level(source, seen=()):
-        if source in seen:
-            raise IntentError(
-                "citation_cycle", "A chain of saved-record citations leads back here"
-            )
-        if source not in levels:
-            levels[source] = 1 + max(
-                (
-                    written[r] if r in written else level(remover[r], (*seen, source))
-                    for r in cited_of[source]
-                ),
-                default=0,
-            )
-        return levels[source]
-
+    reads = {r.source: corpus_reads(r.description) for r in rows if not r.is_retired}
     steps = [
-        Step(row, row.description, None, level(s), cited_of[s])
-        for s, (row, _) in retries.items()
-    ] + [
-        Step(row, revised, replace(impact, level=level(s)), level(s), cited_of[s])
-        for s, (_, row, revised, impact) in found.items()
+        Step(live[s], live[s].description, None, level[s], claim.cited_records)
+        for s, claim in claims.items()
+        if s in level
     ]
+    for s, found in cited.items():
+        if s not in level:
+            continue
+        readers = set().union(*(e for k, e in reads.items() if k != s))
+        revised, impact = removal_revision(
+            live[s], found, ids, removed, readers, records, token
+        )
+        steps.append(
+            Step(
+                live[s],
+                revised,
+                replace(impact, level=level[s]),
+                level[s],
+                frozenset(impact.cited_records),
+            )
+        )
     return tuple(sorted(steps, key=lambda s: (s.level, s.row.source)))
 
 
@@ -443,12 +458,8 @@ def refuse_retiring_inputs(source, rows):
     for row in rows:
         if (row.dataset, row.source) == own or not retiring_by_forget(row):
             continue
-        ids = source_ids(row.description)
         removed = removed_entities(row.description, row.plan, rows)
-        target = Target(
-            ids.original_data_id, frozenset(removed), frozenset([ids.identity_data_id])
-        )
-        found += consumes(source, target)
+        found += consumes(source, forget_target(source_ids(row.description), removed))
     if cited := saved_records(source):
         doomed = set().union(*map(removed_records, under_way(rows)))
         found += [

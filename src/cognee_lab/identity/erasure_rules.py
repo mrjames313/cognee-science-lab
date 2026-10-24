@@ -115,27 +115,37 @@ def written_claims(rows, document, entities) -> list[RemovalClaim]:
     return found
 
 
-def bound_removals(rows, document, entities) -> dict[RemovedRecord, int]:
-    """Each record that a written removal for this forget removed, with the
-    level of that removal, bound inductively: a removal binds when every
-    record it cites was removed by a bound removal, and a first-level
-    removal cites none. So the binding reaches back to the tombstone, and a
-    removal written out of order binds nothing below it."""
-    claims = written_claims(rows, document, entities)
-    removed: dict[RemovedRecord, int] = {}
-    bound: set[int] = set()
+def levels(removals, known=MappingProxyType({})):
+    """Each removal that binds, with its level, and each record a bound
+    removal removes, with that level. `removals` maps each removal to the
+    records it cites and the records it removes; `known` holds records
+    already bound, with their levels. A removal binds when every record it
+    cites is removed by a bound removal, one level below the deepest of
+    them, or at level 1 when it cites none. So binding reaches back to the
+    forget, and a removal that cites a record no bound removal lists binds
+    nothing, nor does any removal below it."""
+    level, removed = {}, dict(known)
     grew = True
     while grew:
         grew = False
-        for index, claim in enumerate(claims):
-            if index in bound or not claim.cited_records <= removed.keys():
+        for key, (cited, removes) in removals.items():
+            if key in level or not cited <= removed.keys():
                 continue
-            level = 1 + max((removed[r] for r in claim.cited_records), default=0)
-            for record in claim.removed_records:
-                removed.setdefault(record, level)
-            bound.add(index)
+            level[key] = 1 + max((removed[r] for r in cited), default=0)
+            for record in removes:
+                removed.setdefault(record, level[key])
             grew = True
-    return removed
+    return level, removed
+
+
+def bound_removals(rows, document, entities) -> dict[RemovedRecord, int]:
+    """Each record that a written removal for this forget removed, with the
+    level of that removal, bound inductively (`levels`), so a removal
+    written out of order binds nothing below it."""
+    claims = written_claims(rows, document, entities)
+    return levels(
+        {i: (c.cited_records, c.removed_records) for i, c in enumerate(claims)}
+    )[1]
 
 
 class Erasures(NamedTuple):
