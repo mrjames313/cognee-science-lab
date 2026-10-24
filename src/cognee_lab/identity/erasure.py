@@ -331,8 +331,8 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
     or a record a bound removal removes as it was before, with one removal
     revision for all it reads. A failed removal revision whose cited
     records no bound removal lists any more, because the source that
-    removed them retired, leaves the cascade, as a citer of a withdrawn
-    intermediate does. A dependent's level is one more than the deepest
+    removed them was withdrawn or its withdrawal failed, leaves the
+    cascade, as a citer of a withdrawn intermediate does. A dependent's level is one more than the deepest
     removal it cites, or 1 (erasure_rules.levels)."""
     forgotten = str(ids.identity_data_id)
     removed = frozenset(UUID(str(e)) for e in removed)
