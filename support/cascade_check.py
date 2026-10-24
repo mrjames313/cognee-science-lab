@@ -26,6 +26,9 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   removal and retiring it would drop another source from what the forget
   has left; a source whose own failed removal is all that is left may
   retire.
+- A rejected retry. A removal in place below level 1 that completed, then
+  lost every source whose records it cites to a withdrawal, then was
+  rejected at retrieval, is admitted again with its saved removal.
 - The served revision. A removal in place that lists its records as last
   served at another revision than the ledger verified is refused.
 - The inductive gate. Admission refuses (`erasure_unbound`) a removal below
@@ -291,6 +294,30 @@ def retired_upstream(rows, step, ids, tomb):
     return failures + ([("upstream retired", source)] if source in left else [])
 
 
+def rejected_after_upstream_retired(rows, step):
+    """Disagreements when `step`, a removal in place below level 1,
+    completed as an erasure retry, every source whose records it cites
+    withdrew, and retrieval then rejected it: the retry with the saved
+    removal is admitted, since its binding was checked when it began."""
+    if step.level == 1 or step.description.revision != step.row.revision:
+        return []
+    rejected = dataclasses.replace(row_of(step.description, "ok"), state="failed")
+    after = withdrawn(
+        [rejected if r.source == rejected.source else r for r in rows],
+        {r.identity_data_id for r in step.cited_records},
+    )
+    try:
+        erasure_rules.check_retry_chain(
+            [step.row.description, step.description],
+            erasure_rules.erasures_of(after, step.description),
+            rejected.verified_revision,
+            step.description,
+        )
+    except IntentError as exc:
+        return [("rejected after upstream retired", rejected.source, exc.code)]
+    return []
+
+
 def check_world(graph, states, tokens, *, shrink):
     """Every disagreement in one world, as (check, detail)."""
     failures = []
@@ -346,6 +373,7 @@ def check_world(graph, states, tokens, *, shrink):
             break
         step = writable[0]
         failures += retired_upstream(rows, step, ids, tomb)
+        failures += rejected_after_upstream_retired(rows, step)
         if (code := refusal(rows, step)) is not None:
             failures.append(("write in order", step.row.source, code))
             break
@@ -459,6 +487,15 @@ def retire_blocked_by_own_removal(source, rows):
         raise IntentError("cascade_unfinished", "")
 
 
+def bind_every_step(chain, erasures, served, saved):
+    """Every step of a retry chain must cite records bound now, also a step
+    an earlier begin admitted."""
+    for i, (before, after) in enumerate(pairwise(chain)):
+        new = i == len(chain) - 2 and after != saved
+        last = frozenset({served} if new else {served, after.revision - 1})
+        _check_erasure_retry(before, after, erasures, last)
+
+
 def served_or_before(chain, erasures, served, saved):
     """Every step of a retry chain may list the revision before the served
     one, also the step new in this begin."""
@@ -498,6 +535,7 @@ MUTANTS = {
         (erasure, "refuse_unfinished_cascade"),
     ),
     "served_or_before": (served_or_before, (erasure_rules, "check_retry_chain")),
+    "bind_every_step": (bind_every_step, (erasure_rules, "check_retry_chain")),
 }
 
 

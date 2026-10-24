@@ -219,7 +219,7 @@ class Erasure(NamedTuple):
     target: Target
 
 
-def erasure_of(old, source, erasures: Erasures) -> Erasure | None:
+def erasure_of(old, source, erasures: Erasures, *, bind=True) -> Erasure | None:
     """The removal producer this revision introduces, with what it erases,
     or None. Its key is `producer_key` of the forgotten source and this
     revision, which `written_claims` and `erasure.removal_of` read to tell
@@ -231,7 +231,11 @@ def erasure_of(old, source, erasures: Erasures) -> Erasure | None:
     ledger also names that source, whose saved records the removal
     erases with its document. The removed records it cites are exactly the
     bound ones (`bound_removals`) its old revision reads, so a removal
-    neither leaves a citer of one nor claims one no bound removal lists."""
+    neither leaves a citer of one nor claims one no bound removal lists.
+    Without `bind`, for a retry-chain step an earlier begin admitted, they
+    need only be records its old revision reads: that begin found them
+    bound, and an upstream that retired since unbinds them without undoing
+    the removal (`check_retry_chain`)."""
     found = [
         (key, p)
         for key, p in source.producers.items()
@@ -260,7 +264,11 @@ def erasure_of(old, source, erasures: Erasures) -> Erasure | None:
             "erasure_unbound",
             "A removal producer names a forgotten source's document and exactly the Entities its forget removed",
         )
-    bound = erasures.records.get(claim.document, frozenset())
+    bound = (
+        erasures.records.get(claim.document, frozenset())
+        if bind
+        else claim.cited_records
+    )
     if not claim.cited_records <= bound or claim.cited_records != read_records(
         old, bound
     ):
@@ -365,24 +373,28 @@ def check_retry_chain(chain, erasures: Erasures, served: int, saved):
     (`check_erasure_retry`). A replacement's own step, from its previous
     revision to the chain's first description, is admission's. `served` is
     the row's verified revision and `saved` the description its failed
-    attempt saved. A step that ends after `saved` is new in this begin and
-    lists its records as last served at exactly `served`. A step up to
-    `saved` was admitted by an earlier begin, and the row may have been
-    served at the step's own revision since (the retry completed, and a
-    later attempt at its revision failed), so it may also list the
-    revision before."""
+    attempt saved. A step that ends after `saved` is new in this begin: the
+    removed records it cites are bound now, and it lists its records as
+    last served at exactly `served`. A step up to `saved` was admitted by an
+    earlier begin, which found what it cites bound; an upstream may have
+    retired since, so its binding is not checked again, only its shape.
+    The row may also have been served at that step's own revision since
+    (the retry completed, and a later attempt at its revision failed), so
+    it may also list the revision before."""
     steps = list(pairwise(chain))
     for i, (before, after) in enumerate(steps):
         new = i == len(steps) - 1 and after != saved
         last = frozenset({served} if new else {served, after.revision - 1})
-        check_erasure_retry(before, after, erasures, last)
+        check_erasure_retry(before, after, erasures, last, bind=new)
 
 
-def check_erasure_retry(saved, source, erasures: Erasures, served: frozenset[int]):
+def check_erasure_retry(
+    saved, source, erasures: Erasures, served: frozenset[int], *, bind=True
+):
     """A retry replaces a failed attempt's saved revision only by its
     erasure removal: the same revision, one removal producer new, and the
-    removal rules."""
-    removal = erasure_step(saved, erasure_of(saved, source, erasures))
+    removal rules (`erasure_of` says what `bind` checks)."""
+    removal = erasure_step(saved, erasure_of(saved, source, erasures, bind=bind))
     if source.revision != saved.revision or removal is None:
         raise IntentError(
             "revision_reuse", "Recovery must use the exact saved replacement intent"

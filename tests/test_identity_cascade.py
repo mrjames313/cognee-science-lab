@@ -10,6 +10,7 @@ from chain_worlds import identity, row_of
 from cognee_lab.identity import erasure
 from cognee_lab.identity.erasure_rules import check_retry_chain, erasures_of
 from cognee_lab.identity.retirement import source_ids
+from cognee_lab.identity.storage import admissible
 from cognee_lab.identity.validation import IntentError
 
 # s0 is forgotten; s1 cites it and s2 cites s1.
@@ -240,3 +241,41 @@ def test_a_failed_removal_whose_own_link_is_all_that_is_left_may_retire():
         erasure.refuse_unfinished_cascade(by_label(rows, "s1").description, rows)
     assert refused.value.code == "cascade_unfinished"
 
+
+def test_a_completed_removal_retry_rejected_after_its_upstream_retired_recovers():
+    """s2's replacement failed and its removal applied in place, an erasure
+    retry, which completed once s1's removal was written; the cascade
+    finished, s1 withdrew, and then retrieval rejected s2. The replacement's
+    retry, with the saved plan and removal, is admitted: an earlier begin
+    found the removal bound, and s1 retiring since does not undo it."""
+    rows = rows_of()
+    s2 = by_label(rows, "s2")
+    rows = replaced(
+        rows,
+        "s2",
+        dataclasses.replace(
+            s2,
+            state="failed",
+            verified_revision=0,
+            plan=dict(operation="identity_replace"),
+        ),
+    )
+    ids = source_ids(rows[0].tombstone)
+    step = erasure.cascade(rows, ids, ())[0]
+    rows = replaced(rows, "s1", row_of(step.description, "ok"))
+    (step,) = erasure.cascade(rows, ids, ())
+    assert step.description.revision == step.row.revision
+    plan = dict(
+        operation="identity_replace",
+        erased_from=[step.row.description.model_dump_json()],
+    )
+    assert admissible(step.row, "replace", plan, step.description, rows) is None
+    rows = replaced(
+        rows, "s2", dataclasses.replace(row_of(step.description, "ok"), plan=plan)
+    )
+    assert erasure.unfinished(rows[0].tombstone, rows) == []
+    s1 = by_label(rows, "s1")
+    rows = replaced(rows, "s1", dataclasses.replace(s1, state="withdrawn"))
+    rejected = dataclasses.replace(by_label(rows, "s2"), state="failed")
+    rows = replaced(rows, "s2", rejected)
+    assert admissible(rejected, "replace", plan, rejected.description, rows) is None
