@@ -22,7 +22,7 @@ Defaults the orchestrator reported to the user before the work:
 
 ## What changes for users
 
-- `edit-entity --case description|unselected|revert` edits the Helios controller Entity that doc01's corpus input `existing_A` names, on a glossary root, chain roots included. It writes no ledger row and no recovery event.
+- `edit-entity --case description|unselected|revert` edits the Helios controller Entity that doc01 reads as a corpus input (`existing_A`), on a glossary root, chain roots included. It writes no ledger row and no recovery event.
 - `reconfirm` answers a decision withheld by an Entity edit: it cites the Entity as it reads now under a new key. One re-confirm answers a decision withheld by inputs of several kinds.
 - `replace-decision --decision r01` answers an Entity edit too: g01 becomes unresolved on the Entity as it reads now.
 - `replace-citation --source <label> --decision <key> (--cite <source>:<record> | --drop)` answers a decision withheld by a saved record it cites, removed or changed.
@@ -35,12 +35,14 @@ Defaults the orchestrator reported to the user before the work:
 No saved schema changed. `RecordStore`, `TRANSITIONS`, the ledger model and the withholding table are unchanged.
 
 - **A review's producer** (`review.review_producer`) records `old_digests` (old input key to digest) and `new_digests` (new input key to digest) for every input kind. Before this checkpoint a glossary-span re-confirm recorded a single `new_digest`; journey D3 and the dependencies native test now read `new_digests`.
-- **The review table** (`review.AS_NOW`) maps an input kind to how a review reads that input as it is now: `SavedRecordInput` to `record_now` (the citation of the record as its source holds it now), `TextSpanInput` to `span_now` (the glossary's HC entry as the glossary reads now), `CorpusObjectInput` to `corpus_now` (the same Entity and selected fields, with the digest of their values now). The new key is `<old key>_r<revision>`.
-- **The replacement table** (`review.REPLACEMENTS`) maps a record type to its captured replacement: a resolution to `unresolved_in_place`, a variant to `replaced_variant`.
+- **What a reviewer reads** (`review.Now`): each input key that withholds the decision, mapped to its new key and the input as it is now, or to None when the input is gone or the reviewer drops it.
+- **The review table** (`review.AS_NOW`) maps an input kind to how a review reads that input as it is now: `SavedRecordInput` to `record_now` (the citation of the record as its source holds it now, through `review.current_record`, which `--cite` and `cite-record` also use), `TextSpanInput` to `span_now` (the glossary's HC entry in the registered text that live validation reads), `CorpusObjectInput` to `corpus_now` (the same Entity and selected fields, with the digest of their values now). Each gives None when its input is gone. The new key is `<old key>_r<revision>`.
+- **The replacement table** (`review.REPLACEMENTS`) is the captured policy: a resolution to `unresolved_in_place`, a variant to `replaced_variant`. A record type without an entry is refused (`fixture_scope`), and an import-time check holds its keys within `records.REGISTRY`.
+- **`records.apply_removal(payload, source, keys, ref_map, producer_key)`** removes records as their type says (`RecordKind.removed`) and rewires the parts that hold those records' inputs (`RecordKind.stripped`) by a ref map: an input that changed maps to its new key, one that went or is dropped maps to None. Other records and their parts keep citing what they cite. The erasure's removal revision, `--drop`, the in-place replacement and the replacement of a decision whose input went all use it.
 - **`validation.selected_digest(node, item)`** is the one digest of a corpus input's selected fields. Live validation and the corpus re-confirm both use it.
 - **`records.names_record(item, source, key)`** is the one test of whether a citation names a record key of a source. `RemovedRecord.reads` builds on it and `chains.check_record_key_reuse` uses it.
 
-Nothing outside `records.REGISTRY` names a record type's fields in the new code. `replace-citation --drop` removes a decision through the registry's `removed` and `stripped` hooks, as an erasure does.
+Nothing outside `records.REGISTRY` names a record type's fields in the new code; the re-confirm (`revisions.reconfirmed`, on `main` before this checkpoint) still does. One flow answers the three review commands (`review.review`): the gate (`review_gate`, with `refuse_command` deciding whether the command answers the decision's inputs), what the reviewer reads now, then the intended revision (`intended_revision`).
 
 ## The edit
 
@@ -52,7 +54,7 @@ Nothing outside `records.REGISTRY` names a record type's fields in the new code.
 | `unselected` | `lab_note`, a property no corpus input selects | nothing withheld |
 | `revert` | the values the first `description` edit replaced, saved in `entity_edit_original.json` in the root | everything released with no revision |
 
-It refuses `id`, `name` and `type` (`entity_field_protected`): Cognee keeps them as native columns outside the blob. It has no fault stage. Its JSON adds `entity_edit` with the fields written, the pinned digest and the digest of the selected fields before and after, beside the usual snapshot with `withheld_decisions`.
+It refuses `id`, `name` and `type` (`entity_field_protected`): Cognee keeps them as native columns outside the blob. It refuses a `description` edit of an Entity that has no `description` (`fixture_scope`), since a revert could not take an added field away, and saves `entity_edit_original.json` only once the edit is made. It finds doc01's input by the Helios controller's Entity ID, so a re-read under another key still counts. It has no fault stage. Its JSON adds `entity_edit` with the fields written, the pinned digest and the digest of the selected fields before and after, beside the usual snapshot with `withheld_decisions`.
 
 Live validation finds the edit at the next read: `validation.input_failure` digests the selected fields and compares them with the pinned digest. `is_foreign` holds a corpus object foreign, so the edit withholds the decisions that cite it and never fails the source. Nothing is written: a revert releases on the next read.
 
@@ -62,14 +64,14 @@ Live validation finds the edit at the next read: `validation.input_failure` dige
 
 ## Replace
 
-`replace-decision --decision r01` leaves g01 unresolved in place. The resolution and its group cite each withholding input as it is now, whatever its kind. `replace-decision --decision v01` has a captured replacement only when the glossary span alone withholds v01, because the "Hybrid coil" meaning comes from the glossary; an Entity edit refuses it (`fixture_scope`). A decision withheld by a saved record is refused by `replace-decision` with a pointer to `replace-citation`.
+`replace-decision --decision r01` leaves g01 unresolved in place. The resolution and its group cite each withholding input as it is now, whatever its kind. An input that went (an Entity that Cognee or another writer deleted outside `forget`, or the glossary document gone) is stripped from the decision instead, as an erasure strips it: a resolution stays, unresolved, and a variant goes (fix round 1). `replace-decision --decision v01` has a captured replacement only when the glossary span alone withholds v01, because the "Hybrid coil" meaning comes from the glossary; an Entity edit refuses it (`fixture_scope`). A decision withheld by a saved record is refused by `replace-decision` with a pointer to `replace-citation`.
 
 ## Replace a citation
 
 `replace-citation` answers a decision whose withholding inputs are all saved records, at any chain level, through the same gates as `review_gate`:
 
 - `--cite <source>:<record>` re-cites the decision on that record as its source holds it now, under the key `<source>_<record>_r<revision>`. The decision's reviewed fields stay, so its own citers release with it. It needs exactly one withholding citation.
-- `--drop` removes the decision as an erasure would: a variant goes and a resolution stays, unresolved in place. Uncited inputs are dropped.
+- `--drop` removes the decision as an erasure would: a variant goes and a resolution stays, unresolved in place. Only the dropped decision and its own group stop citing the record; another resolution whose group cites it keeps citing it under its own producer (fix round 1). Uncited inputs are dropped.
 
 Either names a producer new in the revision (implementation `replaced`) whose configuration records the withholding it answers and the digests. Admission runs as it does for any revision: `check_reconfirmations`, `check_foreign_inputs` and `check_record_citations` admit the new citation and refuse a stale or wrong one.
 
@@ -81,7 +83,7 @@ A citation pins its record by key and fingerprint. A variant that comes back und
 
 `chains.check_record_key_reuse` refuses (`record_key_reused`) a record key that this revision adds while another source that is not retired still cites that key at this source. `chains.new_record_keys` gives the added keys: every key of a first publication or a re-add, and on a replacement the keys the current revision lacks. Only a first attempt checks, as `check_record_citations` does, so a retry is never refused forever. It runs in `Publisher.admit_inputs` beside `check_record_citations`, because it reads the ledger rows.
 
-The chain check proves it on every acyclic citation graph of up to four sources, with each source holding `d`, having dropped it, pending or withdrawn: a revision that declares `d` again is refused exactly when it had dropped `d` and another source that is not retired cites it. Mutants: the check skipped (as if only the revision before counted), and only served citers counted.
+The chain check proves it on every acyclic citation graph of up to four sources, with each source holding `d` and `v`, having dropped `d` (rekeyed) or `v` (rekeyed_v), pending or withdrawn: a revision that declares the dropped key again is refused exactly when another source that is not retired cites it. Mutants: the check skipped (as if only the revision before counted), only served citers counted, and only resolution keys looked for (fix round 1, so the variant key has a lever too).
 
 ## No reader of a mention UUID
 
@@ -89,13 +91,13 @@ The chain check proves it on every acyclic citation graph of up to four sources,
 
 A mention UUID is document-local and fresh at its declaration, and a retiring or regrouping edit removes it with no review of its readers. A source that read it as a corpus object would be withheld `input_removed` with no reviewer path, and the UUID never returns. Refusing the reader makes that state unreachable; extending `text_changes.reject_sole_owned_readers` to mentions would have blocked every changed-meaning edit, regrouping and plain edit whenever another source read the mention.
 
-`admission.check_mention_inputs` refuses (`mention_input`) a corpus input whose Entity is a mention UUID of any saved source: every other source's latest description and tombstones, this source's saved revision (so a group this revision retires counts) and the candidate itself (`admission.mention_ids`). It runs in every admission of a publication (`Publisher.admit_inputs`).
+`admission.check_mention_inputs` refuses (`mention_input`) a corpus input whose Entity is a mention UUID of any saved source: every other source's latest description and tombstones, this source's saved revision (so a group this revision retires counts) and the tombstone of its own forgotten lives (`last_tombstone`, fix round 1), and the candidate itself (`admission.mention_ids`, over `publish.saved_lives`). It runs in every admission of a publication (`Publisher.admit_inputs`).
 
 The occurrence check calls it before `admit`, with another source's mention UUID added. Its rows: a corpus input of the continuing group's mention, of a retired group's mention and of another source's mention, each refused, and one of a reusable Entity, admitted. Mutants: the rule skipped, and only the candidate's own groups counted.
 
 ## Kind changes with readers
 
-`change-kind-to-mention` and `change-kind-to-reusable` on a glossary root (`chain_kind_change.py`) change the first fixture's doc01, which has one group, g01, with unchanged text:
+`change-kind-to-mention` and `change-kind-to-reusable` on a glossary root (`chain_kind_change.py`) change the first fixture's doc01, which has one group, g01, with unchanged text. To mention is `kind_change.describe_to_mention` with the root's groups and text and no producer stamp; to reusable has its own describer:
 
 - To mention: v01 and the HC recipe go, and a fresh g09, `HC` at [19, 21), resolves to the Helios controller as r09. r01 is unchanged, so c01 is untouched.
 - To reusable: g09 retires, the HC recipe returns, the corpus input `existing_HC` reads the HC Entity, and a document-scoped variant names it under v01, the key the first change dropped.
@@ -109,6 +111,8 @@ The readers follow the rules above and the existing ones:
 | doc03 reads an HC doc01 alone owns as a corpus object (`cite-record --citation entity`) | the kind change refuses `dependent_source` before any write (existing rule, first journey) | K7 |
 | no reader, doc01 alone owns HC (a glossary root without doc03) | the HC Entity, its node and its name index leave the graph | K7 |
 | doc03 tries to read doc01's g01 mention as a corpus object (`cite-record --citation mention`) | `mention_input` | K8 |
+
+To reusable needs the HC Entity in the graph. On a chain root doc03 co-owns HC, so it stays through the first change. On a root where doc01 alone owns HC and nothing reads it, to mention takes HC out of the graph, and to reusable is then refused.
 
 The result adds `dependents_withheld`, the other sources' decisions that the completed revision leaves withheld, read from the same live pass as `status`, and `hc_entity`. A failed kind change withholds doc03's decisions with `edit_unfinished`, and `reconcile --source doc01` finishes it through the text-change rebuild (journey K9).
 
@@ -145,15 +149,16 @@ Each is reversible.
 - **`--drop` on a resolution leaves it unresolved in place**, as an erasure removal does (the registry's `removed` hook); a variant goes.
 - **`record_key_reused` matches the key in any record type**, since a key names one record in a source across every type, and checks a first publication and a re-add too.
 - **`mention_input` counts the source's own saved revision**, so a corpus input of a group the same revision retires is refused.
-- **The glossary root's kind change has its own describers**, because the first fixture's doc01 has one group and another text; it reuses the producers and the building blocks of `kind_change.py`. `change-kind-to-reusable` there names HC under v01, to drive `record_key_reused`.
-- **`edit-entity` finds the Entity through `existing_A`, or after its re-confirms through the latest `existing_A_r<revision>`.**
+- **The glossary root's to-reusable has its own describer**, because the first fixture's doc01 has one group and another text; to mention shares `kind_change.py`'s (fix round 1). `change-kind-to-reusable` there names HC under v01, to drive `record_key_reused`.
+- **`edit-entity` finds the Entity by its ID**, the Helios controller's, and reports the first input that reads it (fix round 1; before, by the key name `existing_A`).
+- **A decision whose input went is stripped by `replace-decision`**, a variant dropped as an erasure drops it, rather than refused (fix round 1).
 
 ## Not in this checkpoint
 
 - Facts as saved records (decision 7) and the non-identity example (decision 8).
 - An edit of `name` on a Cognee-extracted Entity. `cognify` cannot rewrite a lab-declared Entity, whose ID derivation differs from Cognee's; it could rewrite only an extracted Entity that a decision cites, which no fixture does. Such a rewrite of a selected field would be an edit and withhold.
 - A successor record, a remap analogue for Entity edits and scoped variants.
-- A reviewer path for a decision withheld by a removed corpus node. It is unreachable through the CLI: a sole-owned Entity under a reader is refused and a mention reader is refused.
+- A journey for a decision withheld by a removed corpus node or glossary text. The lab's own commands cannot remove one under a reader (a sole-owned Entity under a reader is refused and a mention reader is refused), so only unit tests drive the reviewer path (fix round 1).
 
 ## Evidence
 
@@ -167,3 +172,16 @@ Run by the assistant on the user's Mac on 2026-10-24 with loopback embeddings, o
 - `uv run pytest -q -m integration` on the native files for dependencies, chains, forget, erasure retry, kind change and the shared native file (which holds the original Entity-edit test): 57 passed, 1 deselected, in 1339 s, run beside the journeys. This checkpoint adds no native file; journeys D12 to D16 and K6 to K9 drive its paths through the real stores.
 
 The values in this guide come from these runs: the keys, digests and refusal messages from D12 to D16 and K6 to K9.
+
+### Fix round 1 (2026-10-24)
+
+Run by the assistant on the user's Mac with loopback embeddings, on branch `stage6-entity-edits` rebased onto `main` at `9c6f16e` (the chain check as its own CI job).
+
+- Each bug got a test that failed on the code before the fix: the review of a decision whose corpus input or glossary span went (`input_removed` from `corpus_now`; a missing glossary info file from `span_now`), the drop that stripped a sibling's group (`review.dropped` left g2 with `['doc']`, shown by a scratch script on the old code), `edit-entity` on an Entity without `description` (`KeyError`), the input found by key name, and a re-added source reading its own forgotten mention (no refusal).
+- `uv run pytest -q -m 'not integration'`: 559 passed, 86 deselected; each commit was gated on the unit suite over its own staged tree.
+- `uv run python support/occurrence_check.py`: PASS on 540,045 worlds (148 s). `--mutants`: PASS (105 s). The erasure removal now rewires only the citing records' own groups; no world disagreed.
+- `uv run python support/chain_check.py`: PASS, 0 disagreements on 543 acyclic graphs, 16,384 cycle cases, 2,224,128 withholding worlds, 814,500 key-reuse cases (278,016 before `rekeyed_v`) and 34,752 cascade worlds (692 s). `--mutants`: PASS, `key_reuse_resolutions_only` caught (40 s).
+- `uv run python support/ledger_check.py`: PASS, verified within bound at depth 5, `PINNED` unchanged at 9205 nodes and 9050 sequences. `--mutants`: PASS. `RecordStore` is unchanged; the erasure rules that `check_retry_chain` reaches now read `RecordKind.removed` and `stripped` through the ref map.
+- Verify journeys D1 to D16, E1 to E4, F1 to F20, G1 to G4 and K1 to K9: 70 runs, 1053 PASS, 0 FAIL (D 235 in 20 runs, E 125 in 7, F 420 in 27, G 109 in 4, K 164 in 12). `journey all` was not run.
+- `uv run pytest -q -m integration` on the native files for dependencies, chains, forget, erasure retry, kind change and the shared native file: 57 passed, 1 deselected, in 1243 s.
+- Open from the review: the glossary driver's command `elif` chain stays; a command table needs one handler signature across ten commands in four modules, which is more than this round's scope. `revisions.reconfirmed` still writes resolution and group fields outside `records.py`.
