@@ -1,27 +1,43 @@
 """A reviewer's answer to one withheld decision of the captured glossary
 and chain fixtures.
 
-The gate decides whether a decision can be reviewed now (`review_gate`). A
-re-confirm cites each input that withholds the decision as that input is
-now, under a new key, by the input's kind (`AS_NOW`): a saved record as
-its source holds it now (`record_now`), the glossary's HC entry as the
-glossary reads now (`span_now`), so one revision answers a decision whose
-inputs span several kinds. A replacement is per decision, by its record
-type (`REPLACEMENTS`): a resolution in place as unresolved
-(`unresolved_in_place`), v01 by a variant for the glossary entry's new
-meaning (`replaced_variant`). The review decisions are captured fixture
-input, not Describe.
+One flow answers each review command (`review`). The gate decides whether
+the decision can be reviewed now and whether the command answers its
+inputs (`review_gate`, `refuse_command`). The reviewer then reads each
+input that withholds the decision as it is now (`Now`): `reconfirm` and
+`replace-decision` read it by its kind (`AS_NOW`), `replace-citation`
+names the record to cite (`--cite`) or drops the decision (`--drop`). The
+intended revision follows from the command and what was read
+(`intended_revision`):
+
+- a re-confirm, or a citation of another record, cites each input as it is
+  now under a new key (revisions.reconfirmed);
+- a replacement is per decision, by its record type (`REPLACEMENTS`): a
+  resolution unresolved in place, v01 by a variant for the glossary
+  entry's new meaning;
+- an input that went, or a dropped citation, is removed from the decision
+  as an erasure removes it (records.apply_removal): a resolution stays,
+  unresolved, a variant goes.
+
+The review decisions are captured fixture input, not Describe.
 """
 
-from .fixture import context_for, expect_current
+from .fixture import expect_current
 from .forget_fixture import CALLER_FILES
 from .glossary_fixture import INFO, hc_entry
-from .models import CorpusObjectInput, IdentitySource, SavedRecordInput, TextSpanInput
+from .models import CorpusObjectInput, SavedRecordInput, TextSpanInput
 from .multisource import current_sources
-from .records import REGISTRY, cited_row, citation, record_type_of, saved_records
+from .records import (
+    REGISTRY,
+    apply_removal,
+    cited_row,
+    citation,
+    record_type_of,
+    saved_records,
+)
+from .registered import read_texts
 from .retrieve import withheld_now
 from .revisions import next_revision, reconfirmed, replace_one
-from .text_changes import read_original
 from .validation import (
     IntentError,
     Reason,
@@ -33,6 +49,10 @@ from .withholding import Status, document_inputs, unfinished, unfinished_edits
 
 DOC01_REVIEW = "stage6-captured-glossary-review"
 
+# Each input key that withholds the decision: its new key and the input as
+# the reviewer reads it now, or None when it is gone or the reviewer drops it.
+Now = dict[str, tuple[str, dict] | None]
+
 
 async def review_gate(publisher, source, decision, command):
     """The withheld entry a reviewer answers, after the gates: no document
@@ -40,7 +60,8 @@ async def review_gate(publisher, source, decision, command):
     whose records it cites is unfinished (withholding.unfinished, or its own
     input fails live validation), so the reviewer attests committed content;
     the decision waits for review, not for a record above it
-    (`upstream_withheld`); a removed input is never re-confirmed."""
+    (`upstream_withheld`); and the command answers its inputs
+    (`refuse_command`)."""
     rows = await publisher.records.rows()
     for edit in unfinished_edits(rows):
         if document_inputs(source, edit.description):
@@ -70,26 +91,48 @@ async def review_gate(publisher, source, decision, command):
         raise IntentError(
             "not_withheld", f"{decision} is not withheld for review in this source"
         )
-    refuse_removed(source, entry, command)
+    refuse_command(source, entry, command)
     return entry, rows
 
 
-def refuse_removed(source, entry, command):
-    """A removed input is never re-confirmed. The refusal names the answer:
-    `replace-citation` for a removed saved record, else `replace-decision`."""
+def refuse_command(source, entry, command):
+    """Whether the command answers the inputs that withhold the decision. A
+    removed input is never re-confirmed; the refusal names the answer,
+    `replace-citation` for a removed saved record, else `replace-decision`.
+    A saved-record citation is replaced only with `replace-citation`, which
+    answers nothing else."""
+    cites = entry.inputs & set(saved_records(source))
     if command == "reconfirm" and entry.reason == Reason.REMOVED:
         answer = (
             "replace the citation with replace-citation"
-            if entry.inputs & set(saved_records(source))
+            if cites
             else "replace the decision"
         )
         raise IntentError(
             "input_removed", f"A removed input is never re-confirmed; {answer}"
         )
+    if command == "replace-decision" and cites:
+        raise IntentError(
+            "fixture_scope",
+            "A saved-record citation is replaced with replace-citation",
+        )
+    if command == "replace-citation" and entry.inputs - cites:
+        raise IntentError(
+            "fixture_scope",
+            "replace-citation answers a decision withheld by saved-record citations",
+        )
 
 
-def review_producer(entry, command, digests):
-    """The producer a review names, new in its revision."""
+def input_digest(item: dict) -> str:
+    """What an input pins of its content: a span's digest, or a corpus
+    object's or a saved record's fingerprint."""
+    return item.get("text_sha256") or item["content_sha256"]
+
+
+def review_producer(entry, command, source, now: Now):
+    """The producer a review names, new in its revision: the withholding it
+    answers, and the old digest of each input and the new digest of each
+    input that replaces one."""
     return dict(
         method="captured_fixture",
         implementation="re-confirmed" if command == "reconfirm" else "replaced",
@@ -101,36 +144,41 @@ def review_producer(entry, command, digests):
                 dict(input_ref=k, reason=entry.reason, status=entry.status)
                 for k in sorted(entry.inputs)
             ],
-            **digests,
+            old_digests={
+                k: input_digest(source.inputs[k].model_dump(mode="json"))
+                for k in sorted(now)
+            },
+            new_digests={
+                new: input_digest(item)
+                for new, item in (now[k] for k in sorted(now) if now[k])
+            },
         ),
         run_id=None,
     )
 
 
-def cited_now(rows, source) -> dict[str, IdentitySource]:
-    """The current description of each source `source` cites, by identity."""
-    wanted = {str(i.identity_data_id) for i in saved_records(source).values()}
-    return {r.source: r.description for r in rows if r.source in wanted}
+def current_record(rows, identity_data_id: str, record_id) -> dict | None:
+    """A citation of one record as the source `identity_data_id` holds it
+    now, or None when no saved description of that source holds it."""
+    upstream = next((r.description for r in rows if r.source == identity_data_id), None)
+    if upstream is None or record_type_of(upstream, record_id) is None:
+        return None
+    return citation(upstream, record_id)
 
 
-async def record_now(publisher, root, rows, item):
+async def record_now(publisher, rows, source, item):
     """A saved-record citation of the cited record as its source holds it
     now."""
-    upstream = next(
-        (r.description for r in rows if r.source == str(item.identity_data_id)),
-        None,
-    )
-    if upstream is None or record_type_of(upstream, item.record_id) is None:
-        raise IntentError(
-            "input_removed", f"The cited record is gone: {item.record_id}"
-        )
-    return citation(upstream, item.record_id)
+    return current_record(rows, str(item.identity_data_id), item.record_id)
 
 
-async def span_now(publisher, root, rows, item):
-    """A span of the glossary's HC entry as the glossary reads now."""
-    glossary = (await current_sources(root, publisher, INFO))["glossary"]
-    text = await read_original(glossary, await context_for(glossary.identity_data_id))
+async def span_now(publisher, rows, source, item):
+    """A span of the glossary's HC entry as the glossary reads now, from the
+    registered text that live validation reads; None when that text is
+    gone."""
+    text = (await read_texts(source)).get(item.document_ref)
+    if text is None:
+        return None
     entry = hc_entry(text)
     return dict(
         kind="text_span",
@@ -141,15 +189,13 @@ async def span_now(publisher, root, rows, item):
     )
 
 
-async def corpus_now(publisher, root, rows, item):
+async def corpus_now(publisher, rows, source, item):
     """A corpus object as its Entity reads now: the same Entity and
-    selected fields, the digest of their values now."""
+    selected fields, the digest of their values now; None when the Entity
+    or a field it selected is gone."""
     digest = selected_digest(await publisher.graph.get_node(str(item.entity_id)), item)
     if digest is None:
-        raise IntentError(
-            "input_removed",
-            f"The Entity or a field it selected is gone: {item.entity_id}",
-        )
+        return None
     return dict(item.model_dump(mode="json"), content_sha256=digest)
 
 
@@ -161,18 +207,11 @@ AS_NOW = {
 }
 
 
-def input_digest(item: dict) -> str:
-    """What an input pins of its content: a span's digest, or a corpus
-    object's or a saved record's fingerprint."""
-    return item.get("text_sha256") or item["content_sha256"]
-
-
-async def as_now(publisher, root, rows, source, keys, revision):
+async def as_now(publisher, rows, source, keys, revision) -> Now:
     """Each input in `keys` as it is now, under the new key
-    `<key>_r<revision>`, read by its kind (`AS_NOW`). Returns the
-    replacements (old key to new key and input) and what the review
-    producer records: the old and the new digests."""
-    replacements, old_digests, new_digests = {}, {}, {}
+    `<key>_r<revision>`, read by its kind (`AS_NOW`); None for one that is
+    gone."""
+    now = {}
     for key in sorted(keys):
         item = source.inputs[key]
         read = AS_NOW.get(type(item))
@@ -180,52 +219,76 @@ async def as_now(publisher, root, rows, source, keys, revision):
             raise IntentError(
                 "fixture_scope", f"This fixture does not read this input again: {key}"
             )
-        new_key = f"{key}_r{revision}"
-        replacements[key] = (new_key, await read(publisher, root, rows, item))
-        old_digests[key] = input_digest(item.model_dump(mode="json"))
-        new_digests[new_key] = input_digest(replacements[key][1])
-    return replacements, dict(old_digests=old_digests, new_digests=new_digests)
+        found = await read(publisher, rows, source, item)
+        now[key] = None if found is None else (f"{key}_r{revision}", found)
+    return now
 
 
-def unresolved_in_place(source, decision, replacements, key, review):
-    """A resolution whose input changed, which the reviewer now leaves
-    unresolved: it keeps its key and changes in place, so its fingerprint
-    changes. It and its group cite each replaced input as it is now."""
+async def cited_now(root, publisher, rows, entry, cite, revision) -> Now:
+    """`replace-citation`'s reading: the record `cite` names (a source label
+    and a record key) as its source holds it now, in place of the one
+    withholding citation, under a new key; or, with no `cite`, every
+    withholding citation dropped."""
+    if cite is None:
+        return dict.fromkeys(entry.inputs)
+    if len(entry.inputs) != 1:
+        raise IntentError("fixture_scope", "--cite replaces one withholding citation")
+    cited_label, record_id = cite
+    sources = await current_sources(root, publisher, INFO)
+    if cited_label not in sources:
+        raise IntentError("source_missing", f"No such source: {cited_label}")
+    item = current_record(rows, str(sources[cited_label].identity_data_id), record_id)
+    if item is None:
+        raise IntentError("record_missing", f"No such saved record: {record_id}")
+    (old_key,) = entry.inputs
+    return {old_key: (f"{cited_label}_{record_id}_r{revision}", item)}
+
+
+def removal(source, decision, now: Now, producer_key, producer, explanation=None):
+    """The decision removed as an erasure removes it (records.apply_removal),
+    under the review producer: it and the parts that hold its inputs cite
+    each input that changed as it is now and stop citing one that went."""
 
     def change(payload):
-        old = payload["mention_resolutions"][decision]
-        group = payload["mention_groups"][old["group_ref"]]
-        for previous, (new_key, item) in replacements.items():
+        for new_key, item in filter(None, now.values()):
             payload["inputs"][new_key] = item
-            group["input_refs"] = [
-                new_key if k == previous else k for k in group["input_refs"]
-            ]
-        payload["producers"][key] = review
-        payload["mention_resolutions"][decision] = dict(
-            group_ref=old["group_ref"],
-            status="unresolved",
-            input_refs=[replacements.get(k, (k,))[0] for k in old["input_refs"]],
-            producer_ref=key,
-            explanation=f"An input it read changed ({', '.join(sorted(replacements))});"
-            " its group is left unresolved.",
-        )
+        refs = {k: v[0] if v else None for k, v in now.items()}
+        apply_removal(payload, source, {decision}, refs, producer_key, explanation)
+        payload["producers"][producer_key] = producer
 
     return next_revision(source, change)
 
 
-def replaced_variant(doc01, decision, replacements, producer_key, producer):
+def unresolved_in_place(source, decision, now: Now, producer_key, producer):
+    """A resolution whose input changed or went, which the reviewer now
+    leaves unresolved: it keeps its key and changes in place, so its
+    fingerprint changes."""
+    how = "changed" if None not in now.values() else "changed or went"
+    return removal(
+        source,
+        decision,
+        now,
+        producer_key,
+        producer,
+        f"An input it read {how} ({', '.join(sorted(now))});"
+        " its group is left unresolved.",
+    )
+
+
+def replaced_variant(doc01, decision, now: Now, producer_key, producer):
     """v01 said HC is the Helios controller. The glossary now gives HC
     another meaning, so the reviewer drops v01 and adds v02: HC is a new
     "Hybrid coil" Entity, whose UUID derives from v02 and the new revision.
-    Only the changed glossary span carries that meaning."""
-    if decision != "v01" or [type(doc01.inputs[k]) for k in replacements] != [
-        TextSpanInput
-    ]:
+    Only the changed glossary span carries that meaning. A variant whose
+    input went is dropped (`removal`)."""
+    if None in now.values():
+        return removal(doc01, decision, now, producer_key, producer)
+    if decision != "v01" or [type(doc01.inputs[k]) for k in now] != [TextSpanInput]:
         raise IntentError(
             "fixture_scope",
             "Only v01 withheld by the glossary span has a captured replacement",
         )
-    ((span_key, span),) = replacements.values()
+    ((span_key, span),) = now.values()
 
     def change(payload):
         old = payload["variant_assignments"].pop("v01")
@@ -251,6 +314,32 @@ REPLACEMENTS = {
     "mention_resolution": unresolved_in_place,
     "variant_assignment": replaced_variant,
 }
+if not REPLACEMENTS.keys() <= REGISTRY.keys():
+    raise TypeError("review.REPLACEMENTS names a type records.REGISTRY lacks")
+
+
+def no_replacement(source, decision, now, producer_key, producer):
+    raise IntentError(
+        "fixture_scope", f"{decision} has no captured replacement in this fixture"
+    )
+
+
+def intended_revision(command, source, decision, now: Now, producer_key, producer):
+    """The revision that answers the decision, from the command and what
+    the reviewer read now. A re-confirm, or `--cite`, cites each input as
+    it is now; `--drop` removes the decision; `replace-decision` replaces
+    it by its record type (`REPLACEMENTS`)."""
+    if command == "replace-decision":
+        replace = REPLACEMENTS.get(record_type_of(source, decision), no_replacement)
+        return replace(source, decision, now, producer_key, producer)
+    gone = sorted(k for k, v in now.items() if v is None)
+    if command == "replace-citation" and len(gone) == len(now):
+        return removal(source, decision, now, producer_key, producer)
+    if gone:
+        raise IntentError(
+            "input_removed", f"A removed input is never re-confirmed: {', '.join(gone)}"
+        )
+    return reconfirmed(source, decision, now, producer_key, producer)
 
 
 def write_revision(root, label, intended):
@@ -261,118 +350,32 @@ def write_revision(root, label, intended):
 
 
 async def review(
-    publisher, root, label, source, decision, *, expected_revision, fault_stage, command
+    publisher,
+    root,
+    label,
+    source,
+    decision,
+    *,
+    command,
+    cite=None,
+    expected_revision,
+    fault_stage,
 ):
-    """A reviewer's answer to one withheld decision. A re-confirm cites each
-    input that withholds it as that input is now (`as_now`), whatever its
-    kind, in one revision. A replacement is per decision, by its record type
-    (`REPLACEMENTS`)."""
+    """A reviewer's answer to one withheld decision, for each review
+    command: the gate, what the reviewer reads now, the intended revision,
+    the caller's file and the unchanged-text replacement."""
     await expect_current(
         publisher, source, expected_revision, "Reconcile the source before a review"
     )
     entry, rows = await review_gate(publisher, source, decision, command)
-    if command != "reconfirm" and entry.inputs & set(saved_records(source)):
-        raise IntentError(
-            "fixture_scope",
-            "A saved-record citation is replaced with replace-citation",
-        )
     revision = source.revision + 1
-    producer_key = f"review_{decision}_r{revision}"
-    replacements, digests = await as_now(
-        publisher, root, rows, source, entry.inputs, revision
-    )
-    producer = review_producer(entry, command, digests)
-    if command == "reconfirm":
-        intended = reconfirmed(source, decision, replacements, producer_key, producer)
+    if command == "replace-citation":
+        now = await cited_now(root, publisher, rows, entry, cite, revision)
     else:
-        replace = REPLACEMENTS[record_type_of(source, decision)]
-        intended = replace(source, decision, replacements, producer_key, producer)
-    write_revision(root, label, intended)
-    await replace_one(
-        publisher,
-        intended,
-        expected_revision=expected_revision,
-        fault_stage=fault_stage,
-    )
-
-
-def dropped(source, decision, erased, producer_key, producer):
-    """The decision removed as an erasure removes it (records.REGISTRY): a
-    resolution stays, unresolved in place, a variant goes; what holds its
-    records' inputs loses the erased keys."""
-    kind = REGISTRY[record_type_of(source, decision)]
-
-    def change(payload):
-        record = kind.removed(source, decision, erased, producer_key)
-        if record is None:
-            payload[kind.field].pop(decision)
-        else:
-            payload[kind.field][decision] = record.model_dump(
-                mode="json", exclude_none=True
-            )
-        for each in REGISTRY.values():
-            for field, parts in each.stripped(source, erased).items():
-                payload[field] = {
-                    k: p.model_dump(mode="json") for k, p in parts.items()
-                }
-        payload["producers"][producer_key] = producer
-
-    return next_revision(source, change)
-
-
-def cited_record(rows, sources, cite, revision):
-    """The new key and the citation of the record `cite` names (a source
-    label and a record key) as its source holds it now."""
-    cited_label, record_id = cite
-    if cited_label not in sources:
-        raise IntentError("source_missing", f"No such source: {cited_label}")
-    cited = str(sources[cited_label].identity_data_id)
-    upstream = next((r.description for r in rows if r.source == cited), None)
-    if upstream is None or record_type_of(upstream, record_id) is None:
-        raise IntentError("record_missing", f"No such saved record: {record_id}")
-    return f"{cited_label}_{record_id}_r{revision}", citation(upstream, record_id)
-
-
-async def replace_citation(
-    publisher, root, label, source, decision, *, cite, expected_revision, fault_stage
-):
-    """The reviewer's answer to a decision withheld by a saved record it
-    cites, removed or changed. `cite` (a source label and a record key)
-    re-cites the decision on that record as it is now, under a new key, its
-    reviewed fields unchanged; None drops the decision (`dropped`). Either
-    names a producer new in the revision (implementation `replaced`) that
-    records the withholding it answers."""
-    await expect_current(
-        publisher, source, expected_revision, "Reconcile the source before a review"
-    )
-    entry, rows = await review_gate(publisher, source, decision, "replace-citation")
-    old_keys = sorted(entry.inputs)
-    if not entry.inputs <= set(saved_records(source)):
-        raise IntentError(
-            "fixture_scope",
-            "replace-citation answers a decision withheld by saved-record citations",
-        )
-    revision = source.revision + 1
+        now = await as_now(publisher, rows, source, entry.inputs, revision)
     producer_key = f"review_{decision}_r{revision}"
-    digests = dict(
-        old_digests={k: source.inputs[k].content_sha256 for k in old_keys},
-        new_digests={},
-    )
-    if cite is None:
-        producer = review_producer(entry, "replace-citation", digests)
-        intended = dropped(source, decision, set(old_keys), producer_key, producer)
-    else:
-        if len(old_keys) != 1:
-            raise IntentError(
-                "fixture_scope", "--cite replaces one withholding citation"
-            )
-        sources = await current_sources(root, publisher, INFO)
-        new_key, item = cited_record(rows, sources, cite, revision)
-        digests["new_digests"][new_key] = item["content_sha256"]
-        producer = review_producer(entry, "replace-citation", digests)
-        intended = reconfirmed(
-            source, decision, {old_keys[0]: (new_key, item)}, producer_key, producer
-        )
+    producer = review_producer(entry, command, source, now)
+    intended = intended_revision(command, source, decision, now, producer_key, producer)
     write_revision(root, label, intended)
     await replace_one(
         publisher,

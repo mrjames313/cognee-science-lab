@@ -20,7 +20,7 @@ from .digests import object_digest
 from .fixture import expect_current
 from .models import IdentitySource
 from .records import citation
-from .review import cited_now, write_revision
+from .review import current_record, write_revision
 from .revisions import next_revision, replace_one
 from .validation import IntentError, fresh_mention_id, text_digest
 
@@ -200,12 +200,11 @@ def citing_revision(source, case, sources, rows):
     elif case == "self":
         decision, item = "c01", citation(doc03, "c02")
     else:
-        current = cited_now(rows, doc03)[str(doc01.identity_data_id)]
-        decision, item = "c01", citation(current, "r01")
+        decision, item = "c01", current_record(rows, str(doc01.identity_data_id), "r01")
         if case == "missing":
             item["record_id"] = "r99"
         elif case == "stale":
-            item["representation_revision"] = current.revision + 1
+            item["representation_revision"] += 1
         elif case == "digest":
             item["content_sha256"] = text_digest("not the record")
     if (case == "cycle") != (source.identity_data_id == doc01.identity_data_id):

@@ -22,6 +22,7 @@ from .glossary_fixture import CASES as GLOSSARY_CASES
 from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
 from .glossary_fixture import KIND_CHANGES as GLOSSARY_KIND_CHANGES
 from .glossary_fixture import REFRESH_FAULT
+from .glossary_fixture import REVIEW_COMMANDS as REVIEWS
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
 from .replace import TEXT_FAULT_STAGES
@@ -57,7 +58,6 @@ REVISION_COMMANDS = {
     "replace-citation",
     *OCCURRENCE_COMMANDS,
 }
-REVIEWS = {"reconfirm", "replace-decision", "replace-citation"}
 
 
 def cited_record(value):

@@ -424,7 +424,7 @@ def check_erasure_complete(old, source, removal: ErasureStep):
     erased, citing = removal.erased, removal.citing
     for key in sorted(citing):
         kind = REGISTRY[record_type_of(old, key)]
-        removed = kind.removed(old, key, erased, removal.producer)
+        removed = kind.removed(old, key, dict.fromkeys(erased), removal.producer, None)
         if getattr(source, kind.field).get(key) != removed:
             raise IntentError(
                 "erasure_incomplete",
@@ -433,7 +433,7 @@ def check_erasure_complete(old, source, removal: ErasureStep):
     held = [
         part.input_refs
         for kind in REGISTRY.values()
-        for field in kind.stripped(old, erased)
+        for field in kind.stripped(old, citing, dict.fromkeys(erased))
         for part in getattr(source, field).values()
     ]
     if set(source.inputs) & erased or any(set(refs) & erased for refs in held):
@@ -462,9 +462,9 @@ def check_erasure_confined(old, source, removal: ErasureStep, readers):
         }:
             unrelated("changes only the decisions citing what the forget removed")
     stripped = {
-        field: parts
+        field: {**getattr(old, field), **parts}
         for kind in REGISTRY.values()
-        for field, parts in kind.stripped(old, erased).items()
+        for field, parts in kind.stripped(old, citing, dict.fromkeys(erased)).items()
     }
     if any(getattr(source, field) != parts for field, parts in stripped.items()) or any(
         old.inputs.get(k) != item for k, item in source.inputs.items()

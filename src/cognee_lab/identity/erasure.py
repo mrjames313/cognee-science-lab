@@ -41,6 +41,7 @@ from .models import CorpusObjectInput, IdentitySource
 from .records import (
     REGISTRY,
     RemovedRecord,
+    apply_removal,
     naming,
     record_inputs,
     record_type_of,
@@ -230,19 +231,7 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
     kinds = {k: REGISTRY[record_type_of(reader, k)] for k in sorted(citing)}
 
     def change(payload):
-        for k, kind in kinds.items():
-            record = kind.removed(reader, k, erased, key)
-            if record is None:
-                payload[kind.field].pop(k)
-            else:
-                payload[kind.field][k] = record.model_dump(
-                    mode="json", exclude_none=True
-                )
-        for kind in REGISTRY.values():
-            for field, parts in kind.stripped(reader, erased).items():
-                payload[field] = {
-                    k: part.model_dump(mode="json") for k, part in parts.items()
-                }
+        apply_removal(payload, reader, citing, dict.fromkeys(erased), key)
         payload["producers"][key] = removal_producer(
             ids, removed, token, removed_records, cited_records
         )

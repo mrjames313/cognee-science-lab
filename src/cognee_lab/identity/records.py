@@ -13,13 +13,15 @@ mention UUID. Mention UUIDs are revision-scoped and never reused, so a
 resolution key and group key that come back later with the same target
 fingerprint differently.
 
-An erasure removes a record that cites what a forget took away
-(`RecordKind.removed`). A removed record is named with the fingerprint it
-had and the last served revision that held it (`RemovedRecord`), so a
-citation made before the removal matches it and a later one does not.
+An erasure removes a record that cites what a forget took away, and a
+reviewer removes or unresolves one whose input changed or went, through
+one helper (`apply_removal`, by `RecordKind.removed`). A removed record is
+named with the fingerprint it had and the last served revision that held
+it (`RemovedRecord`), so a citation made before the removal matches it and
+a later one does not.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import NamedTuple, Protocol, get_args
 from uuid import UUID
 
@@ -58,6 +60,10 @@ class CitesInputs(Protocol):
     input_refs: list[str]
 
 
+# Each input key a removal changes: its new key, or None when it goes.
+RefMap = Mapping[str, str | None]
+
+
 class RecordKind(NamedTuple):
     """One citable record type: everything the chain logic asks of it, so
     no other module names a record type's fields.
@@ -70,13 +76,14 @@ class RecordKind(NamedTuple):
     - `names`: the Entities a record names, given its source and key.
     - `held`: whether a record is withheld, given its source's entries of
       the withheld-decision set, its source and its key.
-    - `removed`: what an erasure leaves of a record, given its source, its
-      key, the erased input keys and the removal producer's key: the record
-      after the removal, or None when the removal drops it.
-    - `outcome`: the name of what an erasure leaves (`unresolved`,
+    - `removed`: what a removal leaves of a record, given its source, its
+      key, the input ref map (`rewired`), the removal producer's key and an
+      explanation: the record after the removal, or None when the removal
+      drops it.
+    - `outcome`: the name of what a removal leaves (`unresolved`,
       `dropped`).
-    - `stripped`: the other parts of a description that hold its records'
-      inputs, by field, with the erased input keys stripped.
+    - `stripped`: the other parts of a description that hold the inputs of
+      the given records of this type, by field, rewired by the ref map.
     - `unlinked`: the mention Entities whose facts lose their identity link
       when a record is removed, given its source and key."""
 
@@ -85,9 +92,11 @@ class RecordKind(NamedTuple):
     inputs: Callable[[IdentitySource, str], frozenset[str]]
     names: Callable[[IdentitySource, str], frozenset[UUID]]
     held: Callable[[Mapping[str, object], IdentitySource, str], bool]
-    removed: Callable[[IdentitySource, str, set[str], str], Record | None]
+    removed: Callable[[IdentitySource, str, RefMap, str, str | None], Record | None]
     outcome: str
-    stripped: Callable[[IdentitySource, set[str]], dict[str, dict[str, CitesInputs]]]
+    stripped: Callable[
+        [IdentitySource, Collection[str], RefMap], dict[str, dict[str, CitesInputs]]
+    ]
     unlinked: Callable[[IdentitySource, str], frozenset[UUID]]
 
 
@@ -136,46 +145,53 @@ def decision_held(entries, description, key) -> bool:
     return key in entries
 
 
-def without_erased(refs, erased, fallback):
-    """Input refs with the erased keys stripped; the original document when
-    nothing else remains."""
-    return [k for k in refs if k not in erased] or [fallback]
+def rewired(refs, ref_map: RefMap, fallback):
+    """Input refs with each key of `ref_map` replaced by its new key, or
+    dropped when it maps to None; the original document when nothing else
+    remains."""
+    kept = [ref_map.get(k, k) for k in refs]
+    return [k for k in kept if k is not None] or [fallback]
 
 
-def resolution_removed(description, key, erased, producer):
+def resolution_removed(description, key, ref_map, producer, explanation):
     """A removed resolution stays, unresolved in place under the removal
-    producer, with the erased inputs stripped."""
+    producer, with its inputs rewired."""
     was = description.mention_resolutions[key]
     return Unresolved(
         group_ref=was.group_ref,
         status="unresolved",
-        input_refs=without_erased(
-            was.input_refs, erased, description.original_input_ref
-        ),
+        input_refs=rewired(was.input_refs, ref_map, description.original_input_ref),
         producer_ref=producer,
+        explanation=explanation,
     )
 
 
-def variant_removed(description, key, erased, producer):
+def variant_removed(description, key, ref_map, producer, explanation):
     """A removed variant is dropped."""
     return None
 
 
-def groups_stripped(description, erased) -> dict[str, dict[str, CitesInputs]]:
-    """Every group, which a resolution's inputs include, loses the erased
-    inputs."""
+def groups_stripped(description, keys, ref_map) -> dict[str, dict[str, CitesInputs]]:
+    """The group of each given resolution, which its inputs include, with
+    its inputs rewired. Another resolution's group keeps what it cites."""
     fallback = description.original_input_ref
+    groups = {
+        description.mention_resolutions[k].group_ref
+        for k in keys
+        if k in description.mention_resolutions
+    }
     return dict(
         mention_groups={
             k: g.model_copy(
-                update=dict(input_refs=without_erased(g.input_refs, erased, fallback))
+                update=dict(input_refs=rewired(g.input_refs, ref_map, fallback))
             )
             for k, g in description.mention_groups.items()
+            if k in groups
         }
     )
 
 
-def nothing_stripped(description, erased) -> dict[str, dict[str, CitesInputs]]:
+def nothing_stripped(description, keys, ref_map) -> dict[str, dict[str, CitesInputs]]:
     return {}
 
 
@@ -217,6 +233,29 @@ REGISTRY: dict[str, RecordKind] = {
 }
 if set(get_args(RecordType)) != REGISTRY.keys():
     raise TypeError("models.RecordType and records.REGISTRY name different types")
+
+
+def apply_removal(
+    payload, source, keys, ref_map: RefMap, producer_key, explanation=None
+):
+    """Remove each record in `keys` from `payload`, a JSON dump of `source`,
+    as its record type says (`RecordKind.removed`), and rewire the parts
+    that hold those records' inputs (`RecordKind.stripped`) by `ref_map`.
+    Other records and their parts keep citing what they cite. An erasure
+    maps each erased input to None; a reviewer maps an input that changed
+    to its new key and one that went or that it drops to None. The caller
+    adds the new inputs and the producer."""
+    for key in sorted(keys):
+        kind = REGISTRY[record_type_of(source, key)]
+        record = kind.removed(source, key, ref_map, producer_key, explanation)
+        if record is None:
+            payload[kind.field].pop(key)
+        else:
+            payload[kind.field][key] = record.model_dump(mode="json", exclude_none=True)
+    for kind in REGISTRY.values():
+        for field, parts in kind.stripped(source, keys, ref_map).items():
+            for part_key, part in parts.items():
+                payload[field][part_key] = part.model_dump(mode="json")
 
 
 def record_inputs(source) -> dict[str, frozenset[str]]:

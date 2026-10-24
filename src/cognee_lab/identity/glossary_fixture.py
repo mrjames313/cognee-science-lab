@@ -506,36 +506,24 @@ async def run(args, root):
                 )
             refresh.update(await edit_entity(publisher, root, selected, args.case))
         elif args.command in REVIEW_COMMANDS:
-            from .review import replace_citation, review
+            from .review import review
 
             if args.source not in ("doc01", "doc03"):
                 raise IntentError(
                     "fixture_scope",
                     f"{args.command} reviews one decision of doc01 or doc03",
                 )
-            guards = dict(
-                expected_revision=args.expected_revision, fault_stage=args.fault_stage
+            await review(
+                publisher,
+                root,
+                args.source,
+                selected,
+                args.decision,
+                command=args.command,
+                cite=args.cite,
+                expected_revision=args.expected_revision,
+                fault_stage=args.fault_stage,
             )
-            if args.command == "replace-citation":
-                await replace_citation(
-                    publisher,
-                    root,
-                    args.source,
-                    selected,
-                    args.decision,
-                    cite=args.cite,
-                    **guards,
-                )
-            else:
-                await review(
-                    publisher,
-                    root,
-                    args.source,
-                    selected,
-                    args.decision,
-                    command=args.command,
-                    **guards,
-                )
         elif args.command == "withdraw":
             await publisher.withdraw(
                 selected,
