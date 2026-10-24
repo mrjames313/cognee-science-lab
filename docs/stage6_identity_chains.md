@@ -1,6 +1,6 @@
 # Stage 6 chains: decisions that cite other sources' decisions
 
-**Date:** 2026-10-23. **Status:** checkpoint J1, implemented and verified by the assistant on the user's Mac with loopback embeddings, then revised in fix round 1 the same day (see [Fix round 1](#fix-round-1)). No user-reviewed fixture root exists yet. Checkpoint J2 (erasure down a chain) is not built.
+**Date:** 2026-10-23. **Status:** checkpoint J1, implemented and verified by the assistant on the user's Mac with loopback embeddings, then revised in fix round 1 the same day (see [Fix round 1](#fix-round-1)) and found merge-ready by a final review (see [Checkpoint runs](#checkpoint-runs)). No user-reviewed fixture root exists yet. Checkpoint J2 (erasure down a chain) is not built.
 
 Before this checkpoint a source could read another document (a glossary entry, a protocol) but not another source's saved decision. Admission refused every saved-record input. Now a resolution or a variant assignment may cite a resolution or a variant assignment of another source in the same dataset. When the cited decision is withheld, changed or gone, the citing decision is withheld too, and the withholding spreads down the whole chain of citations.
 
@@ -195,3 +195,13 @@ Evidence, run by the assistant on the user's Mac on 2026-10-23, every source fil
 - `uv run python support/ledger_check.py`: PASS, verified within bound at depth 5, `PINNED` unchanged at 8504 nodes and 8349 sequences. `--mutants`: every break caught.
 - `uv run pytest -q -m integration tests/test_identity_chains_native.py tests/test_identity_dependencies_native.py tests/test_identity_forget_native.py`: 36 passed and 1 failed (891 s). The failure was the fence's new refusal message, which dropped the words a native test checks; the message was restored and that test passed alone.
 - Journeys, 41 runs, 0 FAIL: D1 to D6 128 PASS rows, D7 to D11 63, G1 to G4 109, F1 to F15 363 in 27 runs, the same totals as before the round. `journey all` was not run.
+
+## Checkpoint runs
+
+Run by the assistant and its subagents on the user's Mac on 2026-10-23 with loopback embeddings, on branch `stage6-chains`.
+
+- `verify.py journey all`: 1519 PASS and 0 FAIL in 86 runs on `637bfcc`, and again on `8167c25`. P5 calls the embedding API and was skipped.
+- `uv run pytest -q -m integration tests/test_identity_chains_native.py tests/test_identity_dependencies_native.py tests/test_identity_forget_native.py`: 37 passed (837 s) on `8167c25`, after the fence's message was restored.
+- `support/occurrence_check.py` now holds 33 rule-5 rows and 23 rule-6 rows in all.
+- A final targeted review of `8167c25` found the branch merge-ready. `2002a77` changed the fence's remedy to "run forget on that source again first" and corrected the citation-scope comment in `support/occurrence_check.py`.
+- `uv run pytest -q -m 'not integration'` on `2002a77`: 487 passed, 85 deselected.
