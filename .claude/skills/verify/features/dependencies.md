@@ -93,7 +93,7 @@ $V check "$RUN" status '[.refresh_needed[].assignment_id] == ["r01", "v01"] and 
 $V drive "$RUN" main first -- reconfirm --decision r01 --expected-revision 1
 $V check "$RUN" first '.sources.doc01 | .saved_revision == 2 and .verified_revision == 2 and .decisions.r01.input_refs[-1] == "glossary_hc_r2" and .decisions.v01.input_refs[-1] == "glossary_hc"' 'r01 cites the new key and v01 the old one'
 $V check "$RUN" first '.sources.doc01.producers.review_r01_r2 | .implementation == "re-confirmed" and .configuration.confirmed_by == "captured fixture reviewer"' 'the re-confirm names its producer and who confirmed'
-$V check "$RUN" first '.sources.doc01.producers.review_r01_r2.configuration.new_digest == .glossary.hc_entry.text_sha256' 'the new fingerprint is the current entry'
+$V check "$RUN" first '.sources.doc01.producers.review_r01_r2.configuration.new_digests.glossary_hc_r2 == .glossary.hc_entry.text_sha256' 'the new fingerprint is the current entry'
 $V check "$RUN" first '[.withheld_decisions[].assignment_id] == ["v01"]' 'only v01 stays withheld'
 $V check "$RUN" first '[.helios.facts[].identity.assignment_id] == ["r01"] and .result.facts == []' 'the Helios controller query returns the fact; the HC query does not'
 

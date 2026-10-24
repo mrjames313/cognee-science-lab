@@ -128,7 +128,7 @@ def test_native_glossary_edits_withhold_refresh_and_reconfirm(tmp_path):
     review = first["sources"]["doc01"]["producers"]["review_r01_r3"]
     assert review["implementation"] == "re-confirmed"
     assert (
-        review["configuration"]["new_digest"]
+        review["configuration"]["new_digests"]["glossary_hc_r3"]
         == first["glossary"]["hc_entry"]["text_sha256"]
     )
     assert fact_keys(first["helios"]) == ["r01"] and first["result"]["facts"] == []

@@ -505,7 +505,11 @@ def test_a_substantive_change_replaces_v01_with_a_derived_variant(source_payload
     old = glossary_doc01(source_payload)
     span = span_for(CASES["substantive"](GLOSSARY_TEXT))
     new = replaced_variant(
-        old, "v01", "glossary_hc_r2", span, "review_v01_r2", producer("replaced")
+        old,
+        "v01",
+        {"glossary_hc": ("glossary_hc_r2", span)},
+        "review_v01_r2",
+        producer("replaced"),
     )
     assert set(new.variant_assignments) == {"v02"}
     coil = new.variant_assignments["v02"].target_entity_id

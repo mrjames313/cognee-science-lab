@@ -38,7 +38,10 @@ COMMANDS = (
     "replace-decision",
     "refresh-dependents",
     "cite-record",
+    "edit-entity",
+    "replace-citation",
 )
+REVIEW_COMMANDS = ("reconfirm", "replace-decision", "replace-citation")
 
 
 def no_refresh():
@@ -469,24 +472,45 @@ async def run(args, root):
             from .chain_fixture import cite
 
             await cite(publisher, root, args, sources)
-        elif args.command in ("reconfirm", "replace-decision"):
-            from .review import review
+        elif args.command == "edit-entity":
+            from .entity_edit import edit_entity
+
+            if args.source != "doc01":
+                raise IntentError(
+                    "fixture_scope", "edit-entity edits the Entity doc01 reads"
+                )
+            refresh.update(await edit_entity(publisher, root, selected, args.case))
+        elif args.command in REVIEW_COMMANDS:
+            from .review import replace_citation, review
 
             if args.source not in ("doc01", "doc03"):
                 raise IntentError(
                     "fixture_scope",
                     f"{args.command} reviews one decision of doc01 or doc03",
                 )
-            await review(
-                publisher,
-                root,
-                args.source,
-                selected,
-                args.decision,
-                expected_revision=args.expected_revision,
-                fault_stage=args.fault_stage,
-                command=args.command,
+            guards = dict(
+                expected_revision=args.expected_revision, fault_stage=args.fault_stage
             )
+            if args.command == "replace-citation":
+                await replace_citation(
+                    publisher,
+                    root,
+                    args.source,
+                    selected,
+                    args.decision,
+                    cite=args.cite,
+                    **guards,
+                )
+            else:
+                await review(
+                    publisher,
+                    root,
+                    args.source,
+                    selected,
+                    args.decision,
+                    command=args.command,
+                    **guards,
+                )
         elif args.command == "withdraw":
             await publisher.withdraw(
                 selected,

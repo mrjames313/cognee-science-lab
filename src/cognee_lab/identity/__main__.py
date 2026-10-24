@@ -16,6 +16,7 @@ from .environment import (
     read_fixture,
 )
 from .chain_fixture import CITATIONS
+from .entity_edit import ENTITY_CASES
 from .forget import FAULT_STAGES as FORGET_STAGES
 from .glossary_fixture import CASES as GLOSSARY_CASES
 from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
@@ -34,9 +35,11 @@ COMMAND_FAULT_STAGES = {
     "reconfirm": UNCHANGED_TEXT_STAGES,
     "replace-decision": UNCHANGED_TEXT_STAGES,
     "cite-record": UNCHANGED_TEXT_STAGES,
+    "replace-citation": UNCHANGED_TEXT_STAGES,
     "edit-text": REPLACE_STAGES,
     **dict.fromkeys(OCCURRENCE_COMMANDS, REPLACE_STAGES),
     "edit-glossary": (*REPLACE_STAGES, REFRESH_FAULT),
+    "edit-entity": (),
     "refresh-dependents": (REFRESH_FAULT,),
     "withdraw": WITHDRAW_STAGES,
     "forget": FORGET_STAGES,
@@ -50,8 +53,18 @@ REVISION_COMMANDS = {
     "reconfirm",
     "replace-decision",
     "cite-record",
+    "replace-citation",
     *OCCURRENCE_COMMANDS,
 }
+REVIEWS = {"reconfirm", "replace-decision", "replace-citation"}
+
+
+def cited_record(value):
+    """`--cite SOURCE:RECORD`: a fixture source label and a record key."""
+    label, _, record = value.partition(":")
+    if not label or not record:
+        raise argparse.ArgumentTypeError("use SOURCE:RECORD, for example doc01:v02")
+    return label, record
 
 
 def _reopen_error(args, root: Path) -> str | None:
@@ -102,13 +115,27 @@ def main():
     )
     parser.add_argument(
         "--case",
-        choices=sorted(GLOSSARY_CASES),
-        help="edit-glossary only: which captured glossary edit to make",
+        choices=[*sorted(GLOSSARY_CASES), *ENTITY_CASES],
+        help="edit-glossary: which captured glossary edit to make "
+        f"({', '.join(sorted(GLOSSARY_CASES))}); edit-entity: which outside "
+        f"edit of the Entity doc01 reads ({', '.join(ENTITY_CASES)})",
     )
     parser.add_argument(
         "--decision",
-        help="reconfirm and replace-decision only: the withheld decision of doc01 "
-        "or doc03",
+        help="reconfirm, replace-decision and replace-citation only: the withheld "
+        "decision of doc01 or doc03",
+    )
+    answer = parser.add_mutually_exclusive_group()
+    answer.add_argument(
+        "--cite",
+        type=cited_record,
+        metavar="SOURCE:RECORD",
+        help="replace-citation only: cite this record as it is now instead",
+    )
+    answer.add_argument(
+        "--drop",
+        action="store_true",
+        help="replace-citation only: remove the decision instead",
     )
     parser.add_argument(
         "--citation",
@@ -158,10 +185,20 @@ def main():
     root = args.root.resolve()
     if args.command in REVISION_COMMANDS and args.expected_revision is None:
         parser.error(f"{args.command} requires --expected-revision")
-    if args.command == "edit-glossary" and args.case is None:
-        parser.error("edit-glossary requires --case")
-    if args.command in {"reconfirm", "replace-decision"} and args.decision is None:
+    cases = {"edit-glossary": GLOSSARY_CASES, "edit-entity": ENTITY_CASES}
+    if args.command in cases and args.case not in cases[args.command]:
+        parser.error(
+            f"{args.command} requires --case, one of "
+            f"{', '.join(sorted(cases[args.command]))}"
+        )
+    if args.case is not None and args.command not in cases:
+        parser.error("--case applies to edit-glossary and edit-entity only")
+    if args.command in REVIEWS and args.decision is None:
         parser.error(f"{args.command} requires --decision")
+    if (args.command == "replace-citation") != bool(args.cite or args.drop):
+        parser.error(
+            "replace-citation requires --cite or --drop, which apply to it only"
+        )
     if (args.command == "cite-record") != (args.citation is not None):
         parser.error("cite-record requires --citation, which applies to it only")
     if args.chain and args.command != "glossary-fixture":

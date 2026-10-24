@@ -146,6 +146,15 @@ def cited_inputs(source: IdentitySource) -> set[str]:
     return cited
 
 
+def selected_digest(node, item: CorpusObjectInput) -> str | None:
+    """The digest a corpus input pins, of its Entity's node as it is now:
+    its selected fields' values. None when the node or a selected field is
+    gone."""
+    if node is None or any(f not in node for f in item.selected_fields):
+        return None
+    return object_digest({f: node[f] for f in item.selected_fields})
+
+
 class Failure(NamedTuple):
     """Why one input fails: the code that fails the source when the input is
     its own, the reason that withholds decisions when it is foreign."""
@@ -184,10 +193,7 @@ async def input_failure(
                 Reason.REMOVED,
                 f"Corpus input missing: {key}",
             )
-        if any(field not in node for field in item.selected_fields) or (
-            object_digest({field: node[field] for field in item.selected_fields})
-            != item.content_sha256
-        ):
+        if selected_digest(node, item) != item.content_sha256:
             return Failure(
                 "input_changed", Reason.CHANGED, f"Corpus fields changed: {key}"
             )
