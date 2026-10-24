@@ -496,12 +496,19 @@ def unfinished(tombstone, rows) -> list:
 def refuse_unfinished_cascade(source, rows):
     """Refuse withdrawing or forgetting a source that holds a removal
     producer, written or saved by a failed attempt, of a forget whose
-    cascade is not finished (`unfinished`). The removals below it bind to
-    that producer (erasure_rules.written_claims), so retiring the source
-    first would free every citer further down, and the forget would report
-    finished. Transitive, since `unfinished` covers every level. The
-    forgotten source itself holds no removal of its own forget, so finishing
-    it is never refused."""
+    cascade is not finished (`unfinished`), when retiring the source would
+    drop another source from what is unfinished. The removals below it bind
+    to that producer (erasure_rules.written_claims), so retiring it first
+    would free every citer further down, and the forget would report
+    finished. Transitive, since `unfinished` covers every level. A source
+    whose own failed removal is all that retiring it drops frees no citer,
+    and the forgotten source itself holds no removal of its own forget, so
+    neither is refused."""
+    own = (str(source.dataset_id), str(source.identity_data_id))
+    retired = [
+        replace(r, state="withdrawn") if (r.dataset, r.source) == own else r
+        for r in rows
+    ]
     tombstones = {
         r.tombstone.identity_data_id: r.tombstone for r in rows if r.tombstone
     }
@@ -518,13 +525,15 @@ def refuse_unfinished_cascade(source, rows):
             frozenset(tomb.removed_entity_ids),
         ):
             continue
-        if left := unfinished(tomb, rows):
+        left = {r.source for r in unfinished(tomb, rows)} - {own[1]}
+        if freed := left - {r.source for r in unfinished(tomb, retired)}:
             raise IntentError(
                 "cascade_unfinished",
                 "This source holds a removal of a forget whose cascade is not finished; run forget on the forgotten source again first",
                 details=dict(
                     forgotten=str(claim.forgotten),
-                    unfinished=[r.source for r in left],
+                    unfinished=sorted(left),
+                    freed=sorted(freed),
                 ),
             )
 

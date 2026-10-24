@@ -14,15 +14,18 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   chain check); after each write the cascade read from the rows again plans
   the same revisions for the rest; what is left at the end is what waits
   for a blocked removal.
-- A retired upstream. Before a removal below level 1 is written, the same
-  removal saved by a failed attempt resumes at its level, and once every
-  source whose records it cites withdraws, it leaves the cascade and no
-  reader of the cascade raises.
+- A failed removal. Before each removal is written, the same removal
+  saved by a failed attempt: below level 1 it resumes at its level, and
+  once every source whose records it cites withdraws, it leaves the
+  cascade and no reader of the cascade raises.
 - A failed attempt on a written removal. After each write, a reconcile at
   the written revision or a withdrawal that fails leaves the cascade
-  planning the same revisions for the rest, and while any is left, every
-  source that holds a removal is refused a withdrawal or forget
-  (`cascade_unfinished`) and every other source is not.
+  planning the same revisions for the rest.
+- Retiring mid-cascade. In both shapes above, a withdrawal or forget of a
+  source is refused (`cascade_unfinished`) exactly when the source holds a
+  removal and retiring it would drop another source from what the forget
+  has left; a source whose own failed removal is all that is left may
+  retire.
 - The served revision. A removal in place that lists its records as last
   served at another revision than the ledger verified is refused.
 - The inductive gate. Admission refuses (`erasure_unbound`) a removal below
@@ -134,8 +137,8 @@ def holds_removal(row) -> bool:
 def failed_after_written(rows, step, ids, tomb):
     """Disagreements once `step` is written: a failed reconcile at its
     revision, or a failed withdrawal, changes nothing the cascade plans for
-    the rest, and while anything is left, a withdrawal or forget of a
-    source that holds a removal is refused, and of any other source not."""
+    the rest, and a withdrawal or forget is refused as
+    `retire_disagreements` states."""
     failures = []
     plan = {
         (s.row.source, s.level, s.description.model_dump_json())
@@ -154,17 +157,35 @@ def failed_after_written(rows, step, ids, tomb):
         }
         if found != plan:
             failures.append(("written then failed", source, operation))
-    left = bool(erasure.unfinished(tomb, rows))
+    return failures + retire_disagreements(rows, tomb, "retire while unfinished")
+
+
+def withdrawn(rows, sources):
+    return [
+        dataclasses.replace(r, state="withdrawn") if r.source in sources else r
+        for r in rows
+    ]
+
+
+def retire_disagreements(rows, tomb, check):
+    """Disagreements over withdrawing or forgetting each saved source: it
+    is refused (`cascade_unfinished`) exactly when it holds a removal and
+    retiring it would drop another source from what the forget has left."""
+    failures = []
+    left = {r.source for r in erasure.unfinished(tomb, rows)}
     for row in rows:
         if row.description is None:
             continue
+        after = withdrawn(rows, {row.source})
+        kept = {r.source for r in erasure.unfinished(tomb, after)}
+        frees = bool(left - {row.source} - kept)
         try:
             erasure.refuse_unfinished_cascade(row.description, rows)
             refused = False
         except IntentError as exc:
             refused = exc.code == "cascade_unfinished"
-        if refused != (left and holds_removal(row)):
-            failures.append(("retire while unfinished", row.source, refused))
+        if refused != (holds_removal(row) and frees):
+            failures.append((check, row.source, refused))
     return failures
 
 
@@ -220,13 +241,9 @@ def shrinks(rows, confirmed, impact_of):
                 yield (row.source, cited, decision)
 
 
-def retired_upstream(rows, step, ids, tomb):
-    """Disagreements when `step`, a removal below level 1 whose upstream is
-    written, fails after it began, and then every source whose records it
-    cites withdraws: the failed removal resumes at its level while they
-    stay, and leaves the cascade once they withdraw, with no reader of the
-    cascade raising."""
-    source = step.row.source
+def failed_step(rows, step):
+    """`step`'s removal saved by an attempt that failed after it began, and
+    the rows with it."""
     if step.row.state == "current":
         plan = dict(operation="identity_replace")
     else:
@@ -240,17 +257,27 @@ def retired_upstream(rows, step, ids, tomb):
         verified_revision=step.row.verified_revision,
         plan=plan,
     )
-    after = [failed if r.source == source else r for r in rows]
+    return failed, [failed if r.source == failed.source else r for r in rows]
+
+
+def retired_upstream(rows, step, ids, tomb):
+    """Disagreements when `step`, a removal whose upstream is written,
+    fails after it began: a withdrawal or forget is refused as
+    `retire_disagreements` states, and below level 1, once every source
+    whose records it cites withdraws, the failed removal leaves the
+    cascade, after resuming at its level while they stay, with no reader
+    of the cascade raising."""
+    source = step.row.source
+    failed, after = failed_step(rows, step)
+    failures = retire_disagreements(after, tomb, "retire a failed removal")
+    if step.level == 1:
+        return failures
     resumed = next(
         (s for s in erasure.cascade(after, ids, ()) if s.row.source == source), None
     )
     if resumed is None or resumed.impact is not None or resumed.level != step.level:
-        return [("failed removal resumes", source)]
-    upstream = {r.identity_data_id for r in step.cited_records}
-    retired = [
-        dataclasses.replace(r, state="withdrawn") if r.source in upstream else r
-        for r in after
-    ]
+        return failures + [("failed removal resumes", source)]
+    retired = withdrawn(after, {r.identity_data_id for r in step.cited_records})
     try:
         left = {s.row.source for s in erasure.cascade(retired, ids, ())}
         erasure.unfinished(tomb, retired)
@@ -260,8 +287,8 @@ def retired_upstream(rows, step, ids, tomb):
         except IntentError:
             pass
     except Exception as exc:
-        return [("upstream retired", source, type(exc).__name__)]
-    return [("upstream retired", source)] if source in left else []
+        return failures + [("upstream retired", source, type(exc).__name__)]
+    return failures + ([("upstream retired", source)] if source in left else [])
 
 
 def check_world(graph, states, tokens, *, shrink):
@@ -318,8 +345,7 @@ def check_world(graph, states, tokens, *, shrink):
         if not writable:
             break
         step = writable[0]
-        if step.level > 1:
-            failures += retired_upstream(rows, step, ids, tomb)
+        failures += retired_upstream(rows, step, ids, tomb)
         if (code := refusal(rows, step)) is not None:
             failures.append(("write in order", step.row.source, code))
             break
@@ -424,6 +450,15 @@ def retire_anytime(source, rows):
     refused."""
 
 
+def retire_blocked_by_own_removal(source, rows):
+    """A source holding a removal is refused while anything is left, even
+    when its own failed removal is all that is left."""
+    tomb = next(r.tombstone for r in rows if r.tombstone)
+    holds = any(erasure_rules.is_removal_producer(p) for p in source.producers.values())
+    if holds and erasure.unfinished(tomb, rows):
+        raise IntentError("cascade_unfinished", "")
+
+
 def served_or_before(chain, erasures, served, saved):
     """Every step of a retry chain may list the revision before the served
     one, also the step new in this begin."""
@@ -458,6 +493,10 @@ MUTANTS = {
         (PublicationRow, "holds_served"),
     ),
     "retire_anytime": (retire_anytime, (erasure, "refuse_unfinished_cascade")),
+    "retire_blocked_by_own_removal": (
+        retire_blocked_by_own_removal,
+        (erasure, "refuse_unfinished_cascade"),
+    ),
     "served_or_before": (served_or_before, (erasure_rules, "check_retry_chain")),
 }
 

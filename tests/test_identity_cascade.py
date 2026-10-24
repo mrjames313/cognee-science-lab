@@ -211,3 +211,32 @@ def test_a_new_removal_in_place_lists_exactly_the_served_revision():
         check_retry_chain([saved, forged], erasures, 1, saved)
     assert refused.value.code == "erasure_incomplete"
     check_retry_chain([saved, forged], erasures, 1, forged)
+
+
+def failed_leaf_removal():
+    """s1's removal is written; s2's removal revision failed and was never
+    served, so s2's own saved removal is the only unfinished link."""
+    rows = rows_of()
+    ids = source_ids(rows[0].tombstone)
+    step = erasure.cascade(rows, ids, ())[0]
+    rows = replaced(rows, "s1", row_of(step.description, "ok"))
+    (step,) = erasure.cascade(rows, ids, ())
+    failed = dataclasses.replace(
+        row_of(step.description, "ok"),
+        state="failed",
+        verified_revision=step.row.revision,
+        plan=dict(operation="identity_replace"),
+    )
+    return replaced(rows, "s2", failed)
+
+
+def test_a_failed_removal_whose_own_link_is_all_that_is_left_may_retire():
+    """Withdrawing or forgetting s2 frees no other source, so it is not
+    refused; withdrawing s1 would free s2's failed removal, so it is."""
+    rows = failed_leaf_removal()
+    assert erasure.unfinished(rows[0].tombstone, rows) == [by_label(rows, "s2")]
+    erasure.refuse_unfinished_cascade(by_label(rows, "s2").description, rows)
+    with pytest.raises(IntentError) as refused:
+        erasure.refuse_unfinished_cascade(by_label(rows, "s1").description, rows)
+    assert refused.value.code == "cascade_unfinished"
+
