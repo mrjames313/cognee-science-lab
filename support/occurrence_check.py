@@ -70,8 +70,8 @@ def general(case, mapping=None, first_attempt=True, **parts):
     raw = parts["general"] if mapping is None else mapping
 
     def admit():
-        # A replacement's preflight (Publisher.admit_inputs) checks citation
-        # scope before admit runs; admit no longer repeats it.
+        # Citation scope is checked in Publisher.admit_inputs, not in admit,
+        # so the harness checks it here to keep those refusals in view.
         chains.check_citation_scope(parts["new"])
         return admission.admit(
             parts["old"],

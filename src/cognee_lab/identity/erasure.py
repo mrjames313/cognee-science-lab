@@ -383,7 +383,7 @@ def refuse_retiring_inputs(source, rows):
     if found:
         raise IntentError(
             "retiring_source",
-            "An input is a document, Entity or saved record whose forget is not finished, or a record that forget removes; reconcile that forget first",
+            "An input is a document, Entity or saved record whose forget is not finished, or a record that forget removes; run forget on that source again first",
             details=dict(dependents=found),
         )
 
