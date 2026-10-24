@@ -364,6 +364,18 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 
 ## Evidence
 
+**Checkpoint J2 fix round 4.** A fourth review raised a probed medium item and two low ones. The assistant (a subagent) fixed them on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-cascade`. Each bug's test failed before its fix. The native tests and the journeys ran concurrently, so their times are inflated.
+
+- Item 1 (`5c3320f`): retiring a source that holds a removal is refused when it would change what the cascade still does to any other source (`test_retiring_a_written_removal_is_refused_when_it_would_shrink_a_removal_below`, the reviewer's diamond). The cascade lever now checks that invariant itself. Before the fix it failed on a three-source shape (s3 cites s0 and s2) with a failed removal. The mutant `retire_by_ids` restores the round 3 rule.
+- Item 2 (`0750153`): a completed removal rejected after the forgotten source was re-added resumes by its own retry (`test_a_completed_removal_rejected_after_the_forgotten_source_returned`). Lever check "rejected after re-add", with the mutant `forget_only_live`. A second forget of the source is still open ([Scope](#scope)).
+- Item 3 (`57965b4`): L1 recorded in [Scope](#scope), with no code change.
+- `uv run pytest -q -m 'not integration'`: 533 passed, 86 deselected (exit 0, before each commit).
+- `uv run python support/occurrence_check.py`: `PASS`; `--mutants`: `PASS`.
+- `uv run python support/chain_check.py`: `PASS`, 0 disagreements, 34,752 cascade worlds, in 491 s; `--mutants`: all 19 breaks caught in 63 s.
+- `uv run python support/ledger_check.py`: `PASS verified within bound` at depth 5, 9205 nodes and 9050 sequences (`PINNED` unchanged); `--mutants`: exit 0.
+- Journeys F1 to F20, D1 to D11 and G1 to G4: 720 PASS and 0 FAIL in 35 runs.
+- The four native files: 41 passed in 972 s.
+
 **Checkpoint J2 fix round 3.** A third review raised two medium items and a low one. The assistant (a subagent) fixed them on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-cascade`. Each bug's test failed before its fix. The checks, the native tests and the journeys partly ran concurrently, so their times are inflated.
 
 - Item 1 (`8a7529a`): a source whose own failed removal is all that is left may retire (`test_a_failed_removal_whose_own_link_is_all_that_is_left_may_retire`). The reviewer's probe `p4.py` shape is in the cascade lever, which now checks the retire refusal after a failed removal at every level, with the mutant `retire_blocked_by_own_removal`.
