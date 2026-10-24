@@ -24,13 +24,18 @@ Guide: `docs/stage6_identity_forget.md`.
 - `readd-fence` refuses a re-add that would consume a source whose forget is unfinished (native test `test_native_readd_of_a_consumer_waits_for_the_unfinished_forget`).
 - `readd-fault` fails a re-add at an injected stage, withholds the source, then finishes it with `reconcile`, which writes the captured facts the failure skipped.
 - `forget-glossary` forgets the glossary that doc01 read: doc01's r01 is unresolved, v01 and HC go, and the glossary comes back from its files without the decisions.
+- `forget-cascade` forgets the glossary on a `--chain` root: the dry run lists doc01 at level 1 and doc03, which cites r01 and v01, at level 2, and one token removes both levels in order.
+- `forget-cascade-token` refuses a token once a new citation of a record the forget removes adds a level (`impact_changed`); a citation pinned at an older fingerprint is not part of the cascade.
+- `forget-cascade-interrupted` fails a level-2 removal after level 1 is written; `reconcile` on the forgotten source finishes it, and `readd` waits until it does.
+- `forget-cascade-blocked` lists a level-2 dependent whose withdrawal failed as blocked; its removal waits.
 
 ## How to get to it (user POV)
 
 - Run `uv run python -m cognee_lab.identity multi-fixture --root <new dir>`. Add `--dependent` to make doc02 consume doc01's text and private singleton.
 - Run `forget --root <dir> --source doc01 --expected-revision 1 --dry-run` for the report and token, then `forget --root <dir> --source doc01 --expected-revision 1 --confirm <token>`. A forget with no dependent needs no token.
 - Add `--fault-stage forget_impact|forget_contributions|forget_identity|forget_document|forget_verification|forget_identity_committed|forget_document_committed` to inject a failure, then run `reconcile --source doc01`. The two `_committed` stages fail after Cognee committed the Data delete and before it swept the item's evidence rows and stored files.
-- Add `--fault-stage forget_dependents` (before the first removal revision) or `forget_dependent_revision` (inside it: at `replace_registered` for a replacement, at `nodes` for a failed publication) to interrupt a dependent's removal after the forget completed, then run `reconcile --source doc01`.
+- Add `--fault-stage forget_dependents` (before the first removal revision) or `forget_dependent_revision` (inside it: at `replace_registered` for a replacement, at `nodes` for a failed publication) to interrupt a dependent's removal after the forget completed, then run `reconcile --source doc01`. `forget_cascade_revision` fails only the removals below level 1, after level 1 is written.
+- On a `glossary-fixture --chain` root, `forget --source glossary` cascades to doc03 at level 2; `withdraw --source doc03` also works there.
 - Add `--fault-stage nodes|identity_edges|verification` to `readd` to fail the re-add, then run `reconcile --source doc01`.
 - Run `uv run python -m cognee_lab.identity readd --root <dir> --source doc01 --expected-revision 1` on a root whose doc01 is forgotten.
 - Run `retrieve` and `status` against the same root.
@@ -449,11 +454,105 @@ $V check "$RUN" readd2 '.sources.doc01 | .private_singleton_entity_id as $s | ($
 $V check "$RUN" readd2 '.differs_from_forgotten == {"text": false, "decisions": true}' 'the re-add reports the revision 2 text and other decisions'
 ```
 
+**F16 a forget cascades down a two-level chain with one confirmation.** Proves `forget-cascade`. Guide: "The cascade" in the forget guide and "Forget of a cited source" in the chains guide. On a `--chain` root the glossary's forget reaches doc01, whose r01 and v01 cite the HC entry, at level 1, and doc03, whose c01 and c02 cite r01 and v01, at level 2. The dry run lists both levels; doc03's cited records are exactly the records doc01's removal lists, each with its revision 1 fingerprint and `last_revision` 1. Without the token the forget is refused with the two-level report. One token covers both levels: doc01 goes to revision 2 at level 1, then doc03 to revision 2 at level 2, each under its removal producer, and doc03's producer cites what doc01's lists. Nothing is withheld afterwards and nothing is left for the forget.
+
+```bash journey F16
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main dry -- forget --source glossary --expected-revision 1 --dry-run
+T=$(val dry '.token')
+$V check "$RUN" dry '.levels == [{"level": 1, "dependents": ["718efce2-4251-5f6f-8318-417bb4dd3525"]}, {"level": 2, "dependents": ["bbbc442e-0647-552e-bb54-071604d213fa"]}] and .counts.levels == 2 and .counts.decisions == 4' 'the dry run lists doc01 at level 1 and doc03 at level 2'
+$V check "$RUN" dry '[.dependents[] | [.level, [.decisions[] | [.assignment, .outcome, .citing[0].input_ref]]]] == [[1, [["r01", "unresolved", "glossary_hc"], ["v01", "dropped", "glossary_hc"]]], [2, [["c01", "unresolved", "doc01_r01"], ["c02", "dropped", "doc01_v01"]]]]' 'r01 and v01 go for the HC entry, c01 and c02 for r01 and v01'
+$V check "$RUN" dry '.dependents[1].cited_records == .dependents[0].removed_records and [.dependents[0].removed_records[] | [.record_id, .content_sha256, .last_revision]] == [["r01", "1d2e89138501ae78c356a9d46cc9f49f6a4535928cb10f81c356fbd4b4e67c85", 1], ["v01", "6a89916921b8c21be7689812bd0e7032b7ce38162bc701222a0e23db18446aff", 1]]' 'doc03 cites the records doc01 loses, as they are at revision 1'
+$V drive "$RUN" main refused -- forget --source glossary --expected-revision 1
+$V check "$RUN" refused '.error == "IntentError" and (.message | contains("--confirm")) and .details.token == "'"$T"'" and .details.counts.levels == 2' 'without the token the forget is refused with the two-level report'
+
+$V drive "$RUN" main forget -- forget --source glossary --expected-revision 1 --confirm "$T"
+$V check "$RUN" forget '.dependents_failed == null and [.forget.dependents_revised[] | [.identity_data_id, .revision, .level]] == [["718efce2-4251-5f6f-8318-417bb4dd3525", 2, 1], ["bbbc442e-0647-552e-bb54-071604d213fa", 2, 2]]' 'one confirmation writes doc01 revision 2 at level 1, then doc03 revision 2 at level 2'
+$V check "$RUN" forget '(.sources.doc01.decisions | keys) == ["r01"] and .sources.doc01.decisions.r01.status == "unresolved" and (.sources.doc03.decisions | keys) == ["c01"] and .sources.doc03.decisions.c01 == {"input_refs": ["doc03"], "producer_ref": "forget_16e89187-1559-5f97-b957-d86f46315407_r2", "status": "unresolved"} and .sources.doc03.records == {}' 'both levels lose their decisions and doc03 cites nothing of doc01'
+$V check "$RUN" forget '.sources.doc03.producers["forget_16e89187-1559-5f97-b957-d86f46315407_r2"].configuration.cited_records == .sources.doc01.producers["forget_16e89187-1559-5f97-b957-d86f46315407_r2"].configuration.removed_records and .sources.doc01.producers["forget_16e89187-1559-5f97-b957-d86f46315407_r2"].configuration.cited_records == []' 'doc03 removal producer cites what the level-1 producer lists'
+$V check "$RUN" forget '.result.facts == [] and .result.unavailable_sources == []' 'no fact returns and nothing is unavailable'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '.withheld_decisions == [] and [.publications[] | [.revision, .state]] == [[1, "forgotten"], [2, "current"], [2, "current"]] and .recovery_events == []' 'nothing is withheld; doc01 and doc03 are current at revision 2'
+$V drive "$RUN" main rec -- reconcile --source glossary
+$V check "$RUN" rec '.error == "IntentError" and (.message | contains("Forgotten source"))' 'nothing is left for the forget'
+```
+
+**F17 a token is refused when a new level appears.** Proves `forget-cascade-token`. Guide: "The cascade". After a cosmetic glossary edit, the reviewer makes r01 unresolved in place and replaces v01 by v02. doc03's c01 still pins r01's accepted fingerprint and c02 cites v01, which is gone, so neither reads a record the glossary's forget removes: the dry run lists one level. doc03's re-confirm of c01 cites r01 as it is now, unresolved, which the forget does remove, so doc03 becomes a level-2 dependent and the old token is refused with `impact_changed` and a report of two levels. The new token removes r01 and v02 from doc01 and c01 from doc03. c02 still cites v01, which the reviewer took away before the forget, so it stays withheld with `input_removed`.
+
+```bash journey F17
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main edit -- edit-glossary --source glossary --case cosmetic --expected-revision 1
+$V drive "$RUN" main r01 -- replace-decision --source doc01 --decision r01 --expected-revision 1
+$V drive "$RUN" main v01 -- replace-decision --source doc01 --decision v01 --expected-revision 2
+$V check "$RUN" v01 '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["c01", "input_changed", "refresh_needed"], ["c02", "input_removed", "refresh_needed"]]' 'c01 pins an older fingerprint of r01 and c02 a record that is gone'
+$V drive "$RUN" main dry1 -- forget --source glossary --expected-revision 2 --dry-run
+T1=$(val dry1 '.token')
+$V check "$RUN" dry1 '.levels == [{"level": 1, "dependents": ["718efce2-4251-5f6f-8318-417bb4dd3525"]}] and [.dependents[0].decisions[] | [.assignment, .outcome]] == [["r01", "unresolved"], ["v02", "dropped"]]' 'one level: doc03 reads nothing the forget removes'
+
+$V drive "$RUN" main c01 -- reconfirm --source doc03 --decision c01 --expected-revision 1
+$V check "$RUN" c01 '.sources.doc03.saved_revision == 2 and .sources.doc03.records.doc01_r01_r2.representation_revision == 3' 'doc03 re-cites r01 as it is now'
+$V drive "$RUN" main stale -- forget --source glossary --expected-revision 2 --confirm "$T1"
+$V check "$RUN" stale '.error == "IntentError" and (.message | startswith("The impact changed")) and .details.token != "'"$T1"'"' 'the old token is refused'
+$V check "$RUN" stale '[.details.levels[] | .level] == [1, 2] and [.details.dependents[1].decisions[] | [.assignment, .citing[0].input_ref]] == [["c01", "doc01_r01_r2"]]' 'the refusal reports doc03 at level 2 for its new citation'
+$V drive "$RUN" main unchanged -- status
+$V check "$RUN" unchanged '[.publications[] | [.revision, .state]] == [[2, "current"], [3, "current"], [2, "current"]] and .recovery_events == []' 'the refused forget wrote nothing'
+
+$V drive "$RUN" main dry2 -- forget --source glossary --expected-revision 2 --dry-run
+T2=$(val dry2 '.token')
+$V drive "$RUN" main forget -- forget --source glossary --expected-revision 2 --confirm "$T2"
+$V check "$RUN" forget '.dependents_failed == null and [.forget.dependents_revised[] | [.revision, .level]] == [[4, 1], [3, 2]]' 'doc01 revision 4 at level 1 and doc03 revision 3 at level 2'
+$V check "$RUN" forget '(.sources.doc01.decisions | keys) == ["r01"] and .sources.doc03.decisions.c01.status == "unresolved" and (.sources.doc03.records | keys) == ["doc01_v01"]' 'r01 stays unresolved alone, c01 is unresolved and only the citation of v01 remains'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["c02", "input_removed", "refresh_needed"]]' 'c02 waits for its own review, as before the forget'
+```
+
+**F18 a crash at a level-2 removal resumes, and the re-add waits for it.** Proves `forget-cascade-interrupted`. Guide: "The cascade". With `--fault-stage forget_cascade_revision` the glossary is forgotten and doc01's level-1 removal is written, then doc03's level-2 removal fails at `replace_registered`: doc03 is failed at revision 2 and unavailable. The re-add of the glossary is refused while doc03 is unrevised, and the dry run of the forgotten glossary lists doc03 as unfinished. `reconcile --source glossary` finishes doc03's removal from its saved revision, with no new doc01 revision, and resolves its incident. The re-add then publishes the glossary at revision 2 and brings back none of the removed decisions.
+
+```bash journey F18
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main dry -- forget --source glossary --expected-revision 1 --dry-run
+T=$(val dry '.token')
+$V drive "$RUN" main forget -- forget --source glossary --expected-revision 1 --confirm "$T" --fault-stage forget_cascade_revision
+$V check "$RUN" forget '.dependents_failed.code == "recovery_required" and (.dependents_failed.message | contains("Injected failure at replace_registered"))' 'the level-2 removal fails'
+$V check "$RUN" forget '[.forget.dependents_revised[] | [.identity_data_id, .revision, .level]] == [["718efce2-4251-5f6f-8318-417bb4dd3525", 2, 1]] and [.sources.glossary.state, .sources.doc01.state, .sources.doc03.state, .sources.doc03.saved_revision] == ["forgotten", "current", "failed", 2]' 'level 1 is written and doc03 is failed at its removal revision'
+$V check "$RUN" forget '[.result.unavailable_sources[] | [.identity_data_id, .reason]] == [["bbbc442e-0647-552e-bb54-071604d213fa", "publication_failed"]]' 'doc03 is unavailable while its removal is unfinished'
+$V drive "$RUN" main readd -- readd --source glossary --expected-revision 1
+$V check "$RUN" readd '.error == "IntentError" and (.message | contains("has not revised every dependent yet")) and .details.dependents == ["bbbc442e-0647-552e-bb54-071604d213fa"]' 'the re-add waits for the unfinished cascade'
+$V drive "$RUN" main left -- forget --source glossary --expected-revision 1 --dry-run
+$V check "$RUN" left '.forgotten and .unfinished == ["bbbc442e-0647-552e-bb54-071604d213fa"]' 'the forgotten glossary lists doc03 as unfinished'
+
+$V drive "$RUN" main rec -- reconcile --source glossary
+$V check "$RUN" rec '.dependents_failed == null and [.forget.dependents_revised[] | [.identity_data_id, .revision, .level]] == [["bbbc442e-0647-552e-bb54-071604d213fa", 2, 2]] and .sources.doc01.saved_revision == 2' 'reconcile finishes doc03 at level 2 and leaves doc01 alone'
+$V check "$RUN" rec '.sources.doc03 | .state == "current" and .verified_revision == 2 and (.decisions | keys) == ["c01"] and .decisions.c01.status == "unresolved" and .records == {}' 'doc03 finishes its removal revision'
+$V check "$RUN" rec '[.recovery_events[] | [.outcome, (.resolved_at != null)]] == [["restored", true]] and .result.unavailable_sources == []' 'the incident is resolved and nothing is unavailable'
+$V drive "$RUN" main readd2 -- readd --source glossary --expected-revision 1
+$V check "$RUN" readd2 '[.sources.glossary.state, .sources.glossary.saved_revision] == ["current", 2] and (.sources.doc01.decisions | keys) == ["r01"] and (.sources.doc03.decisions | keys) == ["c01"]' 'the glossary is back at revision 2 and the removed decisions stay removed'
+```
+
+**F19 a blocked level-2 dependent waits.** Proves `forget-cascade-blocked`. Guide: "The cascade". doc03's withdrawal fails, so doc03 is a blocked dependent at level 2: the dry run marks it `blocked` and the token covers it. The forget writes doc01's level-1 removal, and doc03 waits with `dependent_unfinished` (the command exits 1). Running the forget again still waits, and the re-add is refused. Finishing doc03's withdrawal after doc01's removal is a tracked follow-up ("Not in this checkpoint" in the forget guide), so the journey stops here.
+
+```bash journey F19
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main wdfail -- withdraw --source doc03 --fault-stage withdraw_contributions
+$V check "$RUN" wdfail '.error == "IntentError" and (.message | contains("Injected failure"))' 'doc03 withdrawal failed'
+$V drive "$RUN" main dry -- forget --source glossary --expected-revision 1 --dry-run
+T=$(val dry '.token')
+$V check "$RUN" dry '[.dependents[] | [.identity_data_id, .level, .state, .blocked]] == [["718efce2-4251-5f6f-8318-417bb4dd3525", 1, "current", false], ["bbbc442e-0647-552e-bb54-071604d213fa", 2, "failed", true]] and .counts.blocked == 1' 'doc03 is a blocked dependent at level 2'
+$V drive "$RUN" main forget -- forget --source glossary --expected-revision 1 --confirm "$T"
+$V check "$RUN" forget '.dependents_failed.code == "dependent_unfinished" and [.sources.glossary.state, .sources.doc01.saved_revision, .sources.doc03.state] == ["forgotten", 2, "failed"]' 'the forget completed, level 1 is written and doc03 waits'
+$V check "$RUN" forget '[.forget.dependents_waiting[] | [.identity_data_id, .operation, .level]] == [["bbbc442e-0647-552e-bb54-071604d213fa", "identity_withdraw", 2]]' 'doc03 is listed as waiting for its withdrawal'
+$V drive "$RUN" main again -- forget --source glossary --expected-revision 1
+$V check "$RUN" again '.dependents_failed.code == "dependent_unfinished" and .forget.dependents_revised == []' 'a second run still waits for doc03'
+$V drive "$RUN" main readd -- readd --source glossary --expected-revision 1
+$V check "$RUN" readd '.error == "IntentError" and .details.dependents == ["bbbc442e-0647-552e-bb54-071604d213fa"]' 'the re-add waits for doc03'
+```
+
 ## Gotchas
 
 - Forget needs `--expected-revision`. Withdraw does not.
 - A forgotten source leaves its row in `status`: its last revision, a tombstone in place of its description, and a plan that keeps identifiers only. `retrieve` neither returns it nor lists it as unavailable.
 - Any source can be forgotten: current, withdrawn, or one whose first publication failed. A failed replacement or withdrawal is finished by its own method first. A dependent's failed replacement or publication is not blocked: the forget applies the removal to its saved revision.
+- A forget's dry run lists `levels`; each dependent has its `level`, the records its removal removes (`removed_records`) and the removed records of other dependents it cites (`cited_records`). Removal revisions are written in level order, and a removal waits (`waits_for`) behind a blocked one whose records it cites.
 - A forget that removes another source's decisions needs `--confirm <token>` from its dry run. A dry run writes nothing and returns before any result file is written. The token changes when the set of affected decisions changes, including a dependent that becomes blocked, changes state or moves to another revision.
 - `drive` exits 1 for an injected failure, a refused forget, a refused `readd` and a forget whose dependent removal stopped. That is the expected result. Check `.error`, `.details` or `.dependents_failed`.
 - `readd` reports `differs_from_forgotten` with `text` and `decisions`, compared with the forgotten revision, not with the caller's earlier files. It never refuses for a difference.

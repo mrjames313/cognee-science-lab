@@ -13,6 +13,7 @@ from typing import Callable, Literal, NamedTuple
 from uuid import NAMESPACE_URL, uuid5
 
 from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION
+from cognee_lab.identity.records import RemovedRecord
 from cognee_lab.identity.models import IdentitySource, Tombstone
 
 REPO = Path(__file__).resolve().parents[1]
@@ -105,6 +106,12 @@ def description(s, revision, variant=0):
             forgotten_document_id=BACKGROUND_DOCUMENT,
             removed_entity_ids=[],
             impact_token=None,
+            removed_records=[
+                RemovedRecord.of(
+                    description(s, revision), "r01", in_place=True
+                )._asdict()
+            ],
+            cited_records=[],
         ),
         run_id=None,
     )

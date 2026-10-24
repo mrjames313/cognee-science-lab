@@ -1,32 +1,47 @@
-"""What forgetting a source does to the sources that read it.
+"""What forgetting a source does to the sources that read it, down every
+chain of citations.
 
 A dependent decision is a resolution, with its group, or a variant whose
 inputs cite the forgotten source: its document's text, a span or chunk of
-it, or an Entity the forget removes. Forget erases the source first and then
-writes each dependent's removal revision: a resolution becomes unresolved,
-a variant is dropped, a reusable recipe that only removed decisions named
+it, an Entity the forget removes, one of its saved records, or a record
+that another dependent's removal removes, as that record was before
+(records.RemovedRecord). Forget erases the source first and then writes
+each dependent's removal revision: a resolution becomes unresolved, a
+variant is dropped, a reusable recipe that only removed decisions named
 goes with them, and inputs nothing cites any more are dropped
-(`removal_revision`). `revisions` yields each dependent's removal
-revision with what it does; `impact` reports them from saved descriptions
-and the forget plan, never the live graph, and its token is what a caller
-confirms; `finish_dependents` writes them. Nothing here is a ledger state:
-a dependent is unfinished while a saved source still cites the forgotten
-document or a removed Entity (`unfinished`).
+(`removal_revision`). The dependents form levels: a dependent that reads
+the forgotten source directly is at level 1, and one that cites a record
+removed at level n is at level n + 1 or below, at its longest path, with
+one removal revision for all it loses (`cascade`). `impact` reports the
+cascade from saved descriptions and the forget plan, never the live graph,
+and its token, over every level, is what a caller confirms;
+`finish_dependents` writes the removal revisions in level order. Nothing
+here is a ledger state: the cascade is derived from the rows each time, so
+a resume after a crash continues where the rows say it stopped
+(`unfinished`).
 """
 
 import json
-from dataclasses import asdict, dataclass
-from typing import Literal, assert_never
+from dataclasses import asdict, dataclass, replace
+from typing import NamedTuple, assert_never
 from uuid import UUID
 
+from .dependency import Citation, Target, citations, read_records
 from .erasure_rules import (
     ERASURE_IMPLEMENTATION,
+    bound_removals,
     corpus_reads,
+    producer_key,
+    removal_claim,
+)
+from .models import Accepted, CorpusObjectInput, IdentitySource
+from .records import (
+    REGISTRY,
+    RemovedRecord,
+    record_type_of,
+    saved_records,
     without_erased,
 )
-from .dependency import Citation, Target, citations
-from .models import Accepted, CorpusObjectInput, IdentitySource
-from .records import saved_records
 from .retirement import (
     Dependent,
     SourceIds,
@@ -35,6 +50,7 @@ from .retirement import (
     retiring_by_forget,
     source_ids,
 )
+from .storage import PublicationRow
 from .validation import IntentError, decision_inputs, naming, object_digest
 
 RESIDUE = (
@@ -45,29 +61,40 @@ RESIDUE = (
 
 @dataclass(frozen=True)
 class Removal:
-    """One decision a forget removes from a dependent."""
+    """One decision a forget removes from a dependent, and what is left of
+    it (`outcome`: its status, or dropped)."""
 
     assignment: str
-    kind: Literal["resolution", "variant"]
-    outcome: Literal["unresolved", "dropped"]
+    record_type: str
+    outcome: str
     citing: tuple[Citation, ...]
 
 
 @dataclass(frozen=True)
 class DependentImpact:
     """What a forget does to one other source. `blocked` marks a source whose
-    own attempt is pending or failed: its removal waits for that attempt."""
+    own attempt is pending or failed: its removal waits for that attempt.
+    `level` is its place in the cascade, `removed_records` the records its
+    removal removes and `cited_records` the removed records of other
+    dependents it cites."""
 
     dataset_id: str
     identity_data_id: str
     revision: int
     state: str
     blocked: bool
+    level: int
     decisions: tuple[Removal, ...]
     dropped_entities: tuple[str, ...]
     kept_entities: tuple[str, ...]
     unlinked_mentions: tuple[str, ...]
     dropped_inputs: tuple[str, ...]
+    removed_records: tuple[RemovedRecord, ...]
+    cited_records: tuple[RemovedRecord, ...]
+
+
+def records_json(records) -> list[dict]:
+    return [r._asdict() for r in records]
 
 
 @dataclass(frozen=True)
@@ -79,9 +106,10 @@ class Impact:
 
     @property
     def token(self) -> str:
-        """A digest of the affected-decision set, which a caller confirms.
-        It covers each dependent's revision and state, so it changes
-        whenever anything the report shows could change."""
+        """A digest of the affected-decision set over every level, which a
+        caller confirms. It covers each dependent's revision, state, level
+        and the records it removes and cites, so it changes whenever
+        anything the report shows could change."""
         return object_digest(
             dict(
                 source=dict(
@@ -95,17 +123,20 @@ class Impact:
                         identity_data_id=d.identity_data_id,
                         revision=d.revision,
                         state=d.state,
+                        level=d.level,
                         assignments=sorted(r.assignment for r in d.decisions),
                         decisions=[
                             dict(
                                 assignment=r.assignment,
-                                kind=r.kind,
+                                record_type=r.record_type,
                                 outcome=r.outcome,
                                 citing=[c._asdict() for c in r.citing],
                             )
                             for r in d.decisions
                         ],
                         dropped_entities=list(d.dropped_entities),
+                        removed_records=records_json(d.removed_records),
+                        cited_records=records_json(d.cited_records),
                         blocked=d.blocked,
                     )
                     for d in self.dependents
@@ -114,9 +145,11 @@ class Impact:
         )
 
 
-def removal_producer(ids: SourceIds, removed, token) -> dict:
+def removal_producer(ids: SourceIds, removed, token, removed_records, cited_records):
     """The producer a removal revision names: it removed what the forget of
-    this source took away, as the caller confirmed it."""
+    this source took away, as the caller confirmed it, and lists the
+    records it removed and the removed records it cites, which bind the
+    removals below it (erasure_rules.bound_removals)."""
     return dict(
         method="captured_fixture",
         implementation=ERASURE_IMPLEMENTATION,
@@ -126,13 +159,11 @@ def removal_producer(ids: SourceIds, removed, token) -> dict:
             forgotten_document_id=str(ids.original_data_id),
             removed_entity_ids=sorted(str(e) for e in removed),
             impact_token=token,
+            removed_records=records_json(sorted(removed_records)),
+            cited_records=records_json(sorted(cited_records)),
         ),
         run_id=None,
     )
-
-
-def producer_key(ids: SourceIds, revision: int) -> str:
-    return f"forget_{ids.identity_data_id}_r{revision}"
 
 
 def removal_writer(row):
@@ -162,25 +193,24 @@ def blocked(row) -> bool:
     return removal_writer(row) is None
 
 
-def removal_revision(row, cited, ids: SourceIds, removed, readers, token=None):
+def removal_revision(row, cited, ids: SourceIds, removed, readers, records, token=None):
     """The dependent's removal revision, and what it does. `cited` are the
     inputs through which the row's description reads what the forget
-    removed. A recipe that a removed decision named and no remaining
-    decision names goes, unless a saved source, this one included, still
-    cites that Entity as a corpus input (`readers`): dropping the last
-    declaration would take the Entity out of the graph under a reader. A
-    current row takes its next revision; a failed replacement or
-    publication keeps its saved revision, which that attempt then finishes
-    with."""
+    removed, and `records` the removed records the cascade knows of. Each
+    citing decision is removed as its record type says (records.REGISTRY).
+    A recipe that a removed decision named and no remaining decision names
+    goes, unless a saved source, this one included, still cites that Entity
+    as a corpus input (`readers`): dropping the last declaration would take
+    the Entity out of the graph under a reader. A current row takes its
+    next revision; a failed replacement or publication keeps its saved
+    revision, which that attempt then finishes with. The level is the
+    cascade's to set."""
     from .revisions import next_revision
 
     reader = row.description
     erased = set(cited)
-    own = reader.original_input_ref
     by_decision = decision_inputs(reader)
     citing = {a for a, inputs in by_decision.items() if inputs & erased}
-    resolutions = {k: d for k, d in reader.mention_resolutions.items() if k in citing}
-    variants = {k: v for k, v in reader.variant_assignments.items() if k in citing}
     remaining = set(by_decision) - citing
     mentions = {g.entity_id for g in reader.mention_groups.values()}
     candidates = (
@@ -189,21 +219,28 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, token=None):
         - mentions
     ) & set(reader.entity_constructions)
     revision = reader.revision + 1 if row.state == "current" else reader.revision
-    key = producer_key(ids, revision)
+    key = producer_key(ids.identity_data_id, revision)
+    in_place = row.state != "current" and not blocked(row)
+    removed_records = {RemovedRecord.of(reader, k, in_place=in_place) for k in citing}
+    cited_records = read_records(reader, records)
+    after = {}
+    for k in sorted(citing):
+        kind = REGISTRY[record_type_of(reader, k)]
+        after[k] = (kind.field, kind.removed(reader, k, erased, key))
 
     def change(payload):
-        for k, d in resolutions.items():
-            payload["mention_resolutions"][k] = dict(
-                group_ref=d.group_ref,
-                status="unresolved",
-                input_refs=without_erased(d.input_refs, erased, own),
-                producer_ref=key,
-            )
-        for k in variants:
-            payload["variant_assignments"].pop(k)
+        for k, (field, record) in after.items():
+            if record is None:
+                payload[field].pop(k)
+            else:
+                payload[field][k] = record.model_dump(mode="json", exclude_none=True)
         for group in payload["mention_groups"].values():
-            group["input_refs"] = without_erased(group["input_refs"], erased, own)
-        payload["producers"][key] = removal_producer(ids, removed, token)
+            group["input_refs"] = without_erased(
+                group["input_refs"], erased, reader.original_input_ref
+            )
+        payload["producers"][key] = removal_producer(
+            ids, removed, token, removed_records, cited_records
+        )
 
     stripped = next_revision(reader, change, revision=revision)
     read = {
@@ -222,52 +259,128 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, token=None):
         revision=row.revision,
         state=row.state,
         blocked=blocked(row),
+        level=0,
         decisions=tuple(
             Removal(
-                a,
-                "resolution" if a in resolutions else "variant",
-                "unresolved" if a in resolutions else "dropped",
-                tuple(cited[k] for k in sorted(by_decision[a] & erased)),
+                k,
+                record_type_of(reader, k),
+                "dropped" if record is None else record.status,
+                tuple(cited[i] for i in sorted(by_decision[k] & erased)),
             )
-            for a in sorted(citing)
+            for k, (_, record) in after.items()
         ),
         dropped_entities=tuple(sorted(str(e) for e in dropped)),
         kept_entities=tuple(sorted(str(e) for e in candidates - dropped)),
         unlinked_mentions=tuple(
             sorted(
                 str(reader.mention_groups[d.group_ref].entity_id)
-                for d in resolutions.values()
-                if isinstance(d, Accepted)
+                for k, d in reader.mention_resolutions.items()
+                if k in citing and isinstance(d, Accepted)
             )
         ),
         dropped_inputs=tuple(sorted(set(reader.inputs) - set(revised.inputs))),
+        removed_records=tuple(sorted(removed_records)),
+        cited_records=tuple(sorted(cited_records)),
     )
 
 
-def dependents_of(rows, ids: SourceIds, removed):
-    """Each saved source other than the forgotten one that reads its
-    document, a removed Entity or one of its saved records, with the inputs
-    through which it does."""
-    target = Target(
-        ids.original_data_id,
-        frozenset(UUID(str(e)) for e in removed),
-        frozenset([ids.identity_data_id]),
+class Step(NamedTuple):
+    """One removal revision the cascade still has to write, in level order:
+    a dependent's planned removal (with its impact), or the retry of a
+    removal revision that failed (impact None), with its saved
+    description."""
+
+    row: PublicationRow
+    description: IdentitySource
+    impact: DependentImpact | None
+    level: int
+    cited_records: frozenset[RemovedRecord]
+
+
+def removal_of(row, ids: SourceIds):
+    """The claim of a failed row's removal revision for this forget: a
+    publication, replacement or text change whose saved revision introduced
+    this source's removal producer, or None. A later revision that only
+    carries that producer forward is not one."""
+    if row.failed_attempt is None or blocked(row):
+        return None
+    producer = row.description.producers.get(
+        producer_key(ids.identity_data_id, row.revision)
     )
-    for row in sorted(rows, key=lambda r: r.source):
-        if row.is_retired or row.source == str(ids.identity_data_id):
-            continue
-        if cited := citations(row.description, target):
-            yield row, cited
+    return removal_claim(producer) if producer is not None else None
 
 
-def revisions(rows, ids: SourceIds, removed, token=None):
-    """Each dependent's row, its removal revision and what the removal does,
-    each row parsed once. `impact` reports them; `finish_dependents` writes
-    them."""
+def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
+    """Every removal revision the forget of this source still has to write,
+    derived from the rows, in level order. The records that written
+    removals removed (erasure_rules.bound_removals), that failed removal
+    revisions remove and that planned ones will remove are found to a
+    fixpoint: each saved source that reads the forgotten source, or a
+    removed record as it was before, is a dependent with one removal
+    revision for all it reads. A dependent's level is one more than the
+    deepest removal it cites, or 1."""
+    forgotten = str(ids.identity_data_id)
+    removed = frozenset(UUID(str(e)) for e in removed)
+    live = sorted(
+        (r for r in rows if not r.is_retired and r.source != forgotten),
+        key=lambda r: r.source,
+    )
+    written = bound_removals(rows, ids.original_data_id, removed)
+    retries = {r.source: (r, claim) for r in live if (claim := removal_of(r, ids))}
+    base = Target(ids.original_data_id, removed, frozenset([ids.identity_data_id]))
     reads = {r.source: corpus_reads(r.description) for r in rows if not r.is_retired}
-    for row, cited in dependents_of(rows, ids, removed):
-        readers = set().union(*(e for k, e in reads.items() if k != row.source))
-        yield row, *removal_revision(row, cited, ids, removed, readers, token)
+    remover = {
+        record: source
+        for source, (_, claim) in retries.items()
+        for record in claim.removed_records
+    }
+    found: dict[str, tuple] = {}
+    grew = True
+    while grew:
+        grew = False
+        records = frozenset(written) | frozenset(remover)
+        target = base._replace(records=records)
+        for row in live:
+            if row.source in retries:
+                continue
+            cited = citations(row.description, target)
+            if not cited or found.get(row.source, (None,))[0] == cited:
+                continue
+            readers = set().union(*(e for k, e in reads.items() if k != row.source))
+            revised, impact = removal_revision(
+                row, cited, ids, removed, readers, records, token
+            )
+            found[row.source] = (cited, row, revised, impact)
+            remover.update(dict.fromkeys(impact.removed_records, row.source))
+            grew = True
+
+    cited_of = {s: claim.cited_records for s, (_, claim) in retries.items()}
+    cited_of.update({s: frozenset(f[3].cited_records) for s, f in found.items()})
+    levels: dict[str, int] = {}
+
+    def level(source, seen=()):
+        if source in seen:
+            raise IntentError(
+                "citation_cycle", "A chain of saved-record citations leads back here"
+            )
+        if source not in levels:
+            levels[source] = 1 + max(
+                (
+                    written[r] if r in written else level(remover[r], (*seen, source))
+                    for r in cited_of[source]
+                ),
+                default=0,
+            )
+        return levels[source]
+
+    steps = [
+        Step(row, row.description, None, level(s), cited_of[s])
+        for s, (row, _) in retries.items()
+    ] + [
+        Step(row, revised, replace(impact, level=level(s)), level(s), cited_of[s])
+        for s, (_, row, revised, impact) in found.items()
+    ]
+    return tuple(sorted(steps, key=lambda s: (s.level, s.row.source)))
 
 
 def impact_of(ids: SourceIds, revision, removed, rows) -> Impact:
@@ -275,7 +388,7 @@ def impact_of(ids: SourceIds, revision, removed, rows) -> Impact:
         ids,
         revision,
         tuple(sorted(str(e) for e in removed)),
-        tuple(found for _, _, found in revisions(rows, ids, removed)),
+        tuple(s.impact for s in cascade(rows, ids, removed) if s.impact),
     )
 
 
@@ -288,7 +401,7 @@ def impact(source, plan, rows) -> Impact:
 
 def remaining(tombstone, rows) -> Impact:
     """What a completed forget has still to do: the removal revisions of
-    the dependents it has not revised yet."""
+    the dependents it has not revised yet, at every level."""
     return impact_of(
         source_ids(tombstone),
         tombstone.revision,
@@ -307,55 +420,23 @@ def under_way(rows):
             yield remaining(row.tombstone, rows)
 
 
-def removed_records(found: Impact) -> set[tuple[str, str]]:
-    """(source, record key) of each record a removal revision of this
-    impact removes: a resolution it makes unresolved or a variant it drops.
-    J2 widens this to every level of a chain; the citation shape is already
-    generic, but removals are decisions."""
-    return {
-        (d.identity_data_id, r.assignment)
-        for d in found.dependents
-        for r in d.decisions
-    }
-
-
-def impact_checked(found: Impact, rows) -> Impact:
-    """`found`, refused (`chain_erasure_pending`) when a removal revision
-    would remove a record that a saved source other than the forgotten one
-    cites. Removing the citers in turn, level by level, is checkpoint J2,
-    which deletes this refusal. Chains did not exist before saved-record
-    citations, so it removes no earlier capability. A direct citer of the
-    forgotten source's own records is an ordinary dependent."""
-    removing = removed_records(found)
-    forgotten = str(found.source.identity_data_id)
-    hits = [
-        dict(
-            identity_data_id=row.source,
-            input_ref=key,
-            cited_source=str(item.identity_data_id),
-            record_id=item.record_id,
-        )
-        for row in sorted(rows, key=lambda r: r.source)
-        if not row.is_retired and row.source != forgotten
-        for key, item in sorted(saved_records(row.description).items())
-        if (str(item.identity_data_id), item.record_id) in removing
-    ]
-    if hits:
-        raise IntentError(
-            "chain_erasure_pending",
-            "This forget would remove a decision another source cites; erasure down a chain of citations is not built yet",
-            details=dict(citations=hits),
-        )
-    return found
+def removed_records(found: Impact) -> set[RemovedRecord]:
+    """Each record a removal revision of this impact removes, at every
+    level, as it is before the removal."""
+    return {r for d in found.dependents for r in d.removed_records}
 
 
 def refuse_retiring_inputs(source, rows):
     """Refuse a description that reads what a forget not finished removes:
     the document, an Entity or a saved record of a source whose forget is
     pending or failed, or a record that a removal revision of a pending,
-    failed or completed forget has still to remove. Admitting it would
-    leave that forget refused by its new dependent, the source
-    half-forgotten, or a citation of a record the forget then removes."""
+    failed or completed forget has still to remove, at any level, as that
+    record is now. The cascade is simulated from the rows (`under_way`), so
+    once a forget is confirmed what it removes can only shrink. Admitting
+    such a description would leave that forget refused by its new
+    dependent, the source half-forgotten, or a citation of a record the
+    cascade then removes without its citer. A citation of a removed record
+    as it is after its removal reads nothing the forget removes."""
     own = (str(source.dataset_id), str(source.identity_data_id))
     found = []
     for row in rows:
@@ -378,7 +459,7 @@ def refuse_retiring_inputs(source, rows):
                 consumed=str(item.identity_data_id),
             )
             for key, item in sorted(cited.items())
-            if (str(item.identity_data_id), item.record_id) in doomed
+            if any(r.reads(item) for r in doomed)
         ]
     if found:
         raise IntentError(
@@ -388,43 +469,30 @@ def refuse_retiring_inputs(source, rows):
         )
 
 
-def removal_of(row, ids: SourceIds) -> bool:
-    """Whether a failed row is a removal revision for this forget: a
-    publication, replacement or text change whose saved revision introduced
-    this source's removal producer. A later revision that only carries that
-    producer forward is not."""
-    return (
-        row.failed_attempt is not None
-        and not blocked(row)
-        and producer_key(ids, row.revision) in row.description.producers
+def unfinished(tombstone, rows) -> list:
+    """The saved sources a completed forget has not revised yet, at every
+    level: a dependent the cascade still finds in the rows, and a removal
+    revision that failed. Derived from the rows, not stored."""
+    steps = cascade(rows, source_ids(tombstone), tombstone.removed_entity_ids)
+    return sorted((s.row for s in steps), key=lambda r: r.source)
+
+
+def dependent_json(d: DependentImpact) -> dict:
+    return dict(
+        asdict(d),
+        decisions=[
+            dict(asdict(r), citing=[c._asdict() for c in r.citing]) for r in d.decisions
+        ],
+        removed_records=records_json(d.removed_records),
+        cited_records=records_json(d.cited_records),
     )
 
 
-def unfinished(tombstone, rows) -> list:
-    """The saved sources a completed forget has not revised yet: a source
-    that still reads the forgotten document or a removed Entity, and a
-    removal revision that failed. Derived from the rows, not stored."""
-    ids = source_ids(tombstone)
-    removed = set(tombstone.removed_entity_ids)
-    found = {row.source: row for row, _ in dependents_of(rows, ids, removed)}
-    found.update({r.source: r for r in rows if removal_of(r, ids)})
-    return [found[k] for k in sorted(found)]
-
-
 def report(impact: Impact, *, plan, description, events) -> dict:
-    """The dry run: what a forget removes from other sources, the traces its
-    tombstone scrubs and the token to confirm."""
-    dependents = [
-        dict(
-            asdict(d),
-            decisions=[
-                dict(asdict(r), citing=[c._asdict() for c in r.citing])
-                for r in d.decisions
-            ],
-        )
-        for d in impact.dependents
-    ]
+    """The dry run: what a forget removes from other sources, level by
+    level, the traces its tombstone scrubs and the token to confirm."""
     decisions = [r for d in impact.dependents for r in d.decisions]
+    levels = sorted({d.level for d in impact.dependents})
     return dict(
         dry_run=True,
         source=dict(
@@ -436,9 +504,19 @@ def report(impact: Impact, *, plan, description, events) -> dict:
         confirmation_required=bool(impact.dependents),
         token=impact.token,
         removed_entities=list(impact.removed_entities),
-        dependents=dependents,
+        dependents=[dependent_json(d) for d in impact.dependents],
+        levels=[
+            dict(
+                level=n,
+                dependents=[
+                    d.identity_data_id for d in impact.dependents if d.level == n
+                ],
+            )
+            for n in levels
+        ],
         counts=dict(
             dependents=len(impact.dependents),
+            levels=len(levels),
             blocked=sum(d.blocked for d in impact.dependents),
             decisions=len(decisions),
             unresolved=sum(r.outcome == "unresolved" for r in decisions),
@@ -509,49 +587,60 @@ async def write_publication(publisher, row, description, revise):
     )
 
 
+def failing(fault, step: Step) -> bool:
+    """Whether a dependents fault fails this removal revision:
+    `forget_dependent_revision` fails each one, `forget_cascade_revision`
+    each one below level 1."""
+    return fault == "forget_dependent_revision" or (
+        fault == "forget_cascade_revision" and step.level > 1
+    )
+
+
 async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
-    """Write each unfinished dependent's removal revision after the forget
-    completed, each under its own writer reservation (`removal_writer`),
+    """Write the cascade's removal revisions after the forget completed, in
+    level order, each under its own writer reservation (`removal_writer`),
     from `rows` as the caller read them. A failed removal revision resumes
     with its saved description. A dependent whose own attempt is pending,
     or whose withdrawal or forget failed, waits (`dependent_unfinished`)
-    until that attempt finishes. Stops at the first failure and reports it,
-    not raised: the forget before it already completed. `fault` is one of
-    forget.DEPENDENT_FAULTS: `forget_dependents` stops before the first
-    revision begins, when there is one; `forget_dependent_revision` fails
-    each removal revision."""
+    until that attempt finishes, and so does every removal below it that
+    cites a record it removes (`waits_for`): its records are not removed
+    yet, and the removals below bind only to written ones. Stops at the
+    first failure and reports it, not raised: the forget before it already
+    completed. `fault` is one of forget.DEPENDENT_FAULTS:
+    `forget_dependents` stops before the first revision begins, when there
+    is one; the others fail removal revisions (`failing`)."""
     ids = source_ids(tombstone)
-    removed = set(tombstone.removed_entity_ids)
-    done, waiting = [], []
+    done, waiting, held = [], [], set()
     try:
-        todo = unfinished(tombstone, rows)
-        if todo and fault == "forget_dependents":
+        steps = cascade(rows, ids, tombstone.removed_entity_ids, tombstone.impact_token)
+        if steps and fault == "forget_dependents":
             raise IntentError(
                 "injected_failure",
                 "Injected failure before the dependents' removal revisions",
             )
-        planned = {
-            row.source: revised
-            for row, revised, _ in revisions(rows, ids, removed, tombstone.impact_token)
-        }
-        for row in todo:
-            if (write := removal_writer(row)) is None:
+        for step in steps:
+            row = step.row
+            behind = sorted({r.identity_data_id for r in step.cited_records} & held)
+            write = removal_writer(row)
+            if write is None or behind:
                 waiting.append(
                     dict(
                         identity_data_id=row.source,
                         state=row.state,
                         operation=row.operation,
+                        level=step.level,
+                        waits_for=behind,
                     )
                 )
+                held.add(row.source)
                 continue
-            description = (
-                row.description if removal_of(row, ids) else planned[row.source]
-            )
-            await write(
-                publisher, row, description, fault == "forget_dependent_revision"
-            )
+            await write(publisher, row, step.description, failing(fault, step))
             done.append(
-                dict(identity_data_id=row.source, revision=description.revision)
+                dict(
+                    identity_data_id=row.source,
+                    revision=step.description.revision,
+                    level=step.level,
+                )
             )
     except Exception as exc:
         code = exc.code if isinstance(exc, IntentError) else type(exc).__name__
@@ -564,7 +653,7 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
     if waiting:
         failed = dict(
             code="dependent_unfinished",
-            message="A dependent's own attempt is pending, or its withdrawal or forget failed; finish it, then run forget or reconcile on the forgotten source",
+            message="A dependent's own attempt is pending, or its withdrawal or forget failed, or a removal above it waits; finish that attempt, then run forget or reconcile on the forgotten source",
         )
     return dict(
         dependents_revised=done,

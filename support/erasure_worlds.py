@@ -2,16 +2,28 @@
 
 A dependent of a forgotten glossary loses the decisions that cite it. Each
 builder makes the old revision cite the glossary's entry, or an Entity the
-forget removed, and the new revision the removal, whole, partial or
-overreaching, under the removal producer the forget names. The rows state
-the outcomes as `DECISIONS` does. A removal changes nothing else, so its
-rows need a steady world, where every group continues and nothing is new.
+forget removed, or a record that a removal above it removed, and the new
+revision the removal, whole, partial or overreaching, under the removal
+producer the forget names. The rows state the outcomes as `DECISIONS`
+does. A removal changes nothing else, so its rows need a steady world,
+where every group continues and nothing is new. The removal producer lists
+what its revision removes (`settle`) unless a row states it.
 """
 
+import json
 from uuid import UUID, uuid5
 
 from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION, Erasures
-from dependency_worlds import add_glossary, cite, glossary_span, saved_record
+from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.records import RemovedRecord
+from cognee_lab.identity.validation import text_digest
+from dependency_worlds import (
+    add_glossary,
+    cite,
+    cited_source,
+    glossary_span,
+    saved_record,
+)
 from occurrence_worlds import (
     ADMIT,
     CONTINUING,
@@ -28,6 +40,8 @@ from occurrence_worlds import (
 
 STEADY = "steady"
 ERASER = "forget_gloss_r2"
+# The removed_records an eraser leaves for `settle` to fill.
+AUTO = "auto"
 UNRELATED = refuse("erasure_unrelated")
 INCOMPLETE = refuse("erasure_incomplete")
 UNBOUND = refuse("erasure_unbound")
@@ -45,25 +59,48 @@ def read_entity(identity):
     return str(uuid5(UUID(str(identity)), "read:entity"))
 
 
+def upstream(payload) -> str:
+    """A source the glossary's forget reached first: its removal, written
+    and bound, removed its resolution r1."""
+    return str(uuid5(UUID(payload["dataset_id"]), "upstream-source"))
+
+
+def upstream_record(payload, **changes) -> dict:
+    """r1 of the upstream source as its removal lists it: the fingerprint it
+    had and the last revision that held it."""
+    return dict(
+        dict(
+            identity_data_id=upstream(payload),
+            record_type="mention_resolution",
+            record_id="r1",
+            content_sha256=text_digest("record"),
+            last_revision=1,
+        ),
+        **changes,
+    )
+
+
 def forgotten(old) -> Erasures:
     """What the ledger lets every world's removal claim: the glossary is
     forgotten and its forget removed one Entity; another saved source reads
     one Entity as a corpus input. The glossary's identity source is
-    dependency_worlds.cited_source, whose resolution r1 a world may cite."""
+    dependency_worlds.cited_source, whose resolution r1 a world may cite.
+    A bound removal of the upstream source removed its r1."""
+    payload = dict(dataset_id=str(old.dataset_id))
+    gloss = uuid5(old.dataset_id, "gloss")
     return Erasures(
-        {
-            uuid5(old.dataset_id, "gloss"): frozenset(
-                {UUID(removed_entity(old.identity_data_id))}
-            )
-        },
+        {gloss: frozenset({UUID(removed_entity(old.identity_data_id))})},
         frozenset({UUID(read_entity(old.identity_data_id))}),
-        {uuid5(old.dataset_id, "gloss"): uuid5(old.dataset_id, "cited-source")},
+        {gloss: uuid5(old.dataset_id, "cited-source")},
+        {gloss: frozenset({RemovedRecord(**upstream_record(payload))})},
     )
 
 
-def eraser(payload, *, document=None, removed=None):
+def eraser(payload, *, document=None, removed=None, cited=(), records=AUTO):
     """The removal producer, naming the forgotten document and Entities: by
-    default the glossary and the one Entity its forget removed."""
+    default the glossary and the one Entity its forget removed. It cites
+    the removed records `cited` and lists `records` as removed, by default
+    what the revision removes (`settle`)."""
     if removed is None:
         removed = [removed_entity(payload["identity_data_id"])]
     payload["producers"][ERASER] = dict(
@@ -71,11 +108,33 @@ def eraser(payload, *, document=None, removed=None):
         implementation=ERASURE_IMPLEMENTATION,
         version="0.1",
         configuration=dict(
+            forgotten_identity_data_id=cited_source(payload),
             forgotten_document_id=document or glossary_id(payload),
             removed_entity_ids=list(removed),
+            removed_records=records,
+            cited_records=list(cited),
         ),
         run_id=None,
     )
+
+
+def settle(old, new):
+    """The removal producer's removed_records, where the row left them to
+    `settle`: each old decision the new revision changes or drops, as the
+    old revision held it."""
+    producer = new["producers"].get(ERASER)
+    if producer is None or producer["configuration"]["removed_records"] != AUTO:
+        return
+    before = IdentitySource.model_validate_json(json.dumps(old))
+    changed = sorted(
+        key
+        for field in ("mention_resolutions", "variant_assignments")
+        for key, record in old[field].items()
+        if new[field].get(key) != record
+    )
+    producer["configuration"]["removed_records"] = [
+        RemovedRecord.of(before, key)._asdict() for key in changed
+    ]
 
 
 def reads_glossary(payload, *records):
@@ -251,6 +310,84 @@ def drop_record_citing_variant(old, new, ctx):
     new["variant_assignments"].pop("v01")
     new["entity_constructions"].pop(HC)
     eraser(new)
+
+
+def cites_upstream(payload, rid, *, revision=1, digest="record"):
+    """`rid` cites the upstream source's r1, by default as its bound
+    removal removed it."""
+    saved_record(
+        payload, "up", identity=upstream(payload), revision=revision, digest=digest
+    )
+    cite(payload, rid, "up")
+
+
+def unresolve_upstream_citer(*, cited=True, pin=None, records=AUTO):
+    """The continuing resolution cites the upstream source's removed r1,
+    pinned as `pin` says, and the removal makes it unresolved, citing the
+    removed record when `cited`."""
+
+    def change(old, new, ctx):
+        rid = continuing_rid(ctx)
+        cites_upstream(old, rid, **(pin or {}))
+        unresolved(new, rid)
+        eraser(new, cited=[upstream_record(new)] if cited else [], records=records)
+
+    return change
+
+
+def keep_upstream_citer(old, new, ctx):
+    rid = continuing_rid(ctx)
+    for payload in (old, new):
+        cites_upstream(payload, rid)
+    eraser(new, cited=[upstream_record(new)])
+
+
+def claim_an_unbound_record(old, new, ctx):
+    """The removal cites a record no bound removal lists: the upstream r1
+    at another fingerprint."""
+    rid = continuing_rid(ctx)
+    cites_upstream(old, rid, digest="other")
+    unresolved(new, rid)
+    eraser(new, cited=[upstream_record(new, content_sha256=text_digest("other"))])
+
+
+ELDER = "forget_elder_r1"
+
+
+def elder_removal(payload, **config):
+    """A removal producer an earlier revision of this source wrote for
+    another forget."""
+    dataset = UUID(payload["dataset_id"])
+    payload["producers"][ELDER] = dict(
+        method="captured_fixture",
+        implementation=ERASURE_IMPLEMENTATION,
+        version="0.1",
+        configuration=dict(
+            dict(
+                forgotten_identity_data_id=str(uuid5(dataset, "elder")),
+                forgotten_document_id=str(uuid5(dataset, "elder-doc")),
+                removed_entity_ids=[],
+                removed_records=[],
+                cited_records=[],
+            ),
+            **config,
+        ),
+        run_id=None,
+    )
+
+
+def keep_elder_removal(old, new, ctx):
+    elder_removal(old)
+    elder_removal(new)
+
+
+def widen_elder_removal(old, new, ctx):
+    elder_removal(old)
+    elder_removal(new, removed_records=[upstream_record(new)])
+
+
+def drop_elder_removal(old, new, ctx):
+    elder_removal(old)
 
 
 # A removal is an unchanged-text revision: with changed text its groups
@@ -439,5 +576,77 @@ ERASURE_DECISIONS = [
         strip_the_group(keep=True),
         text_edit=INCOMPLETE,
         same_text=INCOMPLETE,
+    ),
+    decision(
+        "erasure unresolves the continuing resolution citing an upstream removed record",
+        "rule 6",
+        [CONTINUING, STEADY],
+        unresolve_upstream_citer(),
+        text_edit=UNRELATED,
+        same_text=ADMIT,
+    ),
+    decision(
+        "erasure unresolves an upstream record's citer without naming the record",
+        "rule 6",
+        [CONTINUING, STEADY],
+        unresolve_upstream_citer(cited=False),
+        text_edit=UNBOUND,
+        same_text=UNBOUND,
+    ),
+    decision(
+        "erasure names an upstream record the citer pinned at another fingerprint",
+        "rule 6",
+        [CONTINUING, STEADY],
+        claim_an_unbound_record,
+        text_edit=UNBOUND,
+        same_text=UNBOUND,
+    ),
+    decision(
+        "erasure names an upstream record the citer pinned after its removal",
+        "rule 6",
+        [CONTINUING, STEADY],
+        unresolve_upstream_citer(pin=dict(revision=2)),
+        text_edit=UNBOUND,
+        same_text=UNBOUND,
+    ),
+    decision(
+        "erasure keeps the resolution citing an upstream removed record",
+        "rule 6",
+        [CONTINUING, STEADY],
+        keep_upstream_citer,
+        text_edit=INCOMPLETE,
+        same_text=INCOMPLETE,
+    ),
+    decision(
+        "erasure lists no removed record",
+        "rule 6",
+        [CONTINUING, STEADY],
+        unresolve_upstream_citer(records=[]),
+        text_edit=UNRELATED,
+        same_text=INCOMPLETE,
+    ),
+    decision(
+        "an earlier removal producer kept unchanged",
+        "rule 6",
+        [STEADY],
+        keep_elder_removal,
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "an earlier removal producer widened",
+        "rule 6",
+        [STEADY],
+        widen_elder_removal,
+        text_edit=refuse("removal_producer_changed"),
+        same_text=refuse("removal_producer_changed"),
+    ),
+    decision(
+        "an earlier removal producer dropped",
+        "rule 6",
+        [STEADY],
+        drop_elder_removal,
+        text_edit=refuse("removal_producer_changed"),
+        same_text=refuse("removal_producer_changed"),
     ),
 ]

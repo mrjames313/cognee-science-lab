@@ -202,7 +202,7 @@ def main():
         parser.error(str(exc))
     with environment:
         if args.command in GLOSSARY_COMMANDS or (
-            args.command in {"reconcile", "forget", "readd"}
+            args.command in {"reconcile", "forget", "readd", "withdraw"}
             and kind == "glossary-fixture"
         ):
             from .glossary_fixture import run

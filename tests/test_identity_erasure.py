@@ -14,13 +14,10 @@ from cognee_lab.identity.erasure_rules import (
     check_erasure_retry,
     check_retry_chain,
     erasures_of,
-)
-from cognee_lab.identity.erasure import (
-    impact,
     producer_key,
-    revisions,
-    unfinished,
 )
+from cognee_lab.identity.erasure import cascade, impact, unfinished
+from cognee_lab.identity.records import RemovedRecord
 from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.retirement import contribution_triples, source_ids
@@ -124,10 +121,8 @@ def reader_of(source_payload, read, *, entity=None, scope=None):
 def removal(reader, gloss, *, token=None, state="current", plan=None):
     """The reader's removal revision for the forget of `gloss`, with what it
     does."""
-    ((_, revised, found),) = revisions(
-        [row_of(reader, state, plan)], source_ids(gloss), set(), token
-    )
-    return revised, found
+    (step,) = cascade([row_of(reader, state, plan)], source_ids(gloss), set(), token)
+    return step.description, step.impact
 
 
 def test_a_reader_of_the_forgotten_span_loses_both_decisions(source_payload):
@@ -137,9 +132,10 @@ def test_a_reader_of_the_forgotten_span_loses_both_decisions(source_payload):
     (dependent,) = found.dependents
     assert dependent.identity_data_id == str(doc01.identity_data_id)
     assert not dependent.blocked
-    assert [(r.assignment, r.kind, r.outcome) for r in dependent.decisions] == [
-        ("r01", "resolution", "unresolved"),
-        ("v01", "variant", "dropped"),
+    assert dependent.level == 1 and dependent.cited_records == ()
+    assert [(r.assignment, r.record_type, r.outcome) for r in dependent.decisions] == [
+        ("r01", "mention_resolution", "unresolved"),
+        ("v01", "variant_assignment", "dropped"),
     ]
     assert [c._asdict() for c in dependent.decisions[0].citing] == [
         dict(
@@ -181,15 +177,21 @@ def test_the_removal_revision_is_admitted_and_cites_nothing_forgotten(
     r01 = revised.mention_resolutions["r01"]
     assert r01.status == "unresolved"
     assert r01.input_refs == ["doc01", "existing_A"]
-    assert r01.producer_ref == producer_key(ids, 2)
+    assert r01.producer_ref == producer_key(ids.identity_data_id, 2)
     assert "v01" not in revised.variant_assignments
     assert HC not in revised.entity_constructions
     assert {"gloss", "gloss_hc"}.isdisjoint(revised.inputs)
-    assert revised.producers[producer_key(ids, 2)].configuration == dict(
+    assert revised.producers[
+        producer_key(ids.identity_data_id, 2)
+    ].configuration == dict(
         forgotten_identity_data_id=str(gloss.identity_data_id),
         forgotten_document_id=str(gloss.inputs["doc01"].data_id),
         removed_entity_ids=[],
         impact_token="t" * 64,
+        removed_records=[
+            RemovedRecord.of(doc01, key)._asdict() for key in ("r01", "v01")
+        ],
+        cited_records=[],
     )
     admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=forgot(gloss))
 
@@ -274,8 +276,13 @@ def test_a_failed_replacement_takes_the_removal_in_its_saved_revision(
     )
     assert revised.revision == saved.revision
     assert revised.mention_resolutions["r01"].producer_ref == producer_key(
-        ids, saved.revision
+        ids.identity_data_id, saved.revision
     )
+    # The saved revision was never served, so a citer pinned the one before.
+    removed = revised.producers[producer_key(ids.identity_data_id, saved.revision)]
+    assert {r["last_revision"] for r in removed.configuration["removed_records"]} == {
+        saved.revision - 1
+    }
     check_erasure_retry(saved, revised, forgot(gloss))
     changed = json.loads(saved.model_dump_json())
     changed["mention_resolutions"]["r01"]["explanation"] = "changed"
@@ -423,8 +430,8 @@ def with_removal_producer(source, gloss):
 
     ids = source_ids(gloss)
     payload = json.loads(source.model_dump_json())
-    payload["producers"][producer_key(ids, source.revision)] = removal_producer(
-        ids, (), None
+    payload["producers"][producer_key(ids.identity_data_id, source.revision)] = (
+        removal_producer(ids, (), None, (), ())
     )
     return source_of(payload)
 

@@ -31,6 +31,7 @@ from .records import reviewed_decisions
 from .erasure_rules import (
     NO_ERASURES,
     check_erasure_removals,
+    check_removal_producers_kept,
     erasure_of,
     erasure_step,
 )
@@ -155,6 +156,7 @@ def admit(
     check_new_variant_keys(old, source)
     check_foreign_inputs(old, source)
     check_reconfirmations(old, source)
+    check_removal_producers_kept(old, source)
     check_erasure_removals(old, source, removal, erasures.readers)
     if text_changed:
         check_continuing_decisions(old, source, fate)

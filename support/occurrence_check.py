@@ -34,7 +34,7 @@ from cognee_lab.identity import admission, chains, erasure_rules
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import IntentError, text_digest
 from dependency_worlds import DEPENDENCY_DECISIONS
-from erasure_worlds import ERASURE_DECISIONS, STEADY, forgotten
+from erasure_worlds import ERASURE_DECISIONS, STEADY, forgotten, settle
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import (
     ADMIT,
@@ -283,6 +283,7 @@ def decided(case, decision, ctx, first_attempt):
     """The case with one decision choice applied to both descriptions."""
     old, new = (json.loads(json.dumps(case[k])) for k in ("old_payload", "new_payload"))
     decision.change(old, new, ctx)
+    settle(old, new)
     return general(
         case,
         first_attempt=first_attempt,

@@ -178,7 +178,7 @@ $V check "$RUN" refresh '.recovery_events | length == 1 and .[0].outcome == "res
 - `key-replacement`: replacing v01 by v02 removes the record c02 cites, so c02 shows `input_removed` and cannot be re-confirmed.
 - `in-place-replacement`: `replace-decision --decision r01` leaves g01 unresolved in place, so c01's record changed and doc03's reviewer re-confirms c01 on it.
 - `admission-refusals`: `cite-record` tries a cycle, a self-citation, a missing record, a stale revision and a wrong fingerprint, and each is refused before anything is written.
-- `chain-erasure-pending`: a forget that would remove a record another source cites is refused; a forget of doc01 removes doc03's direct citations.
+- `chain-erasure`: a forget of the glossary cascades to doc03 at level 2 (journeys F16 to F19 in `source-lifecycle.md`); a forget of doc01 removes doc03's direct citations.
 - `upstream-unfinished`: a failed revision of doc01 withholds c01 and c02 with `edit_unfinished`, and doc03's review waits for `reconcile`.
 
 Run `reconfirm` and `replace-decision` with `--source doc03` for doc03's decisions, and `cite-record --source doc01|doc03 --citation cycle|self|missing|stale|digest --expected-revision N` for the refused citations. `cycle` cites from doc01; the others cite from doc03.
@@ -270,7 +270,7 @@ $V drive "$RUN" main after -- retrieve
 $V check "$RUN" after '.unavailable_sources == []' 'a new process serves everything'
 ```
 
-**D11 refused citations, the interim erasure refusal and an unfinished upstream.** Proves `admission-refusals`, `chain-erasure-pending` and `upstream-unfinished`. Guide: "Admission of a citation", "Forget of a cited source" and "An unfinished upstream". Each refused citation leaves every source at revision 1. The glossary's forget is refused because its removal would unresolve r01 and drop v01, which doc03 cites. doc01's dry run lists doc03 as a dependent whose c01 becomes unresolved and c02 goes, and the confirmed forget writes doc03 revision 2. On a second root a failed doc01 re-confirm withholds c01 and c02 with `edit_unfinished`, doc03's review waits, and `reconcile` releases c01.
+**D11 refused citations, the erasure of a cited source and an unfinished upstream.** Proves `admission-refusals`, `chain-erasure` and `upstream-unfinished`. Guide: "Admission of a citation", "Forget of a cited source" and "An unfinished upstream". Each refused citation leaves every source at revision 1. The glossary's dry run lists doc03 at level 2, since its removal would unresolve r01 and drop v01, which doc03 cites. doc01's dry run lists doc03 as a dependent whose c01 becomes unresolved and c02 goes, and the confirmed forget writes doc03 revision 2. On a second root a failed doc01 re-confirm withholds c01 and c02 with `edit_unfinished`, doc03's review waits, and `reconcile` releases c01.
 
 ```bash journey D11
 $V drive "$RUN" main fixture -- glossary-fixture --chain
@@ -288,7 +288,7 @@ $V drive "$RUN" main status -- status
 $V check "$RUN" status '[.publications[] | [.revision, .state]] == [[1, "current"], [1, "current"], [1, "current"]] and .recovery_events == []' 'nothing was written'
 
 $V drive "$RUN" main gloss -- forget --source glossary --expected-revision 1 --dry-run
-$V check "$RUN" gloss '(.message | contains("not built yet")) and ([.details.citations[] | .record_id] == ["r01", "v01"])' 'the glossary forget would remove cited records'
+$V check "$RUN" gloss '[.levels[] | .level] == [1, 2] and [.dependents[1].cited_records[] | .record_id] == ["r01", "v01"]' 'the glossary forget cascades to doc03 for r01 and v01'
 $V drive "$RUN" main dry -- forget --source doc01 --expected-revision 1 --dry-run
 $V check "$RUN" dry '[.dependents[] | .identity_data_id] == ["bbbc442e-0647-552e-bb54-071604d213fa"]' 'doc03 is the one dependent'
 $V check "$RUN" dry '[.dependents[0].decisions[] | [.assignment, .outcome, .citing[0].kind]] == [["c01", "unresolved", "saved_record"], ["c02", "dropped", "saved_record"]]' 'c01 becomes unresolved and c02 goes'

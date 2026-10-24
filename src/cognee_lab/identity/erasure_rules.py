@@ -1,14 +1,20 @@
 """Admission rules for an erasure removal and for a re-add after forget.
 
 A removal revision names a removal producer (`ERASURE_IMPLEMENTATION`) whose
-configuration names the forgotten document and the Entities its forget
-removed. `check_erasure_removals` admits it as that removal, all of it and
-nothing else; `check_retry_chain` admits a chain of them, each in place
-of a failed attempt's saved revision (`check_erasure_retry`). A re-add is a
-fresh publication at the next revision that never brings back a forgotten
-mention or Entity UUID (`admit_readd`). `admission.admit` calls the removal
-rules in its rule order; the replace path and Publisher.readd call the
-rest. Nothing here imports admission.
+configuration names the forgotten document, the Entities its forget
+removed, the records the revision removes (`removed_records`) and, below
+the first level of a cascade, the removed records of other sources it
+cites (`cited_records`). `check_erasure_removals` admits it as that
+removal, all of it and nothing else; `check_retry_chain` admits a chain of
+them, each in place of a failed attempt's saved revision
+(`check_erasure_retry`). A cited record binds only when a removal written
+for the same forget lists it, and that removal is bound in turn, back to
+the tombstone (`bound_removals`). A removal producer never changes once
+written (`check_removal_producers_kept`). A re-add is a fresh publication
+at the next revision that never brings back a forgotten mention or Entity
+UUID (`admit_readd`). `admission.admit` calls the removal rules in its rule
+order; the replace path and Publisher.readd call the rest. Nothing here
+imports admission.
 """
 
 from collections.abc import Mapping
@@ -18,8 +24,9 @@ from typing import NamedTuple
 from uuid import UUID
 
 from .decisions import decisions_digest, naming_keys
-from .dependency import Target, citations
-from .models import Accepted, CorpusObjectInput, Unresolved
+from .dependency import Target, citations, read_records
+from .models import Accepted, CorpusObjectInput
+from .records import REGISTRY, RemovedRecord, record_type_of, without_erased
 from .validation import (
     IntentError,
     decision_inputs,
@@ -31,38 +38,144 @@ from .validation import (
 )
 
 ERASURE_IMPLEMENTATION = "removed by forget"
+UNBOUND_RECORDS = (
+    "erasure_unbound",
+    "A removal names exactly the removed records its revision cites, each listed by a removal written for the same forget",
+)
+
+
+def producer_key(identity_data_id, revision: int) -> str:
+    """The key of the removal producer a revision of a dependent names for
+    the forget of this identity source."""
+    return f"forget_{identity_data_id}_r{revision}"
+
+
+def is_removal_producer(producer) -> bool:
+    return (
+        producer.method == "captured_fixture"
+        and producer.implementation == ERASURE_IMPLEMENTATION
+    )
+
+
+class RemovalClaim(NamedTuple):
+    """What a removal producer's configuration says its revision did: the
+    forget it serves (its identity source, document and removed Entities),
+    the records it removed and the removed records it cites."""
+
+    forgotten: UUID
+    document: UUID
+    removed_entities: frozenset[UUID]
+    removed_records: frozenset[RemovedRecord]
+    cited_records: frozenset[RemovedRecord]
+
+
+def removal_claim(producer) -> RemovalClaim:
+    """The claim of one removal producer; `erasure_configuration` when its
+    configuration is malformed."""
+    try:
+        config = producer.configuration
+        return RemovalClaim(
+            UUID(config["forgotten_identity_data_id"]),
+            UUID(config["forgotten_document_id"]),
+            frozenset(UUID(e) for e in config["removed_entity_ids"]),
+            frozenset(map(RemovedRecord.parse, config["removed_records"])),
+            frozenset(map(RemovedRecord.parse, config["cited_records"])),
+        )
+    except (KeyError, TypeError, ValueError, AttributeError):
+        raise IntentError(
+            "erasure_configuration",
+            "One removal producer names the forgotten source, its document, the removed Entities and the removed and cited records",
+        ) from None
+
+
+def written_claims(rows, document, entities) -> list[RemovalClaim]:
+    """The removals written for the forget of `document` that removed
+    `entities`: each removal producer of a saved source that names them,
+    unless the row's own pending or failed attempt introduced it. Producers
+    are immutable (`check_removal_producers_kept`), so a later revision
+    still carries a written one. A producer that does not parse binds
+    nothing."""
+    found = []
+    for row in rows:
+        if row.description is None or row.is_retired:
+            continue
+        for key, producer in sorted(row.description.producers.items()):
+            if not is_removal_producer(producer):
+                continue
+            try:
+                claim = removal_claim(producer)
+            except IntentError:
+                continue
+            if (claim.document, claim.removed_entities) != (document, entities):
+                continue
+            introduced = key == producer_key(claim.forgotten, row.revision)
+            if row.state != "current" and introduced:
+                continue
+            found.append(claim)
+    return found
+
+
+def bound_removals(rows, document, entities) -> dict[RemovedRecord, int]:
+    """Each record that a written removal for this forget removed, with the
+    level of that removal, bound inductively: a removal binds when every
+    record it cites was removed by a bound removal, and a first-level
+    removal cites none. So the binding reaches back to the tombstone, and a
+    removal written out of order binds nothing below it."""
+    claims = written_claims(rows, document, entities)
+    removed: dict[RemovedRecord, int] = {}
+    bound: set[int] = set()
+    grew = True
+    while grew:
+        grew = False
+        for index, claim in enumerate(claims):
+            if index in bound or not claim.cited_records <= removed.keys():
+                continue
+            level = 1 + max((removed[r] for r in claim.cited_records), default=0)
+            for record in claim.removed_records:
+                removed.setdefault(record, level)
+            bound.add(index)
+            grew = True
+    return removed
 
 
 class Erasures(NamedTuple):
     """What the ledger says a removal revision may erase: the document of
     each forgotten source with the Entities its forget removed, the
     Entities saved sources read as corpus inputs, which no removal drops,
-    and each forgotten document's identity source, whose saved records a
-    removal may erase too."""
+    each forgotten document's identity source, whose saved records a
+    removal may erase too, and the records the bound removals of each
+    forget removed (`bound_removals`), which a removal below them may
+    cite."""
 
     forgotten: Mapping[UUID, frozenset[UUID]] = MappingProxyType({})
     readers: frozenset[UUID] = frozenset()
     sources: Mapping[UUID, UUID] = MappingProxyType({})
+    records: Mapping[UUID, frozenset[RemovedRecord]] = MappingProxyType({})
 
 
 NO_ERASURES = Erasures()
 
 
 def erasures_of(rows, source) -> Erasures:
-    """The forgotten sources and the corpus readers among saved rows other
-    than this source's."""
-    forgotten, readers, sources = {}, set(), {}
+    """The forgotten sources, the corpus readers among saved rows other
+    than this source's, and each forget's bound removed records."""
+    forgotten, readers, sources, records = {}, set(), {}, {}
     own = str(source.identity_data_id)
     for row in rows:
         if (tomb := row.tombstone) is not None:
-            forgotten[tomb.original_data_id] = frozenset(tomb.removed_entity_ids)
+            took = frozenset(tomb.removed_entity_ids)
+            forgotten[tomb.original_data_id] = took
             sources[tomb.original_data_id] = tomb.identity_data_id
+            records[tomb.original_data_id] = frozenset(
+                bound_removals(rows, tomb.original_data_id, took)
+            )
         elif not row.is_retired and row.source != own:
             readers |= corpus_reads(row.description)
     return Erasures(
         MappingProxyType(forgotten),
         frozenset(readers),
         MappingProxyType(sources),
+        MappingProxyType(records),
     )
 
 
@@ -75,45 +188,61 @@ def corpus_reads(description) -> set[UUID]:
     }
 
 
-def erasure_of(old, source, erasures: Erasures) -> tuple[str, Target] | None:
+class Erasure(NamedTuple):
+    """A removal producer a revision introduces: its key, its claim and the
+    target its revision erases."""
+
+    producer: str
+    claim: RemovalClaim
+    target: Target
+
+
+def erasure_of(old, source, erasures: Erasures) -> Erasure | None:
     """The removal producer this revision introduces, with what it erases,
     or None. Its configuration names the forgotten document and the removed
     Entities, and the ledger must agree: the document is a forgotten
     source's, and the Entities named are exactly the ones its forget
     removed, so no step removes only part of what the forget took. The
     ledger also names that source, whose saved records the removal
-    erases with its document."""
+    erases with its document. The removed records it cites are exactly the
+    bound ones (`bound_removals`) its old revision reads, so a removal
+    neither leaves a citer of one nor claims one no bound removal lists."""
     found = [
         (key, p)
         for key, p in source.producers.items()
-        if key not in old.producers
-        and p.method == "captured_fixture"
-        and p.implementation == ERASURE_IMPLEMENTATION
+        if key not in old.producers and is_removal_producer(p)
     ]
     if not found:
         return None
-    try:
-        ((key, producer),) = found
-        config = producer.configuration
-        document = UUID(config["forgotten_document_id"])
-        removed = frozenset(UUID(e) for e in config["removed_entity_ids"])
-    except (KeyError, TypeError, ValueError, AttributeError):
+    if len(found) != 1:
         raise IntentError(
-            "erasure_configuration",
-            "One removal producer names the forgotten document and the removed Entities",
-        ) from None
-    if document == old.inputs[old.original_input_ref].data_id:
+            "erasure_configuration", "A revision introduces one removal producer"
+        )
+    ((key, producer),) = found
+    claim = removal_claim(producer)
+    if claim.document == old.inputs[old.original_input_ref].data_id:
         raise IntentError(
             "erasure_configuration", "An erasure removes another document's inputs"
         )
-    took = erasures.forgotten.get(document)
-    if took is None or removed != took:
+    took = erasures.forgotten.get(claim.document)
+    if took is None or claim.removed_entities != took:
         raise IntentError(
             "erasure_unbound",
             "A removal producer names a forgotten source's document and exactly the Entities its forget removed",
         )
-    identity = erasures.sources.get(document)
-    return key, Target(document, removed, frozenset([identity] if identity else []))
+    bound = erasures.records.get(claim.document, frozenset())
+    if not claim.cited_records <= bound or claim.cited_records != read_records(
+        old, bound
+    ):
+        raise IntentError(*UNBOUND_RECORDS)
+    identity = erasures.sources.get(claim.document)
+    target = Target(
+        claim.document,
+        took,
+        frozenset([identity] if identity else []),
+        claim.cited_records,
+    )
+    return Erasure(key, claim, target)
 
 
 def erased_decisions(old, erased) -> set[str]:
@@ -121,41 +250,54 @@ def erased_decisions(old, erased) -> set[str]:
     return {a for a, inputs in decision_inputs(old).items() if inputs & erased}
 
 
-def without_erased(refs, erased, fallback):
-    """Input refs with the erased keys stripped; the original document when
-    nothing else remains."""
-    return [k for k in refs if k not in erased] or [fallback]
-
-
 class ErasureStep(NamedTuple):
     """One erasure removal step as the rules check it: the old revision's
-    erased input keys and the decisions citing them, and the removal
-    producer's key."""
+    erased input keys and the decisions citing them, the removal producer's
+    key and the records it says it removes."""
 
     producer: str
     erased: set[str]
     citing: set[str]
+    removed_records: frozenset[RemovedRecord] = frozenset()
 
 
-def erasure_step(old, found) -> "ErasureStep | None":
+def erasure_step(old, found: Erasure | None) -> "ErasureStep | None":
     """The removal step `erasure_of` found, or None."""
     if found is None:
         return None
-    producer, erasure = found
-    erased = set(citations(old, erasure))
-    return ErasureStep(producer, erased, erased_decisions(old, erased))
+    erased = set(citations(old, found.target))
+    return ErasureStep(
+        found.producer,
+        erased,
+        erased_decisions(old, erased),
+        found.claim.removed_records,
+    )
+
+
+def check_removal_producers_kept(old, source):
+    """A removal producer stays, unchanged, in every later revision of its
+    source: the removals below it read what it removed from its
+    configuration (`bound_removals`)."""
+    for key, producer in old.producers.items():
+        if is_removal_producer(producer) and source.producers.get(key) != producer:
+            raise IntentError(
+                "removal_producer_changed",
+                "A removal producer stays unchanged in every later revision of its source",
+            )
 
 
 def check_erasure_removals(old, source, removal: ErasureStep | None, readers):
     """A revision that names a removal producer is an erasure removal, all
     of it and nothing else: it cites what the forget removed, removes every
-    decision citing it (`check_erasure_complete`) and changes nothing more
-    (`check_erasure_confined`)."""
+    decision citing it (`check_erasure_complete`), changes nothing more
+    (`check_erasure_confined`) and its producer lists what it removed
+    (`check_erasure_records`)."""
     if removal is None:
         return
     check_erasure_cites(removal)
     check_erasure_complete(old, source, removal)
     check_erasure_confined(old, source, removal, readers)
+    check_erasure_records(old, source, removal)
 
 
 def check_erasure_cites(removal: ErasureStep):
@@ -165,6 +307,21 @@ def check_erasure_cites(removal: ErasureStep):
         raise IntentError(
             "erasure_empty",
             "An erasure removal removes what its revision cites of the forgotten source",
+        )
+
+
+def check_erasure_records(old, source, removal: ErasureStep):
+    """The removal producer lists exactly the records its revision removes,
+    as the old revision held them: the removals below it bind to that list
+    (`bound_removals`). A removal at the old revision is an erasure retry in
+    place (`RemovedRecord.of`)."""
+    in_place = source.revision == old.revision
+    if removal.removed_records != {
+        RemovedRecord.of(old, k, in_place=in_place) for k in removal.citing
+    }:
+        raise IntentError(
+            "erasure_incomplete",
+            "A removal producer lists exactly the records its revision removes, as they were before",
         )
 
 
@@ -191,28 +348,20 @@ def check_erasure_retry(saved, source, erasures: Erasures):
 
 
 def check_erasure_complete(old, source, removal: ErasureStep):
-    """Every old decision citing what the forget removed is removed: a
-    resolution becomes unresolved in place under the removal producer, with
-    the erased inputs stripped, and a variant is dropped. No erased input
-    remains, in the inputs or a group's."""
+    """Every old decision citing what the forget removed is removed as its
+    record type says (records.REGISTRY): a resolution becomes unresolved in
+    place under the removal producer, with the erased inputs stripped, and
+    a variant is dropped. No erased input remains, in the inputs or a
+    group's."""
     erased, citing = removal.erased, removal.citing
-    for key in citing & set(old.mention_resolutions):
-        was = old.mention_resolutions[key]
-        removed = Unresolved(
-            group_ref=was.group_ref,
-            status="unresolved",
-            input_refs=without_erased(was.input_refs, erased, old.original_input_ref),
-            producer_ref=removal.producer,
-        )
-        if source.mention_resolutions.get(key) != removed:
+    for key in sorted(citing):
+        kind = REGISTRY[record_type_of(old, key)]
+        removed = kind.removed(old, key, erased, removal.producer)
+        if getattr(source, kind.field).get(key) != removed:
             raise IntentError(
                 "erasure_incomplete",
-                "A resolution citing what the forget removed becomes unresolved under the removal producer",
+                "A decision citing what the forget removed is removed: a resolution becomes unresolved under the removal producer and a variant is dropped",
             )
-    if citing & set(source.variant_assignments):
-        raise IntentError(
-            "erasure_incomplete", "A variant citing what the forget removed is dropped"
-        )
     if set(source.inputs) & erased or any(
         set(g.input_refs) & erased for g in source.mention_groups.values()
     ):

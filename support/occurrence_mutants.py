@@ -99,6 +99,19 @@ def trust_the_producer(old, source, erasures):
     return _bound_erasure_of(old, source, erasures._replace(forgotten=claimed))
 
 
+def trust_cited_records(old, source, erasures):
+    """A removal may cite whatever removed records its configuration names,
+    as if a bound removal listed each one."""
+    claimed = {}
+    for producer in source.producers.values():
+        try:
+            claim = erasure_rules.removal_claim(producer)
+        except validation.IntentError:
+            continue
+        claimed[claim.document] = claim.cited_records
+    return _bound_erasure_of(old, source, erasures._replace(records=claimed))
+
+
 def saved_records_not_foreign(source, key):
     """A saved record counts as the source's own input, so rule 5 never
     sees it."""
@@ -160,6 +173,9 @@ MUTANTS = {
     "erase_nothing": ("check_erasure_cites", skip),
     "erase_beyond_the_forgotten": ("check_erasure_confined", skip),
     "erase_unbound": ("erasure_of", trust_the_producer),
+    "trust_cited_records": ("erasure_of", trust_cited_records),
+    "erasure_records_unchecked": ("check_erasure_records", skip),
+    "removal_producers_mutable": ("check_removal_producers_kept", skip),
     "drop_read_recipes": ("check_dropped_unread", skip),
     "saved_records_not_foreign": ("is_foreign", saved_records_not_foreign),
     "allow_self_citation": ("check_citation_scope", allow_self_citation),

@@ -487,6 +487,13 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
                 command=args.command,
             )
+        elif args.command == "withdraw":
+            await publisher.withdraw(
+                selected,
+                expected_revision=selected.revision,
+                origin="test/fault_injection" if args.fault_stage else "test",
+                fault_stage=args.fault_stage,
+            )
         elif args.command == "reconcile":
             refresh = await reconcile(publisher, args.source, selected)
         elif args.command == "forget":

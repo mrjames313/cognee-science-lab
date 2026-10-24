@@ -7,6 +7,7 @@ import pytest
 from test_identity_dependencies_native import printed, run, unavailable, withheld
 from test_identity_native import command
 
+D01 = "718efce2-4251-5f6f-8318-417bb4dd3525"
 D03 = "bbbc442e-0647-552e-bb54-071604d213fa"
 
 
@@ -98,11 +99,13 @@ def test_native_chain_refusals_and_level_one_erasure(tmp_path):
             *("--expected-revision", "1"),
         )
         assert message in refusal["message"], case
-    refusal = refused(
-        root,
-        *("forget", "--source", "glossary", "--expected-revision", "1", "--dry-run"),
+    cascade = printed(
+        root, "forget", "--source", "glossary", "--expected-revision", "1", "--dry-run"
     )
-    assert "not built yet" in refusal["message"]
+    assert [(d["identity_data_id"], d["level"]) for d in cascade["dependents"]] == [
+        (D01, 1),
+        (D03, 2),
+    ]
     dry = printed(
         root, "forget", "--source", "doc01", "--expected-revision", "1", "--dry-run"
     )
@@ -118,6 +121,43 @@ def test_native_chain_refusals_and_level_one_erasure(tmp_path):
     c01 = doc03["decisions"]["c01"]
     assert (c01["status"], c01["input_refs"]) == ("unresolved", ["doc03"])
     assert unavailable(forgotten["result"]) == []
+
+
+@pytest.mark.integration
+def test_native_chain_cascade_resumes_a_failed_level_two_removal(tmp_path):
+    root = tmp_path / "cascade"
+    run(root, "glossary-fixture", "--chain")
+    dry = printed(
+        root, "forget", "--source", "glossary", "--expected-revision", "1", "--dry-run"
+    )
+    assert [level["level"] for level in dry["levels"]] == [1, 2]
+    assert (
+        dry["dependents"][1]["cited_records"] == dry["dependents"][0]["removed_records"]
+    )
+    crashed = run(
+        root,
+        *("forget", "--source", "glossary", "--expected-revision", "1"),
+        *("--confirm", dry["token"], "--fault-stage", "forget_cascade_revision"),
+        expect=1,
+    )
+    assert [d["identity_data_id"] for d in crashed["forget"]["dependents_revised"]] == [
+        D01
+    ]
+    assert crashed["sources"]["doc03"]["state"] == "failed"
+    waits = refused(root, "readd", "--source", "glossary", "--expected-revision", "1")
+    assert waits["details"]["dependents"] == [D03]
+    resumed = run(root, "reconcile", "--source", "glossary")
+    assert resumed["dependents_failed"] is None
+    doc03 = resumed["sources"]["doc03"]
+    assert (doc03["state"], doc03["saved_revision"], doc03["records"]) == (
+        "current",
+        2,
+        {},
+    )
+    assert set(doc03["decisions"]) == {"c01"}
+    assert resumed["sources"]["doc01"]["saved_revision"] == 2
+    assert resumed["withheld_decisions"] == []
+    assert unavailable(resumed["result"]) == []
 
 
 @pytest.mark.integration

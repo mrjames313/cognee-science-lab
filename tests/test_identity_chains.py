@@ -17,11 +17,15 @@ from cognee_lab.identity.chains import (
     check_record_citations,
     new_citations,
 )
+from cognee_lab.identity.admission import admit, identity_map
 from cognee_lab.identity.erasure import (
-    impact_checked,
+    cascade,
     refuse_retiring_inputs,
     remaining,
+    unfinished,
 )
+from cognee_lab.identity.erasure_rules import erasures_of
+from cognee_lab.identity.retirement import source_ids
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.records import citation, record_digest
 from cognee_lab.identity.validation import IntentError, Reason
@@ -279,11 +283,93 @@ def test_a_new_citation_of_a_record_a_forget_under_way_removes_is_refused(state)
     refuse_retiring_inputs(citer, [rows[0], row_of(revised, "ok")])
 
 
-def test_resuming_a_forget_refuses_a_citation_of_a_record_it_removes():
+def written(step):
+    """The row after a removal revision is written."""
+    return row_of(step.description, "ok")
+
+
+def test_a_forget_cascades_down_the_chain_by_level():
+    """s2 is forgotten: s1 cites it, so s1 is level 1; s0 cites the records
+    s1's removal removes, so s0 is level 2."""
     rows = forget_rows("forgotten") + [row_of(world_source("s0", CHAIN["s0"]), "ok")]
+    found = remaining(rows[0].tombstone, rows)
+    assert [(d.identity_data_id, d.level) for d in found.dependents] == [
+        (str(identity("s1")), 1),
+        (str(identity("s0")), 2),
+    ]
+    s1, s0 = found.dependents
+    assert s0.cited_records == s1.removed_records
+    assert [r.record_id for r in s1.removed_records] == ["d", "v"]
+    assert {r.last_revision for r in s1.removed_records} == {1}
+
+
+def test_a_resume_converges_from_the_rows_in_level_order():
+    rows = forget_rows("forgotten") + [row_of(world_source("s0", CHAIN["s0"]), "ok")]
+    tomb = rows[0].tombstone
+    first, second = cascade(rows, source_ids(tomb), ())
+    after_first = [rows[0], written(first), rows[2]]
+    (resumed,) = cascade(after_first, source_ids(tomb), ())
+    assert resumed.description == second.description and resumed.level == 2
+    assert [r.source for r in unfinished(tomb, after_first)] == [str(identity("s0"))]
+    assert unfinished(tomb, [rows[0], written(first), written(second)]) == []
+
+
+def test_a_level_two_removal_binds_only_once_level_one_is_written():
+    rows = forget_rows("forgotten") + [row_of(world_source("s0", CHAIN["s0"]), "ok")]
+    first, second = cascade(rows, source_ids(rows[0].tombstone), ())
+    s0 = rows[2].description
+    text = "The controller limits oscillations.\n"
+
+    def admitted(rows):
+        admit(
+            s0,
+            second.description,
+            text,
+            text,
+            identity_map(s0),
+            erasures=erasures_of(rows, s0),
+        )
+
+    assert refusal(admitted, rows) == "erasure_unbound"
+    admitted([rows[0], written(first), rows[2]])
+
+
+def test_a_citation_pinned_before_another_fingerprint_is_not_cascaded():
+    """s0's `d` cites s1's `d` at a fingerprint s1's `d` no longer has: the
+    removal of s1's `d` does not reach it, only live withholding does. s0's
+    `v` still goes."""
+    stale = pinned(world_source("s0", CHAIN["s0"]), "rec_s1", content_sha256="0" * 64)
+    rows = forget_rows("forgotten") + [row_of(stale, "ok")]
+    s1, s0 = remaining(rows[0].tombstone, rows).dependents
+    assert [r.assignment for r in s0.decisions] == ["v"]
+    assert [r.record_id for r in s0.cited_records] == ["v"]
+
+
+def test_a_citation_made_after_a_removal_is_not_cascaded():
+    """A record that returns to the fingerprint it had before its removal
+    is read by a later citation as it is now: the citation pins a revision
+    after the removal's last one."""
+    rows = forget_rows("forgotten") + [row_of(world_source("s0", CHAIN["s0"]), "ok")]
+    s1, s0 = remaining(rows[0].tombstone, rows).dependents
+    removed = s1.removed_records[0]
+    later = pinned(
+        world_source("s0", CHAIN["s0"]), "rec_s1", representation_revision=3
+    ).inputs["rec_s1"]
+    assert removed.reads(rows[2].description.inputs["rec_s1"])
+    assert not removed.reads(later)
+
+
+@pytest.mark.parametrize("state", ["pending", "failed", "forgotten"])
+def test_a_new_citation_of_a_record_removed_below_level_one_is_refused(state):
+    rows = forget_rows(state) + [row_of(world_source("s0", CHAIN["s0"]), "ok")]
+    citer = world_source("s3", frozenset({"s0"}))
     with pytest.raises(IntentError) as refused:
-        impact_checked(remaining(rows[0].tombstone, rows), rows)
-    assert refused.value.code == "chain_erasure_pending"
+        refuse_retiring_inputs(citer, rows)
+    assert refused.value.code == "retiring_source"
+    assert [d["input_ref"] for d in refused.value.details["dependents"]] == [
+        "rec_s0",
+        "var_s0",
+    ]
 
 
 def test_an_unverified_cited_source_waits_for_its_attempt_not_for_a_review():
