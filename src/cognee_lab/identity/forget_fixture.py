@@ -6,6 +6,7 @@ import json
 from typing import NamedTuple
 from uuid import UUID
 
+from .digests import object_digest
 from .models import IdentitySource
 from .validation import IntentError, text_digest
 
@@ -48,7 +49,6 @@ def add_dependency(payload, first, text):
     """doc02 consumed doc01: its r01 decision lists doc01's text and doc01's
     private singleton as inputs, so forgetting doc01 removes that decision."""
     from .multisource import fixture_id
-    from .validation import object_digest
 
     doc = first.inputs[first.original_input_ref]
     singleton = fixture_id("doc01:singleton")

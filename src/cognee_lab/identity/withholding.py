@@ -31,13 +31,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .models import IdentitySource, SavedRecordInput, SourceTextInput, TextSpanInput
 from .dependency import Target, citations
-from .records import cited_row, record_digest, saved_records
-from .validation import (
-    Reason,
-    decision_inputs,
-    stronger,
-    text_digest,
-)
+from .records import cited_row, record_digest, record_inputs, saved_records
+from .validation import Reason, stronger, text_digest
 
 
 class Status(StrEnum):
@@ -207,7 +202,7 @@ def current_readers(rows) -> dict[str, IdentitySource]:
 
 def citing(reader: IdentitySource, keys) -> set[str]:
     """The decisions that cite any of `keys` directly."""
-    return {a for a, inputs in decision_inputs(reader).items() if inputs & set(keys)}
+    return {a for a, inputs in record_inputs(reader).items() if inputs & set(keys)}
 
 
 def found_once(text: str, length: int, digest: str) -> int | None:
@@ -250,7 +245,7 @@ def classify(reader, keys, previous_text, text) -> list[Classified]:
     each of `keys`, the reader's inputs of that document. A text input is
     classified only when a decision cites it directly; a chunk has no
     fingerprint and is renumbered, so any change needs review."""
-    direct = set().union(*decision_inputs(reader).values())
+    direct = set().union(*record_inputs(reader).values())
     found = []
     for key in sorted(keys):
         item = reader.inputs[key]
@@ -394,7 +389,7 @@ def held_by(source, recorded, drift, read: RecordReader) -> dict[str, Withheld]:
         if (verdict := read(item)) is not None:
             found[key] = verdict
     held = dict(recorded)
-    for key, inputs in decision_inputs(source).items():
+    for key, inputs in record_inputs(source).items():
         if not (failing := inputs & found.keys()):
             continue
         reason = reduce(stronger, (found[i][0] for i in sorted(failing)))
@@ -418,7 +413,7 @@ def recorded_rows(readers, table) -> list[WithholdingRow]:
         w
         for w in table
         if w.source in readers
-        and w.input_ref in decision_inputs(readers[w.source]).get(w.assignment, ())
+        and w.input_ref in record_inputs(readers[w.source]).get(w.assignment, ())
     ]
 
 
@@ -442,7 +437,7 @@ def withheld_decisions(rows, table) -> WithheldSet:
             if source == edit.source:
                 continue
             keys = document_inputs(reader, edited)
-            for assignment, inputs in decision_inputs(reader).items():
+            for assignment, inputs in record_inputs(reader).items():
                 if inputs & keys:
                     entry = Withheld(
                         Reason.CHANGED, Status.EDIT_UNFINISHED, inputs & keys

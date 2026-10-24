@@ -17,7 +17,7 @@ order; the replace path and Publisher.readd call the rest. Nothing here
 imports admission.
 """
 
-from collections.abc import Mapping
+from collections.abc import Hashable, Mapping
 from itertools import pairwise
 from types import MappingProxyType
 from typing import NamedTuple
@@ -25,14 +25,19 @@ from uuid import UUID
 
 from .decisions import decisions_digest, naming_keys
 from .dependency import Target, citations, read_records
-from .models import Accepted, CorpusObjectInput
-from .records import REGISTRY, RemovedRecord, record_keys, record_type_of
+from .models import CorpusObjectInput
+from .records import (
+    REGISTRY,
+    RemovedRecord,
+    naming,
+    record_inputs,
+    record_keys,
+    record_type_of,
+)
 from .validation import (
     IntentError,
-    decision_inputs,
     fresh_entity_id,
     fresh_mention_id,
-    naming,
     referenced_corpus_ids,
     reusable_recipes,
 )
@@ -120,7 +125,9 @@ def written_claims(rows, document, entities) -> list[RemovalClaim]:
     return found
 
 
-def levels(removals, known=MappingProxyType({})):
+def levels(
+    removals, known=MappingProxyType({})
+) -> tuple[dict[Hashable, int], dict[RemovedRecord, int]]:
     """Each removal that binds, with its level, and each record a bound
     removal removes, with that level. `removals` maps each removal to the
     records it cites and the records it removes; `known` holds records
@@ -129,18 +136,18 @@ def levels(removals, known=MappingProxyType({})):
     them, or at level 1 when it cites none. So binding reaches back to the
     forget, and a removal that cites a record no bound removal lists binds
     nothing, nor does any removal below it."""
-    level, removed = {}, dict(known)
+    depth, removed = {}, dict(known)
     grew = True
     while grew:
         grew = False
         for key, (cited, removes) in removals.items():
-            if key in level or not cited <= removed.keys():
+            if key in depth or not cited <= removed.keys():
                 continue
-            level[key] = 1 + max((removed[r] for r in cited), default=0)
+            depth[key] = 1 + max((removed[r] for r in cited), default=0)
             for record in removes:
-                removed.setdefault(record, level[key])
+                removed.setdefault(record, depth[key])
             grew = True
-    return level, removed
+    return depth, removed
 
 
 def bound_removals(rows, document, entities) -> dict[RemovedRecord, int]:
@@ -270,7 +277,7 @@ def erasure_of(old, source, erasures: Erasures) -> Erasure | None:
 
 def erased_decisions(old, erased) -> set[str]:
     """The old decisions that cite one of the erased input keys."""
-    return {a for a, inputs in decision_inputs(old).items() if inputs & erased}
+    return {a for a, inputs in record_inputs(old).items() if inputs & erased}
 
 
 class ErasureStep(NamedTuple):
@@ -471,16 +478,10 @@ def check_dropped_unread(old, source, readers):
 
 
 def entity_ids_named(source):
-    """Every Entity UUID a description names: its recipes, its accepted
-    targets, its variant endpoints and its corpus inputs."""
+    """Every Entity UUID a description names: its recipes, what each record
+    names (`records.naming`) and its corpus inputs."""
     named = set(source.entity_constructions)
-    named.update(
-        r.target_entity_id
-        for r in source.mention_resolutions.values()
-        if isinstance(r, Accepted)
-    )
-    for v in source.variant_assignments.values():
-        named.update((v.source_entity_id, v.target_entity_id))
+    named.update(*(naming(source, k) for k in record_keys(source)))
     named.update(
         i.entity_id for i in source.inputs.values() if isinstance(i, CorpusObjectInput)
     )

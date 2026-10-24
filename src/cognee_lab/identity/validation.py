@@ -5,10 +5,7 @@ from hashlib import sha256
 from typing import Any, NamedTuple
 from uuid import UUID, uuid5
 
-import rfc8785
-
 from .models import (
-    Accepted,
     ChunkInput,
     CorpusObjectInput,
     IdentitySource,
@@ -18,6 +15,8 @@ from .models import (
     TextSpanInput,
     Tombstone,
 )
+from .digests import object_digest
+from .records import REGISTRY, record_inputs
 
 
 class IntentError(ValueError):
@@ -42,10 +41,6 @@ def fresh_mention_id(identity_data_id: UUID, revision: int, key: str) -> UUID:
 def fresh_entity_id(identity_data_id: UUID, revision: int, key: str) -> UUID:
     """A new reusable Entity, named by the resolution or variant key that targets it."""
     return uuid5(identity_data_id, f"entity:r{revision}:{key}")
-
-
-def object_digest(value: Any) -> str:
-    return sha256(rfc8785.dumps(value)).hexdigest()
 
 
 def map_chunks(document_text: str, chunks: list) -> dict[str, tuple[int, int]]:
@@ -97,18 +92,6 @@ def is_foreign(source: IdentitySource, key: str) -> bool:
     return isinstance(item, (CorpusObjectInput, SavedRecordInput))
 
 
-def decision_inputs(source: IdentitySource) -> dict[str, frozenset[str]]:
-    """The input keys each record cites directly, as its record type says
-    (records.RecordKind.inputs)."""
-    from .records import REGISTRY  # records imports this module
-
-    return {
-        key: kind.inputs(source, key)
-        for kind in REGISTRY.values()
-        for key in getattr(source, kind.field)
-    }
-
-
 def reusable_recipes(description):
     mentions = {g.entity_id for g in description.mention_groups.values()}
     return {
@@ -119,31 +102,20 @@ def reusable_recipes(description):
 
 
 def referenced_corpus_ids(source):
-    """Existing Entities that a resolution or variant lists as a corpus input
-    in its own input_refs. A group's input_refs do not count: only a decision
-    that names the Entity may exempt it from derivation, so this is not
-    `decision_inputs`. `check_corpus_inputs_exist` proves each one is in the
-    graph."""
+    """Existing Entities that a record lists as a corpus input in its own
+    input_refs. A group's input_refs do not count: only a decision that
+    names the Entity may exempt it from derivation, so this is not
+    `records.record_inputs`. `check_corpus_inputs_exist` proves each one is
+    in the graph."""
     listed = set()
-    for record in [
-        *source.mention_resolutions.values(),
-        *source.variant_assignments.values(),
-    ]:
-        listed.update(record.input_refs)
+    for kind in REGISTRY.values():
+        for record in getattr(source, kind.field).values():
+            listed.update(record.input_refs)
     return {
         i.entity_id
         for key, i in source.inputs.items()
         if key in listed and isinstance(i, CorpusObjectInput)
     }
-
-
-def naming(description, key) -> set[UUID]:
-    """The Entities one resolution or variant names."""
-    decision = description.mention_resolutions.get(key)
-    if decision is not None:
-        return {decision.target_entity_id} if isinstance(decision, Accepted) else set()
-    variant = description.variant_assignments[key]
-    return {variant.source_entity_id, variant.target_entity_id}
 
 
 def checked_inputs(source: IdentitySource, withheld=frozenset()) -> set[str]:
@@ -156,7 +128,7 @@ def checked_inputs(source: IdentitySource, withheld=frozenset()) -> set[str]:
         used.update([group.document_ref, *group.chunk_refs])
         if key not in resolved:
             used.update(group.input_refs)
-    for key, inputs in decision_inputs(source).items():
+    for key, inputs in record_inputs(source).items():
         if key not in withheld:
             used.update(inputs)
     return used

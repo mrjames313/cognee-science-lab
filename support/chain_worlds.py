@@ -33,7 +33,8 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.records import citation
 from cognee_lab.identity.storage import PublicationRow
-from cognee_lab.identity.validation import Reason, object_digest, text_digest
+from cognee_lab.identity.digests import object_digest
+from cognee_lab.identity.validation import Reason, text_digest
 from cognee_lab.identity.withholding import Status, Withheld, WithholdingRow
 
 LABELS = ("s0", "s1", "s2", "s3")

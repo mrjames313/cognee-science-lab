@@ -19,11 +19,11 @@ from cognee_lab.identity.forget_fixture import describe_readd
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.erasure import refuse_retiring_inputs
 from cognee_lab.identity.storage import PublicationRow
+from cognee_lab.identity.digests import object_digest
 from cognee_lab.identity.validation import (
     IntentError,
     fresh_entity_id,
     fresh_mention_id,
-    object_digest,
     text_digest,
     validate_uses,
 )

@@ -246,14 +246,23 @@ async def verify_no_contributions(graph, source, triples):
         raise IntentError("verify_withdrawal", "Retired identity contribution remains")
 
 
-def current_claims(rows) -> dict[str, frozenset]:
-    """What each saved identity source writes now, by its source ref: the
-    Entity keys it declares, the triples of its identity edges, and each of
-    its contributions with its triple. A retirement plan records the refs
-    and contributions other owners held when its first attempt began; an
-    owner that dropped one since, as an erasure removal revision does,
-    no longer owes it, so a resumed retirement checks the survivors against
-    the owners as they are now."""
+class Claims(NamedTuple):
+    """What one saved identity source writes now: the Entity keys it
+    declares, the triples of its identity edges, and each of its
+    contributions as (triple, canonical contribution)."""
+
+    entities: frozenset[str]
+    edges: frozenset[tuple[str, str, str]]
+    contributions: frozenset[tuple[tuple[str, str, str], str]]
+
+
+def current_claims(rows) -> dict[str, Claims]:
+    """What each saved identity source writes now, by its source ref
+    (`Claims`). A retirement plan records the refs and contributions other
+    owners held when its first attempt began; an owner that dropped one
+    since, as an erasure removal revision does, no longer owes it, so a
+    resumed retirement checks the survivors against the owners as they are
+    now."""
     from cognee.infrastructure.databases.provenance import make_source_ref_key
     from .publish import identity_edges
 
@@ -262,10 +271,10 @@ def current_claims(rows) -> dict[str, frozenset]:
         if row.description is None:
             continue
         edges = identity_edges(row.description)
-        claims[make_source_ref_key(row.dataset, row.source)] = frozenset(
-            [str(k) for k in row.description.entity_constructions]
-            + [tuple(e[:3]) for e in edges]
-            + [(tuple(e[:3]), canonical(e[3])) for e in edges]
+        claims[make_source_ref_key(row.dataset, row.source)] = Claims(
+            frozenset(str(k) for k in row.description.entity_constructions),
+            frozenset(tuple(e[:3]) for e in edges),
+            frozenset((tuple(e[:3]), canonical(e[3])) for e in edges),
         )
     return claims
 
@@ -283,12 +292,17 @@ async def verify_survivors(graph, vector, source, plan, released, retired, claim
     from cognee.infrastructure.databases.provenance import make_source_ref_key
     from .publish import contributions
 
-    def owes(ref, item):
-        return not released(ref) and (ref not in claims or item in claims[ref])
+    def owes(ref, field, item):
+        # A ref that is no saved identity source's (a document, its chunks
+        # or another native owner) has no writes the ledger knows, so it
+        # owes all the plan recorded. A retired source's ref is released.
+        if released(ref):
+            return False
+        return ref not in claims or item in getattr(claims[ref], field)
 
     for key, old in plan["entities"].items():
         current = (await graph.get_node_delete_data([key])).get(key)
-        remaining = {ref for ref in old["refs"] if owes(ref, key)}
+        remaining = {ref for ref in old["refs"] if owes(ref, "entities", key)}
         if remaining and (
             current is None or not remaining <= set(current.source_ref_keys)
         ):
@@ -310,7 +324,7 @@ async def verify_survivors(graph, vector, source, plan, released, retired, claim
     for old in plan["edges"]:
         triple = (old["source"], old["target"], old["relation"])
         edge = await edge_metadata(graph, *triple)
-        remaining = {ref for ref in old["refs"] if owes(ref, triple)}
+        remaining = {ref for ref in old["refs"] if owes(ref, "edges", triple)}
         if remaining and (edge is None or not remaining <= set(edge.source_ref_keys)):
             raise IntentError("verify_survivor", "Independent edge ownership was lost")
         for c in contributions(old["properties"]):
@@ -319,7 +333,7 @@ async def verify_survivors(graph, vector, source, plan, released, retired, claim
             if (
                 key not in retired
                 and not is_own(source, c)
-                and owes(ref, (triple, canonical(c)))
+                and owes(ref, "contributions", (triple, canonical(c)))
             ):
                 if edge is None or c not in contributions(edge.edge_properties):
                     raise IntentError(

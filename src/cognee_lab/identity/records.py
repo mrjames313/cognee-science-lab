@@ -20,7 +20,7 @@ citation made before the removal matches it and a later one does not.
 """
 
 from collections.abc import Callable, Mapping
-from typing import NamedTuple, get_args
+from typing import NamedTuple, Protocol, get_args
 from uuid import UUID
 
 from .models import (
@@ -32,7 +32,7 @@ from .models import (
     Unresolved,
     Variant,
 )
-from .validation import object_digest
+from .digests import object_digest
 
 ATTRIBUTION_FIELDS = frozenset({"producer_ref", "input_refs", "explanation"})
 
@@ -52,6 +52,12 @@ def reviewed_decisions(values):
 Record = DecisionBase | Variant
 
 
+class CitesInputs(Protocol):
+    """A part of a description that cites inputs by key, as a group does."""
+
+    input_refs: list[str]
+
+
 class RecordKind(NamedTuple):
     """One citable record type: everything the chain logic asks of it, so
     no other module names a record type's fields.
@@ -61,6 +67,7 @@ class RecordKind(NamedTuple):
       key.
     - `inputs`: the input keys a record cites directly, given its source and
       key.
+    - `names`: the Entities a record names, given its source and key.
     - `held`: whether a record is withheld, given its source's entries of
       the withheld-decision set, its source and its key.
     - `removed`: what an erasure leaves of a record, given its source, its
@@ -76,10 +83,11 @@ class RecordKind(NamedTuple):
     field: str
     fingerprint: Callable[[IdentitySource, str], dict]
     inputs: Callable[[IdentitySource, str], frozenset[str]]
+    names: Callable[[IdentitySource, str], frozenset[UUID]]
     held: Callable[[Mapping[str, object], IdentitySource, str], bool]
     removed: Callable[[IdentitySource, str, set[str], str], Record | None]
     outcome: str
-    stripped: Callable[[IdentitySource, set[str]], dict[str, dict]]
+    stripped: Callable[[IdentitySource, set[str]], dict[str, dict[str, CitesInputs]]]
     unlinked: Callable[[IdentitySource, str], frozenset[UUID]]
 
 
@@ -108,6 +116,19 @@ def variant_inputs(description, key) -> frozenset[str]:
     variant = description.variant_assignments[key]
     scope = getattr(variant.applicability, "document_ref", None)
     return frozenset([*variant.input_refs, *([scope] if scope else [])])
+
+
+def resolution_names(description, key) -> frozenset[UUID]:
+    """An accepted resolution names its target; an unresolved one nothing."""
+    decision = description.mention_resolutions[key]
+    if isinstance(decision, Accepted):
+        return frozenset([decision.target_entity_id])
+    return frozenset()
+
+
+def variant_names(description, key) -> frozenset[UUID]:
+    variant = description.variant_assignments[key]
+    return frozenset([variant.source_entity_id, variant.target_entity_id])
 
 
 def decision_held(entries, description, key) -> bool:
@@ -140,7 +161,7 @@ def variant_removed(description, key, erased, producer):
     return None
 
 
-def groups_stripped(description, erased) -> dict[str, dict]:
+def groups_stripped(description, erased) -> dict[str, dict[str, CitesInputs]]:
     """Every group, which a resolution's inputs include, loses the erased
     inputs."""
     fallback = description.original_input_ref
@@ -154,7 +175,7 @@ def groups_stripped(description, erased) -> dict[str, dict]:
     )
 
 
-def nothing_stripped(description, erased) -> dict[str, dict]:
+def nothing_stripped(description, erased) -> dict[str, dict[str, CitesInputs]]:
     return {}
 
 
@@ -175,6 +196,7 @@ REGISTRY: dict[str, RecordKind] = {
         field="mention_resolutions",
         fingerprint=resolution_fingerprint,
         inputs=resolution_inputs,
+        names=resolution_names,
         held=decision_held,
         removed=resolution_removed,
         outcome="unresolved",
@@ -185,6 +207,7 @@ REGISTRY: dict[str, RecordKind] = {
         field="variant_assignments",
         fingerprint=variant_fingerprint,
         inputs=variant_inputs,
+        names=variant_names,
         held=decision_held,
         removed=variant_removed,
         outcome="dropped",
@@ -194,6 +217,22 @@ REGISTRY: dict[str, RecordKind] = {
 }
 if set(get_args(RecordType)) != REGISTRY.keys():
     raise TypeError("models.RecordType and records.REGISTRY name different types")
+
+
+def record_inputs(source) -> dict[str, frozenset[str]]:
+    """The input keys each record cites directly, by its key, as its record
+    type says (`RecordKind.inputs`)."""
+    return {
+        key: kind.inputs(source, key)
+        for kind in REGISTRY.values()
+        for key in getattr(source, kind.field)
+    }
+
+
+def naming(description, key) -> frozenset[UUID]:
+    """The Entities one record names, as its record type says
+    (`RecordKind.names`)."""
+    return REGISTRY[record_type_of(description, key)].names(description, key)
 
 
 def record_digest(description, record_type, record_id) -> str | None:

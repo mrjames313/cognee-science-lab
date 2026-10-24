@@ -13,9 +13,9 @@ from cognee_lab.identity.text_changes import TextChange
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
 from cognee_lab.identity.retirement import dependents
+from cognee_lab.identity.digests import object_digest
 from cognee_lab.identity.validation import (
     IntentError,
-    object_digest,
     text_digest,
     validate_inputs,
 )

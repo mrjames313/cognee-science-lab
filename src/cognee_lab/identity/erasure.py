@@ -38,7 +38,14 @@ from .erasure_rules import (
     removal_claim,
 )
 from .models import CorpusObjectInput, IdentitySource
-from .records import REGISTRY, RemovedRecord, record_type_of, saved_records
+from .records import (
+    REGISTRY,
+    RemovedRecord,
+    naming,
+    record_inputs,
+    record_type_of,
+    saved_records,
+)
 from .retirement import (
     Dependent,
     SourceIds,
@@ -48,7 +55,8 @@ from .retirement import (
     source_ids,
 )
 from .storage import PublicationRow
-from .validation import IntentError, decision_inputs, naming, object_digest
+from .digests import object_digest
+from .validation import IntentError
 
 RESIDUE = (
     "LanceDB marks deleted vector rows; their bytes stay until a compaction and a cleanup of old table versions",
@@ -206,7 +214,7 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
 
     reader = row.description
     erased = set(cited)
-    by_decision = decision_inputs(reader)
+    by_decision = record_inputs(reader)
     citing = {a for a, inputs in by_decision.items() if inputs & erased}
     remaining = set(by_decision) - citing
     mentions = {g.entity_id for g in reader.mention_groups.values()}
@@ -334,9 +342,9 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
     or a record a bound removal removes as it was before, with one removal
     revision for all it reads. A failed removal revision whose cited
     records no bound removal lists any more, because the source that
-    removed them was withdrawn or its withdrawal failed, leaves the
-    cascade, as a citer of a withdrawn intermediate does. A dependent's level is one more than the deepest
-    removal it cites, or 1 (erasure_rules.levels)."""
+    removed them was withdrawn, leaves the cascade, as a citer of a
+    withdrawn intermediate does. A dependent's level is one more than the
+    deepest removal it cites, or 1 (erasure_rules.levels)."""
     forgotten = str(ids.identity_data_id)
     removed = frozenset(UUID(str(e)) for e in removed)
     live = {
@@ -355,7 +363,7 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
             for s, r in live.items()
             if s not in claims and (found := citations(r.description, target))
         }
-        level, bound = levels(
+        depth, bound = levels(
             {s: (c.cited_records, c.removed_records) for s, c in claims.items()}
             | {
                 s: (
@@ -372,12 +380,12 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
 
     reads = {r.source: corpus_reads(r.description) for r in rows if not r.is_retired}
     steps = [
-        Step(live[s], live[s].description, None, level[s], claim.cited_records)
+        Step(live[s], live[s].description, None, depth[s], claim.cited_records)
         for s, claim in claims.items()
-        if s in level
+        if s in depth
     ]
     for s, found in cited.items():
-        if s not in level:
+        if s not in depth:
             continue
         readers = set().union(*(e for k, e in reads.items() if k != s))
         revised, impact = removal_revision(
@@ -387,8 +395,8 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
             Step(
                 live[s],
                 revised,
-                replace(impact, level=level[s]),
-                level[s],
+                replace(impact, level=depth[s]),
+                depth[s],
                 frozenset(impact.cited_records),
             )
         )
@@ -536,7 +544,7 @@ def report(impact: Impact, *, plan, description, events) -> dict:
     """The dry run: what a forget removes from other sources, level by
     level, the traces its tombstone scrubs and the token to confirm."""
     decisions = [r for d in impact.dependents for r in d.decisions]
-    levels = sorted({d.level for d in impact.dependents})
+    depths = sorted({d.level for d in impact.dependents})
     return dict(
         dry_run=True,
         source=dict(
@@ -556,15 +564,17 @@ def report(impact: Impact, *, plan, description, events) -> dict:
                     d.identity_data_id for d in impact.dependents if d.level == n
                 ],
             )
-            for n in levels
+            for n in depths
         ],
         counts=dict(
             dependents=len(impact.dependents),
-            levels=len(levels),
+            levels=len(depths),
             blocked=sum(d.blocked for d in impact.dependents),
             decisions=len(decisions),
-            unresolved=sum(r.outcome == "unresolved" for r in decisions),
-            dropped=sum(r.outcome == "dropped" for r in decisions),
+            **{
+                kind.outcome: sum(r.outcome == kind.outcome for r in decisions)
+                for kind in REGISTRY.values()
+            },
             dropped_entities=sum(len(d.dropped_entities) for d in impact.dependents),
             unlinked_facts=sum(len(d.unlinked_mentions) for d in impact.dependents),
         ),
@@ -575,11 +585,9 @@ def report(impact: Impact, *, plan, description, events) -> dict:
                 ),
                 recipes=len(description.entity_constructions),
                 explanations=sum(
-                    d.explanation is not None
-                    for d in [
-                        *description.mention_resolutions.values(),
-                        *description.variant_assignments.values(),
-                    ]
+                    record.explanation is not None
+                    for kind in REGISTRY.values()
+                    for record in getattr(description, kind.field).values()
                 ),
             ),
             plan=dict(

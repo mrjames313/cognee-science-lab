@@ -22,7 +22,8 @@ from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.retirement import contribution_triples, source_ids
 from cognee_lab.identity.storage import PublicationRow, scrubbed_plan
-from cognee_lab.identity.validation import IntentError, object_digest, text_digest
+from cognee_lab.identity.digests import object_digest
+from cognee_lab.identity.validation import IntentError, text_digest
 
 TEXT = (FIXTURES / "source.txt").read_text()
 HC = UUID("9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88")

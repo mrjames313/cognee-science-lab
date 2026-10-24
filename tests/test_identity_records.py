@@ -7,10 +7,10 @@ import pytest
 from pydantic import ValidationError
 
 from cognee_lab.identity.models import IdentitySource
+from cognee_lab.identity.digests import object_digest
 from cognee_lab.identity.validation import (
     IntentError,
     map_chunks,
-    object_digest,
     text_digest,
     validate_inputs,
     validate_uses,

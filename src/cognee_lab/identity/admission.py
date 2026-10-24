@@ -27,7 +27,7 @@ from .models import (
     SourceTextInput,
 )
 from .decisions import naming_keys
-from .records import reviewed_decisions
+from .records import record_inputs, reviewed_decisions
 from .erasure_rules import (
     NO_ERASURES,
     check_erasure_removals,
@@ -38,7 +38,6 @@ from .erasure_rules import (
 from .validation import (
     IntentError,
     cited_inputs,
-    decision_inputs,
     fresh_entity_id,
     fresh_mention_id,
     is_foreign,
@@ -532,7 +531,7 @@ def foreign_citations(description):
     """The foreign input keys each decision cites, its group's included."""
     return {
         key: frozenset(k for k in inputs if is_foreign(description, k))
-        for key, inputs in decision_inputs(description).items()
+        for key, inputs in record_inputs(description).items()
     }
 
 

@@ -22,7 +22,7 @@ from .captured_revision import (
 )
 from .captured_text import BEFORE
 from .models import IdentitySource
-from .validation import object_digest
+from .digests import object_digest
 
 TO_REUSABLE = "stage6-captured-kind-change-to-reusable"
 HC_ID = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
