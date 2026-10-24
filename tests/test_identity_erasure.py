@@ -382,10 +382,18 @@ def no_configuration(payload, old):
     payload["producers"][key]["configuration"] = {}
 
 
+def another_key(payload, old):
+    """The removal producer under a key that is not its canonical one."""
+    key = next(k for k in payload["producers"] if k.startswith("forget_"))
+    payload["producers"]["erased"] = payload["producers"].pop(key)
+    payload["mention_resolutions"]["r01"]["producer_ref"] = "erased"
+
+
 @pytest.mark.parametrize(
     "change, code",
     [
         (keep_v01, "erasure_incomplete"),
+        (another_key, "erasure_configuration"),
         # Rule 5 refuses it first: r01 drops a foreign input under its old
         # producer.
         (keep_r01_accepted, "reconfirm_unattested"),

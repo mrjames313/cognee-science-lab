@@ -209,7 +209,10 @@ class Erasure(NamedTuple):
 
 def erasure_of(old, source, erasures: Erasures) -> Erasure | None:
     """The removal producer this revision introduces, with what it erases,
-    or None. Its configuration names the forgotten document and the removed
+    or None. Its key is `producer_key` of the forgotten source and this
+    revision, which `written_claims` and `erasure.removal_of` read to tell
+    the revision that introduced it. Its configuration names the forgotten
+    document and the removed
     Entities, and the ledger must agree: the document is a forgotten
     source's, and the Entities named are exactly the ones its forget
     removed, so no step removes only part of what the forget took. The
@@ -230,6 +233,11 @@ def erasure_of(old, source, erasures: Erasures) -> Erasure | None:
         )
     ((key, producer),) = found
     claim = removal_claim(producer)
+    if key != producer_key(claim.forgotten, source.revision):
+        raise IntentError(
+            "erasure_configuration",
+            "A removal producer's key names the forgotten source and its revision",
+        )
     if claim.document == old.inputs[old.original_input_ref].data_id:
         raise IntentError(
             "erasure_configuration", "An erasure removes another document's inputs"

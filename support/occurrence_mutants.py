@@ -99,6 +99,23 @@ def trust_the_producer(old, source, erasures):
     return _bound_erasure_of(old, source, erasures._replace(forgotten=claimed))
 
 
+class AnyKey:
+    """Equal to every key."""
+
+    __hash__ = None
+
+    def __eq__(self, other):
+        return True
+
+    def __ne__(self, other):
+        return False
+
+
+def any_producer_key(identity_data_id, revision):
+    """A removal producer may sit under any key."""
+    return AnyKey()
+
+
 def trust_cited_records(old, source, erasures):
     """A removal may cite whatever removed records its configuration names,
     as if a bound removal listed each one."""
@@ -174,6 +191,7 @@ MUTANTS = {
     "erase_beyond_the_forgotten": ("check_erasure_confined", skip),
     "erase_unbound": ("erasure_of", trust_the_producer),
     "trust_cited_records": ("erasure_of", trust_cited_records),
+    "erasure_under_any_key": ("producer_key", any_producer_key),
     "erasure_records_unchecked": ("check_erasure_records", skip),
     "removal_producers_mutable": ("check_removal_producers_kept", skip),
     "drop_read_recipes": ("check_dropped_unread", skip),

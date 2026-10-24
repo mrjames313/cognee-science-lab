@@ -13,7 +13,11 @@ what its revision removes (`settle`) unless a row states it.
 import json
 from uuid import UUID, uuid5
 
-from cognee_lab.identity.erasure_rules import ERASURE_IMPLEMENTATION, Erasures
+from cognee_lab.identity.erasure_rules import (
+    ERASURE_IMPLEMENTATION,
+    Erasures,
+    producer_key,
+)
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.records import RemovedRecord
 from cognee_lab.identity.validation import text_digest
@@ -32,6 +36,7 @@ from occurrence_worlds import (
     HC,
     HELIOS,
     add_recipe,
+    base_payload,
     continuing_rid,
     decision,
     refuse,
@@ -39,7 +44,9 @@ from occurrence_worlds import (
 )
 
 STEADY = "steady"
-ERASER = "forget_gloss_r2"
+# The removal producer's key: the glossary's identity source at the new
+# revision.
+ERASER = producer_key(cited_source(base_payload()), 2)
 # The removed_records an eraser leaves for `settle` to fill.
 AUTO = "auto"
 UNRELATED = refuse("erasure_unrelated")
@@ -226,6 +233,15 @@ def add_a_decision(old, new, ctx):
 def erase_another_document(old, new, ctx):
     drop_reading_variant(producer=False)(old, new, ctx)
     eraser(new, document=str(uuid5(UUID(new["dataset_id"]), "other")))
+
+
+def erase_under_another_key(old, new, ctx):
+    """The removal producer, listing what it removes, under a key other
+    than `producer_key` of the forgotten source and the new revision."""
+    drop_reading_variant(producer=False)(old, new, ctx)
+    before = IdentitySource.model_validate_json(json.dumps(old))
+    eraser(new, records=[RemovedRecord.of(before, "v01", 1)._asdict()])
+    new["producers"]["forget_elsewhere"] = new["producers"].pop(ERASER)
 
 
 def claim_an_entity(old, new, ctx):
@@ -512,6 +528,14 @@ ERASURE_DECISIONS = [
         erase_another_document,
         text_edit=UNBOUND,
         same_text=UNBOUND,
+    ),
+    decision(
+        "erasure producer under a key that is not its own",
+        "rule 6",
+        [STEADY],
+        erase_under_another_key,
+        text_edit=refuse("erasure_configuration"),
+        same_text=refuse("erasure_configuration"),
     ),
     decision(
         "erasure names an Entity its forget did not remove",
