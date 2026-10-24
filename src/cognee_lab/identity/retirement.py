@@ -5,9 +5,11 @@ A retirement removes one source's refs and contributions. `retired_sources`
 names the sources whose survival is no longer owed, `released` says whether a
 ref still owes survival, `dependents` finds the sources that consumed what a
 retirement takes away, and `verify_survivors` checks that every other owner
-kept its refs and contributions.
+kept its refs and contributions, as far as that owner still writes them
+(`current_claims`).
 """
 
+import json
 from typing import NamedTuple, TypedDict
 from uuid import UUID
 
@@ -244,16 +246,49 @@ async def verify_no_contributions(graph, source, triples):
         raise IntentError("verify_withdrawal", "Retired identity contribution remains")
 
 
-async def verify_survivors(graph, vector, source, plan, released, retired):
+def current_claims(rows) -> dict[str, frozenset]:
+    """What each saved identity source writes now, by its source ref: the
+    Entity keys it declares, the triples of its identity edges, and each of
+    its contributions with its triple. A retirement plan records the refs
+    and contributions other owners held when its first attempt began; an
+    owner that dropped one since, as an erasure removal revision does,
+    no longer owes it, so a resumed retirement checks the survivors against
+    the owners as they are now."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+    from .publish import identity_edges
+
+    claims = {}
+    for row in rows:
+        if row.description is None:
+            continue
+        edges = identity_edges(row.description)
+        claims[make_source_ref_key(row.dataset, row.source)] = frozenset(
+            [str(k) for k in row.description.entity_constructions]
+            + [tuple(e[:3]) for e in edges]
+            + [(tuple(e[:3]), canonical(e[3])) for e in edges]
+        )
+    return claims
+
+
+def canonical(contribution) -> str:
+    return json.dumps(contribution, sort_keys=True)
+
+
+async def verify_survivors(graph, vector, source, plan, released, retired, claims):
     """Every owned object the plan recorded is either gone with its index, or
     survives for the refs it still owes: `released(ref)` says a ref no longer
-    owes survival, and `retired` names the sources whose contributions do not
-    either."""
+    owes survival, `retired` names the sources whose contributions do not
+    either, and an identity source owes only what it still writes
+    (`current_claims`)."""
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
     from .publish import contributions
+
+    def owes(ref, item):
+        return not released(ref) and (ref not in claims or item in claims[ref])
 
     for key, old in plan["entities"].items():
         current = (await graph.get_node_delete_data([key])).get(key)
-        remaining = {ref for ref in old["refs"] if not released(ref)}
+        remaining = {ref for ref in old["refs"] if owes(ref, key)}
         if remaining and (
             current is None or not remaining <= set(current.source_ref_keys)
         ):
@@ -273,13 +308,19 @@ async def verify_survivors(graph, vector, source, plan, released, retired):
                     "Withdrawn/surviving Entity vector disagrees with graph",
                 )
     for old in plan["edges"]:
-        edge = await edge_metadata(graph, old["source"], old["target"], old["relation"])
-        remaining = {ref for ref in old["refs"] if not released(ref)}
+        triple = (old["source"], old["target"], old["relation"])
+        edge = await edge_metadata(graph, *triple)
+        remaining = {ref for ref in old["refs"] if owes(ref, triple)}
         if remaining and (edge is None or not remaining <= set(edge.source_ref_keys)):
             raise IntentError("verify_survivor", "Independent edge ownership was lost")
         for c in contributions(old["properties"]):
             key = (c.get("dataset_id"), c.get("identity_data_id"))
-            if key not in retired and not is_own(source, c):
+            ref = make_source_ref_key(*key)
+            if (
+                key not in retired
+                and not is_own(source, c)
+                and owes(ref, (triple, canonical(c)))
+            ):
                 if edge is None or c not in contributions(edge.edge_properties):
                     raise IntentError(
                         "verify_survivor", "Independent contribution was lost"

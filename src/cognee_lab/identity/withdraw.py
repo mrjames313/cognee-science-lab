@@ -6,6 +6,7 @@
 from .native import require_graph_methods
 from .retirement import (
     contribution_triples,
+    current_claims,
     owned_by,
     ownership_snapshot,
     released,
@@ -87,7 +88,8 @@ async def withdraw(
         return deleted
 
     async def verification(run):
-        retired = retired_sources(await records.rows())
+        rows = await records.rows()
+        retired = retired_sources(rows)
         if await graph.find_nodes_by_source_ref(
             owner
         ) or await graph.find_edges_by_source_ref(owner):
@@ -102,6 +104,7 @@ async def withdraw(
             plan,
             released(owned_by(source, document=False), retired),
             retired,
+            current_claims(rows),
         )
         run.inject(run.stage, "Injected failure before withdrawal acknowledgement")
 

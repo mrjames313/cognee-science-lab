@@ -22,6 +22,7 @@ from .models import ChunkInput, Tombstone
 from .native import require_graph_methods
 from .retirement import (
     contribution_triples,
+    current_claims,
     has_contribution,
     owned_by,
     ownership_snapshot,
@@ -275,7 +276,8 @@ async def verify_forgotten(publisher, source, plan):
         raise IntentError(
             "forget_incomplete", "Forgotten source leaves " + ", ".join(left)
         )
-    retired = retired_sources(await publisher.records.rows())
+    rows = await publisher.records.rows()
+    retired = retired_sources(rows)
     await verify_survivors(
         publisher.graph,
         publisher.vector,
@@ -283,6 +285,7 @@ async def verify_forgotten(publisher, source, plan):
         plan,
         released(owned_by(source, document=True), retired),
         retired,
+        current_claims(rows),
     )
 
 

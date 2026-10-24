@@ -529,7 +529,7 @@ $V drive "$RUN" main readd2 -- readd --source glossary --expected-revision 1
 $V check "$RUN" readd2 '[.sources.glossary.state, .sources.glossary.saved_revision] == ["current", 2] and (.sources.doc01.decisions | keys) == ["r01"] and (.sources.doc03.decisions | keys) == ["c01"]' 'the glossary is back at revision 2 and the removed decisions stay removed'
 ```
 
-**F19 a blocked level-2 dependent waits.** Proves `forget-cascade-blocked`. Guide: "The cascade". doc03's withdrawal fails, so doc03 is a blocked dependent at level 2: the dry run marks it `blocked` and the token covers it. The forget writes doc01's level-1 removal, and doc03 waits with `dependent_unfinished` (the command exits 1). Running the forget again still waits, and the re-add is refused. Finishing doc03's withdrawal after doc01's removal is a tracked follow-up ("Not in this checkpoint" in the forget guide), so the journey stops here.
+**F19 a blocked level-2 dependent waits.** Proves `forget-cascade-blocked`. Guide: "The cascade". doc03's withdrawal fails, so doc03 is a blocked dependent at level 2: the dry run marks it `blocked` and the token covers it. The forget writes doc01's level-1 removal, and doc03 waits with `dependent_unfinished` (the command exits 1). Running the forget again still waits, and the re-add is refused. Then doc03's withdrawal finishes: doc01's removal dropped an Entity and an edge they shared, so the survivor check owes doc01 only what it still writes (fix round 1). doc03 is withdrawn, its incident resolved, the cascade has nothing left and the re-add publishes the glossary again.
 
 ```bash journey F19
 $V drive "$RUN" main fixture -- glossary-fixture --chain
@@ -545,6 +545,10 @@ $V drive "$RUN" main again -- forget --source glossary --expected-revision 1
 $V check "$RUN" again '.dependents_failed.code == "dependent_unfinished" and .forget.dependents_revised == []' 'a second run still waits for doc03'
 $V drive "$RUN" main readd -- readd --source glossary --expected-revision 1
 $V check "$RUN" readd '.error == "IntentError" and .details.dependents == ["bbbc442e-0647-552e-bb54-071604d213fa"]' 'the re-add waits for doc03'
+$V drive "$RUN" main withdraw -- withdraw --source doc03
+$V check "$RUN" withdraw '.sources.doc03.state == "withdrawn" and .sources.doc01.state == "current" and [.recovery_events[] | .outcome] == ["withdrawn"]' 'doc03 withdrawal finishes after doc01 removal'
+$V drive "$RUN" main readd2 -- readd --source glossary --expected-revision 1
+$V check "$RUN" readd2 '[.sources.glossary.state, .sources.glossary.saved_revision, .sources.doc03.state] == ["current", 2, "withdrawn"]' 'with doc03 withdrawn the cascade is done and the re-add publishes'
 ```
 
 ## Gotchas
