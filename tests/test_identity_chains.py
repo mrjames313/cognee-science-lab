@@ -8,6 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
+import cascade_check
 import chain_check
 from chain_worlds import described as world_source
 from chain_worlds import identity, row_of, world_rows
@@ -244,6 +245,19 @@ def test_chains_agree_with_the_oracle_on_three_sources():
 def test_each_chain_mutant_is_caught(name):
     with chain_check.patched(name):
         _, failures = chain_check.run(3)
+    assert failures
+
+
+def test_the_cascade_agrees_with_the_oracle_on_three_sources():
+    tally, failures = cascade_check.search(3)
+    assert failures == []
+    assert tally["cascade worlds"] == 225 and tally["cascade depth 2"] == 36
+
+
+@pytest.mark.parametrize("name", sorted(cascade_check.MUTANTS))
+def test_each_cascade_mutant_is_caught(name):
+    with cascade_check.patched(name):
+        _, failures = cascade_check.search(4, ("ok", "drifted"), first=True)
     assert failures
 
 

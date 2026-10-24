@@ -11,6 +11,9 @@ On every citation graph of up to four sources (chain_worlds.py), it checks:
   oracle's: each decision's reason, status and withholding inputs, for a
   resolution and a variant of each source, with withholding spread down
   the whole chain as `input_changed` and `upstream_withheld`.
+- The erasure cascade (cascade_check.py): with s0 forgotten, the levels,
+  the token, the write order and resume, the inductive gate and the rule
+  that a confirmed cascade only shrinks.
 
 The code under test is chains.check_citation_cycles,
 withholding.record_reader, withholding.withheld_decisions and
@@ -19,7 +22,8 @@ validation itself (retrieve.live_drift) is replaced: `drift_of` returns the
 reader's answer for each cited record, as validate_inputs does, and raises
 for an invalid source.
 
-With --mutants, each scratch break in MUTANTS must make the check fail.
+With --mutants, each scratch break in MUTANTS and in
+cascade_check.MUTANTS must make the check fail.
 
     uv run python support/chain_check.py
     uv run python support/chain_check.py --mutants
@@ -33,6 +37,7 @@ from collections import Counter
 from contextlib import contextmanager
 from itertools import product
 
+import cascade_check
 from chain_worlds import (
     LABELS,
     STATES,
@@ -183,12 +188,16 @@ def main():
     args = parser.parse_args()
     started = time.monotonic()
     if args.mutants:
-        missed = [n for n, f in run_mutants().items() if f is None]
-        for name in MUTANTS:
+        caught = {**run_mutants(), **cascade_check.run_mutants()}
+        missed = [n for n, f in caught.items() if f is None]
+        for name in caught:
             print(f"{'MISSED' if name in missed else 'caught'}  {name}")
         print(f"{'FAIL' if missed else 'PASS'} in {time.monotonic() - started:.1f} s")
         sys.exit(1 if missed else 0)
     tally, failures = run(args.sources)
+    more, cascade_failures = cascade_check.search(args.sources)
+    tally.update(more)
+    failures += cascade_failures
     for name, count in sorted(tally.items()):
         print(f"{name}: {count}")
     for failure in failures[:5]:

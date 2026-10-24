@@ -16,5 +16,5 @@ jobs:
       - run: uv run pytest -q -m 'not integration'
       # The unit suite runs the occurrence check on small worlds only; this is the default bound.
       - run: uv run python support/occurrence_check.py
-      # Every citation graph of four sources; the unit suite covers three.
+      # Every citation graph of four sources, withholding and the erasure cascade; the unit suite covers three.
       - run: uv run python support/chain_check.py
