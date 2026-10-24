@@ -12,10 +12,11 @@ On every citation graph of up to four sources (chain_worlds.py), it checks:
   resolution and a variant of each source, with withholding spread down
   the whole chain as `input_changed` and `upstream_withheld`.
 - Key reuse (checkpoint K). On every acyclic graph, with every source
-  holding `d`, having dropped it (rekeyed), pending or withdrawn, a
-  source's next revision that declares `d` again is refused
-  (`record_key_reused`) exactly when it had dropped `d` and another source
-  that is not retired cites it.
+  holding `d` and `v`, having dropped `d` (rekeyed) or `v` (rekeyed_v),
+  pending or withdrawn, a source's next revision that declares the dropped
+  key again is refused (`record_key_reused`) exactly when another source
+  that is not retired cites it. Both record types have a key that comes
+  back.
 - The erasure cascade (cascade_check.py): with s0 forgotten, the levels,
   the token, the write order and resume, the inductive gate and the rule
   that a confirmed cascade only shrinks.
@@ -103,8 +104,9 @@ async def held_now(graph, states):
 
 def key_reused(graph, states, label) -> bool:
     """Whether admission refuses the source's next revision, which declares
-    its resolution under `d` again, for a reused key. Each source cites
-    every source it points at, `d` from its `d`."""
+    its resolution under `d` and its variant under `v` again, for a reused
+    key. Each source cites every source it points at, `d` from its `d` and
+    `v` from its `v`."""
     rows, _ = world_rows(graph, states)
     previous = next(r for r in rows if r.source == str(identity(label)))
     candidate = described(label, graph[label]).model_copy(
@@ -123,18 +125,20 @@ def key_reused(graph, states, label) -> bool:
 
 def key_reuse_oracle(graph, states, label) -> bool:
     """The user's rule (2026-10-24): a key the revision brings back, here
-    `d` after a rekey, is refused while another source that is not retired
-    cites it."""
-    return states[label] == "rekeyed" and any(
+    `d` or `v` after a rekey, is refused while another source that is not
+    retired cites it."""
+    return states[label] in KEY_DROPS and any(
         label in graph[other] and states[other] != "withdrawn"
         for other in graph
         if other != label
     )
 
 
-# The states that decide key reuse: a source that holds `d`, one that
-# dropped it, and a citer that still reads (pending) or reads nothing.
-KEY_STATES = ("ok", "rekeyed", "pending", "withdrawn")
+# The states that decide key reuse: a source that holds `d` and `v`, one
+# that dropped one of them, and a citer that still reads (pending) or reads
+# nothing.
+KEY_DROPS = ("rekeyed", "rekeyed_v")
+KEY_STATES = ("ok", *KEY_DROPS, "pending", "withdrawn")
 
 
 async def search(count, states):
@@ -152,7 +156,7 @@ async def search(count, states):
         for chosen in product(KEY_STATES, repeat=count):
             world = dict(zip(labels, chosen))
             for label in labels:
-                if world[label] not in ("ok", "rekeyed"):
+                if world[label] not in ("ok", *KEY_DROPS):
                     continue
                 tally["key reuse cases"] += 1
                 want = key_reuse_oracle(graph, world, label)
@@ -218,6 +222,12 @@ def key_reuse_served_citers(source, rows, keys):
     return original(source, [r for r in rows if r.is_served], keys)
 
 
+def key_reuse_resolutions_only(source, rows, keys):
+    """Only a resolution key is looked for, so a variant key comes back."""
+    original = MUTANT_ORIGINALS["check_record_key_reuse"]
+    return original(source, rows, set(keys) & set(source.mention_resolutions))
+
+
 MUTANT_ORIGINALS = {"check_record_key_reuse": chains.check_record_key_reuse}
 MUTANTS = {
     "no_cycle_check": ("check_citation_cycles", skip),
@@ -225,6 +235,10 @@ MUTANTS = {
     "removed_reads_changed": ("record_reader", removed_reads_changed),
     "key_reuse_unchecked": ("check_record_key_reuse", key_reuse_only_previous),
     "key_reuse_served_citers": ("check_record_key_reuse", key_reuse_served_citers),
+    "key_reuse_resolutions_only": (
+        "check_record_key_reuse",
+        key_reuse_resolutions_only,
+    ),
 }
 
 

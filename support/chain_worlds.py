@@ -15,6 +15,8 @@ withholding table:
 - replaced: served, its `d` and `v` changed in place, so their fingerprints
   differ.
 - rekeyed: served, its resolution renamed to `e`, so `d` is gone.
+- rekeyed_v: served, its variant renamed to `w`, so `v` is gone. Only the
+  key-reuse search (chain_check.KEY_STATES) uses it.
 - pending: its latest attempt is pending.
 - unverified: current, but its verified revision is behind its saved one.
 - withdrawn: withdrawn.
@@ -79,9 +81,9 @@ def producer():
     )
 
 
-def payload_of(label, *, key="d", replaced=False, cites=()) -> dict:
+def payload_of(label, *, key="d", variant="v", replaced=False, cites=()) -> dict:
     """One source's description: its document, one chunk, one group, the
-    resolution under `key` and variant `v`, each citing the record of the
+    resolution under `key` and the variant under `variant`, each citing the record of the
     same kind of each source in `cites`. `replaced` changes both decisions
     in place."""
     own = identity(label)
@@ -140,8 +142,8 @@ def payload_of(label, *, key="d", replaced=False, cites=()) -> dict:
                 producer_ref="fixture",
             )
         },
-        variant_assignments=dict(
-            v=dict(
+        variant_assignments={
+            variant: dict(
                 status="accepted",
                 source_entity_id=HELIOS if replaced else HC,
                 target_entity_id=HC if replaced else HELIOS,
@@ -149,10 +151,11 @@ def payload_of(label, *, key="d", replaced=False, cites=()) -> dict:
                 input_refs=["doc", "existing_A"],
                 producer_ref="fixture",
             )
-        ),
+        },
     )
     decisions = dict(
-        d=payload["mention_resolutions"][key], v=payload["variant_assignments"]["v"]
+        d=payload["mention_resolutions"][key],
+        v=payload["variant_assignments"][variant],
     )
     for cited in sorted(cites):
         for decision, record in decisions.items():
@@ -174,6 +177,8 @@ def described(label, cites: frozenset, state="ok") -> IdentitySource:
     options = dict(cites=cites, replaced=state == "replaced")
     if state == "rekeyed":
         options["key"] = "e"
+    if state == "rekeyed_v":
+        options["variant"] = "w"
     return IdentitySource.model_validate_json(json.dumps(payload_of(label, **options)))
 
 
