@@ -238,3 +238,12 @@ Checkpoint runs of `.claude/skills/verify/scripts/verify.py journey all`, by the
 - On `2fcf78c`, with every source file as at `12c8d30`: 1287 PASS and 0 FAIL. The extra row is the check D6 gained in fix round 2, which reports a refresh failure beside the completed edit; the other journeys give 1159 PASS, as before this checkpoint. The last commit, `e836ba5`, changes only this guide and the `check_reconfirmations` docstring.
 
 The values in this guide come from these runs: the spans and digests from D1 to D4, the glossary chunk from D1's `glossary_identity.json`, and the Hybrid coil UUID from D4's `identity_doc01_revision2.json`.
+
+## Checkpoint K: Entity edits
+
+Checkpoint K (2026-10-24) implements user decision 6: a direct edit of a native Entity withholds the decisions that cite it, with `input_changed`, as a text edit of a consumed document does. See the [entity edits guide](stage6_identity_entity_edits.md).
+
+- `edit-entity --case description|unselected|revert` edits the Entity doc01's `existing_A` names, with no ledger row. Live validation already withheld its citers; the edit now has a CLI driver and journeys (D12 to D15).
+- `reconfirm` reads every withholding input as it is now through one table keyed by input kind, so a corpus object is re-confirmed under `existing_A_r<revision>` and one revision answers a decision withheld by a span and an Entity together. Every review producer now records `old_digests` and `new_digests`; a span re-confirm recorded `new_digest` before.
+- `replace-decision --decision r01` leaves g01 unresolved on whatever changed; v01 keeps its glossary-only replacement and refuses an Entity edit (`fixture_scope`).
+- Rule 5 gains two occurrence-check rows: a corpus re-confirm under a new producer is admitted, under the old producer refused (`reconfirm_unattested`).

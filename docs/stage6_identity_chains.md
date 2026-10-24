@@ -17,7 +17,7 @@ A reviewer checked the spec against these decisions and the code before implemen
 |---|---|---|
 | A saved record of another source | Re-confirmed upstream (only inputs and producer changed) | Valid automatically: the fingerprint holds |
 | A saved record | Changed in place (a reviewed field, or a resolution made unresolved) | Withheld, `input_changed`, `refresh_needed`; may be re-confirmed |
-| A saved record | Its key is gone from the cited source (a group retired, or a replacement under a new key) | Withheld, `input_removed`, `refresh_needed`; never re-confirmed |
+| A saved record | Its key is gone from the cited source (a group retired, a kind change, or a replacement under a new key) | Withheld, `input_removed`, `refresh_needed`; never re-confirmed; since checkpoint K, `replace-citation` re-cites or drops the decision |
 | A saved record | The cited source has a pending or failed attempt, is current but not verified, or its own input fails live validation | Withheld, `input_changed`, `edit_unfinished` |
 | A saved record | The cited source is withdrawn or forgotten | Withheld, `input_removed`, `refresh_needed` |
 | A saved record | The cited decision is withheld | Withheld, `input_changed`, `upstream_withheld`; releases when the cited decision does |
@@ -68,7 +68,7 @@ Nothing is written. When the cited decision is released, the citing one is relea
 ## Reviewer commands
 
 - `reconfirm --source doc03 --decision c01` re-confirms a decision withheld because a saved record it cites changed. The next revision cites the record as it is now under a new key (`doc01_r01_r2`) and names a producer new in the revision (`review_c01_r2`, implementation `re-confirmed`, with the withholding it answers and the old and new fingerprints).
-- `reconfirm` refuses a decision withheld with `input_removed`, as before, and every review refuses a decision withheld with `upstream_withheld` (code `upstream_withheld`): it waits for the record above it.
+- `reconfirm` refuses a decision withheld with `input_removed`, as before; since checkpoint K its refusal names `replace-citation`, the reviewer path for a removed citation (see the [entity edits guide](stage6_identity_entity_edits.md#replace-a-citation)). Every review refuses a decision withheld with `upstream_withheld` (code `upstream_withheld`): it waits for the record above it.
 - The review gate (`review.review_gate`) refuses (`edit_unfinished`) while any document the reviewed source reads has a pending or failed edit, while any source whose records it cites is unfinished, or while the decision's own entry is `edit_unfinished` (a cited source whose own input fails live validation).
 - `replace-decision --decision r01` replaces r01 in place: g01 becomes unresolved under the same key, citing the HC entry as it is now. It changes r01's fingerprint, so a decision citing r01 needs its own review. `replace-decision --decision v01` keeps its checkpoint-H meaning (v01 dropped, v02 added), which removes the record a decision citing v01 read.
 - `refresh-dependents` does nothing for saved records: there is no remap, and a refresh revision keeps the fingerprints, so its citers stay valid.
@@ -260,3 +260,12 @@ Run by the assistant and its subagents on the user's Mac on 2026-10-24 with loop
 
 - `verify.py journey all`: 1565 PASS on `231c2e6`, 1567 on `9d2b47d`, 1576 on `a136d06`, 1576 on `d1192ba` and 1576 in 91 runs on `74ec093`, each with 0 FAIL. P5 calls the embedding API and was skipped.
 - A final review of `74ec093` found the branch merge-ready.
+
+## Checkpoint K
+
+Checkpoint K (2026-10-24) added the reviewer path for a citer of a removed record and two refusals that keep citations single-meaning. See the [entity edits guide](stage6_identity_entity_edits.md).
+
+- `replace-citation --cite <source>:<record>` re-cites a decision withheld by a saved record on a current record under a new key, its reviewed fields unchanged; `--drop` removes the decision as an erasure would. D9's c02 had no reviewer path before. Journey D16.
+- `record_key_reused`: a record key that comes back in a later revision, or in a re-add, is refused while another source that is not retired cites it at that source (`chains.check_record_key_reuse`, first attempt only). The chain check proves it with key-reuse cases and two mutants.
+- `mention_input`: a corpus input may not name a mention UUID of any saved source; a source that depends on a mention cites its resolution instead.
+- A kind change on the chain root leaves c02 withheld `input_removed` and c01 untouched (journey K6).
