@@ -370,6 +370,77 @@ $V drive "$RUN" main after -- status
 $V check "$RUN" after '(.publications | all(.state == "current") and ([.[].revision] | sort) == [1, 2]) and .recovery_events == []' 'the refusals left both publications current at revisions 1 and 2 with no incident'
 ```
 
+### Kind changes with readers (checkpoint K)
+
+Guide: `docs/stage6_identity_entity_edits.md`, "Kind changes with readers". On a `glossary-fixture` root, chain roots included, `change-kind-to-mention` and `change-kind-to-reusable` change the first fixture's doc01 (one group, g01): v01 and the HC recipe go and a fresh g09 resolves to the Helios controller as r09; then g09 retires and HC is named again under v01. The result adds `dependents_withheld` and `hc_entity`.
+
+- `kind-citer`: doc03's c02 cited v01, so it is withheld `input_removed`; `replace-citation` answers it; bringing v01 back is refused (`record_key_reused`) until it does.
+- `kind-reader`: a source that reads an HC doc01 alone owns as a corpus object refuses the change before any write (`dependent_source`); with no reader, that HC leaves the graph.
+- `mention-reader`: a corpus input of a mention UUID is refused (`mention_input`).
+- `kind-fault-chain`: an injected failure of the chain kind change recovers by `reconcile`.
+
+**K6 a kind change removes a cited record.** Proves `kind-citer`. Guide: "Kind changes with readers". The kind change leaves c02 withheld `input_removed` and c01 untouched. `reconfirm` refuses c02, and a revision that brings v01 back is refused while c02 cites it. `replace-citation --cite doc01:r09` re-cites c02 on the fresh resolution and releases it; v01 may then come back.
+
+```bash journey K6
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main mention -- change-kind-to-mention --source doc01 --expected-revision 1
+$V check "$RUN" mention '.sources.doc01 | .saved_revision == 2 and .verified_revision == 2 and (.decisions | keys) == ["r01", "r09"]' 'v01 is gone and r09 is fresh'
+$V check "$RUN" mention '[.dependents_withheld[] | [.assignment_id, .reason, .status]] == [["c02", "input_removed", "refresh_needed"]]' 'c02 is left withheld and c01 is untouched'
+$V check "$RUN" mention '.hc_entity.present == true and .recovery_events == []' 'doc03 still declares HC'
+
+$V drive "$RUN" main refused -- reconfirm --source doc03 --decision c02 --expected-revision 1
+$V check "$RUN" refused '.message | contains("never re-confirmed")' 'a removed record is never re-confirmed'
+$V drive "$RUN" main back -- change-kind-to-reusable --source doc01 --expected-revision 2
+$V check "$RUN" back '.error == "IntentError" and (.message | contains("still cites an earlier v01"))' 'v01 may not come back while c02 cites it'
+
+$V drive "$RUN" main cite -- replace-citation --source doc03 --decision c02 --cite doc01:r09 --expected-revision 1
+$V check "$RUN" cite '.sources.doc03.decisions.c02.input_refs == ["doc03", "doc01_r09_r2"] and .withheld_decisions == []' 'c02 cites r09 and nothing is withheld'
+
+$V drive "$RUN" main reusable -- change-kind-to-reusable --source doc01 --expected-revision 2
+$V check "$RUN" reusable '.sources.doc01 | .saved_revision == 3 and (.decisions | keys) == ["r01", "v01"]' 'with no citer left, v01 comes back'
+$V check "$RUN" reusable '[.dependents_withheld[] | [.assignment_id, .reason]] == [["c02", "input_removed"]]' 'r09 is gone, so c02 needs review again'
+```
+
+**K7 a sole-owned HC: refused under a reader, retired with none.** Proves `kind-reader`. Guide: "Kind changes with readers". `cite-record --citation entity` makes doc03 stop declaring HC and read it as a corpus object, so doc01 alone owns it; the kind change is refused and nothing is written. On a glossary root with no doc03, the kind change retires the HC Entity and its index.
+
+```bash journey K7
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main reader -- cite-record --source doc03 --citation entity --expected-revision 1
+$V check "$RUN" reader '.sources.doc03.saved_revision == 2 and (.sources.doc03.decisions | keys) == ["c01"] and .withheld_decisions == []' 'doc03 reads HC as a corpus object'
+$V drive "$RUN" main refused -- change-kind-to-mention --source doc01 --expected-revision 1
+$V check "$RUN" refused '.error == "IntentError" and (.message | contains("only the edited source owns"))' 'the kind change is refused'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '([.publications[] | .revision] | sort) == [1, 1, 2] and .recovery_events == []' 'nothing was written'
+
+$V drive "$RUN" alone fixture2 -- glossary-fixture
+$V drive "$RUN" alone retired -- change-kind-to-mention --source doc01 --expected-revision 1
+$V check "$RUN" retired '.hc_entity | .present == false and .indexed == false and .entity_ids_named_hc == []' 'the HC Entity and its index are gone'
+$V check "$RUN" retired '.dependents_withheld == [] and [.helios.facts[].identity.assignment_id] == ["r01"]' 'no reader is withheld and the Helios fact is served'
+```
+
+**K8 a corpus input of a mention UUID is refused.** Proves `mention-reader`. Guide: "No reader of a mention UUID". doc03's next revision would read doc01's g01 mention as a corpus object; admission refuses it and nothing is written.
+
+```bash journey K8
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main mention -- cite-record --source doc03 --citation mention --expected-revision 1
+$V check "$RUN" mention '.error == "IntentError" and (.message | contains("names a mention group'"'"'s Entity"))' 'the mention reader is refused'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.publications[] | .revision] == [1, 1, 1] and .recovery_events == []' 'nothing was written'
+```
+
+**K9 a failed chain kind change recovers.** Proves `kind-fault-chain`. Guide: "Kind changes with readers". The runner runs each stage in its own run. While doc01 is failed its citers wait with `edit_unfinished`; `reconcile` completes revision 2 and leaves c02 withheld `input_removed`.
+
+```bash journey K9 stages=replace_published,text_chunks
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main fail -- change-kind-to-mention --source doc01 --expected-revision 1 --fault-stage "$STAGE"
+$V check "$RUN" fail '.error == "IntentError" and (.message | test("recovery_event_id=[0-9a-f-]{36}"))' 'the injected failure names a recovery event'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.withheld_decisions[] | [.assignment_id, .status]] == [["c01", "edit_unfinished"], ["c02", "edit_unfinished"]]' 'doc03 waits for doc01'
+$V drive "$RUN" main rec -- reconcile --source doc01
+$V check "$RUN" rec '.sources.doc01 | .saved_revision == 2 and .verified_revision == 2 and (.decisions | keys) == ["r01", "r09"]' 'reconcile completes the kind change'
+$V check "$RUN" rec '[.withheld_decisions[] | [.assignment_id, .reason]] == [["c02", "input_removed"]] and (.recovery_events | length == 1 and .[0].outcome == "restored")' 'c02 is left withheld and the incident is restored'
+```
+
 ## Gotchas
 
 - The commands accept only their captured doc01 edits. They do not locate phrases, infer a map or match groups. See "Not yet supported" in the README.

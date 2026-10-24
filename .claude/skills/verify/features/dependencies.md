@@ -309,6 +309,110 @@ $V drive "$RUN" fault done -- reconcile --source doc01
 $V check "$RUN" done '[.withheld_decisions[] | [.assignment_id, .status]] == [["v01", "refresh_needed"], ["c02", "upstream_withheld"]] and (.recovery_events | length == 1 and .[0].outcome == "restored")' 'reconcile releases r01 and c01'
 ```
 
+### Entity edits and removed citations (checkpoint K)
+
+Guide: `docs/stage6_identity_entity_edits.md`.
+
+- `entity-edit`: `edit-entity --case description` changes a field doc01's `existing_A` selects, through Cognee's own `update_node`, with no ledger row. r01 and v01 are withheld with `input_changed` and `refresh_needed`, c01 and c02 with `upstream_withheld`. `unselected` withholds nothing and `revert` releases everything with no revision.
+- `corpus-review`: `reconfirm` cites the Entity as it reads now under `existing_A_r<rev>`; `replace-decision --decision r01` leaves g01 unresolved on it; v01 has no captured replacement for an Entity edit.
+- `mixed-review`: one re-confirm answers a decision withheld by the glossary span and the Entity together.
+- `replace-citation`: `--cite doc01:v02` re-cites doc03's c02 on v02 under a new key and producer; `--drop` removes c02.
+
+**D12 an outside Entity edit withholds its readers down the chain until it is reverted.** Proves `entity-edit`. Guide: "The edit". `unselected` leaves every digest as pinned. `description` changes the selected digest, withholds both levels and writes no row, revision or incident; `retrieve` in a new process agrees. `revert` brings the digest back and releases everything at revision 1, with the fact served again.
+
+```bash journey D12
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main unselected -- edit-entity --case unselected
+$V check "$RUN" unselected '.entity_edit | .before_sha256 == .pinned_sha256 and .after_sha256 == .pinned_sha256 and .fields == ["lab_note"]' 'an unselected field leaves the selected digest as pinned'
+$V check "$RUN" unselected '.withheld_decisions == []' 'nothing is withheld'
+
+$V drive "$RUN" main edit -- edit-entity --case description
+$V check "$RUN" edit '.entity_edit | .before_sha256 == .pinned_sha256 and .after_sha256 != .pinned_sha256 and .input_ref == "existing_A"' 'the selected digest changed'
+$V check "$RUN" edit '[.withheld_decisions[] | [.assignment_id, .reason, .status, .input_refs]] == [["r01", "input_changed", "refresh_needed", ["existing_A"]], ["v01", "input_changed", "refresh_needed", ["existing_A"]], ["c01", "input_changed", "upstream_withheld", ["doc01_r01"]], ["c02", "input_changed", "upstream_withheld", ["doc01_v01"]]]' 'both levels are withheld for the Entity input'
+$V check "$RUN" edit '.withholdings == [] and .recovery_events == [] and ([.sources[] | [.state, .saved_revision]] | unique) == [["current", 1]]' 'no row, no revision and no incident'
+
+$V drive "$RUN" main after -- retrieve
+$V check "$RUN" after '.facts == [] and [.unavailable_sources[] | [.assignment_id, .reason]] == [["r01", "input_changed"], ["v01", "input_changed"], ["c01", "input_changed"], ["c02", "input_changed"]]' 'a new process withholds the same four decisions'
+
+$V drive "$RUN" main revert -- edit-entity --case revert
+$V check "$RUN" revert '.entity_edit.after_sha256 == .entity_edit.pinned_sha256 and .withheld_decisions == []' 'the revert releases everything'
+$V check "$RUN" revert '.sources.doc01.saved_revision == 1 and [.result.facts[].identity.assignment_id] == ["r01"]' 'no revision, and the fact is served again'
+```
+
+**D13 re-confirms on the Entity as it reads now.** Proves `corpus-review`. Guide: "Re-confirm". r01's re-confirm cites `existing_A_r2`, whose digest is the edit's after digest, and releases c01 with no doc03 revision. v01's re-confirm releases the rest and drops the uncited `existing_A`.
+
+```bash journey D13
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main edit -- edit-entity --case description
+AFTER=$(val edit '.entity_edit.after_sha256')
+
+$V drive "$RUN" main r01 -- reconfirm --source doc01 --decision r01 --expected-revision 1
+$V check "$RUN" r01 '.sources.doc01.decisions.r01.input_refs == ["doc01", "existing_A_r2", "glossary_hc"] and .sources.doc01.decisions.r01.producer_ref == "review_r01_r2"' 'r01 cites the Entity under a new key'
+$V check "$RUN" r01 ".sources.doc01.producers.review_r01_r2.configuration | .new_digests.existing_A_r2 == \"$AFTER\" and .old_digests.existing_A != \"$AFTER\"" 'the new digest is the edited Entity'
+$V check "$RUN" r01 '[.withheld_decisions[] | [.assignment_id, .status]] == [["v01", "refresh_needed"], ["c02", "upstream_withheld"]] and .sources.doc03.saved_revision == 1' 'r01 and c01 are released with no doc03 revision'
+
+$V drive "$RUN" main v01 -- reconfirm --source doc01 --decision v01 --expected-revision 2
+$V check "$RUN" v01 '.sources.doc01.decisions.v01.input_refs == ["doc01", "existing_A_r3", "glossary_hc"] and .withheld_decisions == []' 'v01 is re-confirmed and nothing is withheld'
+$V check "$RUN" v01 '.sources.doc01 | .saved_revision == 3 and .verified_revision == 3' 'doc01 is at revision 3'
+$V drive "$RUN" main after -- retrieve
+$V check "$RUN" after '.unavailable_sources == [] and [.facts[].identity.assignment_id] == ["r01"]' 'a new process serves everything'
+```
+
+**D14 an Entity edit answered by an in-place replacement.** Proves `corpus-review`. Guide: "Replace". `replace-decision --decision r01` leaves g01 unresolved on the Entity as it reads now, which changes r01's fingerprint, so c01 needs doc03's own review, which releases it. v01 has no captured replacement for an Entity edit.
+
+```bash journey D14
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main edit -- edit-entity --case description
+
+$V drive "$RUN" main replace -- replace-decision --source doc01 --decision r01 --expected-revision 1
+$V check "$RUN" replace '.sources.doc01.decisions.r01 | .status == "unresolved" and .input_refs == ["doc01", "existing_A_r2", "glossary_hc"] and .producer_ref == "review_r01_r2"' 'r01 is unresolved on the Entity as it reads now'
+$V check "$RUN" replace '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["v01", "input_changed", "refresh_needed"], ["c01", "input_changed", "refresh_needed"], ["c02", "input_changed", "upstream_withheld"]]' 'c01 needs its own review'
+
+$V drive "$RUN" main v01 -- replace-decision --source doc01 --decision v01 --expected-revision 2
+$V check "$RUN" v01 '.error == "IntentError" and (.message | contains("Only v01 withheld by the glossary span"))' 'v01 has no captured replacement for an Entity edit'
+
+$V drive "$RUN" main c01 -- reconfirm --source doc03 --decision c01 --expected-revision 1
+$V check "$RUN" c01 '.sources.doc03.decisions.c01.input_refs == ["doc03", "doc01_r01_r2"] and [.withheld_decisions[] | .assignment_id] == ["v01", "c02"]' 'doc03 re-confirms c01 on r01 as it is now'
+```
+
+**D15 one re-confirm answers the glossary span and the Entity together.** Proves `mixed-review`. Guide: "Re-confirm". The cosmetic glossary edit and the Entity edit both withhold r01 and v01. One re-confirm of r01 cites both inputs as they are now in revision 2.
+
+```bash journey D15
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main gloss -- edit-glossary --source glossary --case cosmetic --expected-revision 1
+$V drive "$RUN" main edit -- edit-entity --case description
+$V check "$RUN" edit '[.withheld_decisions[] | select(.assignment_id == "r01") | .input_refs] == [["existing_A", "glossary_hc"]]' 'r01 is withheld by both inputs'
+
+$V drive "$RUN" main r01 -- reconfirm --source doc01 --decision r01 --expected-revision 1
+$V check "$RUN" r01 '.sources.doc01.decisions.r01.input_refs == ["doc01", "existing_A_r2", "glossary_hc_r2"]' 'one revision cites both inputs as they are now'
+$V check "$RUN" r01 '.sources.doc01.producers.review_r01_r2.configuration | (.old_digests | keys) == ["existing_A", "glossary_hc"] and (.new_digests | keys) == ["existing_A_r2", "glossary_hc_r2"]' 'the producer records both digests'
+$V check "$RUN" r01 '[.withheld_decisions[] | [.assignment_id, .status]] == [["v01", "refresh_needed"], ["c02", "upstream_withheld"]]' 'r01 and c01 are released'
+```
+
+**D16 replace-citation answers a removed citation.** Proves `replace-citation`. Guide: "Replace a citation". After D9's replacement of v01 by v02, `reconfirm` of c02 is refused and names `replace-citation`, and `replace-decision` is refused too. `replace-citation --cite doc01:v02` re-cites c02 on v02 as it is now under `doc01_v02_r2`, with a producer new in the revision, and releases c02. On a second root `--drop` removes c02.
+
+```bash journey D16
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main edit -- edit-glossary --source glossary --case substantive --expected-revision 1
+$V drive "$RUN" main replace -- replace-decision --source doc01 --decision v01 --expected-revision 1
+$V drive "$RUN" main refused -- reconfirm --source doc03 --decision c02 --expected-revision 1
+$V check "$RUN" refused '.message | contains("never re-confirmed") and contains("replace-citation")' 'the refusal names replace-citation'
+$V drive "$RUN" main decision -- replace-decision --source doc03 --decision c02 --expected-revision 1
+$V check "$RUN" decision '.message | contains("replaced with replace-citation")' 'replace-decision points to replace-citation'
+
+$V drive "$RUN" main cite -- replace-citation --source doc03 --decision c02 --cite doc01:v02 --expected-revision 1
+$V check "$RUN" cite '.sources.doc03 | .saved_revision == 2 and .verified_revision == 2 and .decisions.c02.input_refs == ["doc03", "doc01_v02_r2"] and .decisions.c02.producer_ref == "review_c02_r2"' 'c02 cites v02 under a new key'
+$V check "$RUN" cite '.sources.doc03 | .records.doc01_v02_r2.representation_revision == 2 and (.records | has("doc01_v01") | not) and .producers.review_c02_r2.implementation == "replaced"' 'the citation pins doc01 revision 2 under a replaced producer'
+$V check "$RUN" cite '[.withheld_decisions[] | [.assignment_id, .status]] == [["r01", "refresh_needed"], ["c01", "upstream_withheld"]] and .recovery_events == []' 'c02 is released'
+
+$V drive "$RUN" drop fixture2 -- glossary-fixture --chain
+$V drive "$RUN" drop edit2 -- edit-glossary --source glossary --case substantive --expected-revision 1
+$V drive "$RUN" drop replace2 -- replace-decision --source doc01 --decision v01 --expected-revision 1
+$V drive "$RUN" drop dropped -- replace-citation --source doc03 --decision c02 --drop --expected-revision 1
+$V check "$RUN" dropped '.sources.doc03 | .saved_revision == 2 and (.decisions | keys) == ["c01"] and (.records | keys) == ["doc01_r01"]' 'c02 and its citation are gone'
+$V check "$RUN" dropped '[.withheld_decisions[] | .assignment_id] == ["r01", "c01"]' 'only the r01 chain is withheld'
+```
+
 ## Notes
 
 - The review decisions are captured fixture input. They prove the withholding, refresh and re-confirm mechanics, not Describe.

@@ -20,6 +20,7 @@ from .entity_edit import ENTITY_CASES
 from .forget import FAULT_STAGES as FORGET_STAGES
 from .glossary_fixture import CASES as GLOSSARY_CASES
 from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
+from .glossary_fixture import KIND_CHANGES as GLOSSARY_KIND_CHANGES
 from .glossary_fixture import REFRESH_FAULT
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
@@ -239,7 +240,8 @@ def main():
         parser.error(str(exc))
     with environment:
         if args.command in GLOSSARY_COMMANDS or (
-            args.command in {"reconcile", "forget", "readd", "withdraw"}
+            args.command
+            in {"reconcile", "forget", "readd", "withdraw", *GLOSSARY_KIND_CHANGES}
             and kind == "glossary-fixture"
         ):
             from .glossary_fixture import run

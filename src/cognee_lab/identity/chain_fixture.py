@@ -14,8 +14,9 @@ not Describe.
 """
 
 import json
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
+from .digests import object_digest
 from .fixture import expect_current
 from .models import IdentitySource
 from .records import citation
@@ -31,8 +32,28 @@ HELIOS = "8b4bff50-907b-56b6-bc80-3b0a7018714a"
 HC = "9b2b4cb5-1b07-5380-8aa5-cf0f11b8db88"
 DOC03_REVIEW = "stage6-captured-chain-review"
 # Each `cite-record --citation` case: the source that cites, and how its
-# next revision cites. Admission refuses each one.
-CITATIONS = ("cycle", "self", "missing", "stale", "digest")
+# next revision cites. Admission refuses each one but `entity`.
+ENTITY_READS = ("entity", "mention")
+CITATIONS = ("cycle", "self", "missing", "stale", "digest", *ENTITY_READS)
+
+
+def entity_read(doc01, case) -> dict:
+    """A corpus input of an Entity of doc01's: the HC Entity (`entity`),
+    which doc03 then reads as doc01's alone, or doc01's g01 mention
+    (`mention`), which admission refuses (`mention_input`)."""
+    if case == "entity":
+        entity_id = HC
+        fields = doc01.entity_constructions[UUID(HC)].model_dump()
+    else:
+        entity_id = str(doc01.mention_groups["g01"].entity_id)
+        fields = dict(name=doc01.entity_constructions[UUID(entity_id)].name)
+    return dict(
+        kind="corpus_object",
+        dataset_id=str(doc01.dataset_id),
+        entity_id=entity_id,
+        selected_fields=sorted(fields),
+        content_sha256=object_digest(fields),
+    )
 
 
 def producer(policy, implementation="stage6-captured-chain"):
@@ -174,6 +195,8 @@ def citing_revision(source, case, sources, rows):
     if case == "cycle":
         # doc03 cites doc01, so doc01 citing doc03 closes a cycle.
         decision, item = "v01", citation(doc03, "c02")
+    elif case in ENTITY_READS:
+        decision, item = "c01", entity_read(doc01, case)
     elif case == "self":
         decision, item = "c01", citation(doc03, "c02")
     else:
@@ -195,6 +218,10 @@ def citing_revision(source, case, sources, rows):
         record = payload["mention_resolutions"].get(decision) or (
             payload["variant_assignments"][decision]
         )
+        if case == "entity":
+            # doc03 stops declaring HC, so doc01 alone owns the HC it reads.
+            payload["variant_assignments"].pop("c02")
+            payload["entity_constructions"].pop(HC)
         payload["inputs"][key] = item
         payload["producers"][f"review_{decision}_r{revision}"] = producer(
             DOC03_REVIEW, "cited"

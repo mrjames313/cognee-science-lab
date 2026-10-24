@@ -42,6 +42,8 @@ COMMANDS = (
     "replace-citation",
 )
 REVIEW_COMMANDS = ("reconfirm", "replace-decision", "replace-citation")
+# doc01's kind changes, which a glossary root also takes (chain_kind_change).
+KIND_CHANGES = ("change-kind-to-mention", "change-kind-to-reusable")
 
 
 def no_refresh():
@@ -315,6 +317,16 @@ async def reconcile(publisher, label, selected):
             TextChange.from_plan(row.plan),
             expected_revision=selected.revision,
         )
+    if row.resumed_by == "replace" and row.plan.get("text_change"):
+        # doc01's kind change (chain_kind_change.py) is a text change.
+        from .text_fixture import maintain_one
+
+        return await maintain_one(
+            publisher,
+            selected,
+            TextChange.from_plan(row.plan),
+            expected_revision=selected.revision,
+        )
     if row.resumed_by == "replace":
         await replace_one(publisher, selected, expected_revision=selected.revision)
     else:
@@ -472,6 +484,19 @@ async def run(args, root):
             from .chain_fixture import cite
 
             await cite(publisher, root, args, sources)
+        elif args.command in KIND_CHANGES:
+            from .chain_kind_change import change_kind
+
+            if args.source != "doc01":
+                raise IntentError("fixture_scope", f"{args.command} changes doc01")
+            refresh = await change_kind(
+                publisher,
+                root,
+                args.command,
+                selected,
+                expected_revision=args.expected_revision,
+                fault_stage=args.fault_stage,
+            )
         elif args.command == "edit-entity":
             from .entity_edit import edit_entity
 
@@ -547,6 +572,11 @@ async def run(args, root):
                 raise IntentError(failed["code"], failed["message"])
     result = await snapshot(publisher, root, args.query)
     result.update(refresh)
+    if args.command in KIND_CHANGES:
+        from .chain_kind_change import dependents_withheld
+
+        sources = await current_sources(root, publisher, INFO)
+        result.update(await dependents_withheld(publisher, sources, result))
     (root / "glossary_result.json").write_text(
         json.dumps(result, indent=2, default=str)
     )
