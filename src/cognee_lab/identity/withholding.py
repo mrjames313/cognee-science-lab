@@ -14,6 +14,10 @@ The rows live in their own table beside the ledger, not in RecordStore.
 consumed source's text change is pending or failed, every decision citing
 that document is withheld, so a crash before the rows are written never
 serves a dependent stale. Withholding writes no recovery events.
+
+A cited saved record needs no row: `record_reader` answers for it from the
+ledger rows each time, and `held_by` combines its answer with a source's
+other drift for the live pass (chains.live_pass).
 """
 
 from collections.abc import Callable
