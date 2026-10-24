@@ -134,12 +134,12 @@ def cascade_oracle(graph, states):
 def new_citation(source, cited, decision) -> IdentitySource:
     """`source` with one more citation, of `cited`'s record `decision` as it
     is now, from its decision of the same kind, under a new key."""
-    from cognee_lab.identity.records import citation
+    from cognee_lab.identity.records import REGISTRY, citation
 
     payload = source.model_dump(mode="json")
     key = f"new_{decision}_{cited.identity_data_id}"
     payload["inputs"][key] = citation(cited, decision)
-    field = "mention_resolutions" if decision == "d" else "variant_assignments"
+    field = REGISTRY[payload["inputs"][key]["record_type"]].field
     for record in payload[field].values():
         record["input_refs"].append(key)
     return IdentitySource.model_validate_json(json.dumps(payload))

@@ -601,21 +601,36 @@ def failing(fault, step: Step) -> bool:
     )
 
 
+def ready(steps) -> tuple[list[Step], list[tuple[Step, list[str]]]]:
+    """The removal revisions that can be written now, in the cascade's
+    order, and the ones that wait, each with the sources it waits behind:
+    one whose own attempt is pending, or whose withdrawal or forget failed
+    (`blocked`), and every one below it that cites a record it removes. Its
+    records are not removed yet, and a removal below binds only to written
+    ones."""
+    writable, waiting, held = [], [], set()
+    for step in steps:
+        behind = sorted({r.identity_data_id for r in step.cited_records} & held)
+        if blocked(step.row) or behind:
+            waiting.append((step, behind))
+            held.add(step.row.source)
+        else:
+            writable.append(step)
+    return writable, waiting
+
+
 async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
     """Write the cascade's removal revisions after the forget completed, in
     level order, each under its own writer reservation (`removal_writer`),
     from `rows` as the caller read them. A failed removal revision resumes
-    with its saved description. A dependent whose own attempt is pending,
-    or whose withdrawal or forget failed, waits (`dependent_unfinished`)
-    until that attempt finishes, and so does every removal below it that
-    cites a record it removes (`waits_for`): its records are not removed
-    yet, and the removals below bind only to written ones. Stops at the
-    first failure and reports it, not raised: the forget before it already
-    completed. `fault` is one of forget.DEPENDENT_FAULTS:
+    with its saved description. A removal that waits (`ready`) is reported
+    (`dependent_unfinished`) until the attempt it waits for finishes. Stops
+    at the first failure and reports it, not raised: the forget before it
+    already completed. `fault` is one of forget.DEPENDENT_FAULTS:
     `forget_dependents` stops before the first revision begins, when there
     is one; the others fail removal revisions (`failing`)."""
     ids = source_ids(tombstone)
-    done, waiting, held = [], [], set()
+    done, waiting = [], []
     try:
         steps = cascade(rows, ids, tombstone.removed_entity_ids, tombstone.impact_token)
         if steps and fault == "forget_dependents":
@@ -623,26 +638,23 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
                 "injected_failure",
                 "Injected failure before the dependents' removal revisions",
             )
-        for step in steps:
-            row = step.row
-            behind = sorted({r.identity_data_id for r in step.cited_records} & held)
-            write = removal_writer(row)
-            if write is None or behind:
-                waiting.append(
-                    dict(
-                        identity_data_id=row.source,
-                        state=row.state,
-                        operation=row.operation,
-                        level=step.level,
-                        waits_for=behind,
-                    )
-                )
-                held.add(row.source)
-                continue
-            await write(publisher, row, step.description, failing(fault, step))
+        writable, held = ready(steps)
+        waiting = [
+            dict(
+                identity_data_id=step.row.source,
+                state=step.row.state,
+                operation=step.row.operation,
+                level=step.level,
+                waits_for=behind,
+            )
+            for step, behind in held
+        ]
+        for step in writable:
+            write = removal_writer(step.row)
+            await write(publisher, step.row, step.description, failing(fault, step))
             done.append(
                 dict(
-                    identity_data_id=row.source,
+                    identity_data_id=step.row.source,
                     revision=step.description.revision,
                     level=step.level,
                 )

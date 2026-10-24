@@ -11,13 +11,13 @@ import pytest
 from cognee_lab.identity.admission import admit, identity_map
 from cognee_lab.identity.erasure_rules import (
     Erasures,
+    bound_removals,
     check_erasure_retry,
     check_retry_chain,
     erasures_of,
     producer_key,
 )
 from cognee_lab.identity.erasure import cascade, impact, unfinished
-from cognee_lab.identity.records import RemovedRecord
 from cognee_lab.identity.fixture import FIXTURES
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.retirement import contribution_triples, source_ids
@@ -184,20 +184,20 @@ def test_the_removal_revision_is_admitted_and_cites_nothing_forgotten(
     assert "v01" not in revised.variant_assignments
     assert HC not in revised.entity_constructions
     assert {"gloss", "gloss_hc"}.isdisjoint(revised.inputs)
-    assert revised.producers[
-        producer_key(ids.identity_data_id, 2)
-    ].configuration == dict(
-        forgotten_identity_data_id=str(gloss.identity_data_id),
-        forgotten_document_id=str(gloss.inputs["doc01"].data_id),
-        removed_entity_ids=[],
-        impact_token="t" * 64,
-        removed_records=[
-            RemovedRecord.of(doc01, key, doc01.revision)._asdict()
-            for key in ("r01", "v01")
-        ],
-        cited_records=[],
-    )
     admit(doc01, revised, TEXT, TEXT, identity_map(doc01), erasures=forgot(gloss))
+    # Once written, the removal binds r01 and v01 as they were served for a
+    # removal below it.
+    tombstone = Tombstone.of(gloss, forgotten_at="t")
+    forgotten = replace(
+        row_of(gloss, "forgotten"), description=None, tombstone=tombstone
+    )
+    bound = bound_removals(
+        [forgotten, row_of(revised)], gloss.inputs["doc01"].data_id, frozenset()
+    )
+    assert {(r.record_id, r.last_revision, level) for r, level in bound.items()} == {
+        ("r01", 1, 1),
+        ("v01", 1, 1),
+    }
 
 
 def test_a_corpus_scoped_variant_citing_the_span_is_dropped(source_payload):

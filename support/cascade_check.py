@@ -9,7 +9,7 @@ with s0 forgotten and every other source ok, blocked or drifted
   the oracle states them, and its token tells apart any two different
   cascades.
 - Order and resume. Writing the removal revisions as `finish_dependents`
-  does (the first one that waits for nothing, in the cascade's order),
+  does (the first one `erasure.ready` lets write, in the cascade's order),
   admission admits each one; after each write the cascade read from the
   rows again plans the same revisions for the rest; what is left at the end
   is what waits for a blocked removal.
@@ -41,7 +41,14 @@ from cascade_worlds import (
     pending_row,
 )
 from chain_worlds import LABELS, TEXT, acyclic, graphs, row_of
-from cognee_lab.identity import erasure, erasure_rules, records
+from cognee_lab.identity import (
+    dependency,
+    erasure,
+    erasure_rules,
+    records,
+    retirement,
+    withholding,
+)
 from cognee_lab.identity.admission import admit, identity_map
 from cognee_lab.identity.chains import (
     check_citation_cycles,
@@ -97,19 +104,6 @@ def removals(found):
     }
 
 
-def next_step(steps):
-    """The first removal revision that waits for nothing, as
-    finish_dependents picks it."""
-    held = set()
-    for step in steps:
-        behind = {r.identity_data_id for r in step.cited_records} & held
-        if erasure.blocked(step.row) or behind:
-            held.add(step.row.source)
-            continue
-        return step
-    return None
-
-
 def shrinks(rows, confirmed, impact_of):
     """Each admitted new citation leaves the removals inside `confirmed`.
     Yields the citations that widen them."""
@@ -119,10 +113,7 @@ def shrinks(rows, confirmed, impact_of):
             continue
         for cited, decision in product(sorted(current), ("d", "v")):
             target = current[cited].description
-            if cited == row.source or decision not in {
-                *target.mention_resolutions,
-                *target.variant_assignments,
-            }:
+            if cited == row.source or decision not in records.record_keys(target):
                 continue
             candidate = new_citation(row.description, target, decision)
             try:
@@ -187,9 +178,10 @@ def check_world(graph, states, tokens, *, shrink):
                 rows, confirmed, lambda r: erasure.remaining(tomb, r)
             ):
                 failures.append(("shrink", widened))
-        step = next_step(steps)
-        if step is None:
+        writable, _ = erasure.ready(steps)
+        if not writable:
             break
+        step = writable[0]
         if (code := refusal(rows, step)) is not None:
             failures.append(("write in order", step.row.source, code))
             break
@@ -257,26 +249,41 @@ def any_fingerprint(self, item):
     ) and item.representation_revision <= self.last_revision
 
 
-_citations = erasure.citations
+_citations = dependency.citations
 _cascade = erasure.cascade
+# Each mutant: its replacement and every (module, name) that binds the
+# original, so callers that imported it see the mutant too.
 MUTANTS = {
-    "one_level_cascade": (erasure, "citations", one_level),
-    "cascade_out_of_order": (erasure, "cascade", by_source),
-    "bound_without_induction": (erasure_rules, "bound_removals", without_induction),
-    "level_one_fence": (erasure, "removed_records", level_one_fence),
-    "removed_any_fingerprint": (records.RemovedRecord, "reads", any_fingerprint),
+    "one_level_cascade": (
+        one_level,
+        [
+            (m, "citations")
+            for m in (dependency, erasure, erasure_rules, retirement, withholding)
+        ],
+    ),
+    "cascade_out_of_order": (by_source, [(erasure, "cascade")]),
+    "bound_without_induction": (
+        without_induction,
+        [(erasure, "bound_removals"), (erasure_rules, "bound_removals")],
+    ),
+    "level_one_fence": (level_one_fence, [(erasure, "removed_records")]),
+    "removed_any_fingerprint": (any_fingerprint, [(records.RemovedRecord, "reads")]),
 }
 
 
 @contextmanager
 def patched(name):
-    owner, attribute, replacement = MUTANTS[name]
-    original = getattr(owner, attribute)
-    setattr(owner, attribute, replacement)
+    replacement, bindings = MUTANTS[name]
+    originals = [
+        (owner, attribute, getattr(owner, attribute)) for owner, attribute in bindings
+    ]
+    for owner, attribute, _ in originals:
+        setattr(owner, attribute, replacement)
     try:
         yield
     finally:
-        setattr(owner, attribute, original)
+        for owner, attribute, original in originals:
+            setattr(owner, attribute, original)
 
 
 def run_mutants(count=4, states=("ok", "drifted")):
