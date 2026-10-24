@@ -17,11 +17,13 @@ intended revision follows from the command and what was read
   entry's new meaning;
 - an input that went, or a dropped citation, is removed from the decision
   as an erasure removes it (records.apply_removal): a resolution stays,
-  unresolved, a variant goes.
+  unresolved, a variant goes, and a recipe only it named goes too
+  (erasure_rules.drop_unnamed_recipes).
 
 The review decisions are captured fixture input, not Describe.
 """
 
+from .erasure_rules import corpus_readers, drop_unnamed_recipes
 from .fixture import expect_current
 from .forget_fixture import CALLER_FILES
 from .glossary_fixture import INFO, hc_entry
@@ -32,6 +34,7 @@ from .records import (
     apply_removal,
     cited_row,
     citation,
+    drops,
     record_type_of,
     saved_records,
 )
@@ -244,10 +247,14 @@ async def cited_now(root, publisher, rows, entry, cite, revision) -> Now:
     return {old_key: (f"{cited_label}_{record_id}_r{revision}", item)}
 
 
-def removal(source, decision, now: Now, producer_key, producer, explanation=None):
+def removal(
+    source, decision, now: Now, producer_key, producer, readers, explanation=None
+):
     """The decision removed as an erasure removes it (records.apply_removal),
     under the review producer: it and the parts that hold its inputs cite
-    each input that changed as it is now and stop citing one that went."""
+    each input that changed as it is now and stop citing one that went. A
+    recipe that only the decision named goes, unless a saved source reads
+    it as a corpus input (`readers`, erasure_rules.drop_unnamed_recipes)."""
 
     def change(payload):
         for new_key, item in filter(None, now.values()):
@@ -256,33 +263,39 @@ def removal(source, decision, now: Now, producer_key, producer, explanation=None
         apply_removal(payload, source, {decision}, refs, producer_key, explanation)
         payload["producers"][producer_key] = producer
 
-    return next_revision(source, change)
+    stripped = next_revision(source, change)
+    return drop_unnamed_recipes(source, {decision}, stripped, readers)[0]
 
 
-def unresolved_in_place(source, decision, now: Now, producer_key, producer):
-    """A resolution whose input changed or went, which the reviewer now
-    leaves unresolved: it keeps its key and changes in place, so its
-    fingerprint changes."""
-    how = "changed" if None not in now.values() else "changed or went"
-    return removal(
-        source,
-        decision,
-        now,
-        producer_key,
-        producer,
+def left_unresolved(now: Now) -> str:
+    """Why a replaced resolution is left unresolved: the inputs it read
+    that changed, went, or both."""
+    went = [k for k, v in now.items() if v is None]
+    how = (
+        "changed"
+        if not went
+        else "went" if len(went) == len(now) else "changed or went"
+    )
+    return (
         f"An input it read {how} ({', '.join(sorted(now))});"
-        " its group is left unresolved.",
+        " its group is left unresolved."
     )
 
 
-def replaced_variant(doc01, decision, now: Now, producer_key, producer):
+def unresolved_in_place(source, decision, now: Now, producer_key, producer, readers):
+    """A resolution whose input changed, which the reviewer now leaves
+    unresolved: it keeps its key and changes in place, so its fingerprint
+    changes."""
+    return removal(
+        source, decision, now, producer_key, producer, readers, left_unresolved(now)
+    )
+
+
+def replaced_variant(doc01, decision, now: Now, producer_key, producer, readers):
     """v01 said HC is the Helios controller. The glossary now gives HC
     another meaning, so the reviewer drops v01 and adds v02: HC is a new
     "Hybrid coil" Entity, whose UUID derives from v02 and the new revision.
-    Only the changed glossary span carries that meaning. A variant whose
-    input went is dropped (`removal`)."""
-    if None in now.values():
-        return removal(doc01, decision, now, producer_key, producer)
+    Only the changed glossary span carries that meaning."""
     if decision != "v01" or [type(doc01.inputs[k]) for k in now] != [TextSpanInput]:
         raise IntentError(
             "fixture_scope",
@@ -318,27 +331,36 @@ if not REPLACEMENTS.keys() <= REGISTRY.keys():
     raise TypeError("review.REPLACEMENTS names a type records.REGISTRY lacks")
 
 
-def no_replacement(source, decision, now, producer_key, producer):
+def no_replacement(source, decision, now, producer_key, producer, readers):
     raise IntentError(
         "fixture_scope", f"{decision} has no captured replacement in this fixture"
     )
 
 
-def intended_revision(command, source, decision, now: Now, producer_key, producer):
+def intended_revision(
+    command, entry, source, decision, now: Now, producer_key, readers
+):
     """The revision that answers the decision, from the command and what
-    the reviewer read now. A re-confirm, or `--cite`, cites each input as
-    it is now; `--drop` removes the decision; `replace-decision` replaces
-    it by its record type (`REPLACEMENTS`)."""
-    if command == "replace-decision":
-        replace = REPLACEMENTS.get(record_type_of(source, decision), no_replacement)
-        return replace(source, decision, now, producer_key, producer)
+    the reviewer read now, under its producer (`review_producer`). An input
+    that went, or a dropped citation, removes the decision (`removal`);
+    a re-confirm refuses it. Otherwise a re-confirm, or `--cite`, cites
+    each input as it is now, and `replace-decision` replaces the decision
+    by its record type (`REPLACEMENTS`). The producer's new digests name
+    only inputs the revision keeps: a dropped decision keeps none."""
     gone = sorted(k for k, v in now.items() if v is None)
-    if command == "replace-citation" and len(gone) == len(now):
-        return removal(source, decision, now, producer_key, producer)
-    if gone:
+    if gone and command == "reconfirm":
         raise IntentError(
             "input_removed", f"A removed input is never re-confirmed: {', '.join(gone)}"
         )
+    if gone:
+        why = left_unresolved(now) if command == "replace-decision" else None
+        kept = dict.fromkeys(now) if drops(source, decision) else now
+        producer = review_producer(entry, command, source, kept)
+        return removal(source, decision, kept, producer_key, producer, readers, why)
+    producer = review_producer(entry, command, source, now)
+    if command == "replace-decision":
+        replace = REPLACEMENTS.get(record_type_of(source, decision), no_replacement)
+        return replace(source, decision, now, producer_key, producer, readers)
     return reconfirmed(source, decision, now, producer_key, producer)
 
 
@@ -373,9 +395,15 @@ async def review(
         now = await cited_now(root, publisher, rows, entry, cite, revision)
     else:
         now = await as_now(publisher, rows, source, entry.inputs, revision)
-    producer_key = f"review_{decision}_r{revision}"
-    producer = review_producer(entry, command, source, now)
-    intended = intended_revision(command, source, decision, now, producer_key, producer)
+    intended = intended_revision(
+        command,
+        entry,
+        source,
+        decision,
+        now,
+        f"review_{decision}_r{revision}",
+        corpus_readers(rows, str(source.identity_data_id)),
+    )
     write_revision(root, label, intended)
     await replace_one(
         publisher,

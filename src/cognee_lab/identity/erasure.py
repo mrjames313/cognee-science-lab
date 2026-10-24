@@ -21,7 +21,6 @@ a resume after a crash continues where the rows say it stopped
 (`unfinished`).
 """
 
-import json
 from dataclasses import asdict, dataclass, replace
 from typing import NamedTuple, assert_never
 from uuid import UUID
@@ -30,19 +29,19 @@ from .dependency import Citation, Target, citations, read_records
 from .erasure_rules import (
     ERASURE_IMPLEMENTATION,
     bound_removals,
-    corpus_reads,
+    corpus_readers,
+    drop_unnamed_recipes,
     erased_decisions,
     is_removal_producer,
     levels,
     producer_key,
     removal_claim,
 )
-from .models import CorpusObjectInput, IdentitySource
+from .models import IdentitySource
 from .records import (
     REGISTRY,
     RemovedRecord,
     apply_removal,
-    naming,
     record_inputs,
     record_type_of,
     saved_records,
@@ -217,13 +216,6 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
     erased = set(cited)
     by_decision = record_inputs(reader)
     citing = {a for a, inputs in by_decision.items() if inputs & erased}
-    remaining = set(by_decision) - citing
-    mentions = {g.entity_id for g in reader.mention_groups.values()}
-    candidates = (
-        set().union(*(naming(reader, k) for k in citing))
-        - set().union(*(naming(reader, k) for k in remaining))
-        - mentions
-    ) & set(reader.entity_constructions)
     revision = reader.revision + 1 if row.state == "current" else reader.revision
     key = producer_key(ids.identity_data_id, revision)
     removed_records = removes(row, cited)
@@ -237,16 +229,7 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
         )
 
     stripped = next_revision(reader, change, revision=revision)
-    read = {
-        i.entity_id
-        for i in stripped.inputs.values()
-        if isinstance(i, CorpusObjectInput)
-    } | set(readers)
-    dropped = {e for e in candidates if e not in read}
-    payload = stripped.model_dump(mode="json")
-    for e in dropped:
-        payload["entity_constructions"].pop(str(e))
-    revised = IdentitySource.model_validate_json(json.dumps(payload))
+    revised, dropped, kept = drop_unnamed_recipes(reader, citing, stripped, readers)
     return revised, DependentImpact(
         dataset_id=row.dataset,
         identity_data_id=row.source,
@@ -264,7 +247,7 @@ def removal_revision(row, cited, ids: SourceIds, removed, readers, records, toke
             for k, kind in kinds.items()
         ),
         dropped_entities=tuple(sorted(str(e) for e in dropped)),
-        kept_entities=tuple(sorted(str(e) for e in candidates - dropped)),
+        kept_entities=tuple(sorted(str(e) for e in kept)),
         unlinked_mentions=tuple(
             sorted(
                 str(e) for k, kind in kinds.items() for e in kind.unlinked(reader, k)
@@ -369,7 +352,6 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
             break
         records |= bound.keys()
 
-    reads = {r.source: corpus_reads(r.description) for r in rows if not r.is_retired}
     steps = [
         Step(
             live[s],
@@ -385,9 +367,8 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
     for s, found in cited.items():
         if s not in depth:
             continue
-        readers = set().union(*(e for k, e in reads.items() if k != s))
         revised, impact = removal_revision(
-            live[s], found, ids, removed, readers, records, token
+            live[s], found, ids, removed, corpus_readers(rows, s), records, token
         )
         steps.append(
             Step(

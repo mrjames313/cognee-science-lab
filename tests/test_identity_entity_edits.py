@@ -9,7 +9,7 @@ import asyncio
 import dataclasses
 import json
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -18,6 +18,7 @@ from chain_worlds import described, identity, record_key, row_of, world_rows
 from cognee_lab.identity import chains, entity_edit, erasure, review
 from cognee_lab.identity.admission import check_mention_inputs, mention_ids
 from cognee_lab.identity.digests import object_digest
+from cognee_lab.identity.kind_change import HC_ID
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.records import RemovedRecord, names_record, saved_records
 from cognee_lab.identity.retirement import source_ids
@@ -206,7 +207,7 @@ def reviewed(monkeypatch, tmp_path, source, entry, decision, *, command, **optio
     monkeypatch.setattr(review, "withheld_now", withheld)
     monkeypatch.setattr(review, "expect_current", current)
     monkeypatch.setattr(review, "replace_one", replaced)
-    monkeypatch.setattr(review, "read_texts", texts, raising=False)
+    monkeypatch.setattr(review, "read_texts", texts)
     publisher = SimpleNamespace(
         records=SimpleNamespace(rows=read_rows), graph=options.get("graph")
     )
@@ -243,11 +244,50 @@ def test_replace_decision_strips_a_removed_corpus_input(monkeypatch, tmp_path):
     resolution = d.mention_resolutions["d"]
     assert (resolution.status, resolution.producer_ref) == ("unresolved", "review_d_r2")
     assert "existing_A" not in resolution.input_refs
+    assert resolution.explanation == (
+        "An input it read went (existing_A); its group is left unresolved."
+    )
     # The variant still cites the Entity, so its input stays.
     assert "existing_A" in d.variant_assignments["v"].input_refs
     v = reviewed(monkeypatch, tmp_path, source, REMOVED_ENTITY, "v", **options)
     assert "v" not in v.variant_assignments
     assert v.mention_resolutions == source.mention_resolutions
+    # Only the variant named HC, so its recipe goes with it.
+    assert UUID(HC_ID) not in v.entity_constructions
+    assert UUID(helios(source)) in v.entity_constructions
+
+
+def test_a_dropped_variant_names_no_input_it_drops(
+    monkeypatch, tmp_path, source_payload
+):
+    """v01 reads the glossary span, which went, and the Entity, which
+    changed. The variant goes, so the new read of the Entity goes with it:
+    the producer names its old digests and no new one, and HC's recipe,
+    which only v01 named, goes as an erasure drops it."""
+    doc01 = glossary_doc01(source_payload)
+    graph = Graph({helios(doc01): dict(HELIOS_FIELDS, description="Edited.")})
+    entry = Withheld(
+        Reason.REMOVED, Status.REFRESH_NEEDED, frozenset(["glossary_hc", "existing_A"])
+    )
+    options = dict(graph=graph, command="replace-decision")
+    v = reviewed(monkeypatch, tmp_path, doc01, entry, "v01", **options)
+    assert "v01" not in v.variant_assignments and "existing_A_r2" not in v.inputs
+    digests = v.producers["review_v01_r2"].configuration
+    assert set(digests["old_digests"]) == {"existing_A", "glossary_hc"}
+    assert digests["new_digests"] == {}
+    assert UUID(HC_ID) not in v.entity_constructions
+    assert UUID(helios(doc01)) in v.entity_constructions
+    r01 = reviewed(monkeypatch, tmp_path, doc01, entry, "r01", **options)
+    assert r01.mention_resolutions["r01"].explanation == (
+        "An input it read changed or went (existing_A, glossary_hc);"
+        " its group is left unresolved."
+    )
+    # Another source reads HC as a corpus object, so its recipe stays.
+    payload = json.loads(described("s0", frozenset()).model_dump_json())
+    payload["inputs"]["existing_A"]["entity_id"] = HC_ID
+    reader = row_of(IdentitySource.model_validate_json(json.dumps(payload)), "ok")
+    v = reviewed(monkeypatch, tmp_path, doc01, entry, "v01", rows=[reader], **options)
+    assert UUID(HC_ID) in v.entity_constructions
 
 
 def test_replace_decision_strips_a_removed_glossary_span(
@@ -263,7 +303,9 @@ def test_replace_decision_strips_a_removed_glossary_span(
     r01 = intended.mention_resolutions["r01"]
     assert r01.status == "unresolved" and "glossary_hc" not in r01.input_refs
     assert "glossary_hc" in intended.variant_assignments["v01"].input_refs
-    assert "went" in r01.explanation
+    assert r01.explanation == (
+        "An input it read went (glossary_hc); its group is left unresolved."
+    )
 
 
 def test_one_reconfirm_reads_every_withholding_input_by_its_kind(monkeypatch, tmp_path):
@@ -325,6 +367,7 @@ def test_drop_removes_a_variant_and_unresolves_only_the_resolution_it_drops(
     no_variant = reviewed(monkeypatch, tmp_path, source, held, "v", **options)
     assert "v" not in no_variant.variant_assignments
     assert variant_key not in no_variant.inputs and no_variant.revision == 2
+    assert UUID(HC_ID) not in no_variant.entity_constructions
     held = held._replace(inputs=frozenset([resolution_key]))
     unresolved = reviewed(monkeypatch, tmp_path, source, held, "d", **options)
     d = unresolved.mention_resolutions["d"]

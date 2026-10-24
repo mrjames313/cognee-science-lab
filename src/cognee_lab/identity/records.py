@@ -258,6 +258,12 @@ def apply_removal(
                 payload[field][part_key] = part.model_dump(mode="json")
 
 
+def drops(description, key) -> bool:
+    """Whether a removal drops the record (`RecordKind.outcome`), as it
+    drops a variant, rather than keep it in place."""
+    return REGISTRY[record_type_of(description, key)].outcome == "dropped"
+
+
 def record_inputs(source) -> dict[str, frozenset[str]]:
     """The input keys each record cites directly, by its key, as its record
     type says (`RecordKind.inputs`)."""

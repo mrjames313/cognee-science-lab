@@ -17,6 +17,7 @@ order; the replace path and Publisher.readd call the rest. Nothing here
 imports admission.
 """
 
+import json
 from collections.abc import Hashable, Mapping
 from itertools import pairwise
 from types import MappingProxyType
@@ -25,7 +26,7 @@ from uuid import UUID
 
 from .decisions import decisions_digest, naming_keys
 from .dependency import Target, citations, read_records
-from .models import CorpusObjectInput
+from .models import CorpusObjectInput, IdentitySource
 from .records import (
     REGISTRY,
     RemovedRecord,
@@ -216,6 +217,44 @@ def corpus_reads(description) -> set[UUID]:
         for i in description.inputs.values()
         if isinstance(i, CorpusObjectInput)
     }
+
+
+def corpus_readers(rows, source: str) -> set[UUID]:
+    """The Entities that saved sources other than `source` list as corpus
+    inputs."""
+    return set().union(
+        *(
+            corpus_reads(r.description)
+            for r in rows
+            if not r.is_retired and r.source != source
+        )
+    )
+
+
+def drop_unnamed_recipes(old, removed, revised, readers):
+    """`revised`, `old` after the removal of the records in `removed`, with
+    each recipe dropped that a removed record named and no remaining record
+    of `old` names, unless a saved source reads that Entity as a corpus
+    input, `revised` itself or another (`readers`): dropping the last
+    declaration would take the Entity out of the graph under its reader
+    (`check_dropped_unread`). Mention Entities stay with their groups. An
+    erasure's removal and a reviewer's both drop recipes this way. Returns
+    the revision, the dropped recipes and the kept candidates."""
+    remaining = set(record_keys(old)) - set(removed)
+    candidates = (
+        set().union(*(naming(old, k) for k in removed))
+        - set().union(*(naming(old, k) for k in remaining))
+        - {g.entity_id for g in old.mention_groups.values()}
+    ) & set(old.entity_constructions)
+    dropped = frozenset(candidates - corpus_reads(revised) - set(readers))
+    payload = revised.model_dump(mode="json")
+    for e in dropped:
+        payload["entity_constructions"].pop(str(e))
+    return (
+        IdentitySource.model_validate_json(json.dumps(payload)),
+        dropped,
+        frozenset(candidates - dropped),
+    )
 
 
 class Erasure(NamedTuple):
