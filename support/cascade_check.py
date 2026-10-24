@@ -31,6 +31,8 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   every source whose records it cites to a withdrawal, then was rejected
   at retrieval, is admitted again with its saved removal: in place through
   the erasure-retry chain check, at the next revision through admission.
+  So is every removal of a finished cascade rejected after s0 was
+  re-added.
 - The served revision. A removal in place that lists its records as last
   served at another revision than the ledger verified is refused.
 - The inductive gate. Admission refuses (`erasure_unbound`) a removal below
@@ -63,6 +65,7 @@ from cascade_worlds import (
     cascade_rows,
     new_citation,
     pending_row,
+    readded,
 )
 from chain_worlds import LABELS, TEXT, acyclic, graphs, row_of
 from cognee_lab.identity import (
@@ -312,26 +315,19 @@ def retired_upstream(rows, step, ids, tomb):
     return failures + ([("upstream retired", source)] if source in left else [])
 
 
-def rejected_after_upstream_retired(rows, step):
-    """Disagreements when `step`, a removal below level 1, completed, every
-    source whose records it cites withdrew, and retrieval then rejected
-    it: the retry with the saved removal is admitted, since its first
-    attempt found what it cites bound. A removal in place is an erasure
-    retry, which begin checks; one at the next revision is a replacement's
-    retry, which admission checks."""
-    if step.level == 1:
-        return []
+def retry_refusal(step, rows):
+    """The code admission refuses the retry of `step`'s removal with, once
+    it completed and retrieval rejected it, in `rows` (which hold that
+    rejected row), or None when it admits it. A removal in place is an
+    erasure retry, which begin checks; one at the next revision is a
+    replacement's retry, which admission checks."""
     old, removal = step.row.description, step.description
-    rejected = dataclasses.replace(row_of(removal, "ok"), state="failed")
-    after = withdrawn(
-        [rejected if r.source == rejected.source else r for r in rows],
-        {r.identity_data_id for r in step.cited_records},
-    )
-    erasures = erasure_rules.erasures_of(after, removal)
+    row = next(r for r in rows if r.source == step.row.source)
+    erasures = erasure_rules.erasures_of(rows, removal)
     try:
         if removal.revision == old.revision:
             erasure_rules.check_retry_chain(
-                [old, removal], erasures, rejected.verified_revision, removal
+                [old, removal], erasures, row.verified_revision, removal
             )
         else:
             admit(
@@ -344,8 +340,42 @@ def rejected_after_upstream_retired(rows, step):
                 erasures=erasures,
             )
     except IntentError as exc:
-        return [("rejected after upstream retired", rejected.source, exc.code)]
+        return exc.code
+    return None
+
+
+def rejected(rows, step):
+    """`rows` with `step`'s removal completed and then rejected at
+    retrieval."""
+    row = dataclasses.replace(row_of(step.description, "ok"), state="failed")
+    return [row if r.source == row.source else r for r in rows]
+
+
+def rejected_after_upstream_retired(rows, step):
+    """Disagreements when `step`, a removal below level 1, completed, every
+    source whose records it cites withdrew, and retrieval then rejected
+    it: the retry with the saved removal is admitted, since its first
+    attempt found what it cites bound."""
+    if step.level == 1:
+        return []
+    after = withdrawn(
+        rejected(rows, step), {r.identity_data_id for r in step.cited_records}
+    )
+    if code := retry_refusal(step, after):
+        return [("rejected after upstream retired", step.row.source, code)]
     return []
+
+
+def rejected_after_readd(rows, planned):
+    """Disagreements once the cascade finished and s0 was re-added, which
+    moves its tombstone to the row's last tombstone, when retrieval then
+    rejects a removal: its retry with the saved removal is admitted, since
+    the forget it names is s0's last."""
+    failures = []
+    for step in planned:
+        if code := retry_refusal(step, readded(rejected(rows, step))):
+            failures.append(("rejected after re-add", step.row.source, code))
+    return failures
 
 
 def check_world(graph, states, tokens, *, shrink):
@@ -412,6 +442,8 @@ def check_world(graph, states, tokens, *, shrink):
     left = {s.row.source for s in erasure.cascade(rows, ids, ())}
     if left != waiting:
         failures.append(("waiting", left))
+    if not left:
+        failures += rejected_after_readd(rows, planned.values())
     return failures
 
 
@@ -530,6 +562,12 @@ def retire_by_ids(source, rows):
         raise IntentError("cascade_unfinished", "")
 
 
+def forget_only_live(old, source, erasures, **options):
+    """A removal may name only a forget whose source is still forgotten,
+    also on a retry after the source was re-added."""
+    return _erasure_of(old, source, erasures._replace(earlier={}), **options)
+
+
 def bind_every_step(chain, erasures, served, saved):
     """Every step of a retry chain must cite records bound now, also a step
     an earlier begin admitted."""
@@ -588,6 +626,7 @@ MUTANTS = {
     "served_or_before": (served_or_before, (erasure_rules, "check_retry_chain")),
     "bind_every_step": (bind_every_step, (erasure_rules, "check_retry_chain")),
     "bind_on_retry": (bind_on_retry, (erasure_rules, "erasure_of")),
+    "forget_only_live": (forget_only_live, (erasure_rules, "erasure_of")),
 }
 
 

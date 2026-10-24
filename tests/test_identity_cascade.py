@@ -5,7 +5,7 @@ import dataclasses
 
 import pytest
 
-from cascade_worlds import cascade_rows
+from cascade_worlds import cascade_rows, readded
 from chain_worlds import TEXT, identity, row_of
 from cognee_lab.identity import erasure
 from cognee_lab.identity.admission import admit, identity_map
@@ -338,3 +338,42 @@ def test_a_completed_removal_rejected_after_its_upstream_retired_is_admitted_aga
     with pytest.raises(IntentError) as refused:
         admit(old, removal, TEXT, TEXT, identity_map(old), erasures=erasures)
     assert refused.value.code == "erasure_unbound"
+
+
+@pytest.mark.parametrize("bind", [True, False])
+def test_a_completed_removal_rejected_after_the_forgotten_source_returned(bind):
+    """s1's and s2's removals completed and the cascade finished; s0 was
+    re-added, which moves its tombstone to the row's last tombstone, and
+    then retrieval rejected s2. The replacement's retry with its saved
+    removal is admitted: the forget it names is one the ledger records,
+    in s0's last forgotten life. A first attempt with the same removal is
+    refused, since that forget no longer binds anything new."""
+    rows = rows_of()
+    ids = source_ids(rows[0].tombstone)
+    for _ in range(2):
+        step = erasure.cascade(rows, ids, ())[0]
+        rows = [
+            row_of(step.description, "ok") if r.source == step.row.source else r
+            for r in rows
+        ]
+    assert erasure.unfinished(rows[0].tombstone, rows) == []
+    old = rows_of()[2].description
+    removal = by_label(rows, "s2").description
+    rows = readded(rows)
+    rejected = dataclasses.replace(by_label(rows, "s2"), state="failed")
+    rows = replaced(rows, "s2", rejected)
+    erasures = erasures_of(rows, removal)
+    if bind:
+        with pytest.raises(IntentError) as refused:
+            admit(old, removal, TEXT, TEXT, identity_map(old), erasures=erasures)
+        assert refused.value.code == "erasure_unbound"
+    else:
+        admit(
+            old,
+            removal,
+            TEXT,
+            TEXT,
+            identity_map(old),
+            first_attempt=False,
+            erasures=erasures,
+        )

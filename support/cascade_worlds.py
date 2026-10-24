@@ -80,6 +80,18 @@ def pending_row(graph):
     return dataclasses.replace(row_of(source, "ok"), state="pending", plan=plan)
 
 
+def readded(rows):
+    """`rows` with s0 re-added after its forget: current at the revision
+    after its tombstone's, which the row keeps as its last tombstone."""
+    (forgotten,) = [r for r in rows if r.tombstone is not None]
+    tomb = forgotten.tombstone
+    payload = payload_of(FORGOTTEN, cites=())
+    payload["revision"] = tomb.revision + 1
+    source = IdentitySource.model_validate_json(json.dumps(payload))
+    row = dataclasses.replace(row_of(source, "ok"), tombstone=None, last_tombstone=tomb)
+    return [row if r is forgotten else r for r in rows]
+
+
 def cascade_rows(graph, states, forget=forgotten_row):
     """The rows of one world: s0's, by `forget`, then every other source's
     in its state."""

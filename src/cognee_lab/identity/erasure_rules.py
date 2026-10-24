@@ -165,14 +165,17 @@ class Erasures(NamedTuple):
     each forgotten source with the Entities its forget removed, the
     Entities saved sources read as corpus inputs, which no removal drops,
     each forgotten document's identity source, whose saved records a
-    removal may erase too, and the records the bound removals of each
-    forget removed (`bound_removals`), which a removal below them may
-    cite."""
+    removal may erase too, the records the bound removals of each forget
+    removed (`bound_removals`), which a removal below them may cite, and
+    the document of each source re-added since its last forget, with the
+    Entities that forget removed, which only a retry's saved removal may
+    name (`erasure_of`)."""
 
     forgotten: Mapping[UUID, frozenset[UUID]] = MappingProxyType({})
     readers: frozenset[UUID] = frozenset()
     sources: Mapping[UUID, UUID] = MappingProxyType({})
     records: Mapping[UUID, frozenset[RemovedRecord]] = MappingProxyType({})
+    earlier: Mapping[UUID, frozenset[UUID]] = MappingProxyType({})
 
 
 NO_ERASURES = Erasures()
@@ -180,10 +183,14 @@ NO_ERASURES = Erasures()
 
 def erasures_of(rows, source) -> Erasures:
     """The forgotten sources, the corpus readers among saved rows other
-    than this source's, and each forget's bound removed records."""
-    forgotten, readers, sources, records = {}, set(), {}, {}
+    than this source's, each forget's bound removed records and the last
+    forget of each source re-added since (`PublicationRow.last_tombstone`)."""
+    forgotten, readers, sources, records, earlier = {}, set(), {}, {}, {}
     own = str(source.identity_data_id)
     for row in rows:
+        if (last := row.last_tombstone) is not None:
+            earlier[last.original_data_id] = frozenset(last.removed_entity_ids)
+            sources.setdefault(last.original_data_id, last.identity_data_id)
         if (tomb := row.tombstone) is not None:
             took = frozenset(tomb.removed_entity_ids)
             forgotten[tomb.original_data_id] = took
@@ -198,6 +205,7 @@ def erasures_of(rows, source) -> Erasures:
         frozenset(readers),
         MappingProxyType(sources),
         MappingProxyType(records),
+        MappingProxyType(earlier),
     )
 
 
@@ -237,7 +245,10 @@ def erasure_of(old, source, erasures: Erasures, *, bind=True) -> Erasure | None:
     still names every bound record its old revision reads and only records
     it reads: the attempt that admitted it found them bound, and an
     upstream that retired since unbinds them without undoing the removal
-    (`admission.admit`, `check_retry_chain`)."""
+    (`admission.admit`, `check_retry_chain`). Its forget may then also be
+    the last one of a source re-added since (`Erasures.earlier`): the
+    re-add waited for that forget's cascade, which the removal was part
+    of."""
     found = [
         (key, p)
         for key, p in source.producers.items()
@@ -261,6 +272,8 @@ def erasure_of(old, source, erasures: Erasures, *, bind=True) -> Erasure | None:
             "erasure_configuration", "An erasure removes another document's inputs"
         )
     took = erasures.forgotten.get(claim.document)
+    if not bind and claim.removed_entities != took:
+        took = erasures.earlier.get(claim.document)
     if took is None or claim.removed_entities != took:
         raise IntentError(
             "erasure_unbound",
