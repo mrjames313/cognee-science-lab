@@ -9,7 +9,9 @@ from .chains import (
     check_citation_cycles,
     check_citation_scope,
     check_record_citations,
+    check_record_key_reuse,
     new_citations,
+    new_record_keys,
 )
 from .erasure import refuse_retiring_inputs
 from .native import edge_metadata, require_graph_methods
@@ -205,7 +207,11 @@ class Publisher:
             saved_record_reader=record_reader(rows),
             withheld=await self.withheld_for(source, rows),
         )
-        from .admission import check_corpus_inputs_exist
+        from .admission import (
+            check_corpus_inputs_exist,
+            check_mention_inputs,
+            mention_ids,
+        )
 
         await check_corpus_inputs_exist(self.graph, source)
         others = [
@@ -215,12 +221,18 @@ class Publisher:
             != (str(source.dataset_id), str(source.identity_data_id))
         ]
         # A re-added source's earlier forgotten lives count as its tombstone.
-        validate_uses(
-            [
-                *(r.description or r.tombstone for r in others),
-                *(r.last_tombstone for r in others if r.last_tombstone),
-                source,
-            ]
+        saved = [
+            *(r.description or r.tombstone for r in others),
+            *(r.last_tombstone for r in others if r.last_tombstone),
+            source,
+        ]
+        validate_uses(saved)
+        own = [r for r in rows if r not in others]
+        # The source's own saved revision counts too: a group this revision
+        # retires is still a mention UUID, whose node the edit removes.
+        check_mention_inputs(
+            source,
+            mention_ids([*saved, *(r.description or r.tombstone for r in own)]),
         )
         refuse_retiring_inputs(source, rows)
         previous = await self.records.row(source)
@@ -230,6 +242,7 @@ class Publisher:
                 "Use the guarded replacement operation to advance a revision",
             )
         check_record_citations(source, rows, new_citations(source, previous))
+        check_record_key_reuse(source, rows, new_record_keys(source, previous))
         check_citation_cycles(source, rows)
         for entity_id in source.entity_constructions:
             node = await self.graph.get_node(str(entity_id))

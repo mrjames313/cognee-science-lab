@@ -12,6 +12,8 @@ from cognee_lab.identity import admission, chains, erasure_rules, validation
 from cognee_lab.identity.models import SavedRecordInput
 from cognee_lab.identity.records import saved_records
 
+MENTION_IDS = admission.mention_ids
+
 
 def skip(*_):
     return None
@@ -209,6 +211,12 @@ MUTANTS = {
     "drop_scoped_variants_freely": (
         "check_scoped_variants",
         drop_scoped_variants_freely,
+    ),
+    "allow_mention_inputs": ("check_mention_inputs", skip),
+    # The harness passes the old revision, then the candidate.
+    "mention_inputs_of_the_candidate_only": (
+        "mention_ids",
+        lambda saved: MENTION_IDS(saved[-1:]),
     ),
 }
 assert all(

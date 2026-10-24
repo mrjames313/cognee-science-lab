@@ -353,13 +353,19 @@ class RemovedRecord(NamedTuple):
     def reads(self, item: SavedRecordInput) -> bool:
         """Whether a citation reads this record as it was before removal."""
         return (
-            str(item.identity_data_id),
-            item.record_type,
-            item.record_id,
-            item.content_sha256,
-        ) == (
-            self.identity_data_id,
-            self.record_type,
-            self.record_id,
-            self.content_sha256,
-        ) and item.representation_revision <= self.last_revision
+            names_record(item, self.identity_data_id, self.record_id)
+            and (item.record_type, item.content_sha256)
+            == (self.record_type, self.content_sha256)
+            and item.representation_revision <= self.last_revision
+        )
+
+
+def names_record(item: SavedRecordInput, identity_data_id: str, record_id) -> bool:
+    """Whether a citation names this record key of this source. A key names
+    one record in a source across every type, so a citation of the key
+    reads whatever record the source holds under it; its fingerprint and
+    pinned revision say which one it read (`RemovedRecord.reads`)."""
+    return (str(item.identity_data_id), item.record_id) == (
+        identity_data_id,
+        record_id,
+    )

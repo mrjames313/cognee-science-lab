@@ -44,6 +44,7 @@ from .validation import (
     referenced_corpus_ids,
     reusable_recipes,
     text_digest,
+    uses_of,
 )
 
 
@@ -611,6 +612,31 @@ async def check_absent_from_graph(graph, old, source, fate):
     for entity_id, code, message in probes:
         if await graph.get_node(str(entity_id)) is not None:
             raise IntentError(code, message)
+
+
+def mention_ids(saved) -> set:
+    """Every mention UUID of these saved descriptions and tombstones: each
+    group's Entity, and a tombstone's of every forgotten life."""
+    return {entity_id for each in saved for entity_id in uses_of(each)[0]}
+
+
+def check_mention_inputs(source, mentions):
+    """Invariant: a corpus input names a reusable Entity, never a mention
+    group's. A mention UUID is document-local and fresh at its declaration,
+    and a retiring or regrouping edit removes it with no review of its
+    readers. A source that depends on another source's mention cites that
+    mention's resolution as a saved record instead, which withholding and
+    erasure follow. `mentions` are the mention UUIDs of every saved source,
+    this one included (`mention_ids`). Run by every admission of a
+    publication (Publisher.admit_inputs), so no reader of a mention UUID is
+    ever saved."""
+    for key, item in sorted(source.inputs.items()):
+        if isinstance(item, CorpusObjectInput) and item.entity_id in mentions:
+            raise IntentError(
+                "mention_input",
+                f"A corpus input names a mention group's Entity: {key}; "
+                "cite its resolution as a saved record instead",
+            )
 
 
 async def check_corpus_inputs_exist(graph, source):

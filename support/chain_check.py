@@ -11,11 +11,17 @@ On every citation graph of up to four sources (chain_worlds.py), it checks:
   oracle's: each decision's reason, status and withholding inputs, for a
   resolution and a variant of each source, with withholding spread down
   the whole chain as `input_changed` and `upstream_withheld`.
+- Key reuse (checkpoint K). On every acyclic graph, with every source
+  holding `d`, having dropped it (rekeyed), pending or withdrawn, a
+  source's next revision that declares `d` again is refused
+  (`record_key_reused`) exactly when it had dropped `d` and another source
+  that is not retired cites it.
 - The erasure cascade (cascade_check.py): with s0 forgotten, the levels,
   the token, the write order and resume, the inductive gate and the rule
   that a confirmed cascade only shrinks.
 
 The code under test is chains.check_citation_cycles,
+chains.check_record_key_reuse with chains.new_record_keys,
 withholding.record_reader, withholding.withheld_decisions and
 chains.live_pass, the pass that retrieval and `status` run. Only live
 validation itself (retrieve.live_drift) is replaced: `drift_of` returns the
@@ -95,6 +101,42 @@ async def held_now(graph, states):
     }
 
 
+def key_reused(graph, states, label) -> bool:
+    """Whether admission refuses the source's next revision, which declares
+    its resolution under `d` again, for a reused key. Each source cites
+    every source it points at, `d` from its `d`."""
+    rows, _ = world_rows(graph, states)
+    previous = next(r for r in rows if r.source == str(identity(label)))
+    candidate = described(label, graph[label]).model_copy(
+        update=dict(revision=previous.revision + 1)
+    )
+    try:
+        chains.check_record_key_reuse(
+            candidate, rows, chains.new_record_keys(candidate, previous)
+        )
+    except IntentError as exc:
+        if exc.code != "record_key_reused":
+            raise
+        return True
+    return False
+
+
+def key_reuse_oracle(graph, states, label) -> bool:
+    """The user's rule (2026-10-24): a key the revision brings back, here
+    `d` after a rekey, is refused while another source that is not retired
+    cites it."""
+    return states[label] == "rekeyed" and any(
+        label in graph[other] and states[other] != "withdrawn"
+        for other in graph
+        if other != label
+    )
+
+
+# The states that decide key reuse: a source that holds `d`, one that
+# dropped it, and a citer that still reads (pending) or reads nothing.
+KEY_STATES = ("ok", "rekeyed", "pending", "withdrawn")
+
+
 async def search(count, states):
     labels = LABELS[:count]
     tally, failures = Counter(), []
@@ -107,6 +149,16 @@ async def search(count, states):
         if not acyclic(graph):
             continue
         tally["acyclic graphs"] += 1
+        for chosen in product(KEY_STATES, repeat=count):
+            world = dict(zip(labels, chosen))
+            for label in labels:
+                if world[label] not in ("ok", "rekeyed"):
+                    continue
+                tally["key reuse cases"] += 1
+                want = key_reuse_oracle(graph, world, label)
+                got = key_reused(graph, world, label)
+                if want != got:
+                    failures.append(("key reuse", graph, world, label, want, got))
         for chosen in product(states, repeat=count):
             world = dict(zip(labels, chosen))
             tally["withholding worlds"] += 1
@@ -154,10 +206,25 @@ def removed_reads_changed(rows, failed=frozenset()):
     return changed
 
 
+def key_reuse_only_previous(source, rows, keys):
+    """Key reuse judged against the revision before only, as the fresh-key
+    rules are: a citer of an earlier life is not looked for."""
+    return None
+
+
+def key_reuse_served_citers(source, rows, keys):
+    """Only a served citer counts, so a pending citer's citation is missed."""
+    original = MUTANT_ORIGINALS["check_record_key_reuse"]
+    return original(source, [r for r in rows if r.is_served], keys)
+
+
+MUTANT_ORIGINALS = {"check_record_key_reuse": chains.check_record_key_reuse}
 MUTANTS = {
     "no_cycle_check": ("check_citation_cycles", skip),
     "one_level_closure": ("upstream_closure", one_level_closure),
     "removed_reads_changed": ("record_reader", removed_reads_changed),
+    "key_reuse_unchecked": ("check_record_key_reuse", key_reuse_only_previous),
+    "key_reuse_served_citers": ("check_record_key_reuse", key_reuse_served_citers),
 }
 
 

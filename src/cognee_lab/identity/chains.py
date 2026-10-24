@@ -12,7 +12,14 @@ validation (`live_pass`), and releases as soon as its cause does.
 from collections.abc import Awaitable, Callable, Mapping
 
 from .models import IdentitySource
-from .records import REGISTRY, cited_row, record_digest, saved_records
+from .records import (
+    REGISTRY,
+    cited_row,
+    names_record,
+    record_digest,
+    record_keys,
+    saved_records,
+)
 from .storage import PublicationRow
 from .validation import IntentError, Reason
 from .withholding import (
@@ -55,6 +62,41 @@ def new_citations(source, previous) -> set[str]:
     if previous.state == "current" and previous.revision < source.revision:
         return set(saved_records(source)) - set(previous.description.inputs)
     return set()
+
+
+def new_record_keys(source, previous) -> set[str]:
+    """The record keys a first attempt adds, of every type: every key of a
+    first publication or a re-add, and on a replacement the keys the
+    current revision lacks. A retry or a reconcile reuses its saved intent,
+    so it adds none."""
+    if previous is None or previous.tombstone is not None:
+        return set(record_keys(source))
+    if previous.state == "current" and previous.revision < source.revision:
+        return set(record_keys(source)) - set(record_keys(previous.description))
+    return set()
+
+
+def check_record_key_reuse(source, rows, keys):
+    """Invariant: a record key that another source cites names one record
+    of this source for as long as the citation lasts. A citation pins its
+    record by key and fingerprint, so a key that came back (the same
+    reviewed fields fingerprint the same) would serve the old citation a
+    record nobody reviewed for it. So a key this revision adds (`keys`,
+    `new_record_keys`) that another source's saved description, not
+    retired, still cites at this source is refused. That citation was made
+    against an earlier life of the key: the key is absent from the revision
+    before. Only a first attempt checks this, as `check_record_citations`."""
+    own = str(source.identity_data_id)
+    for row in rows:
+        if row.is_retired or row.source == own:
+            continue
+        for item in saved_records(row.description).values():
+            if item.record_id in keys and names_record(item, own, item.record_id):
+                raise IntentError(
+                    "record_key_reused",
+                    f"Another source still cites an earlier {item.record_id} of "
+                    "this source; give the record a new key",
+                )
 
 
 def check_record_citations(source, rows, keys):

@@ -33,7 +33,7 @@ from uuid import UUID
 from cognee_lab.identity import admission, chains, erasure_rules
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.validation import IntentError, text_digest
-from dependency_worlds import DEPENDENCY_DECISIONS
+from dependency_worlds import DEPENDENCY_DECISIONS, OTHER_MENTION
 from erasure_worlds import ERASURE_DECISIONS, STEADY, forgotten, settle
 from occurrence_mutants import MUTANTS
 from occurrence_worlds import (
@@ -73,6 +73,10 @@ def general(case, mapping=None, first_attempt=True, **parts):
         # Citation scope is checked in Publisher.admit_inputs, not in admit,
         # so the harness checks it here to keep those refusals in view.
         chains.check_citation_scope(parts["new"])
+        # So is a corpus input of a mention UUID: of this source, either
+        # revision, or of another saved source.
+        mentions = admission.mention_ids([parts["old"], parts["new"]])
+        admission.check_mention_inputs(parts["new"], mentions | {UUID(OTHER_MENTION)})
         return admission.admit(
             parts["old"],
             parts["new"],

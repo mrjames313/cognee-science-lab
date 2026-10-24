@@ -12,6 +12,7 @@ from occurrence_worlds import (
     ADMIT,
     CONTINUING,
     DOCUMENT,
+    RETIRED,
     HC,
     HELIOS,
     attest,
@@ -289,7 +290,98 @@ def group_cites_record(old, new, ctx):
         payload["mention_groups"][ctx["continuing"]]["input_refs"].append("rec")
 
 
+def reconfirm_corpus(*, producer):
+    """The continuing resolution cites its Entity again, as the Entity
+    reads after an outside edit: a new key with the new digest (review.py's
+    corpus re-confirm)."""
+
+    def change(old, new, ctx):
+        rid = continuing_rid(ctx)
+        new["inputs"]["existing_A_r2"] = dict(
+            new["inputs"]["existing_A"], content_sha256=text_digest("edited")
+        )
+        refs = new["mention_resolutions"][rid]["input_refs"]
+        new["mention_resolutions"][rid]["input_refs"] = [
+            "existing_A_r2" if k == "existing_A" else k for k in refs
+        ]
+        if producer:
+            attest(new, rid)
+
+    return change
+
+
+# A mention UUID of another saved source; the harness adds it to the
+# mention UUIDs admission compares corpus inputs with.
+OTHER_MENTION = str(uuid5(UUID(int=0), "other-source:mention:r1:g01"))
+
+
+def read_entity(entity_of):
+    """v01 reads one more Entity as a corpus object, under a producer new in
+    the revision, so only the corpus-input rules decide."""
+
+    def change(old, new, ctx):
+        new["inputs"]["read_entity"] = dict(
+            new["inputs"]["existing_A"], entity_id=entity_of(old, new, ctx)
+        )
+        new["variant_assignments"]["v01"]["input_refs"].append("read_entity")
+        attest(new, "v01")
+
+    return change
+
+
+def own_mention(kind):
+    return lambda old, new, ctx: old["mention_groups"][ctx[kind]]["entity_id"]
+
+
 DEPENDENCY_DECISIONS = [
+    decision(
+        "continuing resolution re-confirmed on its edited Entity under a new producer",
+        "rule 5",
+        [CONTINUING],
+        reconfirm_corpus(producer=True),
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "continuing resolution cites its edited Entity under its old producer",
+        "rule 5",
+        [CONTINUING],
+        reconfirm_corpus(producer=False),
+        text_edit=refuse("reconfirm_unattested"),
+        same_text=refuse("reconfirm_unattested"),
+    ),
+    decision(
+        "corpus input names a reusable Entity",
+        "mention input",
+        [],
+        read_entity(lambda old, new, ctx: HC),
+        text_edit=ADMIT,
+        same_text=ADMIT,
+    ),
+    decision(
+        "corpus input names the continuing group's mention Entity",
+        "mention input",
+        [CONTINUING],
+        read_entity(own_mention(CONTINUING)),
+        text_edit=refuse("mention_input"),
+        same_text=refuse("mention_input"),
+    ),
+    decision(
+        "corpus input names a retired group's mention Entity",
+        "mention input",
+        [RETIRED],
+        read_entity(own_mention(RETIRED)),
+        text_edit=refuse("mention_input"),
+        same_text=refuse("mention_input"),
+    ),
+    decision(
+        "corpus input names another source's mention Entity",
+        "mention input",
+        [],
+        read_entity(lambda old, new, ctx: OTHER_MENTION),
+        text_edit=refuse("mention_input"),
+        same_text=refuse("mention_input"),
+    ),
     decision(
         "foreign span moved with its digest unchanged",
         "rule 5",

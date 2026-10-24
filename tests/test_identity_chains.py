@@ -239,6 +239,7 @@ def test_chains_agree_with_the_oracle_on_three_sources():
     tally, failures = chain_check.run(3)
     assert failures == []
     assert tally["acyclic graphs"] == 25 and tally["cycle refusal"] == 192
+    assert tally["key reuse cases"] == 2400
 
 
 @pytest.mark.parametrize("name", sorted(chain_check.MUTANTS))
