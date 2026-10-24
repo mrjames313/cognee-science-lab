@@ -161,7 +161,7 @@ The spec left these open or worded them two ways. Each is reversible.
 ## Not in this checkpoint
 
 - The erasure cascade was J2, built on 2026-10-24.
-- Facts as citable records (user decision 1).
+- Facts as citable records (user decision 1). On 2026-10-24 the user moved them to step 6, with the model that produces semantic output, after a discussion with the user.
 - A citation's `representation_revision` is not checked after the first attempt, by design. Nothing records which revision a re-confirm saw beyond the new citation's pin.
 - Per-decision acyclicity. The source-level rule refuses mutual citation between two sources even when no decision cycle exists.
 
@@ -234,3 +234,29 @@ A second review of checkpoint J2 raised two probed bugs, a low one and six quali
 - The registry answers what a record names, and the import cycle between `records.py` and `validation.py` is gone.
 
 Evidence: `support/chain_check.py` `PASS` with 34,752 cascade worlds in 451 s, `--mutants` all 14 breaks caught; 520 unit tests passed; journeys D7 to D11 63 PASS rows and F16 to F20 57, 0 FAIL. The forget guide has the full list.
+
+## Checkpoint J2 fix round 3
+
+A third review of checkpoint J2 raised two medium items and a low one. The assistant (a subagent) fixed them on the user's Mac on 2026-10-24, on branch `stage6-cascade`, with loopback embeddings. The [forget guide](stage6_identity_forget.md#evidence) lists each fix with its commit. For chains:
+
+- A source whose own failed removal is all that is left of the cascade may be withdrawn or forgotten. Round 2's refusal had covered it too.
+- A completed removal that retrieval rejected after its upstream withdrew resumes by its own retry, in place or at the next revision. A retry checks the binding only for the step that is new in it, a default the orchestrator chose under the user's standing autonomy. Fix round 1 had left this edge open.
+
+Evidence: `support/chain_check.py` `PASS` with 34,752 cascade worlds in 511 s, `--mutants` all 17 breaks caught; 528 unit tests passed; journeys F1 to F20, D1 to D11 and G1 to G4 720 PASS rows, 0 FAIL. The forget guide has the full list.
+
+## Checkpoint J2 fix round 4
+
+A fourth review of checkpoint J2 raised a probed medium item and two low ones. The assistant (a subagent) fixed them on the user's Mac on 2026-10-24, on branch `stage6-cascade`, with loopback embeddings. The [forget guide](stage6_identity_forget.md#evidence) lists each fix with its commit. For chains:
+
+- Retiring a source that holds a removal is refused when it would change what the unfinished cascade still does to any other source: which sources are left, and what each of their removals removes and cites (`erasure.reach`). Round 3 compared only which sources are left, so a diamond-shaped chain slipped past it. The cascade half of `chain_check.py` now checks this invariant itself on every world, and it also caught a three-source shape no review had named.
+- A completed removal rejected after the forgotten source was re-added resumes by its own retry. A second forget of that source is still open.
+- L1 (a retry refused when the bound set grew after admission) is recorded, with no code change.
+
+Evidence: `support/chain_check.py` `PASS` with 34,752 cascade worlds in 491 s, `--mutants` all 19 breaks caught; 533 unit tests passed; journeys F1 to F20, D1 to D11 and G1 to G4 720 PASS rows, 0 FAIL. The forget guide has the full list.
+
+## Checkpoint J2 runs
+
+Run by the assistant and its subagents on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-cascade`.
+
+- `verify.py journey all`: 1565 PASS on `231c2e6`, 1567 on `9d2b47d`, 1576 on `a136d06`, 1576 on `d1192ba` and 1576 in 91 runs on `74ec093`, each with 0 FAIL. P5 calls the embedding API and was skipped.
+- A final review of `74ec093` found the branch merge-ready.

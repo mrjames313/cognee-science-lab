@@ -360,9 +360,18 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 
 **2026-10-23, re-add follow-ups fix round 1.** A review found that the decisions digest missed a regrouping with unchanged text, that the ledger check could not see `last_tombstone`, that a root from before the follow-ups failed with a raw sqlite error, and that a third life refused an earlier life's Entity still in the graph. The digest now counts occurrences, the ledger check has P8, old roots are refused by name, and every forgotten life's reusable Entities may return. A forgotten row now holds its tombstone once: `last_tombstone` lives only on a row re-added since, and `forget.py`, not `complete`, builds the carried tombstone.
 
-**2026-10-24, checkpoint J2.** The user decided on 2026-10-23 that erasure cascades down a chain of citations. Until then a forget that would remove a record another source cites was refused (`chain_erasure_pending`, checkpoint J1). The refusal is gone: the cascade removes each level in order under one token ([The cascade](#the-cascade)).
+**2026-10-24, checkpoint J2.** The user decided on 2026-10-23 that erasure cascades down a chain of citations. Until then a forget that would remove a record another source cites was refused (`chain_erasure_pending`, checkpoint J1). The refusal is gone: the cascade removes each level in order under one token ([The cascade](#the-cascade)). Four review and fix rounds the same day shaped the binding rule and the refusal to retire a source that holds a removal; the [evidence](#evidence) lists each.
 
 ## Evidence
+
+**Checkpoint J2 runs.** The assistant and its subagents ran `.claude/skills/verify/scripts/verify.py journey all` on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-cascade`. P5 calls the embedding API and did not run.
+
+- On `231c2e6` (after checkpoint J2): 1565 PASS and 0 FAIL.
+- On `9d2b47d` (after fix round 1): 1567 PASS and 0 FAIL.
+- On `a136d06` (after fix round 2): 1576 PASS and 0 FAIL.
+- On `d1192ba` (after fix round 3): 1576 PASS and 0 FAIL.
+- On `74ec093` (after fix round 4): 1576 PASS and 0 FAIL in 91 runs, the 65 loopback journey blocks. The unit suite gave 533 passed on this code.
+- A final review of `74ec093` found the branch merge-ready.
 
 **Checkpoint J2 fix round 4.** A fourth review raised a probed medium item and two low ones. The assistant (a subagent) fixed them on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-cascade`. Each bug's test failed before its fix. The native tests and the journeys ran concurrently, so their times are inflated.
 
