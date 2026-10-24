@@ -149,7 +149,7 @@ $V check "$RUN" before '.recovery_events == []' 'a refusal is not an incident'
 $V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1 --confirm "$T"
 $V check "$RUN" forget '[.sources.doc01.state, .sources.doc02.state] == ["forgotten", "current"]' 'doc01 is forgotten and doc02 is current'
 $V check "$RUN" forget '.sources.doc01.forget | .original_data_present == false and .identity_data_present == false and .chunks_present == [] and .mention_nodes_present == [] and .original_fact_present == false and .evidence_rows == 0 and .owned_nodes == 0 and .owned_edges == 0 and .private_singleton_present == false' 'nothing of doc01 remains'
-$V check "$RUN" forget '.forget.dependents_revised == [{"identity_data_id": "'"$D02"'", "revision": 2}] and .dependents_failed == null' 'doc02 was revised at revision 2'
+$V check "$RUN" forget '.forget.dependents_revised == [{"identity_data_id": "'"$D02"'", "revision": 2, "level": 1}] and .dependents_failed == null' 'doc02 was revised at revision 2, at level 1'
 $V check "$RUN" forget '.sources.doc02 | .saved_revision == 2 and .verified_revision == 2 and .registered_matches_saved' 'doc02 is current at revision 2'
 $V check "$RUN" forget '.sources.doc02.decisions.r01 | .status == "unresolved" and .producer_ref == "forget_'"$D01"'_r2" and .input_refs == ["doc01", "existing_A"]' 'r01 is unresolved under the removal producer'
 $V check "$RUN" forget '.sources.doc02.decisions.v01.status == "accepted" and (.sources.doc02.input_keys | index("doc01_text") == null and index("doc01_instrument") == null)' 'v01 stays and doc01 inputs are gone'
