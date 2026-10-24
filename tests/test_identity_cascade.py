@@ -243,6 +243,31 @@ def test_a_failed_removal_whose_own_link_is_all_that_is_left_may_retire():
     assert refused.value.code == "cascade_unfinished"
 
 
+# s1 and s3 cite the forgotten s0; s2 cites both.
+DIAMOND = {"s0": set(), "s1": {"s0"}, "s3": {"s0"}, "s2": {"s1", "s3"}}
+
+
+def test_retiring_a_written_removal_is_refused_when_it_would_shrink_a_removal_below():
+    """s1's and s3's removals are written and s2's is still to write.
+    Withdrawing s1 would leave s2 unfinished, but its removal would cite
+    only s3's removed records and keep its citations of s1's: the forget
+    would then finish with s2 still citing what s1's removal removed."""
+    rows = cascade_rows(DIAMOND, {"s1": "ok", "s2": "ok", "s3": "ok"})
+    ids = source_ids(rows[0].tombstone)
+    written = {
+        s.row.source: row_of(s.description, "ok")
+        for s in erasure.cascade(rows, ids, ())
+        if s.level == 1
+    }
+    rows = [written.get(r.source, r) for r in rows]
+    for label in ("s1", "s3"):
+        with pytest.raises(IntentError) as refused:
+            erasure.refuse_unfinished_cascade(by_label(rows, label).description, rows)
+        assert refused.value.code == "cascade_unfinished"
+        assert refused.value.details["freed"] == [str(identity("s2"))]
+    erasure.refuse_unfinished_cascade(by_label(rows, "s2").description, rows)
+
+
 def test_a_completed_removal_retry_rejected_after_its_upstream_retired_recovers():
     """s2's replacement failed and its removal applied in place, an erasure
     retry, which completed once s1's removal was written; the cascade

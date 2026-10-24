@@ -291,13 +291,15 @@ class Step(NamedTuple):
     """One removal revision the cascade still has to write, in level order:
     a dependent's planned removal (with its impact), or the retry of a
     removal revision that failed (impact None), with its saved
-    description."""
+    description, the removed records it cites and the records it
+    removes."""
 
     row: PublicationRow
     description: IdentitySource
     impact: DependentImpact | None
     level: int
     cited_records: frozenset[RemovedRecord]
+    removed_records: frozenset[RemovedRecord]
 
 
 def removal_of(row, ids: SourceIds):
@@ -380,7 +382,14 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
 
     reads = {r.source: corpus_reads(r.description) for r in rows if not r.is_retired}
     steps = [
-        Step(live[s], live[s].description, None, depth[s], claim.cited_records)
+        Step(
+            live[s],
+            live[s].description,
+            None,
+            depth[s],
+            claim.cited_records,
+            claim.removed_records,
+        )
         for s, claim in claims.items()
         if s in depth
     ]
@@ -398,6 +407,7 @@ def cascade(rows, ids: SourceIds, removed, token=None) -> tuple[Step, ...]:
                 replace(impact, level=depth[s]),
                 depth[s],
                 frozenset(impact.cited_records),
+                frozenset(impact.removed_records),
             )
         )
     return tuple(sorted(steps, key=lambda s: (s.level, s.row.source)))
@@ -493,17 +503,33 @@ def unfinished(tombstone, rows) -> list:
     return sorted((s.row for s in steps), key=lambda r: r.source)
 
 
+def reach(tombstone, rows, own) -> dict:
+    """What a completed forget's cascade still does to each source but
+    `own`: the records its removal removes and the removed records it
+    cites, at every level."""
+    steps = cascade(rows, source_ids(tombstone), tombstone.removed_entity_ids)
+    return {
+        s.row.source: (s.removed_records, s.cited_records)
+        for s in steps
+        if s.row.source != own
+    }
+
+
 def refuse_unfinished_cascade(source, rows):
     """Refuse withdrawing or forgetting a source that holds a removal
     producer, written or saved by a failed attempt, of a forget whose
-    cascade is not finished (`unfinished`), when retiring the source would
-    drop another source from what is unfinished. The removals below it bind
-    to that producer (erasure_rules.written_claims), so retiring it first
-    would free every citer further down, and the forget would report
-    finished. Transitive, since `unfinished` covers every level. A source
-    whose own failed removal is all that retiring it drops frees no citer,
-    and the forgotten source itself holds no removal of its own forget, so
-    neither is refused."""
+    cascade is not finished, when retiring the source would change what
+    that cascade still does to any other source (`reach`): drop it from
+    what is unfinished, or change what its removal removes or cites. The
+    removals below bind to that producer (erasure_rules.written_claims), so
+    retiring it first would free the citations of what it removed, and the
+    forget would report finished with a citer still reading them. Comparing
+    the whole reach, not only which sources are left, covers a citer that
+    also reads another removal or the forgotten source and so stays
+    unfinished with a smaller removal. A source whose own failed removal is
+    all that retiring it drops changes nothing for another source, and the
+    forgotten source itself holds no removal of its own forget, so neither
+    is refused."""
     own = (str(source.dataset_id), str(source.identity_data_id))
     retired = [
         replace(r, state="withdrawn") if (r.dataset, r.source) == own else r
@@ -525,15 +551,19 @@ def refuse_unfinished_cascade(source, rows):
             frozenset(tomb.removed_entity_ids),
         ):
             continue
-        left = {r.source for r in unfinished(tomb, rows)} - {own[1]}
-        if freed := left - {r.source for r in unfinished(tomb, retired)}:
+        before, after = reach(tomb, rows, own[1]), reach(tomb, retired, own[1])
+        if before != after:
             raise IntentError(
                 "cascade_unfinished",
                 "This source holds a removal of a forget whose cascade is not finished; run forget on the forgotten source again first",
                 details=dict(
                     forgotten=str(claim.forgotten),
-                    unfinished=sorted(left),
-                    freed=sorted(freed),
+                    unfinished=sorted(before),
+                    freed=sorted(
+                        s
+                        for s in before.keys() | after.keys()
+                        if before.get(s) != after.get(s)
+                    ),
                 ),
             )
 

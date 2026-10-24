@@ -23,9 +23,10 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   planning the same revisions for the rest.
 - Retiring mid-cascade. In both shapes above, a withdrawal or forget of a
   source is refused (`cascade_unfinished`) exactly when the source holds a
-  removal and retiring it would drop another source from what the forget
-  has left; a source whose own failed removal is all that is left may
-  retire.
+  removal and retiring it would change what the cascade still does to any
+  other source: which sources are left, or what any of their removals
+  removes or cites. A source whose own failed removal is all that is left
+  may retire.
 - A rejected retry. A removal below level 1 that completed, then lost
   every source whose records it cites to a withdrawal, then was rejected
   at retrieval, is admitted again with its saved removal: in place through
@@ -171,24 +172,40 @@ def withdrawn(rows, sources):
     ]
 
 
+def reach(rows, ids, own):
+    """What the forget's cascade still does to each source but `own`: the
+    records its removal removes and the removed records it cites."""
+    found = {}
+    for step in erasure.cascade(rows, ids, ()):
+        if step.row.source == own:
+            continue
+        removes = (
+            step.impact.removed_records
+            if step.impact is not None
+            else erasure.removal_of(step.row, ids).removed_records
+        )
+        found[step.row.source] = (frozenset(removes), step.cited_records)
+    return found
+
+
 def retire_disagreements(rows, tomb, check):
     """Disagreements over withdrawing or forgetting each saved source: it
     is refused (`cascade_unfinished`) exactly when it holds a removal and
-    retiring it would drop another source from what the forget has left."""
+    retiring it would change what the forget's cascade still does to any
+    other source (`reach`)."""
     failures = []
-    left = {r.source for r in erasure.unfinished(tomb, rows)}
+    ids = source_ids(tomb)
     for row in rows:
         if row.description is None:
             continue
         after = withdrawn(rows, {row.source})
-        kept = {r.source for r in erasure.unfinished(tomb, after)}
-        frees = bool(left - {row.source} - kept)
+        changes = reach(rows, ids, row.source) != reach(after, ids, row.source)
         try:
             erasure.refuse_unfinished_cascade(row.description, rows)
             refused = False
         except IntentError as exc:
             refused = exc.code == "cascade_unfinished"
-        if refused != (holds_removal(row) and frees):
+        if refused != (holds_removal(row) and changes):
             failures.append((check, row.source, refused))
     return failures
 
@@ -500,6 +517,19 @@ def retire_blocked_by_own_removal(source, rows):
         raise IntentError("cascade_unfinished", "")
 
 
+def retire_by_ids(source, rows):
+    """A source holding a removal is refused only when retiring it would
+    drop another source from what is left, not when it would shrink what
+    another source's removal removes or cites."""
+    tomb = next(r.tombstone for r in rows if r.tombstone)
+    own = str(source.identity_data_id)
+    holds = any(erasure_rules.is_removal_producer(p) for p in source.producers.values())
+    left = {r.source for r in erasure.unfinished(tomb, rows)} - {own}
+    kept = {r.source for r in erasure.unfinished(tomb, withdrawn(rows, {own}))}
+    if holds and left - kept:
+        raise IntentError("cascade_unfinished", "")
+
+
 def bind_every_step(chain, erasures, served, saved):
     """Every step of a retry chain must cite records bound now, also a step
     an earlier begin admitted."""
@@ -554,6 +584,7 @@ MUTANTS = {
         retire_blocked_by_own_removal,
         (erasure, "refuse_unfinished_cascade"),
     ),
+    "retire_by_ids": (retire_by_ids, (erasure, "refuse_unfinished_cascade")),
     "served_or_before": (served_or_before, (erasure_rules, "check_retry_chain")),
     "bind_every_step": (bind_every_step, (erasure_rules, "check_retry_chain")),
     "bind_on_retry": (bind_on_retry, (erasure_rules, "erasure_of")),
