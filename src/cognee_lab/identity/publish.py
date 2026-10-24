@@ -95,6 +95,15 @@ class PublishResult:
     referenced: list[str]
 
 
+def saved_lives(rows) -> list:
+    """Each row's saved description or tombstone and, for a re-added source,
+    the tombstone of its forgotten lives (`last_tombstone`)."""
+    return [
+        *(r.description or r.tombstone for r in rows),
+        *(r.last_tombstone for r in rows if r.last_tombstone),
+    ]
+
+
 class Publisher:
     def __init__(self, graph, vector, records: RecordStore, runtime_profile=None):
         from .withholding import WithholdingStore
@@ -220,20 +229,10 @@ class Publisher:
             if (r.dataset, r.source)
             != (str(source.dataset_id), str(source.identity_data_id))
         ]
-        # A re-added source's earlier forgotten lives count as its tombstone.
-        saved = [
-            *(r.description or r.tombstone for r in others),
-            *(r.last_tombstone for r in others if r.last_tombstone),
-            source,
-        ]
-        validate_uses(saved)
-        own = [r for r in rows if r not in others]
-        # The source's own saved revision counts too: a group this revision
+        validate_uses([*saved_lives(others), source])
+        # The source's own saved lives count too: a group this revision
         # retires is still a mention UUID, whose node the edit removes.
-        check_mention_inputs(
-            source,
-            mention_ids([*saved, *(r.description or r.tombstone for r in own)]),
-        )
+        check_mention_inputs(source, mention_ids([*saved_lives(rows), source]))
         refuse_retiring_inputs(source, rows)
         previous = await self.records.row(source)
         if previous and previous.revision != (saved_revision or source.revision):

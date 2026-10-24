@@ -697,6 +697,39 @@ async def test_admission_counts_a_readded_source_earlier_forgotten_lives(
     assert refused.value.code == "incompatible_group"
 
 
+async def test_admission_counts_a_readded_source_own_forgotten_mentions(
+    source_payload,
+):
+    """A re-added source's next revision may not read a mention UUID of its
+    own forgotten life as a corpus input (`mention_input`)."""
+    from test_identity_dependencies import admitting_publisher, own_chunks
+
+    life1 = source_of(source_payload)
+    life2 = describe_readd(life1, tomb(life1), set(), TEXT, chunks_of(life1, TEXT))
+    forgotten = life1.mention_groups["g01"].entity_id
+    assert forgotten not in {g.entity_id for g in life2.mention_groups.values()}
+    payload = json.loads(life2.model_dump_json())
+    payload["inputs"]["read_forgotten"] = dict(
+        payload["inputs"]["existing_A"], entity_id=str(forgotten)
+    )
+    reader = source_of(payload)
+    entity = str(life1.inputs["existing_A"].entity_id)
+    nodes = {
+        entity: dict(type="Entity", name="A"),
+        str(forgotten): dict(type="Entity", name="mention"),
+    }
+    publisher = await admitting_publisher(nodes)
+    saved = [replace(row_of(life2), last_tombstone=tomb(life1))]
+
+    async def rows(dataset=None):
+        return saved
+
+    publisher.records.rows = rows
+    with pytest.raises(IntentError) as refused:
+        await publisher.admit_inputs(reader, {"doc01": TEXT}, own_chunks(reader))
+    assert refused.value.code == "mention_input"
+
+
 @pytest.mark.asyncio
 async def test_a_third_life_reuses_an_earlier_life_entity_still_in_the_graph(
     source_payload,
