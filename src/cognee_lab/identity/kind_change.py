@@ -37,17 +37,24 @@ MENTION_REF = "to_mention_review"
 REUSABLE_REF = "to_reusable_review"
 
 
-def describe_to_mention(old, before, chunks):
+def describe_to_mention(
+    old,
+    before,
+    chunks,
+    *,
+    groups=TO_MENTION_MAP,
+    text=BEFORE,
+    stamp=True,
+    scope="Reusable to mention requires doc01 of a fresh chunked-fixture",
+):
     """doc01 drops v01 and the HC recipe; a fresh g09 holds `HC` and resolves to
-    the Helios controller. doc02 still declares HC and its own HC variant."""
-    require_root(
-        old,
-        before,
-        set(TO_MENTION_MAP),
-        "Reusable to mention requires doc01 of a fresh chunked-fixture",
-    )
+    the Helios controller. On a chunked-fixture doc02 still declares HC and its
+    own HC variant. `groups` are the groups and `text` the text of the root's
+    doc01 at revision 1 (`scope` refuses another); `stamp` names the kind
+    change as the producer of every record, the chunked-fixture's way."""
+    require_root(old, before, set(groups), scope, text=text)
     payload = begin_revision(
-        old, BEFORE, MENTION_REF, TO_MENTION, "explicit-reusable-to-mention-v1"
+        old, before, MENTION_REF, TO_MENTION, "explicit-reusable-to-mention-v1"
     )
     payload["variant_assignments"].pop("v01")
     payload["entity_constructions"].pop(HC_ID)
@@ -58,13 +65,14 @@ def describe_to_mention(old, before, chunks):
         "r09",
         "HC (local mention)",
         "Captured document-local mention group g09.",
-        [occurrence(BEFORE, "HC")],
+        [occurrence(before, "HC")],
         MENTION_REF,
         status="accepted",
         target=old.mention_resolutions["r01"].target_entity_id,
     )
-    stamp_producer(payload, MENTION_REF)
-    bind_chunks(payload, BEFORE, chunks)
+    if stamp:
+        stamp_producer(payload, MENTION_REF)
+    bind_chunks(payload, before, chunks)
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 

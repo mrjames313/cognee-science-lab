@@ -8,8 +8,11 @@ from .captured_text import BEFORE
 from .validation import IntentError, fresh_mention_id, text_digest
 
 
-def require_root(old, before, groups, message, *, revision=1, produced=None):
-    """A captured edit applies only to doc01 of the root it was written for.
+def require_root(
+    old, before, groups, message, *, revision=1, produced=None, text=BEFORE
+):
+    """A captured edit applies only to doc01 of the root it was written for,
+    whose text is `text`.
 
     The default is a fresh chunked-fixture at revision 1. `produced` is the
     (producer ref, implementation) of the edit that must have made `old`.
@@ -18,7 +21,7 @@ def require_root(old, before, groups, message, *, revision=1, produced=None):
     wrong_edit = produced and (made is None or made.implementation != produced[1])
     if (
         old.revision != revision
-        or before != BEFORE
+        or before != text
         or set(old.mention_groups) != groups
         or wrong_edit
     ):

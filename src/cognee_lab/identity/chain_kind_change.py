@@ -3,15 +3,18 @@ sources read doc01.
 
 The user decided on 2026-10-24 that a kind change retires the old group
 and declares a fresh one; there is no in-place kind change. A glossary
-root's doc01 is the first fixture's (one group, g01), so it has its own
-describers beside kind_change.py's, with the same producers and the same
-equal-text rebuild:
+root's doc01 is the first fixture's (one group, g01, and its own text), with
+the same producers and the same equal-text rebuild as kind_change.py:
 
-- `change-kind-to-mention` drops v01 and the HC recipe and declares the
-  fresh mention group g09, `HC`, resolved to the Helios controller as r09.
-- `change-kind-to-reusable` retires g09, declares the HC recipe again, reads
-  the HC Entity through the corpus input `existing_HC` and names it in a
-  variant under v01, the key the first change dropped.
+- `change-kind-to-mention` is kind_change.py's describer for that root: it
+  drops v01 and the HC recipe and declares the fresh mention group g09,
+  `HC`, resolved to the Helios controller as r09. r01 keeps its producer.
+- `change-kind-to-reusable` has its own describer: it retires g09, declares
+  the HC recipe again, reads the HC Entity through the corpus input
+  `existing_HC` and names it in a variant under v01, the key the first
+  change dropped. HC must still be in the graph: on a chain root doc03
+  co-owns it, but a root where doc01 alone owned HC and nothing read it
+  loses HC at the first change, and this one is then refused.
 
 The readers follow the rules that already hold. A citer of v01 is withheld
 `input_removed`: `replace-citation` answers it and `reconfirm` refuses it.
@@ -25,15 +28,12 @@ withheld (`dependents_withheld`), from the live pass that retrieval and
 """
 
 import json
+from functools import partial
 
 from .captured_chunks import TO_MENTION, bind_chunks
-from .captured_revision import (
-    begin_revision,
-    declare_group,
-    occurrence,
-    retire_group,
-)
+from .captured_revision import begin_revision, retire_group
 from .digests import object_digest
+from .fixture import FIXTURES
 from .kind_change import (
     HC_ID,
     HC_RECIPE,
@@ -42,44 +42,21 @@ from .kind_change import (
     TO_REUSABLE,
     inspect_hc_entity,
 )
+from .kind_change import describe_to_mention as to_mention
 from .models import IdentitySource
 from .validation import IntentError
 
 TO_MENTION_MAP = {"g01": [["g01", 0], ["g01", 1]]}
 TO_REUSABLE_MAP = {**TO_MENTION_MAP, "g09": [None]}
+ROOT_TEXT = (FIXTURES / "source.txt").read_text()
 
-
-def describe_to_mention(old, before, chunks):
-    """doc01 drops v01 and the HC recipe; a fresh g09 holds `HC` and
-    resolves to the Helios controller. r01 is unchanged."""
-    if (
-        old.revision != 1
-        or set(old.mention_groups) != {"g01"}
-        or "v01" not in old.variant_assignments
-    ):
-        raise IntentError(
-            "fixture_scope",
-            "change-kind-to-mention on a glossary root needs doc01 at revision 1",
-        )
-    payload = begin_revision(
-        old, before, MENTION_REF, TO_MENTION, "explicit-reusable-to-mention-v1"
-    )
-    payload["variant_assignments"].pop("v01")
-    payload["entity_constructions"].pop(HC_ID)
-    declare_group(
-        payload,
-        old,
-        "g09",
-        "r09",
-        "HC (local mention)",
-        "Captured document-local mention group g09.",
-        [occurrence(before, "HC")],
-        MENTION_REF,
-        status="accepted",
-        target=old.mention_resolutions["r01"].target_entity_id,
-    )
-    bind_chunks(payload, before, chunks)
-    return IdentitySource.model_validate_json(json.dumps(payload))
+describe_to_mention = partial(
+    to_mention,
+    groups=TO_MENTION_MAP,
+    text=ROOT_TEXT,
+    stamp=False,
+    scope="change-kind-to-mention on a glossary root needs doc01 at revision 1",
+)
 
 
 def describe_to_reusable(old, before, chunks):
