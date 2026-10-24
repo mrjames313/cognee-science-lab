@@ -28,6 +28,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-cascade-token` refuses a token once a new citation of a record the forget removes adds a level (`impact_changed`); a citation pinned at an older fingerprint is not part of the cascade.
 - `forget-cascade-interrupted` fails a level-2 removal after level 1 is written; `reconcile` on the forgotten source finishes it, and `readd` waits until it does.
 - `forget-cascade-blocked` lists a level-2 dependent whose withdrawal failed as blocked; its removal waits.
+- `forget-cascade-retire-refused` refuses a withdrawal or forget of a source that holds a removal while the cascade below it is unfinished (`cascade_unfinished`); once `forget` on the forgotten source finishes the cascade, the withdrawal goes ahead.
 
 ## How to get to it (user POV)
 
@@ -549,6 +550,26 @@ $V drive "$RUN" main withdraw -- withdraw --source doc03
 $V check "$RUN" withdraw '.sources.doc03.state == "withdrawn" and .sources.doc01.state == "current" and [.recovery_events[] | .outcome] == ["withdrawn"]' 'doc03 withdrawal finishes after doc01 removal'
 $V drive "$RUN" main readd2 -- readd --source glossary --expected-revision 1
 $V check "$RUN" readd2 '[.sources.glossary.state, .sources.glossary.saved_revision, .sources.doc03.state] == ["current", 2, "withdrawn"]' 'with doc03 withdrawn the cascade is done and the re-add publishes'
+```
+
+**F20 a source holding a removal is not retired before the cascade below it finishes.** Proves `forget-cascade-retire-refused`. Guide: "The cascade". With `--fault-stage forget_cascade_revision` doc01's level-1 removal is written and doc03's level-2 removal fails. Withdrawing doc01 is refused (`cascade_unfinished`), and so is forgetting it: doc03's removal binds to the removal doc01 holds, so retiring doc01 first would leave doc03 citing what the forget removed while the forget reports finished (fix round 2). Neither refusal writes anything. `forget` on the glossary again finishes doc03, and the withdrawal of doc01 then goes ahead.
+
+```bash journey F20
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main dry -- forget --source glossary --expected-revision 1 --dry-run
+T=$(val dry '.token')
+$V drive "$RUN" main forget -- forget --source glossary --expected-revision 1 --confirm "$T" --fault-stage forget_cascade_revision
+$V check "$RUN" forget '[.sources.glossary.state, .sources.doc01.state, .sources.doc01.saved_revision, .sources.doc03.state] == ["forgotten", "current", 2, "failed"]' 'level 1 is written and doc03 failed at level 2'
+$V drive "$RUN" main wd -- withdraw --source doc01
+$V check "$RUN" wd '.error == "IntentError" and (.message | startswith("This source holds a removal of a forget whose cascade is not finished")) and .details.unfinished == ["bbbc442e-0647-552e-bb54-071604d213fa"]' 'withdrawing doc01 is refused while doc03 is unfinished'
+$V drive "$RUN" main fg -- forget --source doc01 --expected-revision 2
+$V check "$RUN" fg '.error == "IntentError" and (.message | startswith("This source holds a removal")) and .details.forgotten == "16e89187-1559-5f97-b957-d86f46315407"' 'forgetting doc01 is refused too, naming the glossary'
+$V drive "$RUN" main still -- status
+$V check "$RUN" still '[.publications[] | [.revision, .state]] == [[1, "forgotten"], [2, "current"], [2, "failed"]]' 'the refusals wrote nothing'
+$V drive "$RUN" main again -- forget --source glossary --expected-revision 1
+$V check "$RUN" again '.dependents_failed == null and [.forget.dependents_revised[] | [.identity_data_id, .level]] == [["bbbc442e-0647-552e-bb54-071604d213fa", 2]] and .sources.doc03.state == "current"' 'forget on the glossary again finishes doc03'
+$V drive "$RUN" main wd2 -- withdraw --source doc01
+$V check "$RUN" wd2 '[.sources.doc01.state, .sources.doc03.state] == ["withdrawn", "current"]' 'with the cascade finished doc01 withdraws'
 ```
 
 ## Gotchas
