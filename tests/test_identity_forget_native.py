@@ -533,6 +533,36 @@ def test_native_any_source_can_be_forgotten(tmp_path, prior):
 
 
 @pytest.mark.integration
+def test_native_a_single_source_root_forgets_readds_and_withdraws(tmp_path):
+    """A `fixture` root has no two-source manifest; each command still
+    finishes and reports its one source."""
+    root = tmp_path / "single"
+    command(root, "fixture")
+
+    def states(completed):
+        report = json.loads(completed.stdout)
+        assert report == result_of(root)
+        return report, [(p["state"], p["revision"]) for p in report["publications"]]
+
+    forgot, rows = states(
+        command(root, "forget", "--source", "doc01", "--expected-revision", "1")
+    )
+    assert rows == [("forgotten", 1)]
+    assert forgot["forget"]["dependents_revised"] == []
+    assert forgot["result"]["facts"] == [] and forgot["recovery_events"] == []
+
+    readded, rows = states(
+        command(root, "readd", "--source", "doc01", "--expected-revision", "1")
+    )
+    assert rows == [("current", 2)]
+    assert [f["relationship"] for f in readded["result"]["facts"]] == ["limits"]
+
+    withdrawn, rows = states(command(root, "withdraw", "--source", "doc01"))
+    assert rows == [("withdrawn", 2)]
+    assert withdrawn["result"]["facts"] == []
+
+
+@pytest.mark.integration
 def test_native_readd_takes_the_callers_changed_files(tmp_path):
     """A re-add is a fresh publication from the caller's files: here doc01's
     text gains a sentence, and its identity file states the new digest."""

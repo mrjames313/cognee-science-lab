@@ -21,7 +21,7 @@ A review of the spec (2026-10-23, verdict proceed) fixed the order, the token, t
 
 ## Commands
 
-On a `multi-fixture` root, and on a `glossary-fixture` root for `doc01` or `glossary` (and `doc03` on a `--chain` root):
+On a `multi-fixture` root, on a single-source `fixture` root for `doc01`, and on a `glossary-fixture` root for `doc01` or `glossary` (and `doc03` on a `--chain` root):
 
 - `forget --source <doc> --expected-revision N --dry-run` reports what the forget would do and the token to confirm. It writes nothing, and it returns before any result file is written.
 - `forget --source <doc> --expected-revision N` forgets a source nothing depends on.

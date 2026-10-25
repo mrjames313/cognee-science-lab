@@ -165,6 +165,18 @@ async def saved_or_file(publisher, files):
     }
 
 
+def fixture_files(root):
+    """Each source's identity file on a root this driver runs: the two the
+    manifest names, or a single-source `fixture` root's doc01."""
+    if (root / INFO).exists():
+        return read_sources(root)
+    return {
+        "doc01": IdentitySource.model_validate_json(
+            (root / "identity.json").read_text()
+        )
+    }
+
+
 async def current_sources(root, publisher, info=INFO):
     """Each source a fixture manifest names, as it is saved now
     (`saved_or_file`): a two-source root's by default, or another fixture's
@@ -501,15 +513,7 @@ async def run(args, root):
     else:
         publisher = await Publisher.configured()
         args._fixture_publisher = publisher
-        sources = (
-            await current_sources(root, publisher)
-            if (root / INFO).exists()
-            else {
-                "doc01": IdentitySource.model_validate_json(
-                    (root / "identity.json").read_text()
-                )
-            }
-        )
+        sources = await saved_or_file(publisher, fixture_files(root))
         if args.source not in sources:
             raise IntentError(
                 "source_missing", "Selected document is not in this fixture"
@@ -578,7 +582,7 @@ async def run(args, root):
                     operation="reconcile",
                 )
         # Forget and re-add change the saved descriptions; report the new ones.
-        sources = await current_sources(root, publisher)
+        sources = await saved_or_file(publisher, fixture_files(root))
     if len(sources) == 1:
         result = dict(
             result=await retrieve(publisher, selected.dataset_id, args.query),

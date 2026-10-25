@@ -28,6 +28,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-cascade-token` refuses a token once a new citation of a record the forget removes adds a level (`impact_changed`); a citation pinned at an older fingerprint is not part of the cascade.
 - `forget-cascade-interrupted` fails a level-2 removal after level 1 is written; `reconcile` on the forgotten source finishes it, and `readd` waits until it does.
 - `forget-cascade-blocked` lists a level-2 dependent whose withdrawal failed as blocked; its removal waits.
+- `forget-single-source` forgets, re-adds and withdraws doc01 on a single-source `fixture` root, which has no two-source manifest; each command exits 0 with its one source's report.
 - `forget-cascade-retire-refused` refuses a withdrawal or forget of a source that holds a removal while the cascade below it is unfinished (`cascade_unfinished`); once `forget` on the forgotten source finishes the cascade, the withdrawal goes ahead.
 
 ## How to get to it (user POV)
@@ -39,6 +40,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - On a `glossary-fixture --chain` root, `forget --source glossary` cascades to doc03 at level 2; `withdraw --source doc03` also works there.
 - Add `--fault-stage nodes|identity_edges|verification` to `readd` to fail the re-add, then run `reconcile --source doc01`.
 - Run `uv run python -m cognee_lab.identity readd --root <dir> --source doc01 --expected-revision 1` on a root whose doc01 is forgotten.
+- On a `fixture` root, `forget`, `readd` and `withdraw` take `--source doc01`.
 - Run `retrieve` and `status` against the same root.
 
 ## Driving it with verify.py
@@ -570,6 +572,21 @@ $V drive "$RUN" main again -- forget --source glossary --expected-revision 1
 $V check "$RUN" again '.dependents_failed == null and [.forget.dependents_revised[] | [.identity_data_id, .level]] == [["bbbc442e-0647-552e-bb54-071604d213fa", 2]] and .sources.doc03.state == "current"' 'forget on the glossary again finishes doc03'
 $V drive "$RUN" main wd2 -- withdraw --source doc01
 $V check "$RUN" wd2 '[.sources.doc01.state, .sources.doc03.state] == ["withdrawn", "current"]' 'with the cascade finished doc01 withdraws'
+```
+
+**F21 a single-source root forgets, re-adds and withdraws.** Proves `forget-single-source`. Guide: "Commands". A `fixture` root holds doc01 alone and no `multi-fixture-info.json`. The forget exits 0 with doc01 forgotten at revision 1, no dependent and no fact. The re-add publishes doc01 at revision 2 and its `limits` fact returns. The withdrawal of the re-added revision 2 exits 0 and serves no fact.
+
+```bash journey F21
+$V drive "$RUN" main fixture -- fixture
+$V drive "$RUN" main dry -- forget --source doc01 --expected-revision 1 --dry-run
+$V check "$RUN" dry '.dry_run and .confirmation_required == false and .dependents == []' 'the dry run finds no dependent'
+$V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1
+$V check "$RUN" forget '[.publications[] | [.state, .revision]] == [["forgotten", 1]] and .forget.dependents_revised == [] and .dependents_failed == null' 'doc01 is forgotten at revision 1 with no dependent'
+$V check "$RUN" forget '.result.facts == [] and .result.unavailable_sources == [] and .recovery_events == []' 'nothing is served and no incident is open'
+$V drive "$RUN" main readd -- readd --source doc01 --expected-revision 1
+$V check "$RUN" readd '[.publications[] | [.state, .revision]] == [["current", 2]] and ([.result.facts[].relationship] | index("limits") != null)' 'doc01 is current at revision 2 and its fact returns'
+$V drive "$RUN" main wd -- withdraw --source doc01
+$V check "$RUN" wd '[.publications[] | [.state, .revision]] == [["withdrawn", 2]] and .result.facts == []' 'the re-added doc01 withdraws'
 ```
 
 ## Gotchas
