@@ -487,7 +487,7 @@ async def opened(args, root, scope: Scope | None) -> Call:
 
 async def edited_glossary(call: Call) -> dict:
     args = call.args
-    refresh = await edit(
+    outcome = await edit(
         call.publisher,
         call.root,
         call.selected,
@@ -496,7 +496,7 @@ async def edited_glossary(call: Call) -> dict:
         fault_stage=None if call.refresh_fault else args.fault_stage,
         refresh_fault=call.refresh_fault,
     )
-    return await finish(call.publisher, call.root, args.query, **refresh)
+    return await finish(call.publisher, call.root, args.query, **outcome)
 
 
 async def cited(call: Call) -> dict:
@@ -506,9 +506,10 @@ async def cited(call: Call) -> dict:
 
 async def kind_changed(call: Call) -> dict:
     """doc01's kind change, its refresh, and what it leaves withheld in the
-    other sources, which the snapshot after it shows."""
+    other sources, which the snapshot after it shows. It builds its result
+    without `finish`, because `dependents_withheld` reads that snapshot."""
     args = call.args
-    refresh = await change_kind(
+    outcome = await change_kind(
         call.publisher,
         call.root,
         args.command,
@@ -517,7 +518,7 @@ async def kind_changed(call: Call) -> dict:
         fault_stage=args.fault_stage,
     )
     result = await snapshot(call.publisher, call.root, args.query)
-    result.update(refresh)
+    result.update(outcome)
     sources = await current_sources(call.root, call.publisher, INFO)
     result.update(await dependents_withheld(call.publisher, sources, result))
     return saved(call.root, result)
@@ -559,8 +560,8 @@ async def withdrawn(call: Call) -> dict:
 
 
 async def reconciled(call: Call) -> dict:
-    refresh = await reconcile(call.publisher, call.args.source, call.selected)
-    return await finish(call.publisher, call.root, call.args.query, **refresh)
+    outcome = await reconcile(call.publisher, call.args.source, call.selected)
+    return await finish(call.publisher, call.root, call.args.query, **outcome)
 
 
 async def forgotten(call: Call) -> dict:

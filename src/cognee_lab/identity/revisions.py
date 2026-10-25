@@ -168,26 +168,19 @@ async def refresh(publisher, fault_stage=None):
 
     Yields each range written, and raises the failure that stops the
     refresh. `refresh-dependents` runs it as its own operation."""
+
+    async def write(revised, row, moved):
+        await replace_one(
+            publisher, revised, expected_revision=row.revision, fault_stage=fault_stage
+        )
+        return written_ranges(revised, moved)
+
     for source, (row, moved) in (await pending_moves(publisher)).items():
         if row.state != "current" and row.resumed_by == "replace":
-            saved = row.description
-            await replace_one(
-                publisher,
-                saved,
-                expected_revision=row.revision,
-                fault_stage=fault_stage,
-            )
-            yield written_ranges(saved, moved)
+            yield await write(row.description, row, moved)
             row, moved = (await pending_moves(publisher)).get(source, (row, []))
         if row.state == "current" and moved:
-            revised = remapped(row.description, moved)
-            await replace_one(
-                publisher,
-                revised,
-                expected_revision=row.revision,
-                fault_stage=fault_stage,
-            )
-            yield written_ranges(revised, moved)
+            yield await write(remapped(row.description, moved), row, moved)
 
 
 async def refresh_dependents(publisher, fault_stage=None) -> dict:

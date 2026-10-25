@@ -678,6 +678,37 @@ async def test_a_refresh_after_a_second_edit_writes_the_latest_range(
     assert await publisher.withholdings.rows() == []
 
 
+async def test_a_refresh_that_fails_part_way_reports_the_range_it_wrote(
+    source_payload, monkeypatch
+):
+    """The resumed revision completes, then the remap after it fails: the
+    refresh reports the one range written beside the failure."""
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    rows = [row_of(glossary), row_of(doc01)]
+    publisher = await memory_publisher(rows)
+    moved = await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+    saved = remapped(doc01, [WithholdingRow(**w) for w in moved])
+    rows[1] = row_of(saved, "failed", dict(operation="identity_replace"))
+    twice = "Preface.\n" + INSERTED
+    await withhold_dependents(publisher, glossary, INSERTED, twice, 3)
+
+    async def replace(_, description, *, expected_revision, fault_stage=None):
+        if rows[1].state == "current":
+            raise IntentError("injected_failure", "second write fails")
+        rows[1] = row_of(description)
+
+    monkeypatch.setattr(revisions, "replace_one", replace)
+    refresh = await refresh_dependents(publisher)
+    first = INSERTED.index(ENTRY)
+    assert [
+        (r["revision"], r["inputs"]["glossary_hc"]) for r in refresh["refreshed"]
+    ] == [(2, dict(start=first, end=first + len(ENTRY)))]
+    assert refresh["refresh_failed"] == dict(
+        code="injected_failure", message="second write fails"
+    )
+
+
 async def test_a_failed_refresh_is_reported_beside_the_completed_edit(
     source_payload, monkeypatch
 ):

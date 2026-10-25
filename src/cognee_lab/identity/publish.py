@@ -26,8 +26,6 @@ from .storage import (
 from .validation import IntentError, validate_inputs, validate_uses
 from .withholding import record_reader
 
-# What replace.plan_retirement records from the graph on a first attempt.
-
 
 def contribution(source, assignment_id, kind, applicability):
     return dict(

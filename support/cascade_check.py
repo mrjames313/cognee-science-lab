@@ -49,8 +49,9 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   the descriptions before and after, not from `cascade`. The withdrawals
   are tried before each write, not once: on 2026-10-25 a single try on the
   initial rows also caught skip_citers_of_withdrawn but saved no time (four
-  sources: 292 s per search before, 297 s after, three runs each), since
-  this check took about 4% of a profiled three-source search.
+  sources, three runs each: 292 s per search trying before each write,
+  297 s trying once), since this check took about 4% of a profiled
+  three-source search.
 
 The code under test is erasure.cascade, erasure.remaining, the token,
 erasure.ready, erasure_rules.bound_removals and erasure_of through
