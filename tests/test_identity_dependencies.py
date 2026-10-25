@@ -457,6 +457,41 @@ def test_a_reconfirm_is_copy_on_write_under_a_new_producer(source_payload):
     assert refused.value.code == "reconfirm_unattested"
 
 
+def test_a_second_prefix_edit_after_a_reconfirm_is_admitted(source_payload):
+    """Each prefix edit names its own review producer. One that reused an
+    earlier edit's key would name a producer whose old decisions never
+    cited the re-confirmed span, and the attestation rule would refuse it."""
+    from cognee_lab.identity.text_fixture import PREFIX, describe_prefix_edit
+
+    def chunk(source, text):
+        doc = source.inputs[source.original_input_ref]
+        return SimpleNamespace(
+            id=uuid4(),
+            chunk_index=0,
+            text=text,
+            is_part_of=SimpleNamespace(id=doc.data_id),
+        )
+
+    old = glossary_doc01(source_payload)
+    once, twice = PREFIX + TEXT, PREFIX + PREFIX + TEXT
+    first = describe_prefix_edit(old, once, [chunk(old, once)])
+    admit(old, first, TEXT, once, identity_map(old))
+    span = span_for(CASES["cosmetic"](GLOSSARY_TEXT))
+    confirmed = reconfirmed(
+        first,
+        "r01",
+        {"glossary_hc": ("glossary_hc_r3", span)},
+        "review_r01_r3",
+        producer("re-confirmed"),
+    )
+    admit(first, confirmed, once, once, identity_map(first))
+    second = describe_prefix_edit(confirmed, twice, [chunk(confirmed, twice)])
+    admit(confirmed, second, once, twice, identity_map(confirmed))
+    assert first.mention_resolutions["r01"].producer_ref != (
+        second.mention_resolutions["r01"].producer_ref
+    )
+
+
 def test_renaming_a_variant_onto_a_new_span_is_still_a_reconfirm(source_payload):
     old = glossary_doc01(source_payload)
     payload = old.model_dump(mode="json")

@@ -17,12 +17,15 @@ def describe_prefix_edit(old, text, chunks, *, prefix=PREFIX):
 
     Not a general Describe algorithm: no nearest-text matching, implicit identity
     inference or automatic assumption that a new context preserves interpretation.
+    Each edit's review is a producer new in its revision (`text_review_r<N>`),
+    since the attestation rule constrains a producer the old revision had.
     """
     payload = old.model_dump(mode="json")
     payload["revision"] += 1
     key = old.original_input_ref
     payload["inputs"][key]["text_sha256"] = text_digest(text)
-    payload["producers"]["text_review"] = dict(
+    review = f"text_review_r{payload['revision']}"
+    payload["producers"][review] = dict(
         method="captured_fixture",
         implementation="stage6-captured-prefix-edit",
         version="0.1",
@@ -33,12 +36,12 @@ def describe_prefix_edit(old, text, chunks, *, prefix=PREFIX):
         for occurrence in group["occurrences"]:
             occurrence["start"] += len(prefix)
             occurrence["end"] += len(prefix)
-        group["producer_ref"] = "text_review"
+        group["producer_ref"] = review
     for item in [
         *payload["mention_resolutions"].values(),
         *payload["variant_assignments"].values(),
     ]:
-        item["producer_ref"] = "text_review"
+        item["producer_ref"] = review
     from .captured_chunks import bind_chunks
 
     bind_chunks(payload, text, chunks)

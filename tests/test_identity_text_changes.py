@@ -70,8 +70,8 @@ def test_exact_unicode_remap_preserves_occurrence_identity_and_reviews_context(
     ):
         assert current.start == previous.start + len(PREFIX)
         assert after[current.start : current.end] == current.text
-    assert intended.mention_resolutions["r01"].producer_ref == "text_review"
-    assert intended.producers["text_review"].method == "captured_fixture"
+    assert intended.mention_resolutions["r01"].producer_ref == "text_review_r2"
+    assert intended.producers["text_review_r2"].method == "captured_fixture"
 
 
 @pytest.mark.parametrize(

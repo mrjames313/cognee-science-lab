@@ -46,7 +46,7 @@ A later healthy reconcile replaces the completed mutation plan with its own publ
 
 ## Describe, Publish and Maintain responsibilities
 
-The captured Describe step supplies the complete new IdentitySource: exact text fingerprint, every new native chunk and document range, remapped occurrence lists and chunk references, reviewed assignment decisions and producer attribution. The fixture changes producer attribution to `text_review` for the groups and decisions that were reviewed against the edited document. Unresolved groups are remapped too. The existing model already requires chunk ranges to cover every occurrence, including an occurrence crossing a boundary.
+The captured Describe step supplies the complete new IdentitySource: exact text fingerprint, every new native chunk and document range, remapped occurrence lists and chunk references, reviewed assignment decisions and producer attribution. The fixture changes producer attribution to a producer new in the revision, `text_review_r<N>`, for the groups and decisions that were reviewed against the edited document. Unresolved groups are remapped too. The existing model already requires chunk ranges to cover every occurrence, including an occurrence crossing a boundary.
 
 `TextChange(previous_text, text, chunk_budget=512)` describes the exact original-text transition. Pass it to `Publisher.replace` with the intended next source, prepared native chunks, real generated-source context, expected saved revision, and explicit `semantic_writer` / `verify_semantics` callbacks. These callbacks receive no automatic identity or scientific reasoning. The fixture supplies captured fact generation and verifies the independently supported doc02 fact as well as the rebuilt doc01 fact.
 
