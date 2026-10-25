@@ -29,7 +29,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-cascade-interrupted` fails a level-2 removal after level 1 is written; `reconcile` on the forgotten source finishes it, and `readd` waits until it does.
 - `forget-cascade-blocked` lists a level-2 dependent whose withdrawal failed as blocked; its removal waits.
 - `forget-single-source` forgets, re-adds and withdraws doc01 on a single-source `fixture` root, which has no two-source manifest; each command exits 0 with its one source's report.
-- `native-deleted` lists, in `status`, a source whose native copy a delete outside the lab took (`native-forget`), with the facets it misses and the `forget` that erases the lab's copy.
+- `native-deleted` lists, in `status`, a source whose native copy a delete outside the lab took (`native-forget`), with the facets it misses and the `forget` that erases the lab's copy; `reconcile` refuses it and `forget` erases it (native tests in `tests/test_identity_native_deletes_native.py` cover the dataset forget, the prune and a dependent).
 - `forget-cascade-retire-refused` refuses a withdrawal or forget of a source that holds a removal while the cascade below it is unfinished (`cascade_unfinished`); once `forget` on the forgotten source finishes the cascade, the withdrawal goes ahead.
 
 ## How to get to it (user POV)
@@ -590,7 +590,7 @@ $V drive "$RUN" main wd -- withdraw --source doc01
 $V check "$RUN" wd '[.publications[] | [.state, .revision]] == [["withdrawn", 2]] and .result.facts == []' 'the re-added doc01 withdraws'
 ```
 
-**F22 a delete outside the lab, then the lab's forget.** Proves `native-deleted`. Guide: "Deletes outside the lab". On a `fixture` root `status` lists nothing under `native_deleted`. `native-forget --case data` deletes doc01's original through `cognee.forget` and writes no ledger row: doc01 stays `current` at revision 1. `status` then lists doc01 with `missing` `original_data`, `document_node`, `chunks` and `stored_files` (the guide's table) and `next` `forget --source doc01 --expected-revision 1`. `reconcile` is refused with the guide's `native_deleted` message, naming the same forget, and writes nothing.
+**F22 a delete outside the lab, then the lab's forget.** Proves `native-deleted`. Guide: "Deletes outside the lab". On a `fixture` root `status` lists nothing under `native_deleted`. `native-forget --case data` deletes doc01's original through `cognee.forget` and writes no ledger row: doc01 stays `current` at revision 1. `status` then lists doc01 with `missing` `original_data`, `document_node`, `chunks` and `stored_files` (the guide's table) and `next` `forget --source doc01 --expected-revision 1`. `reconcile` is refused with the guide's `native_deleted` message, naming the same forget, and writes nothing. That `forget` exits 0, leaves doc01 `forgotten` at revision 1 with no dependent, and `status` lists nothing under `native_deleted`.
 
 ```bash journey F22
 $V drive "$RUN" main fixture -- fixture
@@ -605,6 +605,10 @@ $V drive "$RUN" main rec -- reconcile --source doc01
 $V check "$RUN" rec '.error == "IntentError" and (.message | startswith("The native copy of doc01 is gone or changed outside the lab")) and .details.next == "forget --source doc01 --expected-revision 1"' 'reconcile refuses doc01 and names forget'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '[.publications[] | [.state, .revision]] == [["current", 1]] and .recovery_events == []' 'the refusal wrote nothing'
+$V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1
+$V check "$RUN" forget '[.publications[] | [.state, .revision]] == [["forgotten", 1]] and .dependents_failed == null and .forget.dependents_revised == []' 'the lab forget erases doc01'
+$V drive "$RUN" main gone -- status
+$V check "$RUN" gone '.native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'status lists nothing deleted outside the lab and no open incident'
 ```
 
 ## Gotchas

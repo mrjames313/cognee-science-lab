@@ -115,3 +115,95 @@ def test_native_reconcile_refuses_a_source_deleted_outside_the_lab(tmp_path, cre
     after = status_of(root)
     assert after["publications"] == before["publications"]
     assert after["recovery_events"] == before["recovery_events"]
+
+
+CASES = ["data", "dataset", "prune"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("case", CASES)
+def test_native_forget_erases_a_source_deleted_outside_the_lab(tmp_path, case):
+    root = tmp_path / case
+    command(root, "fixture")
+    command(root, "native-forget", "--case", case)
+    forgotten = output_of(
+        command(root, "forget", "--source", "doc01", "--expected-revision", "1")
+    )
+    assert [[p["state"], p["revision"]] for p in forgotten["publications"]] == [
+        ["forgotten", 1]
+    ]
+    assert forgotten["dependents_failed"] is None
+    status = status_of(root)
+    assert status["native_deleted"] == []
+    assert all(e["resolved_at"] for e in status["recovery_events"])
+
+
+def forget_confirmed(root, label, expect=0):
+    dry = output_of(
+        command(
+            root, "forget", "--source", label, "--expected-revision", "1", "--dry-run"
+        )
+    )
+    return output_of(
+        command(
+            root,
+            "forget",
+            "--source",
+            label,
+            "--expected-revision",
+            "1",
+            "--confirm",
+            dry["token"],
+            expect=expect,
+        )
+    )
+
+
+@pytest.mark.integration
+def test_native_forget_revises_a_dependent_whose_copy_remains(tmp_path):
+    root = tmp_path / "data"
+    command(root, "multi-fixture", "--dependent")
+    command(root, "native-forget", "--source", "doc01", "--case", "data")
+    forgotten = forget_confirmed(root, "doc01")
+    assert [
+        [d["revision"], d["level"]] for d in forgotten["forget"]["dependents_revised"]
+    ] == [[2, 1]]
+    assert forgotten["dependents_failed"] is None
+    assert [forgotten["sources"][k]["state"] for k in ("doc01", "doc02")] == [
+        "forgotten",
+        "current",
+    ]
+    assert status_of(root)["native_deleted"] == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("case", ["dataset", "prune"])
+def test_native_a_dependent_deleted_outside_the_lab_waits_for_its_own_forget(
+    tmp_path, case
+):
+    root = tmp_path / case
+    command(root, "multi-fixture", "--dependent")
+    command(root, "native-forget", "--case", case)
+    forgotten = forget_confirmed(root, "doc01", expect=1)
+    assert forgotten["forget"]["dependents_revised"] == []
+    [waiting] = forgotten["forget"]["dependents_waiting"]
+    assert (
+        waiting["identity_data_id"] == forgotten["sources"]["doc02"]["identity_data_id"]
+    )
+    assert "chunks" in waiting["native_deleted"]
+    assert forgotten["dependents_failed"]["code"] == "dependent_unfinished"
+    assert forgotten["sources"]["doc02"]["native_deleted"] == waiting["native_deleted"]
+    second = output_of(
+        command(root, "forget", "--source", "doc02", "--expected-revision", "1")
+    )
+    assert second["dependents_failed"] is None
+    finished = output_of(
+        command(
+            root, "forget", "--source", "doc01", "--expected-revision", "1", "--dry-run"
+        )
+    )
+    assert finished["unfinished"] == []
+    status = status_of(root)
+    assert [p["state"] for p in status["publications"]] == ["forgotten", "forgotten"]
+    assert status["native_deleted"] == []
+    assert all(e["resolved_at"] for e in status["recovery_events"])

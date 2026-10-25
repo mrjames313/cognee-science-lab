@@ -285,6 +285,14 @@ def checks_native_copy(row) -> bool:
     )
 
 
+async def missing_native(publisher, row) -> list[str]:
+    """The facets of the row's native copy that are gone; none for a row
+    with no native copy to compare (`checks_native_copy`)."""
+    if not checks_native_copy(row):
+        return []
+    return (await native_copy(publisher, row.description)).missing
+
+
 def forget_next(label, row) -> str:
     return f"forget --source {label} --expected-revision {row.revision}"
 
@@ -295,17 +303,14 @@ async def natively_deleted(publisher, rows, labels) -> list[dict]:
     `labels` names each source's fixture label by identity Data ID."""
     found = []
     for row in rows:
-        if not checks_native_copy(row):
-            continue
-        copy = await native_copy(publisher, row.description)
-        if copy.missing:
+        if missing := await missing_native(publisher, row):
             found.append(
                 dict(
                     identity_data_id=row.source,
                     dataset_id=row.dataset,
                     state=row.state,
                     revision=row.revision,
-                    missing=copy.missing,
+                    missing=missing,
                     next=forget_next(labels[row.source], row),
                 )
             )
@@ -317,17 +322,14 @@ async def refuse_natively_deleted(publisher, row, label):
     outside the lab: no saved intent can rebuild it. Its lab copy goes
     through `forget`. A forget retry, a tombstone and a row with no native
     copy to compare pass (`checks_native_copy`)."""
-    if row is None or not checks_native_copy(row):
-        return
-    copy = await native_copy(publisher, row.description)
-    if copy.missing:
+    if row is not None and (missing := await missing_native(publisher, row)):
         raise IntentError(
             "native_deleted",
             f"The native copy of {label} is gone or changed outside the lab "
             "(for example by cognee.forget, a prune or cognee.update): "
-            f"{', '.join(copy.missing)} missing. Run `{forget_next(label, row)}` "
+            f"{', '.join(missing)} missing. Run `{forget_next(label, row)}` "
             "to erase the lab's copy",
-            details=dict(missing=copy.missing, next=forget_next(label, row)),
+            details=dict(missing=missing, next=forget_next(label, row)),
         )
 
 
@@ -599,14 +601,16 @@ async def forget(
 
     # Native deletion of a Data item removes every graph and vector object
     # that only its refs own, then its Data row, stored files and evidence
-    # rows. On a missing item it finds nothing to delete and sweeps nothing,
-    # so the sweep runs here too and a retry converges.
+    # rows. A missing item has nothing left for it to delete, and after a
+    # dataset forget outside the lab Cognee refuses to name the dataset, so
+    # it is skipped; the sweep runs here too and a retry converges.
     def native_delete(data_id):
         async def stage(run):
-            with dying_after_commit(run.stage, fault_stage):
-                await native_forget(
-                    data_id=data_id, dataset_id=source.dataset_id, user=user
-                )
+            if await data_present(data_id, source.dataset_id):
+                with dying_after_commit(run.stage, fault_stage):
+                    await native_forget(
+                        data_id=data_id, dataset_id=source.dataset_id, user=user
+                    )
             await sweep(source.dataset_id, data_id, plan["stored_files"][str(data_id)])
 
         return stage

@@ -22,7 +22,7 @@ from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
 from .fixture import context_for, expect_current, load_chunks
 from .fixture import prepare as prepare_doc01
-from .forget import refuse_natively_deleted
+from .forget import missing_native, refuse_natively_deleted
 from .forget_fixture import (
     CALLER_FILES,
     forget_command,
@@ -32,7 +32,7 @@ from .forget_fixture import (
 )
 from .models import IdentitySource
 from .multisource import GLOSSARY_INFO as INFO
-from .multisource import current_sources, publish_one
+from .multisource import current_sources, native_deleted_entry, publish_one
 from .publish import Publisher
 from .records import saved_records
 from .registered import read_registered, read_texts
@@ -326,9 +326,13 @@ async def snapshot(publisher, root, query):
     sources = await current_sources(root, publisher, INFO)
     rows = await publisher.records.rows()
     by_source = {r.source: r for r in rows}
-    found = {}
+    found, gone = {}, set()
     for label, source in sources.items():
         row = by_source[str(source.identity_data_id)]
+        if missing := await missing_native(publisher, row):
+            found[label] = native_deleted_entry(row, missing)
+            gone.add(label)
+            continue
         if row.tombstone is not None:
             found[label] = dict(
                 identity_data_id=row.source,
@@ -376,8 +380,12 @@ async def snapshot(publisher, root, query):
             },
         )
     glossary = sources["glossary"]
-    # A forgotten glossary's Data item is gone, so it has no text to show.
-    erased = by_source[str(glossary.identity_data_id)].state == "forgotten"
+    # A forgotten glossary's Data item is gone, as is the native copy of one
+    # deleted outside the lab, so it has no text to show.
+    erased = (
+        by_source[str(glossary.identity_data_id)].state == "forgotten"
+        or "glossary" in gone
+    )
     text = None if erased else (await read_texts(glossary))["glossary"]
     entry = hc_entry(text) if text is not None else None
     dataset = glossary.dataset_id

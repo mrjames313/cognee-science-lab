@@ -252,6 +252,18 @@ async def publish_one(
         pass
 
 
+def native_deleted_entry(row, missing) -> dict:
+    """A snapshot's entry for a source whose native copy is gone: the
+    identifiers, the revisions and what is missing, which a forget erases."""
+    return dict(
+        identity_data_id=row.source,
+        state=row.state,
+        saved_revision=row.revision,
+        verified_revision=row.verified_revision,
+        native_deleted=missing,
+    )
+
+
 async def snapshot(publisher, sources, query="What does HC limit?"):
     from .fixture import OSCILLATIONS_ID
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
@@ -301,6 +313,8 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             else []
         ),
     )
+    from .forget import missing_native
+
     for label, source in sources.items():
         from .registered import read_registered
 
@@ -330,6 +344,9 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
                     private_singleton_id(source, label),
                 ),
             )
+            continue
+        if missing := await missing_native(publisher, row):
+            result["sources"][label] = native_deleted_entry(row, missing)
             continue
         registered = await read_registered(source)
         mid = fixture_mention_id(source)

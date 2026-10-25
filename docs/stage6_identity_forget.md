@@ -338,6 +338,14 @@ The native copy of doc01 is gone or changed outside the lab (for example by cogn
 
 Before this, `reconcile` failed on whatever it read first: `Fixture Data item missing`, `Original Data item is not registered` or, after a prune or an incremental update, `Native chunk budget is missing or inconsistent`. A forget retry and a failed text change pass the check, since `reconcile` finishes them with their own saved intent.
 
+`forget` erases the lab's copy of such a source, whatever the delete left: its ledger row ends `forgotten` with a tombstone, as for any forget, and `status` no longer lists it. Pinned on 2026-10-25 after each of the three deletes, on a `fixture` root and on a `multi-fixture --dependent` root:
+
+- After a dataset forget Cognee refuses to name the deleted dataset (`PermissionDeniedError`, status 403), so a forget stage that called `cognee.forget(data_id=...)` failed and left the row `failed`. A forget stage now skips the native delete of a Data item that is already gone and runs only its sweep, as a retry already did.
+- A dependent whose native copy is gone too, as after a dataset forget or a prune, cannot take a removal revision: there is no registered copy to write it to. The forget completes and reports the dependent under `dependents_waiting` with `native_deleted` (the missing facets), and `dependents_failed` is `dependent_unfinished`, so the command exits 1. Forget the dependent next. Its tombstone finishes the first forget's cascade, and a dry run of the first forget then lists `unfinished: []`. The order does not matter on a `glossary-fixture --chain` root: forgetting the glossary first holds doc01 at level 1 and doc03 behind it, and each forget after that converges.
+- The command's own report shows such a source as identifiers, revisions and `native_deleted`, instead of failing to read its registered snapshot or text (`Registered identity snapshot is unreadable or invalid`, `Original Data item missing`).
+
+`retrieve` still fails a natively deleted row and opens a `retrieval_validation` incident (step 5 unit 6). The forget resolves that incident.
+
 ## Scope
 
 - A forget removes a dependent's decisions that cite the forgotten source and, since checkpoint J2, down every chain of saved-record citations, each decision that cites a removed record as it was ([The cascade](#the-cascade)).

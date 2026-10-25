@@ -657,17 +657,19 @@ def failing(fault, step: Step) -> bool:
     )
 
 
-def ready(steps) -> tuple[list[Step], list[tuple[Step, list[str]]]]:
+def ready(
+    steps, deleted=frozenset()
+) -> tuple[list[Step], list[tuple[Step, list[str]]]]:
     """The removal revisions that can be written now, in the cascade's
     order, and the ones that wait, each with the sources it waits behind:
     one whose own attempt is pending, or whose withdrawal or forget failed
-    (`blocked`), and every one below it that cites a record it removes. Its
-    records are not removed yet, and a removal below binds only to written
-    ones."""
+    (`blocked`), one whose native copy is gone (in `deleted`), and every one
+    below it that cites a record it removes. Its records are not removed
+    yet, and a removal below binds only to written ones."""
     writable, waiting, held = [], [], set()
     for step in steps:
         behind = sorted({r.identity_data_id for r in step.cited_records} & held)
-        if blocked(step.row) or behind:
+        if blocked(step.row) or step.row.source in deleted or behind:
             waiting.append((step, behind))
             held.add(step.row.source)
         else:
@@ -684,7 +686,11 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
     at the first failure and reports it, not raised: the forget before it
     already completed. `fault` is one of forget.DEPENDENT_FAULTS:
     `forget_dependents` stops before the first revision begins, when there
-    is one; the others fail removal revisions (`failing`)."""
+    is one; the others fail removal revisions (`failing`). A dependent
+    whose native copy is gone waits too, with what it misses: no removal
+    revision can be registered for it, and its own forget erases it."""
+    from .forget import missing_native
+
     ids = source_ids(tombstone)
     done, waiting = [], []
     try:
@@ -694,7 +700,12 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
                 "injected_failure",
                 "Injected failure before the dependents' removal revisions",
             )
-        writable, held = ready(steps)
+        missing = {
+            step.row.source: gone
+            for step in steps
+            if (gone := await missing_native(publisher, step.row))
+        }
+        writable, held = ready(steps, frozenset(missing))
         waiting = [
             dict(
                 identity_data_id=step.row.source,
@@ -702,6 +713,11 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
                 operation=step.row.operation,
                 level=step.level,
                 waits_for=behind,
+                **(
+                    dict(native_deleted=missing[step.row.source])
+                    if step.row.source in missing
+                    else {}
+                ),
             )
             for step, behind in held
         ]
@@ -726,7 +742,7 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
     if waiting:
         failed = dict(
             code="dependent_unfinished",
-            message="A dependent's own attempt is pending, or its withdrawal or forget failed, or a removal above it waits; finish that attempt, then run forget or reconcile on the forgotten source",
+            message="A dependent's own attempt is pending, or its withdrawal or forget failed, or its native copy is gone, or a removal above it waits; finish that attempt or forget the dependent, then run forget or reconcile on the forgotten source",
         )
     return dict(
         dependents_revised=done,
