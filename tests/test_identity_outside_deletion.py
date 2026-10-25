@@ -111,14 +111,12 @@ def reader_only(payload):
 
 def forgotten_row(source, served, removed=()):
     """The row a forget left: `served` says whether the source was served
-    when it was forgotten, as the forget's plan records it."""
-    tombstone = Tombstone.of(source, forgotten_at="now", removed_entity_ids=removed)
+    when it was forgotten."""
+    tombstone = Tombstone.of(
+        source, forgotten_at="now", removed_entity_ids=removed, served=served
+    )
     return replace(
-        row_of(
-            source,
-            state="forgotten",
-            plan=dict(operation="identity_forget", served=served),
-        ),
+        row_of(source, state="forgotten", plan=dict(operation="identity_forget")),
         description=None,
         tombstone=tombstone,
     )
@@ -355,21 +353,14 @@ def readded(source):
 
 def forget_of(source, served, earlier=None):
     """The row a forget of `source` left, whose last forget left `earlier`."""
-    tombstone = Tombstone.of(source, forgotten_at="now", earlier=earlier)
+    tombstone = Tombstone.of(source, forgotten_at="now", earlier=earlier, served=served)
     return replace(
-        row_of(
-            source,
-            state="forgotten",
-            plan=dict(operation="identity_forget", served=served),
-        ),
+        row_of(source, state="forgotten", plan=dict(operation="identity_forget")),
         description=None,
         tombstone=tombstone,
     )
 
 
-@pytest.mark.xfail(
-    strict=True, reason="a re-add or a later served forget drops the unserved life"
-)
 async def test_a_withdrawal_removal_stays_lab_removed_across_readds(source_payload):
     """W, the only one to declare Helios, is withdrawn, which removes
     Helios, and forgotten. W is re-added, then forgotten again while served.

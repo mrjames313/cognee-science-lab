@@ -53,13 +53,11 @@ class RecoveryEvent(Base):
 
 
 RETIRED_STATES = frozenset({"withdrawn", "forgotten"})
-# What a forgotten row's plan keeps: identifiers, refs, file locations and
-# whether the source was served when it was forgotten. Every edge property
-# goes, since a fact or chunk edge quotes the document.
+# What a forgotten row's plan keeps: identifiers, refs and file locations.
+# Every edge property goes, since a fact or chunk edge quotes the document.
 FORGOTTEN_PLAN_FIELDS = (
     "operation",
     "revision",
-    "served",
     "origin",
     "method",
     "original_data_id",

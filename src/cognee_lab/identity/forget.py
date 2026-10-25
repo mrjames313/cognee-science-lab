@@ -314,9 +314,8 @@ def resumes(row):
 async def plan_for(publisher, source, row):
     """A failed forget's saved plan, which keeps the ownership the first
     attempt found before native deletion detached or removed it; otherwise a
-    new plan from the graph, with whether the source was served: a reusable
-    Entity a served source declared and the graph lacks was deleted outside
-    the lab, not by a withdrawal (outside_deletion.lab_removed)."""
+    new plan from the graph, with whether the source was served, which its
+    tombstone keeps (`Tombstone.served_entity_ids`)."""
     if not resumes(row):
         return dict(await forget_plan(publisher, source), served=row.is_served)
     return require_stored_files(dict(row.plan))
@@ -503,6 +502,7 @@ async def forget(
             removed_entity_ids=[UUID(e) for e in found.removed_entities],
             impact_token=found.token if found.dependents else None,
             earlier=(await records.row(source)).last_tombstone,
+            served=plan.get("served", False),
         )
         run.completion = dict(tombstone=tombstone)
 

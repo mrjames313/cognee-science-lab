@@ -277,7 +277,10 @@ class Tombstone(Strict):
     (`decisions.decisions_digest`), so a re-add can report whether its
     decisions differ. `removed_entity_ids` are the Entities the forget
     removed; a dependent still citing one of them, or the document, has not
-    been revised yet. `impact_token` is the confirmed impact on other
+    been revised yet. `served_entity_ids` are the reusable Entity UUIDs of
+    every forgotten life whose forget found it served and did not remove
+    them: no lab operation removes what a served source builds, so an
+    absent one was deleted outside the lab. `impact_token` is the confirmed impact on other
     sources, None when the forget affected none."""
 
     kind: Literal["identity_source_tombstone"]
@@ -293,6 +296,7 @@ class Tombstone(Strict):
     earlier_mention_ids: list[UUID]
     earlier_entity_ids: list[UUID]
     removed_entity_ids: list[UUID]
+    served_entity_ids: list[UUID] = []
     impact_token: Digest | None
     forgotten_at: str
 
@@ -305,12 +309,17 @@ class Tombstone(Strict):
         removed_entity_ids=(),
         impact_token: str | None = None,
         earlier: Tombstone | None = None,
+        served: bool = False,
     ) -> Tombstone:
         """The tombstone of `source`, carrying the UUIDs of `earlier`, the
-        tombstone the source's last forget left, if it lived before."""
+        tombstone the source's last forget left, if it lived before.
+        `served` says whether the forget found the source served."""
         doc = source.inputs[source.original_input_ref]
         mentions = {k: g.entity_id for k, g in source.mention_groups.items()}
         reusable = set(source.entity_constructions) - set(mentions.values())
+        kept = reusable - set(removed_entity_ids) if served else set()
+        if earlier is not None:
+            kept |= set(earlier.served_entity_ids) - reusable
         return cls(
             kind="identity_source_tombstone",
             dataset_id=source.dataset_id,
@@ -331,6 +340,7 @@ class Tombstone(Strict):
                 sorted(earlier.all_reusable_ids - reusable, key=str) if earlier else []
             ),
             removed_entity_ids=sorted(set(removed_entity_ids), key=str),
+            served_entity_ids=sorted(kept, key=str),
             impact_token=impact_token,
             forgotten_at=forgotten_at,
         )

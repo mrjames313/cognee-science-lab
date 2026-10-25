@@ -60,8 +60,9 @@ def corpus_entities(description) -> set[UUID]:
 def lab_removed(rows, own=None, own_built=frozenset()) -> set[UUID]:
     """The Entities a lab operation removed, or may have: what each forget
     removed and each forgotten life's mention UUIDs; every reusable Entity
-    of a source forgotten while it was not served, which its withdrawal or
-    a failed attempt may have removed before the forget found it gone;
+    of a forgotten life but those its forget found served
+    (`Tombstone.served_entity_ids`), since a withdrawal or a failed attempt
+    may have removed one before the forget found it gone;
     what a replacement planned to retire; and the recipes of a source that
     is not served. Less what a served source still builds, which no lab
     operation removes while it is served: `own_built` for `own`, the source
@@ -72,8 +73,7 @@ def lab_removed(rows, own=None, own_built=frozenset()) -> set[UUID]:
             if tombstone is not None:
                 removed |= set(tombstone.removed_entity_ids)
                 removed |= set(tombstone.all_mention_ids)
-        if row.tombstone is not None and not row.plan.get("served"):
-            removed |= row.tombstone.all_reusable_ids
+                removed |= tombstone.all_reusable_ids - set(tombstone.served_entity_ids)
         removed |= {UUID(key) for key in row.plan.get("retired_entities", {})}
         if row.description is None or (row.dataset, row.source) == own:
             continue
