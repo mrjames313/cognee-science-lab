@@ -46,7 +46,11 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   after any withdrawal the fence allows while a removal is left to write,
   no live source cites a record the forget took away or a removal dropped
   or changed, by the fingerprint it pins. The removed records come from
-  the descriptions before and after, not from `cascade`.
+  the descriptions before and after, not from `cascade`. The withdrawals
+  are tried before each write, not once: on 2026-10-25 a single try on the
+  initial rows also caught skip_citers_of_withdrawn but saved no time (four
+  sources: 292 s per search before, 297 s after, three runs each), since
+  this check took about 4% of a profiled three-source search.
 
 The code under test is erasure.cascade, erasure.remaining, the token,
 erasure.ready, erasure_rules.bound_removals and erasure_of through
@@ -81,7 +85,6 @@ from cognee_lab.identity import (
     records,
 )
 from cognee_lab.identity.admission import admit, identity_map
-from cognee_lab.identity.models import SavedRecordInput
 from cognee_lab.identity.chains import (
     check_citation_cycles,
     check_record_citations,
@@ -417,11 +420,10 @@ def stale_citations(start, rows) -> list:
     for row in rows:
         if row.description is None or row.is_retired:
             continue
+        saved = records.saved_records(row.description)
         for key, inputs in records.record_inputs(row.description).items():
-            for ref in sorted(inputs):
-                item = row.description.inputs[ref]
-                if not isinstance(item, SavedRecordInput):
-                    continue
+            for ref in sorted(inputs & saved.keys()):
+                item = saved[ref]
                 cited = (str(item.identity_data_id), item.record_id)
                 if (*cited, item.content_sha256) in removed:
                     found.append((row.source, key, cited))
@@ -439,7 +441,7 @@ def finished(rows, ids):
     return None if erasure.cascade(rows, ids, ()) else rows
 
 
-def stale_after_retirements(start, rows, ids):
+def stale_after_withdrawal(start, rows, ids):
     """Disagreements when each source the fence lets withdraw now does, and
     the cascade then finishes: a live source still cites a removed
     record."""
@@ -453,7 +455,7 @@ def stale_after_retirements(start, rows, ids):
             continue
         done = finished(withdrawn(rows, {row.source}), ids)
         if done is not None and (stale := stale_citations(start, done)):
-            failures.append(("stale after retirement", row.source, stale[0]))
+            failures.append(("stale after withdrawal", row.source, stale[0]))
     return failures
 
 
@@ -513,7 +515,7 @@ def check_world(graph, states, tokens, *, shrink):
         writable, _ = erasure.ready(steps)
         if not writable:
             break
-        failures += stale_after_retirements(start, rows, ids)
+        failures += stale_after_withdrawal(start, rows, ids)
         step = writable[0]
         failures += retired_upstream(rows, step, ids, tomb)
         failures += rejected_after_upstream_retired(rows, step)
@@ -674,8 +676,8 @@ def skip_citers_of_withdrawn(rows, ids, removed, token=None):
 
     def cites_withdrawn(description):
         return any(
-            isinstance(i, SavedRecordInput) and str(i.identity_data_id) in withdrawn_ids
-            for i in description.inputs.values()
+            str(i.identity_data_id) in withdrawn_ids
+            for i in records.saved_records(description).values()
         )
 
     return tuple(
