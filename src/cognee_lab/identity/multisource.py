@@ -554,9 +554,11 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
             )
         elif args.command == "reconcile":
+            from .forget import refuse_natively_deleted
             from .forget_fixture import reconcile_forget
 
             row = await publisher.records.row(selected)
+            await refuse_natively_deleted(publisher, row, args.source)
             if (
                 finished := await reconcile_forget(publisher, row, selected)
             ) is not None:

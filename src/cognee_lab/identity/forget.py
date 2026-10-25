@@ -312,6 +312,25 @@ async def natively_deleted(publisher, rows, labels) -> list[dict]:
     return found
 
 
+async def refuse_natively_deleted(publisher, row, label):
+    """Refuse to reconcile a source whose native copy is gone or changed
+    outside the lab: no saved intent can rebuild it. Its lab copy goes
+    through `forget`. A forget retry, a tombstone and a row with no native
+    copy to compare pass (`checks_native_copy`)."""
+    if row is None or not checks_native_copy(row):
+        return
+    copy = await native_copy(publisher, row.description)
+    if copy.missing:
+        raise IntentError(
+            "native_deleted",
+            f"The native copy of {label} is gone or changed outside the lab "
+            "(for example by cognee.forget, a prune or cognee.update): "
+            f"{', '.join(copy.missing)} missing. Run `{forget_next(label, row)}` "
+            "to erase the lab's copy",
+            details=dict(missing=copy.missing, next=forget_next(label, row)),
+        )
+
+
 async def evidence_rows(dataset_id, data_id):
     from sqlalchemy import func, select
     from cognee.infrastructure.databases.relational import get_relational_engine

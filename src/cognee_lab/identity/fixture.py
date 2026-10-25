@@ -346,6 +346,12 @@ async def run(args, root):
         )
     if args.command == "retrieve":
         return await retrieve(publisher, dataset_id, args.query)
+    if args.command == "reconcile":
+        from .forget import refuse_natively_deleted
+
+        await refuse_natively_deleted(
+            publisher, await publisher.records.row(source), "doc01"
+        )
     if chunks is None:
         original_ctx = await context_for(
             source.inputs[source.original_input_ref].data_id

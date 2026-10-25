@@ -22,6 +22,7 @@ from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
 from .fixture import context_for, expect_current, load_chunks
 from .fixture import prepare as prepare_doc01
+from .forget import refuse_natively_deleted
 from .forget_fixture import (
     CALLER_FILES,
     forget_command,
@@ -294,6 +295,7 @@ async def reconcile(publisher, label, selected):
     reports beside the snapshot: a finished forget's outcome, or what a
     completed edit refreshed (a glossary edit refreshes its dependents)."""
     row = await publisher.records.row(selected)
+    await refuse_natively_deleted(publisher, row, label)
     if (finished := await reconcile_forget(publisher, row, selected)) is not None:
         return finished
     if row.resumed_by == "replace" and row.plan.get("text_change"):

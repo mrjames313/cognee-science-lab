@@ -330,6 +330,14 @@ Each entry gives the row's `identity_data_id`, `dataset_id`, `state` and `revisi
 
 `status` leaves out a row whose own attempt changes its native copy: a pending row, a row whose failed forget `forget` resumes, and a failed text change, whose retry rebuilds the document. A forgotten row has no description to compare. A withdrawn row is checked: withdrawal keeps the Data items, the document and its chunks.
 
+`reconcile` refuses such a source on every fixture kind (`native_deleted`), before it reads the missing document, and writes nothing: no saved intent can rebuild a copy Cognee no longer holds. The message names the missing facets and the forget, and `details` carries both:
+
+```text
+The native copy of doc01 is gone or changed outside the lab (for example by cognee.forget, a prune or cognee.update): original_data, document_node, chunks, stored_files missing. Run `forget --source doc01 --expected-revision 1` to erase the lab's copy
+```
+
+Before this, `reconcile` failed on whatever it read first: `Fixture Data item missing`, `Original Data item is not registered` or, after a prune or an incremental update, `Native chunk budget is missing or inconsistent`. A forget retry and a failed text change pass the check, since `reconcile` finishes them with their own saved intent.
+
 ## Scope
 
 - A forget removes a dependent's decisions that cite the forgotten source and, since checkpoint J2, down every chain of saved-record citations, each decision that cites a removed record as it was ([The cascade](#the-cascade)).

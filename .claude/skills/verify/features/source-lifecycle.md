@@ -590,7 +590,7 @@ $V drive "$RUN" main wd -- withdraw --source doc01
 $V check "$RUN" wd '[.publications[] | [.state, .revision]] == [["withdrawn", 2]] and .result.facts == []' 'the re-added doc01 withdraws'
 ```
 
-**F22 a delete outside the lab, then the lab's forget.** Proves `native-deleted`. Guide: "Deletes outside the lab". On a `fixture` root `status` lists nothing under `native_deleted`. `native-forget --case data` deletes doc01's original through `cognee.forget` and writes no ledger row: doc01 stays `current` at revision 1. `status` then lists doc01 with `missing` `original_data`, `document_node`, `chunks` and `stored_files` (the guide's table) and `next` `forget --source doc01 --expected-revision 1`.
+**F22 a delete outside the lab, then the lab's forget.** Proves `native-deleted`. Guide: "Deletes outside the lab". On a `fixture` root `status` lists nothing under `native_deleted`. `native-forget --case data` deletes doc01's original through `cognee.forget` and writes no ledger row: doc01 stays `current` at revision 1. `status` then lists doc01 with `missing` `original_data`, `document_node`, `chunks` and `stored_files` (the guide's table) and `next` `forget --source doc01 --expected-revision 1`. `reconcile` is refused with the guide's `native_deleted` message, naming the same forget, and writes nothing.
 
 ```bash journey F22
 $V drive "$RUN" main fixture -- fixture
@@ -601,6 +601,10 @@ $V check "$RUN" native '.native_forget.case == "data" and .native_forget.source 
 $V drive "$RUN" main status -- status
 $V check "$RUN" status '[.publications[] | [.state, .revision]] == [["current", 1]]' 'the delete wrote no ledger row'
 $V check "$RUN" status '[.native_deleted[] | [.state, .revision, .missing, .next]] == [["current", 1, ["original_data", "document_node", "chunks", "stored_files"], "forget --source doc01 --expected-revision 1"]]' 'status lists doc01 as deleted outside the lab and names forget'
+$V drive "$RUN" main rec -- reconcile --source doc01
+$V check "$RUN" rec '.error == "IntentError" and (.message | startswith("The native copy of doc01 is gone or changed outside the lab")) and .details.next == "forget --source doc01 --expected-revision 1"' 'reconcile refuses doc01 and names forget'
+$V drive "$RUN" main after -- status
+$V check "$RUN" after '[.publications[] | [.state, .revision]] == [["current", 1]] and .recovery_events == []' 'the refusal wrote nothing'
 ```
 
 ## Gotchas

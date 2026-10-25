@@ -86,3 +86,32 @@ def test_native_status_lists_no_source_the_lab_itself_changed(tmp_path):
         status = status_of(root)
         assert sorted(p["state"] for p in status["publications"]) == states
         assert status["native_deleted"] == [], root.name
+    command(text, "reconcile", "--source", "doc01")
+    assert [p["state"] for p in status_of(text)["publications"]] == [
+        "current",
+        "current",
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "creation",
+    [["fixture"], ["multi-fixture"], ["glossary-fixture", "--chain"]],
+    ids=["fixture", "multi", "chain"],
+)
+def test_native_reconcile_refuses_a_source_deleted_outside_the_lab(tmp_path, creation):
+    root = tmp_path / creation[0]
+    command(root, *creation)
+    command(root, "native-forget", "--case", "data")
+    before = status_of(root)
+    refused = output_of(command(root, "reconcile", "--source", "doc01", expect=1))
+    assert refused["message"].startswith(
+        "The native copy of doc01 is gone or changed outside the lab"
+    )
+    assert refused["details"] == dict(
+        missing=["original_data", "document_node", "chunks", "stored_files"],
+        next="forget --source doc01 --expected-revision 1",
+    )
+    after = status_of(root)
+    assert after["publications"] == before["publications"]
+    assert after["recovery_events"] == before["recovery_events"]
