@@ -443,6 +443,25 @@ async def test_a_failed_forget_whose_plan_predates_stored_files_is_refused(
 
 
 @pytest.mark.asyncio
+async def test_a_snapshot_of_a_plan_that_predates_stored_files_is_refused(
+    source_payload,
+):
+    """The forget snapshot refuses such a plan by name, as a retry does,
+    instead of failing on the missing field."""
+    from types import SimpleNamespace
+
+    from cognee_lab.identity.forget import remains
+
+    source = source_of(source_payload)
+    doc = source.inputs[source.original_input_ref]
+    plan = dict(owned_plan(source, uuid4(), []), original_data_id=str(doc.data_id))
+    publisher = SimpleNamespace(graph=None, vector=None)
+    with pytest.raises(IntentError) as refused:
+        await remains(publisher, source, plan)
+    assert refused.value.code == "recovery_plan"
+
+
+@pytest.mark.asyncio
 async def test_a_readd_with_the_forgotten_uuids_or_revision_is_refused(
     source_payload,
 ):

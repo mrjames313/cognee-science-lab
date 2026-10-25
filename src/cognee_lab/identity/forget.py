@@ -238,6 +238,7 @@ async def remains(publisher, source, plan):
     """What is left of a source whose forget began. Every value is false,
     empty or zero once the forget is complete. `source` is its description
     or, once forgotten, its tombstone."""
+    require_stored_files(plan)
     graph, vector = publisher.graph, publisher.vector
     ids = source_ids(source)
     nodes, edges = await owned_objects(graph, ids)
@@ -324,7 +325,12 @@ async def plan_for(publisher, source, row):
     new plan from the graph."""
     if not resumes(row):
         return await forget_plan(publisher, source)
-    plan = dict(row.plan)
+    return require_stored_files(dict(row.plan))
+
+
+def require_stored_files(plan):
+    """The plan, refused if it was saved before forget plans kept
+    `stored_files`."""
     if "stored_files" not in plan:
         raise IntentError(
             "recovery_plan",
