@@ -1,5 +1,7 @@
 """Identity revision replacement with explicit, durable forward recovery."""
 
+import copy
+
 from .admission import admit, check_absent_from_graph, identity_map
 from .erasure_rules import NO_ERASURES, check_retry_chain, erasures_of
 from .models import IdentitySource
@@ -67,6 +69,17 @@ async def admit_replacement(
             "Retiring or adding a group or an occurrence requires a text change and its rebuild",
         )
     return fate
+
+
+# What plan_retirement records in a plan.
+RETIREMENT_FIELDS = ("retired_entities", "old_edges", "previous_edges")
+
+
+def saved_retirement(plan) -> dict:
+    """What a saved plan records of its retirement (`RETIREMENT_FIELDS`),
+    copied for a retry, which extends it (plan_retirement): the first
+    attempt may have retired part of it, which the graph no longer shows."""
+    return {f: copy.deepcopy(plan[f]) for f in RETIREMENT_FIELDS if f in plan}
 
 
 async def plan_retirement(graph, plan, olds, source):

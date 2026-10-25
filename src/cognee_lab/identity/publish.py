@@ -27,7 +27,6 @@ from .validation import IntentError, validate_inputs, validate_uses
 from .withholding import record_reader
 
 # What replace.plan_retirement records from the graph on a first attempt.
-RETIREMENT_FIELDS = ("retired_entities", "old_edges", "previous_edges")
 
 
 def contribution(source, assignment_id, kind, applicability):
@@ -369,17 +368,17 @@ class Publisher:
         other description.
 
         With them it keeps what an earlier erasure retry planned to retire
-        (`RETIREMENT_FIELDS`), as a replacement retry keeps its saved plan:
-        that attempt may have retired part of it, which the graph no longer
-        shows (replace.plan_retirement)."""
+        (replace.saved_retirement). A replacement retry resumes its saved
+        plan whole, so it needs no such selection."""
+        from .replace import saved_retirement
+
         row = await self.records.row(source)
         if row is None or row.state != "failed":
             return {}
         kept = superseding_plan(row, source)
         if not kept:
             return {}
-        saved = {f: row.plan[f] for f in RETIREMENT_FIELDS if f in row.plan}
-        return dict(kept, **json.loads(json.dumps(saved)))
+        return dict(kept, **saved_retirement(row.plan))
 
     async def forgotten_row(self, source):
         row = await self.records.row(source)
