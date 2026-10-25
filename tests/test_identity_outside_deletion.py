@@ -333,3 +333,70 @@ async def test_a_replacement_that_drops_the_recipe_and_citation_is_admitted(
         [row_of(old)], payload_with(source_payload, dropped), saved_revision=2
     )
     assert HELIOS not in writes.entities and writes.edges == []
+
+
+def renamed(payload, *, helios=False):
+    """The payload with new mention Entity UUIDs, and a new Helios UUID too
+    when `helios`."""
+    text = json.dumps(payload)
+    groups = payload["mention_groups"].values()
+    for used in [*(g["entity_id"] for g in groups), *([str(HELIOS)] * helios)]:
+        text = text.replace(str(used), str(uuid4()))
+    return json.loads(text)
+
+
+def readded(source):
+    """The source's next life after its forget: its re-add described its
+    mention Entities and the reusable Helios under new UUIDs."""
+    payload = renamed(json.loads(source.model_dump_json()), helios=True)
+    payload["revision"] = source.revision + 1
+    return source_of(payload)
+
+
+def forget_of(source, served, earlier=None):
+    """The row a forget of `source` left, whose last forget left `earlier`."""
+    tombstone = Tombstone.of(source, forgotten_at="now", earlier=earlier)
+    return replace(
+        row_of(
+            source,
+            state="forgotten",
+            plan=dict(operation="identity_forget", served=served),
+        ),
+        description=None,
+        tombstone=tombstone,
+    )
+
+
+@pytest.mark.xfail(
+    strict=True, reason="a re-add or a later served forget drops the unserved life"
+)
+async def test_a_withdrawal_removal_stays_lab_removed_across_readds(source_payload):
+    """W, the only one to declare Helios, is withdrawn, which removes
+    Helios, and forgotten. W is re-added, then forgotten again while served.
+    Helios stays removed by the lab through both."""
+    owner = source_of(source_payload)
+    reader = reader_only(renamed(source_payload))
+    first = forget_of(owner, served=False)
+    life = readded(owner)
+    live = row_of(life, last_tombstone=first.tombstone)
+    with pytest.raises(IntentError) as refused:
+        await admit([live, row_of(reader)], reader)
+    assert refused.value.code == "missing_reasoning_input"
+    second = forget_of(life, served=True, earlier=first.tombstone)
+    await check_readd(Graph(HELIOS), second.tombstone, owner, [second])
+
+
+async def test_an_entity_deleted_outside_stays_so_across_readds(source_payload):
+    """Helios is deleted outside the lab while doc01 is served, then doc01
+    is forgotten, re-added without Helios and forgotten again while served."""
+    doc01 = source_of(source_payload)
+    reader = reader_only(renamed(source_payload))
+    first = forget_of(doc01, served=True)
+    life = readded(doc01)
+    live = row_of(life, last_tombstone=first.tombstone)
+    rows = [live, row_of(reader)]
+    assert await deleted_outside(Graph(HELIOS), rows, reader, reader) == {HELIOS}
+    second = forget_of(life, served=True, earlier=first.tombstone)
+    with pytest.raises(IntentError) as refused:
+        await check_readd(Graph(HELIOS), second.tombstone, doc01, [second])
+    assert refused.value.code == "entity_recreation"
