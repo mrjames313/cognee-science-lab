@@ -330,3 +330,22 @@ def test_the_marker_records_the_fixture_kind_the_cli_routes_by(tmp_path):
         read_fixture(root)
     (root / MARKER).write_text(json.dumps({"kind": MARKER_KIND}))
     assert read_fixture(root) is None
+
+
+def test_the_cli_module_imports_no_cognee():
+    """`__main__` imports the fixture modules before `fixture_environment`
+    points Cognee at the root. A Cognee import then would load the
+    operator's env file and could open the lab store."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, cognee_lab.identity.__main__; print('cognee' in sys.modules)",
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-3000:]
+    assert result.stdout.strip() == "False"
