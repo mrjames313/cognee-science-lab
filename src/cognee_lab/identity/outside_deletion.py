@@ -57,27 +57,33 @@ def corpus_entities(description) -> set[UUID]:
     } | set(reusable_recipes(description))
 
 
-def lab_removed(rows, own=None, own_built=frozenset()) -> set[UUID]:
+def lab_removed(rows, own=None, verified=None) -> set[UUID]:
     """The Entities a lab operation removed, or may have: what each forget
     removed and each forgotten life's mention UUIDs; every reusable Entity
     of a forgotten life but those its forget found served
     (`Tombstone.served_entity_ids`), since a withdrawal or a failed attempt
-    may have removed one before the forget found it gone;
-    what a replacement planned to retire; and the recipes of a source that
-    is not served. Less what a served source still builds, which no lab
-    operation removes while it is served: `own_built` for `own`, the source
-    being published, whose own attempt in flight leaves it unserved."""
-    removed, built = set(), set(own_built)
+    may have removed one before the forget found it gone; what a
+    replacement planned to retire; and the recipes of a source that is not
+    served. Less what a served source still builds, which no lab operation
+    removes while it is served. `own` is the source being published, whose
+    attempt in flight leaves it unserved: it builds the recipes of
+    `verified`, its last verified description, that it has not planned to
+    retire."""
+    removed, built = set(), set()
     for row in rows:
         for tombstone in (row.tombstone, row.last_tombstone):
             if tombstone is not None:
                 removed |= set(tombstone.removed_entity_ids)
                 removed |= set(tombstone.all_mention_ids)
                 removed |= tombstone.all_reusable_ids - set(tombstone.served_entity_ids)
-        removed |= {UUID(key) for key in row.plan.get("retired_entities", {})}
-        if row.description is None or (row.dataset, row.source) == own:
+        retired = {UUID(key) for key in row.plan.get("retired_entities", {})}
+        removed |= retired
+        if (row.dataset, row.source) == own:
+            if verified is not None:
+                built |= set(reusable_recipes(verified)) - retired
+        elif row.description is None:
             continue
-        if row.is_served:
+        elif row.is_served:
             built |= set(reusable_recipes(row.description))
         else:
             removed |= set(row.description.entity_constructions)
@@ -89,10 +95,6 @@ async def deleted_outside(graph, rows, source, verified) -> frozenset[UUID]:
     sees them. Its own row counts through `verified` alone, since an
     attempt in flight leaves it unserved."""
     own = (str(source.dataset_id), str(source.identity_data_id))
-    own_built = set(reusable_recipes(verified)) if verified is not None else set()
-    previous = next((r for r in rows if (r.dataset, r.source) == own), None)
-    if previous is not None:
-        own_built -= {UUID(k) for k in previous.plan.get("retired_entities", {})}
     named = set().union(
         *(
             corpus_entities(r.description)
@@ -101,7 +103,7 @@ async def deleted_outside(graph, rows, source, verified) -> frozenset[UUID]:
         ),
         corpus_entities(verified) if verified is not None else (),
     )
-    candidates = named - lab_removed(rows, own, own_built)
+    candidates = named - lab_removed(rows, own, verified)
     return frozenset([e for e in candidates if await graph.get_node(str(e)) is None])
 
 
