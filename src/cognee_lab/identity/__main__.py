@@ -23,6 +23,7 @@ from .glossary_fixture import COMMANDS as GLOSSARY_COMMANDS
 from .glossary_fixture import REFRESH_FAULT
 from .glossary_fixture import REVIEW_COMMANDS as REVIEWS
 from .glossary_fixture import SHARED_COMMANDS as GLOSSARY_SHARED
+from .native_forget import CASES as NATIVE_CASES
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
 from .replace import TEXT_FAULT_STAGES
@@ -42,6 +43,7 @@ COMMAND_FAULT_STAGES = {
     **dict.fromkeys(OCCURRENCE_COMMANDS, REPLACE_STAGES),
     "edit-glossary": (*REPLACE_STAGES, REFRESH_FAULT),
     "edit-entity": (),
+    "native-forget": (),
     "refresh-dependents": (REFRESH_FAULT,),
     "withdraw": WITHDRAW_STAGES,
     "forget": FORGET_STAGES,
@@ -96,6 +98,7 @@ def main():
             "forget",
             "readd",
             *GLOSSARY_COMMANDS,
+            "native-forget",
             "retrieve",
             "status",
             "reconcile",
@@ -116,10 +119,12 @@ def main():
     )
     parser.add_argument(
         "--case",
-        choices=[*sorted(GLOSSARY_CASES), *ENTITY_CASES],
+        choices=[*sorted(GLOSSARY_CASES), *ENTITY_CASES, *NATIVE_CASES],
         help="edit-glossary: which captured glossary edit to make "
         f"({', '.join(sorted(GLOSSARY_CASES))}); edit-entity: which outside "
-        f"edit of the Entity doc01 reads ({', '.join(ENTITY_CASES)})",
+        f"edit of the Entity doc01 reads ({', '.join(ENTITY_CASES)}); "
+        "native-forget: which Cognee delete to make outside the lab "
+        f"({', '.join(NATIVE_CASES)})",
     )
     parser.add_argument(
         "--decision",
@@ -186,14 +191,20 @@ def main():
     root = args.root.resolve()
     if args.command in REVISION_COMMANDS and args.expected_revision is None:
         parser.error(f"{args.command} requires --expected-revision")
-    cases = {"edit-glossary": GLOSSARY_CASES, "edit-entity": ENTITY_CASES}
+    cases = {
+        "edit-glossary": GLOSSARY_CASES,
+        "edit-entity": ENTITY_CASES,
+        "native-forget": NATIVE_CASES,
+    }
     if args.command in cases and args.case not in cases[args.command]:
         parser.error(
             f"{args.command} requires --case, one of "
             f"{', '.join(sorted(cases[args.command]))}"
         )
     if args.case is not None and args.command not in cases:
-        parser.error("--case applies to edit-glossary and edit-entity only")
+        parser.error(
+            "--case applies to edit-glossary, edit-entity and native-forget only"
+        )
     if args.command in REVIEWS and args.decision is None:
         parser.error(f"{args.command} requires --decision")
     if (args.command == "replace-citation") != bool(args.cite or args.drop):
@@ -245,6 +256,8 @@ def main():
             from .glossary_fixture import run
         elif args.command in OCCURRENCE_COMMANDS:
             from .occurrence_fixture import run
+        elif args.command == "native-forget":
+            from .native_forget import run
         elif args.command == "edit-text":
             from .text_fixture import run
         elif args.command == "revise":

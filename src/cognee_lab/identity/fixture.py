@@ -329,6 +329,8 @@ async def run(args, root):
     dataset_id = source.dataset_id
     args._fixture_publisher = publisher
     if args.command == "status":
+        from .forget import natively_deleted
+        from .multisource import root_files
         from .retrieve import withholding_status
 
         rows = await publisher.records.rows(dataset_id)
@@ -336,6 +338,11 @@ async def run(args, root):
             publications=[row.record() for row in rows],
             recovery_events=await publisher.records.events(dataset_id),
             **await withholding_status(publisher, rows),
+            native_deleted=await natively_deleted(
+                publisher,
+                rows,
+                {str(s.identity_data_id): k for k, s in root_files(root).items()},
+            ),
         )
     if args.command == "retrieve":
         return await retrieve(publisher, dataset_id, args.query)

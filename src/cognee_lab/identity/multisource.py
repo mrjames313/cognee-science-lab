@@ -143,6 +143,7 @@ async def prepare(root, *, chunked=False, dependent=False):
 
 
 INFO = "multi-fixture-info.json"
+GLOSSARY_INFO = "glossary-fixture-info.json"
 
 
 def read_sources(root, info=INFO):
@@ -175,6 +176,13 @@ def fixture_files(root):
             (root / "identity.json").read_text()
         )
     }
+
+
+def root_files(root):
+    """Each source's identity file on a root of any kind."""
+    if (root / GLOSSARY_INFO).exists():
+        return read_sources(root, GLOSSARY_INFO)
+    return fixture_files(root)
 
 
 async def current_sources(root, publisher, info=INFO):

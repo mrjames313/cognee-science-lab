@@ -301,6 +301,35 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 
 `readd --fault-stage nodes` fails before the captured facts are written. `reconcile --source <doc>` runs `write_semantics`, which skips a chunk whose fact and evidence are in place, so it writes what the failure skipped and completes at revision 2, with the incident resolved as `restored`.
 
+## Deletes outside the lab
+
+Step 5 S2 (2026-10-25, built by the assistant on the user's Mac with loopback embeddings). A plain `cognee.forget` or prune erases only Cognee's copy of a source. The lab's ledger row, its saved description and the lab's own graph objects stay, and nothing in the lab hears of the delete. Run `forget` on the lab source afterwards to erase the lab's copy.
+
+`native-forget --case data|dataset|prune` stands in for such a delete, as `edit-entity` stands in for an outside edit. It writes no ledger row and takes no writer reservation:
+
+- `data` calls `cognee.forget(data_id=..., dataset_id=...)` on the selected source's original document.
+- `dataset` calls `cognee.forget(dataset=...)` on the root's dataset.
+- `prune` calls `cognee.prune.prune_data()` and then `cognee.prune.prune_system()` with its defaults. That keeps Cognee's relational database, and so the lab's ledger.
+
+`status` compares each saved source with its native copy and lists the ones that differ under `native_deleted`. It checks five facets (`forget.NativeCopy`): the original's Data row, the identity Data row, the original's document node, every chunk the saved description names, and the raw files of both Data items. Each delete leaves its own pattern, measured on 2026-10-25 on a `fixture` root:
+
+| Delete | `missing` |
+|---|---|
+| `native-forget --case data` | `original_data`, `document_node`, `chunks`, `stored_files` |
+| `native-forget --case dataset` | all five |
+| `native-forget --case prune` | `document_node`, `chunks`, `stored_files` |
+| an incremental `cognee.update` of the original (`.audit/step5-update-probe.md`) | `chunks` |
+
+Each entry gives the row's `identity_data_id`, `dataset_id`, `state` and `revision`, the `missing` facets and `next`, the command that erases the lab's copy:
+
+```json
+"native_deleted": [{"identity_data_id": "718efce2-...", "dataset_id": "...", "state": "current",
+  "revision": 1, "missing": ["original_data", "document_node", "chunks", "stored_files"],
+  "next": "forget --source doc01 --expected-revision 1"}]
+```
+
+`status` leaves out a row whose own attempt changes its native copy: a pending row, a row whose failed forget `forget` resumes, and a failed text change, whose retry rebuilds the document. A forgotten row has no description to compare. A withdrawn row is checked: withdrawal keeps the Data items, the document and its chunks.
+
 ## Scope
 
 - A forget removes a dependent's decisions that cite the forgotten source and, since checkpoint J2, down every chain of saved-record citations, each decision that cites a removed record as it was ([The cascade](#the-cascade)).

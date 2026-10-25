@@ -29,6 +29,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-cascade-interrupted` fails a level-2 removal after level 1 is written; `reconcile` on the forgotten source finishes it, and `readd` waits until it does.
 - `forget-cascade-blocked` lists a level-2 dependent whose withdrawal failed as blocked; its removal waits.
 - `forget-single-source` forgets, re-adds and withdraws doc01 on a single-source `fixture` root, which has no two-source manifest; each command exits 0 with its one source's report.
+- `native-deleted` lists, in `status`, a source whose native copy a delete outside the lab took (`native-forget`), with the facets it misses and the `forget` that erases the lab's copy.
 - `forget-cascade-retire-refused` refuses a withdrawal or forget of a source that holds a removal while the cascade below it is unfinished (`cascade_unfinished`); once `forget` on the forgotten source finishes the cascade, the withdrawal goes ahead.
 
 ## How to get to it (user POV)
@@ -587,6 +588,19 @@ $V drive "$RUN" main readd -- readd --source doc01 --expected-revision 1
 $V check "$RUN" readd '[.publications[] | [.state, .revision]] == [["current", 2]] and ([.result.facts[].relationship] | index("limits") != null)' 'doc01 is current at revision 2 and its fact returns'
 $V drive "$RUN" main wd -- withdraw --source doc01
 $V check "$RUN" wd '[.publications[] | [.state, .revision]] == [["withdrawn", 2]] and .result.facts == []' 'the re-added doc01 withdraws'
+```
+
+**F22 a delete outside the lab, then the lab's forget.** Proves `native-deleted`. Guide: "Deletes outside the lab". On a `fixture` root `status` lists nothing under `native_deleted`. `native-forget --case data` deletes doc01's original through `cognee.forget` and writes no ledger row: doc01 stays `current` at revision 1. `status` then lists doc01 with `missing` `original_data`, `document_node`, `chunks` and `stored_files` (the guide's table) and `next` `forget --source doc01 --expected-revision 1`.
+
+```bash journey F22
+$V drive "$RUN" main fixture -- fixture
+$V drive "$RUN" main before -- status
+$V check "$RUN" before '.native_deleted == []' 'a fresh root lists nothing deleted outside the lab'
+$V drive "$RUN" main native -- native-forget --source doc01 --case data
+$V check "$RUN" native '.native_forget.case == "data" and .native_forget.source == "doc01"' 'Cognee forgot doc01 outside the lab'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.publications[] | [.state, .revision]] == [["current", 1]]' 'the delete wrote no ledger row'
+$V check "$RUN" status '[.native_deleted[] | [.state, .revision, .missing, .next]] == [["current", 1, ["original_data", "document_node", "chunks", "stored_files"], "forget --source doc01 --expected-revision 1"]]' 'status lists doc01 as deleted outside the lab and names forget'
 ```
 
 ## Gotchas

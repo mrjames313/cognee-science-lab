@@ -30,6 +30,7 @@ from .forget_fixture import (
     reconcile_forget,
 )
 from .models import IdentitySource
+from .multisource import GLOSSARY_INFO as INFO
 from .multisource import current_sources, publish_one
 from .publish import Publisher
 from .records import saved_records
@@ -49,7 +50,6 @@ GLOSSARY_TEXT = (
 )
 GLOSSARY_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:glossary:original")
 GLOSSARY_IDENTITY_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:glossary:identity")
-INFO = "glossary-fixture-info.json"
 CHUNK_BUDGET = 512
 HC_LINE = re.compile(r"^HC: .*$", re.MULTILINE)
 # A fault in the refresh that follows an edit: doc01's refresh revision

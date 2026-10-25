@@ -16,6 +16,7 @@ forgotten: current, withdrawn, or one whose publication failed. `withdraw`
 is the sibling orchestration; `retirement.py` holds what both use.
 """
 
+from typing import NamedTuple
 from uuid import UUID
 
 from .models import ChunkInput, Tombstone
@@ -214,6 +215,101 @@ async def data_present(data_id, dataset_id):
     async with get_relational_engine().get_async_session() as session:
         data = await session.get(Data, UUID(str(data_id)))
     return data is not None and data.dataset_id == dataset_id
+
+
+class NativeCopy(NamedTuple):
+    """What Cognee still holds of a saved source. Each facet is needed: a
+    native forget of the original takes its Data row and document node; a
+    dataset forget takes both Data rows and the graph; the default prune
+    keeps the Data rows but takes the graph and the stored files; an
+    incremental `cognee.update` keeps the Data row and replaces the chunks."""
+
+    original_data: bool
+    identity_data: bool
+    document_node: bool
+    chunks: bool
+    stored_files: bool
+
+    @property
+    def missing(self) -> list[str]:
+        return [facet for facet in self._fields if not getattr(self, facet)]
+
+
+async def raw_file_present(data_id, dataset_id) -> bool:
+    """Whether the Data item is registered and its raw file can be opened."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.infrastructure.files.utils.open_data_file import open_data_file
+    from cognee.modules.data.models import Data
+
+    async with get_relational_engine().get_async_session() as session:
+        data = await session.get(Data, UUID(str(data_id)))
+    if data is None or data.dataset_id != dataset_id or not data.raw_data_location:
+        return False
+    try:
+        async with open_data_file(data.raw_data_location, mode="rb"):
+            return True
+    except OSError:
+        return False
+
+
+async def native_copy(publisher, source) -> NativeCopy:
+    """The native copy of a saved description, facet by facet."""
+    graph = publisher.graph
+    ids = source_ids(source)
+    chunk_ids = [
+        str(i.chunk_id) for i in source.inputs.values() if isinstance(i, ChunkInput)
+    ]
+    return NativeCopy(
+        original_data=await data_present(ids.original_data_id, ids.dataset_id),
+        identity_data=await data_present(ids.identity_data_id, ids.dataset_id),
+        document_node=await graph.get_node(str(ids.original_data_id)) is not None,
+        chunks=all([await graph.get_node(c) is not None for c in chunk_ids]),
+        stored_files=all(
+            [
+                await raw_file_present(data_id, ids.dataset_id)
+                for data_id in (ids.original_data_id, ids.identity_data_id)
+            ]
+        ),
+    )
+
+
+def checks_native_copy(row) -> bool:
+    """Whether a row's saved description should still have its native copy.
+    Not a forgotten row, nor one whose forget resumes, nor a pending one,
+    nor a failed text change, whose own retry rebuilds the document."""
+    return (
+        row.description is not None
+        and row.state != "pending"
+        and row.resumed_by != "forget"
+        and row.failed_attempt != "text_change"
+    )
+
+
+def forget_next(label, row) -> str:
+    return f"forget --source {label} --expected-revision {row.revision}"
+
+
+async def natively_deleted(publisher, rows, labels) -> list[dict]:
+    """The rows whose native copy is gone or changed outside the lab, each
+    with what is missing and the command that erases the lab's copy.
+    `labels` names each source's fixture label by identity Data ID."""
+    found = []
+    for row in rows:
+        if not checks_native_copy(row):
+            continue
+        copy = await native_copy(publisher, row.description)
+        if copy.missing:
+            found.append(
+                dict(
+                    identity_data_id=row.source,
+                    dataset_id=row.dataset,
+                    state=row.state,
+                    revision=row.revision,
+                    missing=copy.missing,
+                    next=forget_next(labels[row.source], row),
+                )
+            )
+    return found
 
 
 async def evidence_rows(dataset_id, data_id):
