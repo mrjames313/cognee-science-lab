@@ -8,9 +8,11 @@ range), and a change to the entry needs a reviewer, who re-confirms a decision
 or replaces it. The review decisions are captured fixture input, not Describe.
 """
 
+import argparse
 import json
 import re
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import NamedTuple
 from uuid import NAMESPACE_URL, uuid5
 
@@ -53,24 +55,8 @@ HC_LINE = re.compile(r"^HC: .*$", re.MULTILINE)
 # A fault in the refresh that follows an edit: doc01's refresh revision
 # fails at replace_registered, after the edit itself completed.
 REFRESH_FAULT = "refresh_interrupted"
-COMMANDS = (
-    "glossary-fixture",
-    "edit-glossary",
-    "reconfirm",
-    "replace-decision",
-    "refresh-dependents",
-    "cite-record",
-    "edit-entity",
-    "replace-citation",
-)
-REVIEW_COMMANDS = ("reconfirm", "replace-decision", "replace-citation")
 # doc01's kind changes, which a glossary root also takes (chain_kind_change).
 KIND_CHANGES = ("change-kind-to-mention", "change-kind-to-reusable")
-
-
-def no_refresh():
-    """A command result with no refresh, fresh for each command."""
-    return dict(refreshed=[], refresh_failed=None)
 
 
 def hc_entry(text):
@@ -304,11 +290,12 @@ async def edit(
 
 
 async def reconcile(publisher, label, selected):
-    """Finish the selected source's failed attempt. A glossary edit refreshes
-    its dependents when it completes; return what it refreshed."""
+    """Finish the selected source's failed attempt. Returns what the command
+    reports beside the snapshot: a finished forget's outcome, or what a
+    completed edit refreshed (a glossary edit refreshes its dependents)."""
     row = await publisher.records.row(selected)
     if (finished := await reconcile_forget(publisher, row, selected)) is not None:
-        return dict(no_refresh(), **finished)
+        return finished
     if row.resumed_by == "replace" and row.plan.get("text_change"):
         # The glossary's edit, or doc01's kind change (chain_kind_change.py).
         resume = change_glossary if label == "glossary" else maintain_one
@@ -330,7 +317,7 @@ async def reconcile(publisher, label, selected):
             operation="reconcile",
             semantics=CALLER_FILES[label].facts,
         )
-    return no_refresh()
+    return {}
 
 
 async def snapshot(publisher, root, query):
@@ -419,15 +406,19 @@ async def snapshot(publisher, root, query):
 
 class Call(NamedTuple):
     """One command on an open glossary root. `selected` is the source
-    `--source` names. `refresh_fault` is the stage at which the refresh
-    fault fails each refresh revision, or None."""
+    `--source` names."""
 
     publisher: Publisher
-    root: object
-    args: object
-    sources: dict
-    selected: IdentitySource | None
-    refresh_fault: str | None
+    root: Path
+    args: argparse.Namespace
+    sources: dict[str, IdentitySource]
+    selected: IdentitySource
+
+    @property
+    def refresh_fault(self) -> str | None:
+        """The stage at which the refresh fault fails each refresh revision
+        (replace_registered), or None."""
+        return "replace_registered" if self.args.fault_stage == REFRESH_FAULT else None
 
 
 class Scope(NamedTuple):
@@ -439,24 +430,31 @@ class Scope(NamedTuple):
 
 
 class Command(NamedTuple):
-    """One command a glossary root takes.
+    """One command an open glossary root takes: its handler, which returns
+    the command's whole result, and the sources it accepts (None for any
+    source of the root)."""
 
-    - `handler`: runs the command and returns the fields it adds to the
-      root's snapshot.
-    - `scope`: the sources it accepts; None for any source of the root.
-    - `after`: the fields it adds once the snapshot is read, or None.
-    - `opens`: how the command gets its root (`opened`; `create` makes it).
-    - `snapshot`: False for a command that writes nothing, whose result is
-      the handler's alone."""
-
-    handler: Callable[["Call"], Awaitable[dict]]
+    handler: Callable[[Call], Awaitable[dict]]
     scope: Scope | None = None
-    after: Callable[["Call", dict], Awaitable[dict]] | None = None
-    opens: Callable[..., Awaitable["Call"]] | None = None
-    snapshot: bool = True
 
 
-async def create(args, root, scope) -> Call:
+def saved(root, result) -> dict:
+    (root / "glossary_result.json").write_text(
+        json.dumps(result, indent=2, default=str)
+    )
+    return result
+
+
+async def finish(publisher, root, query, **extra) -> dict:
+    """A command's whole result: the root's snapshot after it, with no
+    refresh unless `extra` reports one, and `extra`. Saved as
+    glossary_result.json."""
+    result = await snapshot(publisher, root, query)
+    result.update(dict(refreshed=[], refresh_failed=None), **extra)
+    return saved(root, result)
+
+
+async def create(args, root) -> dict:
     """Make the root and publish each source in citation order: doc03 pins
     doc01's decisions as published. No current source is read first."""
     publisher, prepared = await prepare(root, chain=args.chain)
@@ -471,7 +469,7 @@ async def create(args, root, scope) -> Call:
             fault_stage=args.fault_stage if label == args.source else None,
             semantics=CALLER_FILES[label].facts,
         )
-    return Call(publisher, root, args, {}, None, None)
+    return await finish(publisher, root, args.query)
 
 
 async def opened(args, root, scope: Scope | None) -> Call:
@@ -484,18 +482,12 @@ async def opened(args, root, scope: Scope | None) -> Call:
         raise IntentError("source_missing", "Selected source is not in this fixture")
     if scope is not None and args.source not in scope.labels:
         raise IntentError("fixture_scope", scope.refusal.format(command=args.command))
-    # The refresh fault fails each refresh revision at replace_registered.
-    refresh_fault = "replace_registered" if args.fault_stage == REFRESH_FAULT else None
-    return Call(publisher, root, args, sources, sources[args.source], refresh_fault)
-
-
-async def created(call: Call) -> dict:
-    return no_refresh()
+    return Call(publisher, root, args, sources, sources[args.source])
 
 
 async def edited_glossary(call: Call) -> dict:
     args = call.args
-    return await edit(
+    refresh = await edit(
         call.publisher,
         call.root,
         call.selected,
@@ -504,16 +496,19 @@ async def edited_glossary(call: Call) -> dict:
         fault_stage=None if call.refresh_fault else args.fault_stage,
         refresh_fault=call.refresh_fault,
     )
+    return await finish(call.publisher, call.root, args.query, **refresh)
 
 
 async def cited(call: Call) -> dict:
     await cite(call.publisher, call.root, call.args, call.sources)
-    return no_refresh()
+    return await finish(call.publisher, call.root, call.args.query)
 
 
 async def kind_changed(call: Call) -> dict:
+    """doc01's kind change, its refresh, and what it leaves withheld in the
+    other sources, which the snapshot after it shows."""
     args = call.args
-    return await change_kind(
+    refresh = await change_kind(
         call.publisher,
         call.root,
         args.command,
@@ -521,16 +516,16 @@ async def kind_changed(call: Call) -> dict:
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,
     )
-
-
-async def kind_change_dependents(call: Call, result) -> dict:
+    result = await snapshot(call.publisher, call.root, args.query)
+    result.update(refresh)
     sources = await current_sources(call.root, call.publisher, INFO)
-    return await dependents_withheld(call.publisher, sources, result)
+    result.update(await dependents_withheld(call.publisher, sources, result))
+    return saved(call.root, result)
 
 
 async def entity_edited(call: Call) -> dict:
     edited = await edit_entity(call.publisher, call.root, call.selected, call.args.case)
-    return dict(no_refresh(), **edited)
+    return await finish(call.publisher, call.root, call.args.query, **edited)
 
 
 async def reviewed(call: Call) -> dict:
@@ -549,7 +544,7 @@ async def reviewed(call: Call) -> dict:
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,
     )
-    return no_refresh()
+    return await finish(call.publisher, call.root, args.query)
 
 
 async def withdrawn(call: Call) -> dict:
@@ -560,26 +555,25 @@ async def withdrawn(call: Call) -> dict:
         origin="test/fault_injection" if fault else "test",
         fault_stage=fault,
     )
-    return no_refresh()
+    return await finish(call.publisher, call.root, call.args.query)
 
 
 async def reconciled(call: Call) -> dict:
-    return await reconcile(call.publisher, call.args.source, call.selected)
+    refresh = await reconcile(call.publisher, call.args.source, call.selected)
+    return await finish(call.publisher, call.root, call.args.query, **refresh)
 
 
 async def forgotten(call: Call) -> dict:
     args = call.args
+    if args.dry_run:
+        # A dry run writes nothing: its preview is the whole result.
+        return await forget_dry_run(
+            call.publisher, call.root, args, args.source, call.selected
+        )
     outcome = await forget_command(
         call.publisher, call.root, args, args.source, call.selected
     )
-    return dict(no_refresh(), **outcome)
-
-
-async def forget_previewed(call: Call) -> dict:
-    args = call.args
-    return await forget_dry_run(
-        call.publisher, call.root, args, args.source, call.selected
-    )
+    return await finish(call.publisher, call.root, args.query, **outcome)
 
 
 async def readded(call: Call) -> dict:
@@ -591,51 +585,50 @@ async def readded(call: Call) -> dict:
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,
     )
-    return dict(no_refresh(), **outcome)
+    return await finish(call.publisher, call.root, args.query, **outcome)
 
 
 async def refreshed(call: Call) -> dict:
     # The refresh is this command's own operation, so its failure raises.
     written = []
     await refresh(call.publisher, written, call.refresh_fault)
-    return dict(refreshed=written, refresh_failed=None)
+    return await finish(call.publisher, call.root, call.args.query, refreshed=written)
 
 
 DOC01 = Scope(("doc01",), "{command} changes doc01")
-REVIEWED = Scope(("doc01", "doc03"), "{command} reviews one decision of doc01 or doc03")
-COMMAND_TABLE = {
-    "glossary-fixture": Command(created, opens=create),
+REVIEW = Command(
+    reviewed,
+    Scope(("doc01", "doc03"), "{command} reviews one decision of doc01 or doc03"),
+)
+# The commands only a glossary root takes, beside glossary-fixture, which
+# creates one.
+OWN_COMMANDS = {
     "edit-glossary": Command(
         edited_glossary, Scope(("glossary",), "edit-glossary edits the glossary")
     ),
+    "reconfirm": REVIEW,
+    "replace-decision": REVIEW,
+    "refresh-dependents": Command(refreshed),
     "cite-record": Command(cited),
-    **dict.fromkeys(KIND_CHANGES, Command(kind_changed, DOC01, kind_change_dependents)),
     "edit-entity": Command(
         entity_edited, Scope(("doc01",), "edit-entity edits the Entity doc01 reads")
     ),
-    **dict.fromkeys(REVIEW_COMMANDS, Command(reviewed, REVIEWED)),
+    "replace-citation": REVIEW,
+}
+# Commands other fixture kinds also take, which a glossary root runs here.
+SHARED_COMMANDS = {
+    **dict.fromkeys(KIND_CHANGES, Command(kind_changed, DOC01)),
     "withdraw": Command(withdrawn),
     "reconcile": Command(reconciled),
     "forget": Command(forgotten),
     "readd": Command(readded),
-    "refresh-dependents": Command(refreshed),
 }
-# `forget --dry-run` writes nothing and returns the preview alone.
-FORGET_DRY_RUN = Command(forget_previewed, snapshot=False)
+COMMANDS = ("glossary-fixture", *OWN_COMMANDS)
+REVIEW_COMMANDS = tuple(c for c, command in OWN_COMMANDS.items() if command is REVIEW)
 
 
 async def run(args, root):
-    dry_run = args.command == "forget" and args.dry_run
-    command = FORGET_DRY_RUN if dry_run else COMMAND_TABLE[args.command]
-    call = await (command.opens or opened)(args, root, command.scope)
-    handled = await command.handler(call)
-    if not command.snapshot:
-        return handled
-    result = await snapshot(call.publisher, root, args.query)
-    result.update(handled)
-    if command.after is not None:
-        result.update(await command.after(call, result))
-    (root / "glossary_result.json").write_text(
-        json.dumps(result, indent=2, default=str)
-    )
-    return result
+    if args.command == "glossary-fixture":
+        return await create(args, root)
+    command = OWN_COMMANDS.get(args.command) or SHARED_COMMANDS[args.command]
+    return await command.handler(await opened(args, root, command.scope))

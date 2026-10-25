@@ -1,6 +1,7 @@
 """Dependencies: a decision that read another document is withheld, not the
 source, when what it read changes."""
 
+import argparse
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -720,12 +721,12 @@ async def test_any_refresh_failure_is_reported_by_class_and_message(
 
 
 async def test_refresh_dependents_raises_its_own_failure_unchanged(
-    source_payload, monkeypatch
+    source_payload, monkeypatch, tmp_path
 ):
     """The refresh is refresh-dependents' own operation, so its failure
     raises as itself, with its class and traceback, not as an IntentError
-    named after the class."""
-    from cognee_lab.identity.glossary_fixture import COMMAND_TABLE, Call
+    named after the class, and the command saves no result."""
+    from cognee_lab.identity import glossary_fixture
 
     glossary = glossary_source(source_payload)
     doc01 = citing(strip_corpus(source_payload))
@@ -736,11 +737,22 @@ async def test_refresh_dependents_raises_its_own_failure_unchanged(
     async def replace(_, description, *, expected_revision, fault_stage=None):
         raise failure
 
+    async def configured():
+        return publisher
+
+    async def current_sources(root, publisher, info):
+        return dict(glossary=glossary, doc01=doc01)
+
     monkeypatch.setattr(revisions, "replace_one", replace)
-    command = COMMAND_TABLE["refresh-dependents"]
+    monkeypatch.setattr(glossary_fixture.Publisher, "configured", configured)
+    monkeypatch.setattr(glossary_fixture, "current_sources", current_sources)
+    args = argparse.Namespace(
+        command="refresh-dependents", source="glossary", fault_stage=None, query="q"
+    )
     with pytest.raises(OSError) as raised:
-        await command.handler(Call(publisher, None, None, {}, None, None))
+        await glossary_fixture.run(args, tmp_path)
     assert raised.value is failure
+    assert not (tmp_path / "glossary_result.json").exists()
     assert len(await publisher.withholdings.rows()) == 2
 
 
