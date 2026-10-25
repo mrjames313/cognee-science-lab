@@ -17,7 +17,7 @@ intended revision follows from the command and what was read
   entry's new meaning;
 - an input that went, or a dropped citation, is removed from the decision
   as an erasure removes it (records.apply_removal): a resolution stays,
-  unresolved, a variant goes, and a recipe only it named goes too
+  unresolved, and a variant goes. Its recipes go as an erasure's do
   (erasure_rules.drop_unnamed_recipes).
 
 The review decisions are captured fixture input, not Describe.
@@ -243,9 +243,9 @@ def removal(
 ):
     """The decision removed as an erasure removes it (records.apply_removal),
     under the review producer: it and the parts that hold its inputs cite
-    each input that changed as it is now and stop citing one that went. A
-    recipe that only the decision named goes, unless a saved source reads
-    it as a corpus input (`readers`, erasure_rules.drop_unnamed_recipes)."""
+    each input that changed as it is now and stop citing one that went.
+    Recipes go as an erasure's do (erasure_rules.drop_unnamed_recipes, with
+    `readers`)."""
 
     def change(payload):
         for new_key, item in filter(None, now.values()):

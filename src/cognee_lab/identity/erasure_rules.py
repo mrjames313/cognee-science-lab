@@ -186,8 +186,7 @@ def erasures_of(rows, source) -> Erasures:
     """The forgotten sources, the corpus readers among saved rows other
     than this source's, each forget's bound removed records and the last
     forget of each source re-added since (`PublicationRow.last_tombstone`)."""
-    forgotten, readers, sources, records, earlier = {}, set(), {}, {}, {}
-    own = str(source.identity_data_id)
+    forgotten, sources, records, earlier = {}, {}, {}, {}
     for row in rows:
         if (last := row.last_tombstone) is not None:
             earlier[last.original_data_id] = frozenset(last.removed_entity_ids)
@@ -199,11 +198,9 @@ def erasures_of(rows, source) -> Erasures:
             records[tomb.original_data_id] = frozenset(
                 bound_removals(rows, tomb.original_data_id, took)
             )
-        elif not row.is_retired and row.source != own:
-            readers |= corpus_reads(row.description)
     return Erasures(
         MappingProxyType(forgotten),
-        frozenset(readers),
+        frozenset(corpus_readers(rows, str(source.identity_data_id))),
         MappingProxyType(sources),
         MappingProxyType(records),
         MappingProxyType(earlier),
@@ -232,14 +229,18 @@ def corpus_readers(rows, source: str) -> set[UUID]:
 
 
 def drop_unnamed_recipes(old, removed, revised, readers):
-    """`revised`, `old` after the removal of the records in `removed`, with
-    each recipe dropped that a removed record named and no remaining record
-    of `old` names, unless a saved source reads that Entity as a corpus
-    input, `revised` itself or another (`readers`): dropping the last
+    """`revised`, which is `old` after the removal of the records in
+    `removed`, less the recipes only those records named.
+
+    A recipe is a candidate when a removed record of `old` names it and no
+    remaining record does. Mention Entities stay with their groups. A
+    candidate stays when a saved source reads its Entity as a corpus input:
+    `revised` itself, or another source (`readers`). Dropping its last
     declaration would take the Entity out of the graph under its reader
-    (`check_dropped_unread`). Mention Entities stay with their groups. An
-    erasure's removal and a reviewer's both drop recipes this way. Returns
-    the revision, the dropped recipes and the kept candidates."""
+    (`check_dropped_unread`).
+
+    An erasure's removal and a reviewer's both drop recipes this way.
+    Returns the revision, the dropped recipes and the kept candidates."""
     remaining = set(record_keys(old)) - set(removed)
     candidates = (
         set().union(*(naming(old, k) for k in removed))
