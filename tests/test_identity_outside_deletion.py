@@ -310,3 +310,26 @@ async def test_an_entity_a_withdrawal_removed_stays_lab_removed_after_the_forget
         await admit(rows, reader)
     assert refused.value.code == "missing_reasoning_input"
     await check_readd(Graph(HELIOS), rows[0].tombstone, owner, rows)
+
+
+async def test_a_replacement_that_drops_the_recipe_and_citation_is_admitted(
+    source_payload,
+):
+    """replace-decision v01 after r01: v01, Helios's recipe and the input
+    citing Helios go. Dropping is the remedy, so nothing is refused, and
+    the publication writes no Helios."""
+    old = source_of(unresolved_r01(source_payload))
+
+    def dropped(p):
+        p["revision"] = 3
+        p["mention_resolutions"]["r01"] = old.mention_resolutions["r01"].model_dump(
+            mode="json"
+        )
+        del p["variant_assignments"]["v01"]
+        del p["entity_constructions"][str(HELIOS)]
+        del p["inputs"]["existing_A"]
+
+    writes = await admit(
+        [row_of(old)], payload_with(source_payload, dropped), saved_revision=2
+    )
+    assert HELIOS not in writes.entities and writes.edges == []
