@@ -637,3 +637,55 @@ async def test_the_ledger_begins_an_erasure_retry_only_with_the_removal(
     await store.begin(revised, expected_revision=2, plan=dict(retry), method="replace")
     now = await store.row(saved)
     assert (now.state, now.description) == ("pending", revised)
+
+
+@pytest.mark.asyncio
+async def test_a_reconcile_of_an_erasure_retry_keeps_what_its_first_attempt_read(
+    source_payload,
+):
+    """A failed erasure retry may have retired part of what it planned. Its
+    reconcile plans with the saved retired recipes and previous edges, as a
+    replacement retry does, so the survivor checks see every contribution
+    the first attempt found, not only what the graph still holds."""
+    from types import SimpleNamespace
+
+    from cognee_lab.identity.publish import Publisher, identity_edges
+    from cognee_lab.identity.replace import plan_retirement
+
+    superseded, saved = source_of(source_payload), source_of(source_payload)
+    edge = identity_edges(superseded)[0]
+    first = dict(
+        operation="identity_publish",
+        erased_from=[superseded.model_dump_json()],
+        retired_entities={
+            str(uuid4()): dict(refs=["r"], type="Entity", indexed_fields=["name"])
+        },
+        old_edges=[list(e[:3]) for e in identity_edges(superseded)],
+        previous_edges=[
+            dict(
+                source=edge[0],
+                target=edge[1],
+                relation=edge[2],
+                refs=["r"],
+                properties={"identity_contributions": "[]"},
+            )
+        ],
+    )
+    row = row_of(saved, "failed", first)
+
+    class Records:
+        async def row(self, _):
+            return row
+
+    class EmptyGraph:
+        async def get_node_delete_data(self, ids):
+            return {}
+
+        async def get_edge_delete_data(self, edges):
+            return {}
+
+    plan = dict(operation="identity_publish")
+    plan.update(await Publisher.superseded(SimpleNamespace(records=Records()), saved))
+    await plan_retirement(EmptyGraph(), plan, [superseded], saved)
+    assert plan["retired_entities"] == first["retired_entities"]
+    assert plan["previous_edges"] == first["previous_edges"]
