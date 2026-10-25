@@ -330,11 +330,12 @@ async def plan_for(publisher, source, row):
 
 def require_stored_files(plan):
     """The plan, refused if it was saved before forget plans kept
-    `stored_files`."""
+    `stored_files`: a retry cannot finish its sweep, and a snapshot of any
+    forget, finished or not, cannot check it."""
     if "stored_files" not in plan:
         raise IntentError(
             "recovery_plan",
-            "Failed forget plan predates stored_files; its sweep cannot be finished",
+            "Forget plan predates stored_files; this code cannot sweep or check it",
         )
     return plan
 
