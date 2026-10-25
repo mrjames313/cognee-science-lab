@@ -26,10 +26,10 @@ from uuid import UUID
 from .erasure_rules import entity_ids_named
 from .models import CorpusObjectInput, IdentitySource
 from .records import REGISTRY, naming, record_inputs, record_type_of
-from .validation import IntentError, reusable_recipes
+from .validation import MISSING_INPUT, IntentError, reusable_recipes
 
 MESSAGES = dict(
-    missing_reasoning_input="Corpus input missing: {}",
+    missing_reasoning_input=MISSING_INPUT,
     entity_recreation="A publication does not recreate an Entity deleted outside "
     "the lab: {}; pick another target or leave the mention unresolved",
 )
@@ -115,13 +115,11 @@ class Part(NamedTuple):
     cites: bool
 
 
-RECIPE = ("recipe",)
-
-
 def touching(description, entity_id) -> dict:
     """Each part of the description that cites or names the Entity, by key:
     a record with its attribution, its producer and the inputs it cites; an
-    unresolved group with the same; and the Entity's recipe."""
+    unresolved group with the same; and the Entity's recipe, under the
+    Entity's UUID as entity_constructions keys it."""
     keys = {
         k
         for k, i in description.inputs.items()
@@ -146,7 +144,7 @@ def touching(description, entity_id) -> dict:
         if key not in resolved and keys & set(group.input_refs):
             found[key] = Part(held(group, group.input_refs), True)
     if entity_id in description.entity_constructions:
-        found[RECIPE] = Part(description.entity_constructions[entity_id], False)
+        found[entity_id] = Part(description.entity_constructions[entity_id], False)
     return found
 
 

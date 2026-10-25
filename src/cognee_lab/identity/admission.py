@@ -36,6 +36,7 @@ from .erasure_rules import (
     erasure_step,
 )
 from .validation import (
+    MISSING_INPUT,
     IntentError,
     cited_inputs,
     fresh_entity_id,
@@ -656,5 +657,5 @@ async def check_corpus_inputs_exist(graph, source, exempt=frozenset()):
     for entity_id in sorted(cited - set(exempt), key=str):
         if await graph.get_node(str(entity_id)) is None:
             raise IntentError(
-                "missing_reasoning_input", f"Corpus input missing: {entity_id}"
+                "missing_reasoning_input", MISSING_INPUT.format(entity_id)
             )

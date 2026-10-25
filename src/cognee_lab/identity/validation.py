@@ -30,6 +30,9 @@ class IntentError(ValueError):
         super().__init__(message)
 
 
+MISSING_INPUT = "Corpus input missing: {}"
+
+
 def text_digest(text: str) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
 
@@ -191,7 +194,7 @@ async def input_failure(
             return Failure(
                 "missing_reasoning_input",
                 Reason.REMOVED,
-                f"Corpus input missing: {key}",
+                MISSING_INPUT.format(key),
             )
         if selected_digest(node, item) != item.content_sha256:
             return Failure(
