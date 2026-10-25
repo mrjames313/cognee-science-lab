@@ -317,6 +317,7 @@ Guide: `docs/stage6_identity_entity_edits.md`.
 - `corpus-review`: `reconfirm` cites the Entity as it reads now under `existing_A_r<rev>`; `replace-decision --decision r01` leaves g01 unresolved on it; v01 has no captured replacement for an Entity edit.
 - `mixed-review`: one re-confirm answers a decision withheld by the glossary span and the Entity together.
 - `replace-citation`: `--cite doc01:v02` re-cites doc03's c02 on v02 under a new key and producer; `--drop` removes c02.
+- `entity-delete` (step 5 S2): `edit-entity --case delete` deletes the Entity doc01 reads through `graph.delete_node`, with no ledger row. A kept, withheld decision may keep citing it while a neighbour is replaced, and no publication recreates it (`entity_recreation` for a changed decision that names it).
 
 **D12 an outside Entity edit withholds its readers down the chain until it is reverted.** Proves `entity-edit`. Guide: "The edit". `unselected` leaves every digest as pinned. `description` changes the selected digest, withholds both levels and writes no row, revision or incident; `retrieve` in a new process agrees. `revert` brings the digest back and releases everything at revision 1, with the fact served again.
 
@@ -411,6 +412,34 @@ $V drive "$RUN" drop replace2 -- replace-decision --source doc01 --decision v01 
 $V drive "$RUN" drop dropped -- replace-citation --source doc03 --decision c02 --drop --expected-revision 1
 $V check "$RUN" dropped '.sources.doc03 | .saved_revision == 2 and (.decisions | keys) == ["c01"] and (.records | keys) == ["doc01_r01"]' 'c02 and its citation are gone'
 $V check "$RUN" dropped '[.withheld_decisions[] | .assignment_id] == ["r01", "c01"]' 'only the r01 chain is withheld'
+```
+
+**D17 an Entity deleted outside the lab is answered one decision at a time.** Proves `entity-delete`. Guide: entity edits, "Outside deletion". `edit-entity --case delete` deletes the Helios controller (`8b4bff50-...`) through `graph.delete_node` and writes no row, revision or incident; its `Entity_name` point stays. r01 and v01 are withheld `input_removed`, and c01 and c02 `upstream_withheld` (reason `input_changed`, as for any upstream). `reconfirm` of r01 is refused. `replace-decision --decision r01` leaves g01 unresolved without `existing_A` at revision 2, while v01, kept, still cites it and stays withheld and c01 needs doc03's own review, as in D14; Helios stays absent, so a second delete is refused. `replace-decision --decision v01` drops the variant and the Helios recipe at revision 3, and no description cites `existing_A`; doc03 is left with its own review of c01 and c02 (`replace-citation`). A retrieve for "Helios controller" never reaches Helios through its orphaned name point.
+
+```bash journey D17
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main del -- edit-entity --case delete
+$V check "$RUN" del '.entity_edit | .case == "delete" and .entity_id == "8b4bff50-907b-56b6-bc80-3b0a7018714a" and .input_ref == "existing_A" and .node_present == false and .name_point_present == true' 'the Entity is gone and its name point stays'
+$V check "$RUN" del '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["r01", "input_removed", "refresh_needed"], ["v01", "input_removed", "refresh_needed"], ["c01", "input_changed", "upstream_withheld"], ["c02", "input_changed", "upstream_withheld"]]' 'both levels are withheld for the removed Entity'
+$V check "$RUN" del '.withholdings == [] and .recovery_events == [] and ([.sources[] | [.state, .saved_revision]] | unique) == [["current", 1]]' 'no row, no revision and no incident'
+
+$V drive "$RUN" main reconfirm -- reconfirm --source doc01 --decision r01 --expected-revision 1
+$V check "$RUN" reconfirm '.error == "IntentError" and (.message | startswith("A removed input is never re-confirmed"))' 'a removed input is never re-confirmed'
+
+$V drive "$RUN" main r01 -- replace-decision --source doc01 --decision r01 --expected-revision 1
+$V check "$RUN" r01 '.sources.doc01 | .saved_revision == 2 and .verified_revision == 2 and .decisions.r01.status == "unresolved" and (.decisions.r01.input_refs | index("existing_A") == null) and (.decisions.v01.input_refs | index("existing_A") != null)' 'r01 is unresolved without the input; v01 still cites it'
+$V check "$RUN" r01 '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["v01", "input_removed", "refresh_needed"], ["c01", "input_changed", "refresh_needed"], ["c02", "input_changed", "upstream_withheld"]] and .recovery_events == []' 'v01 stays withheld, c01 needs its own review and no incident is open'
+$V drive "$RUN" main again -- edit-entity --case delete
+$V check "$RUN" again '.error == "IntentError" and .message == "No such Entity: 8b4bff50-907b-56b6-bc80-3b0a7018714a"' 'the replacement did not recreate Helios'
+
+$V drive "$RUN" main v01 -- replace-decision --source doc01 --decision v01 --expected-revision 2
+$V check "$RUN" v01 '.sources.doc01 | .saved_revision == 3 and .verified_revision == 3 and (.decisions | has("v01") | not)' 'v01 is dropped at revision 3'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.publications[] | .description | fromjson | select(.revision == 3) | [(.entity_constructions | has("8b4bff50-907b-56b6-bc80-3b0a7018714a")), (.inputs | has("existing_A"))]] == [[false, false]]' 'the Helios recipe and the input are gone'
+$V check "$RUN" status '[.withheld_decisions[] | [.assignment_id, .reason, .status]] == [["c01", "input_changed", "refresh_needed"], ["c02", "input_removed", "refresh_needed"]] and .recovery_events == []' 'only doc03 waits for its own review'
+
+$V drive "$RUN" main ask -- retrieve --query "Helios controller"
+$V check "$RUN" ask '(.facts | tojson | contains("8b4bff50-907b-56b6-bc80-3b0a7018714a")) | not' 'the orphaned name point seeds nothing'
 ```
 
 ## Notes

@@ -145,7 +145,7 @@ uv run python -m cognee_lab.identity retrieve --root outputs/stage6_entity_check
 
 Expected: after the edit, r01 and v01 are withheld for review and c01 and c02 with `upstream_withheld`; after both re-confirms nothing is withheld, doc01 is at revision 3 and doc03 at revision 1.
 
-Journeys D12 to D16 in `.claude/skills/verify/features/dependencies.md` and K6 to K9 in `reinterpretation.md` cover this checkpoint.
+Journeys D12 to D17 in `.claude/skills/verify/features/dependencies.md` and K6 to K9 in `reinterpretation.md` cover this checkpoint.
 
 ## Choices the assistant made
 
@@ -165,7 +165,7 @@ Each is reversible.
 - Facts as saved records (decision 7) and the non-identity example (decision 8).
 - An edit of `name` on a Cognee-extracted Entity. `cognify` cannot rewrite a lab-declared Entity, whose ID derivation differs from Cognee's; it could rewrite only an extracted Entity that a decision cites, which no fixture does. Such a rewrite of a selected field would be an edit and withhold.
 - A successor record, a remap analogue for Entity edits and scoped variants.
-- A journey for a decision withheld by a removed corpus node or glossary text. The lab's own commands cannot remove one under a reader (a sole-owned Entity under a reader is refused and a mention reader is refused), so only unit tests drive the reviewer path (fix round 1). See [Outside deletion, probed 2026-10-25](#outside-deletion-probed-2026-10-25) for why the journey is deferred to step 5.
+- A journey for a decision withheld by removed glossary text. Only `forget` removes the glossary. Step 5 S2 added the corpus-node case, journey D17 ([Outside deletion, built in step 5 S2](#outside-deletion-built-in-step-5-s2)).
 
 ## Outside deletion, probed 2026-10-25
 
@@ -182,6 +182,20 @@ The user decided on 2026-10-25:
 3. Step 4 records the deadlock as a documented limit. The fix, journey D17 and the orphaned vector point go to step 5 S2 (removal).
 
 No stand-in was committed. The glossary text removal was left out, because only `forget` removes the glossary.
+
+## Outside deletion, built in step 5 S2
+
+Built 2026-10-25 by the assistant on the user's Mac with loopback embeddings (module `outside_deletion.py`).
+
+`edit-entity --case delete` deletes the Helios controller through `graph.delete_node`, as an outside writer would. It writes no ledger row, has no `revert`, and reports `node_present: false` and `name_point_present: true`. An Entity counts as deleted outside the lab when a served source's description, or the publishing source's last verified one, names it as a corpus input or a reusable recipe, its node is absent, and no lab operation removed it. Lab removals are every forget's removed Entities and mention UUIDs (a forget whose dependents are not yet revised included), what a replacement planned to retire, and the recipes of a source that is not served, which a withdrawal or a failed attempt may have removed.
+
+- **A kept decision may keep citing it.** `admission.check_corpus_inputs_exist` admits a missing Entity deleted outside the lab when every decision that cites it, or whose group cites it, is kept: the record, attribution included, and the inputs it cites are as in the source's last verified description. That is a current or withdrawn row's description, a replacement's `previous_description` while it is pending or failed, and a publication's own description when it was verified at that revision; a first publication and an erasure retry have none. A changed or new citer is refused `missing_reasoning_input`, so is any citer of an Entity a lab operation removed.
+- **No publication recreates it.** `check_no_recreation` refuses `entity_recreation` when a changed or new decision names such an Entity. For kept ones the publisher leaves the Entity absent by design: it skips the recipe, the identity edges with that endpoint and their contributions, in the write and in its verification (`publish.present_edges`). Cognee's `add_edges` silently drops an edge whose endpoint is gone and makes no stub node (prototype, 2026-10-25), so an unskipped edge would have failed verification. A prototype with the relaxation alone let `replace-decision --decision r01` recreate Helios from doc01's recipe, which the user's decision 2 forbids.
+- **A re-add naming it is refused** (`entity_recreation`, the default for the user's question Q2): a reusable Entity of a forgotten life whose node is absent and that no lab operation removed, which the caller's files still name.
+
+Journey D17 runs the decisions one at a time: r01 and v01 are withheld `input_removed` and c01 and c02 `upstream_withheld`; `reconfirm` is refused; `replace-decision --decision r01` leaves g01 unresolved at revision 2 while v01 stays withheld and Helios stays absent; `replace-decision --decision v01` drops the variant and the Helios recipe at revision 3. doc03 then answers c01 and c02 with its own review. A retrieve for "Helios controller" serves nothing through the orphaned `Entity_name` point, since the retriever resolves vector hits through the graph. The orphaned point itself stays as documented residue until a sweep lands with the dataset forget (blocked on the user's question Q3).
+
+Native tests in `tests/test_identity_outside_deletion_native.py` cover the D17 sequence, a failed replacement's retry with Helios absent (`--fault-stage replace_verification`, then `reconcile`) and the re-add refusal; unit tests in `tests/test_identity_outside_deletion.py` cover each lab removal path and the refusals.
 
 ## Evidence
 

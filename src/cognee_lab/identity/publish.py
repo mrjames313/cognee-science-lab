@@ -74,6 +74,15 @@ def identity_edges(source):
     return edges
 
 
+def present_edges(source, absent):
+    """The source's identity edges but those with an endpoint deleted
+    outside the lab that the publication leaves absent. Cognee's add_edges
+    drops an edge whose endpoint is gone, so it is neither written nor
+    verified (outside_deletion.py)."""
+    gone = {str(e) for e in absent}
+    return [e for e in identity_edges(source) if not gone & {e[0], e[1]}]
+
+
 def contributions(properties):
     try:
         result = json.loads(properties.get("identity_contributions", "[]"))
@@ -204,7 +213,8 @@ class Publisher:
         types. A re-add runs them before it writes anything. Saved-record
         citations stay in their dataset and off the citing source, a new
         one pins its record as it is now, and none closes a cycle
-        (chains.py)."""
+        (chains.py). Returns the Entities deleted outside the lab that the
+        publication leaves absent (outside_deletion.check_no_recreation)."""
         rows = await self.records.rows()
         check_citation_scope(source)
         # Another document's drift withholds decisions, never the source.
@@ -221,8 +231,17 @@ class Publisher:
             check_mention_inputs,
             mention_ids,
         )
+        from .outside_deletion import (
+            check_no_recreation,
+            deleted_outside,
+            verified_description,
+        )
 
-        await check_corpus_inputs_exist(self.graph, source)
+        previous = await self.records.row(source)
+        verified = verified_description(previous)
+        outside = await deleted_outside(self.graph, rows, source, verified)
+        await check_corpus_inputs_exist(self.graph, source, verified, outside)
+        absent = check_no_recreation(source, verified, outside)
         others = [
             r
             for r in rows
@@ -234,7 +253,6 @@ class Publisher:
         # retires is still a mention UUID, whose node the edit removes.
         check_mention_inputs(source, mention_ids([*saved_lives(rows), source]))
         refuse_retiring_inputs(source, rows)
-        previous = await self.records.row(source)
         if previous and previous.revision != (saved_revision or source.revision):
             raise IntentError(
                 "not_admitted",
@@ -247,6 +265,7 @@ class Publisher:
             node = await self.graph.get_node(str(entity_id))
             if node is not None and node.get("type") != "Entity":
                 raise IntentError("incompatible_type", f"{entity_id} is not an Entity")
+        return absent
 
     async def preflight(
         self,
@@ -320,7 +339,9 @@ class Publisher:
                 raise IntentError(
                     "chunk_mapping", "Original chunk is absent or differs in the graph"
                 )
-        await self.admit_inputs(source, texts, chunks, saved_revision=saved_revision)
+        return await self.admit_inputs(
+            source, texts, chunks, saved_revision=saved_revision
+        )
 
     async def refuse_owned_retry(self, source):
         """A failed replacement or forget resumes only through its own method.
@@ -390,6 +411,7 @@ class Publisher:
         checks. A forget whose dependents are not all revised yet refuses."""
         from .erasure_rules import admit_readd
         from .erasure import unfinished
+        from .outside_deletion import check_readd
         from .retirement import readd_removed
 
         row = await self.forgotten_row(source)
@@ -401,6 +423,7 @@ class Publisher:
                 details=dict(dependents=[r.source for r in waiting]),
             )
         removed = await readd_removed(self.graph, row.tombstone, row.plan, rows)
+        await check_readd(self.graph, row.tombstone, source, rows)
         await admit_readd(self.graph, row.tombstone, source, removed)
         await self.admit_inputs(source, texts, chunks, saved_revision=row.revision)
         return row
@@ -440,8 +463,10 @@ class Publisher:
         semantic_writer=None,
         verify_semantics=None,
     ):
-        await self.preflight(source, texts, chunks, ctx, saved_revision=saved_revision)
-        wanted = identity_edges(source)
+        absent = await self.preflight(
+            source, texts, chunks, ctx, saved_revision=saved_revision
+        )
+        wanted = present_edges(source, absent)
         markers = [
             (str(source.inputs[key].chunk_id), str(group.entity_id), key)
             for group in source.mention_groups.values()
@@ -450,7 +475,7 @@ class Publisher:
         plan = dict(
             operation="identity_publish",
             revision=source.revision,
-            entities=[str(i) for i in source.entity_constructions],
+            entities=[str(i) for i in source.entity_constructions if i not in absent],
             identity_edges=[list(e[:3]) for e in wanted],
             markers=[list(m[:2]) for m in markers],
             withdraw=[],
@@ -516,7 +541,6 @@ class Publisher:
         from cognee.tasks.storage import add_data_points
 
         await self.records.assert_pending(source, attempt)
-        wanted = identity_edges(source)
         markers = [
             (str(source.inputs[key].chunk_id), str(group.entity_id), key)
             for group in source.mention_groups.values()
@@ -525,12 +549,16 @@ class Publisher:
         stage, created, referenced = "validation", [], []
         try:
             # Repeat after taking the project writer reservation.
-            await self.preflight(source, texts, chunks, ctx)
+            absent = await self.preflight(source, texts, chunks, ctx)
+            wanted = present_edges(source, absent)
+            built = {
+                e: r for e, r in source.entity_constructions.items() if e not in absent
+            }
             owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
             old_properties = {}
             stage = "nodes"
             new_nodes = []
-            for entity_id, recipe in source.entity_constructions.items():
+            for entity_id, recipe in built.items():
                 node = await self.graph.get_node(str(entity_id))
                 if node is None:
                     new_nodes.append(
@@ -617,7 +645,7 @@ class Publisher:
                 await after_write()
 
             stage = "verification"
-            for entity_id in source.entity_constructions:
+            for entity_id in built:
                 sid = str(entity_id)
                 node = await self.graph.get_node(sid)
                 if node is None or node.get("type") != "Entity":

@@ -14,6 +14,10 @@ withholds its dependents as a text edit of a consumed document does.
 - `description` changes a selected field.
 - `unselected` sets a property no corpus input selects.
 - `revert` puts back what the first `description` edit changed.
+- `delete` deletes the Entity through `graph.delete_node`, as an outside
+  writer would (outside_deletion.py). It has no revert. Cognee's node
+  delete detaches the Entity's edges and leaves its `Entity_name` vector
+  point, which nothing in the lab reads without the node.
 """
 
 import json
@@ -29,7 +33,7 @@ CASES = {
     "description": dict(description="Controller identity, edited outside the lab."),
     "unselected": dict(lab_note="Set outside the lab; no decision selects it."),
 }
-ENTITY_CASES = (*CASES, "revert")
+ENTITY_CASES = (*CASES, "revert", "delete")
 
 
 def entity_input(doc01) -> str:
@@ -90,6 +94,22 @@ async def edit_entity(publisher, root, doc01, case) -> dict:
     if node is None:
         raise IntentError(
             "missing_reasoning_input", f"No such Entity: {item.entity_id}"
+        )
+    if case == "delete":
+        await publisher.graph.delete_node(str(item.entity_id))
+        return dict(
+            entity_edit=dict(
+                case=case,
+                entity_id=str(item.entity_id),
+                input_ref=key,
+                node_present=await publisher.graph.get_node(str(item.entity_id))
+                is not None,
+                name_point_present=bool(
+                    await publisher.vector.retrieve(
+                        "Entity_name", [str(item.entity_id)]
+                    )
+                ),
+            )
         )
     values, before = patch_for(root, case, node)
     await update_entity(publisher.graph, item.entity_id, values)

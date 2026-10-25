@@ -24,6 +24,7 @@ from cognee_lab.identity.validation import (
     IntentError,
     fresh_entity_id,
     fresh_mention_id,
+    reusable_recipes,
     text_digest,
     validate_uses,
 )
@@ -702,7 +703,14 @@ async def test_admission_counts_a_readded_source_earlier_forgotten_lives(
     life1 = source_of(earlier)
     life2 = describe_readd(life1, tomb(life1), set(), TEXT, chunks_of(life1, TEXT))
     entity = str(source.inputs["existing_A"].entity_id)
-    publisher = await admitting_publisher({entity: dict(type="Entity", name="A")})
+    # The served life2's own recipes are nodes, as its publication verified;
+    # an absent one would be an Entity deleted outside the lab.
+    publisher = await admitting_publisher(
+        {
+            str(e): dict(type="Entity", name="A")
+            for e in {entity, *map(str, reusable_recipes(life2))}
+        }
+    )
     saved = [row_of(life2)]
 
     async def rows(dataset=None):
