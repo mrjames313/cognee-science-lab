@@ -439,9 +439,11 @@ def resumes(row):
 async def plan_for(publisher, source, row):
     """A failed forget's saved plan, which keeps the ownership the first
     attempt found before native deletion detached or removed it; otherwise a
-    new plan from the graph."""
+    new plan from the graph, with whether the source was served: a reusable
+    Entity a served source declared and the graph lacks was deleted outside
+    the lab, not by a withdrawal (outside_deletion.lab_removed)."""
     if not resumes(row):
-        return await forget_plan(publisher, source)
+        return dict(await forget_plan(publisher, source), served=row.is_served)
     return require_stored_files(dict(row.plan))
 
 

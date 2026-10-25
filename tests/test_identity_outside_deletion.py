@@ -250,10 +250,6 @@ async def test_a_readd_naming_an_entity_deleted_outside_is_refused(source_payloa
     await check_readd(Graph(HELIOS), tombstone, forgotten, [gone, other])
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="lab_removed counts a co-owner's or a forgotten owner's recipes wrongly",
-)
 async def test_an_entity_a_served_source_builds_is_deleted_outside_after_a_co_owner_left(
     source_payload,
 ):
@@ -269,10 +265,6 @@ async def test_an_entity_a_served_source_builds_is_deleted_outside_after_a_co_ow
     }
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="lab_removed counts a co-owner's or a forgotten owner's recipes wrongly",
-)
 async def test_an_entity_a_withdrawal_removed_stays_lab_removed_after_the_forget(
     source_payload,
 ):

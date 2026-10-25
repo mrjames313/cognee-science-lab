@@ -127,10 +127,6 @@ def test_native_a_readd_naming_a_deleted_entity_is_refused(tmp_path):
     assert helios_absent(root)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="lab_removed counts a co-owner's or a forgotten owner's recipes wrongly",
-)
 @pytest.mark.integration
 def test_native_a_withdrawn_co_owner_leaves_the_entity_deleted_outside(tmp_path):
     """doc03 declares doc01's Helios recipe too. Once doc03 is withdrawn,
