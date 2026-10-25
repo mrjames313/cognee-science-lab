@@ -297,12 +297,14 @@ def main():
             if getattr(exc, "details", None) is not None:
                 report["details"] = exc.details
             if getattr(exc, "code", None) == "native_deleted":
+                from .multisource import root_labels
                 from .native_copy import forget_hint, refusal_message
 
-                label = args.source or "doc01"
-                hint = forget_hint(label, exc.details["revision"])
-                report["message"] = refusal_message(label, exc.details["missing"], hint)
-                report["details"] = dict(exc.details, next=hint)
+                details = exc.details
+                if label := root_labels(root).get(details["source"]):
+                    hint = forget_hint(label, details["revision"])
+                    report["message"] = refusal_message(label, details["missing"], hint)
+                    report["details"] = dict(details, next=hint)
             print(json.dumps(report, default=str))
             raise SystemExit(1) from exc
         print(json.dumps(result, indent=2, ensure_ascii=False, default=str))

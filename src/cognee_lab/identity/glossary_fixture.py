@@ -28,17 +28,16 @@ from .forget_fixture import (
     forget_command,
     forget_dry_run,
     readd,
-    reconcile_forget,
 )
 from .models import IdentitySource
-from .multisource import current_sources, native_deleted_entry, publish_one
+from .multisource import current_sources, publish_one, reconcile_selected
 from .multisource import read_sources
-from .native_copy import missing_native
+from .native_copy import deleted_entry, missing_native
 from .publish import Publisher
 from .records import saved_records
 from .registered import read_registered, read_texts
 from .retrieve import retrieve, withholding_status
-from .revisions import refresh, refresh_dependents, replace_one
+from .revisions import refresh, refresh_dependents
 from .text_changes import TextChange, chunk_text, original_context, read_original
 from .text_fixture import maintain_one
 from .validation import IntentError, text_digest
@@ -298,35 +297,15 @@ async def edit(
 
 
 async def reconcile(publisher, label, selected):
-    """Finish the selected source's failed attempt. Returns what the command
-    reports beside the snapshot: a finished forget's outcome, or what a
-    completed edit refreshed (a glossary edit refreshes its dependents)."""
-    await publisher.refuse_natively_deleted(selected)
-    row = await publisher.records.row(selected)
-    if (finished := await reconcile_forget(publisher, row, selected)) is not None:
-        return finished
-    if row.resumed_by == "replace" and row.plan.get("text_change"):
-        # The glossary's edit, or doc01's kind change (chain_kind_change.py).
-        resume = change_glossary if label == "glossary" else maintain_one
-        return await resume(
-            publisher,
-            selected,
-            TextChange.from_plan(row.plan),
-            expected_revision=selected.revision,
-        )
-    if row.resumed_by == "replace":
-        await replace_one(publisher, selected, expected_revision=selected.revision)
-    else:
-        ctx = await context_for(selected.inputs[selected.original_input_ref].data_id)
-        await publish_one(
-            publisher,
-            selected,
-            await load_chunks(selected, ctx),
-            ctx,
-            operation="reconcile",
-            semantics=CALLER_FILES[label].facts,
-        )
-    return {}
+    """Finish the selected source's failed attempt (`reconcile_selected`). A
+    glossary edit refreshes its dependents; doc01's text change is its kind
+    change (chain_kind_change.py)."""
+    return await reconcile_selected(
+        publisher,
+        selected,
+        resume_text_change=change_glossary if label == "glossary" else maintain_one,
+        semantics=CALLER_FILES[label].facts,
+    )
 
 
 async def snapshot(publisher, root, query):
@@ -337,7 +316,7 @@ async def snapshot(publisher, root, query):
     for label, source in sources.items():
         row = by_source[str(source.identity_data_id)]
         if missing := await missing_native(publisher.graph, row):
-            found[label] = native_deleted_entry(row, missing)
+            found[label] = deleted_entry(row, missing)
             continue
         if row.tombstone is not None:
             found[label] = dict(

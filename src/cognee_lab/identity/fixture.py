@@ -329,12 +329,12 @@ async def run(args, root):
     dataset_id = source.dataset_id
     args._fixture_publisher = publisher
     if args.command == "status":
-        from .multisource import root_files
+        from .multisource import root_labels
         from .native_copy import forget_hint, natively_deleted
         from .retrieve import withholding_status
 
         rows = await publisher.records.rows(dataset_id)
-        labels = {str(s.identity_data_id): k for k, s in root_files(root).items()}
+        labels = root_labels(root)
         return dict(
             publications=[row.record() for row in rows],
             recovery_events=await publisher.records.events(dataset_id),

@@ -95,20 +95,27 @@ async def missing_native(graph, row) -> list[str]:
     return (await native_copy(graph, row.description)).missing
 
 
+def deleted_entry(row, missing) -> dict:
+    """What `status` and a snapshot report of a row whose native copy is
+    gone: its identifiers, state and saved revision, which a forget names,
+    and the missing facets."""
+    return dict(
+        identity_data_id=row.source,
+        dataset_id=row.dataset,
+        state=row.state,
+        revision=row.revision,
+        missing=missing,
+    )
+
+
 async def natively_deleted(graph, rows) -> dict[str, dict]:
     """The rows whose native copy is gone or changed outside the lab, by
-    identity Data ID, each with what is missing."""
-    found = {}
-    for row in rows:
-        if missing := await missing_native(graph, row):
-            found[row.source] = dict(
-                identity_data_id=row.source,
-                dataset_id=row.dataset,
-                state=row.state,
-                revision=row.revision,
-                missing=missing,
-            )
-    return found
+    identity Data ID (`deleted_entry`)."""
+    return {
+        row.source: deleted_entry(row, missing)
+        for row in rows
+        if (missing := await missing_native(graph, row))
+    }
 
 
 def refusal_message(name, missing, hint=None) -> str:

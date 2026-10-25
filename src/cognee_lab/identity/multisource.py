@@ -188,6 +188,11 @@ def root_files(root):
     return fixture_files(root)
 
 
+def root_labels(root) -> dict[str, str]:
+    """Each source's label on the root, by identity Data ID."""
+    return {str(s.identity_data_id): k for k, s in root_files(root).items()}
+
+
 async def current_sources(root, publisher, info=INFO):
     """Each source a fixture manifest names, as it is saved now
     (`saved_or_file`): a two-source root's by default, or another fixture's
@@ -255,16 +260,43 @@ async def publish_one(
         pass
 
 
-def native_deleted_entry(row, missing) -> dict:
-    """A snapshot's entry for a source whose native copy is gone: the
-    identifiers, the revisions and what is missing, which a forget erases."""
-    return dict(
-        identity_data_id=row.source,
-        state=row.state,
-        saved_revision=row.revision,
-        verified_revision=row.verified_revision,
-        native_deleted=missing,
-    )
+async def reconcile_selected(
+    publisher, selected, *, resume_text_change, semantics=True
+) -> dict:
+    """Finish the selected source's failed attempt, after refusing one whose
+    native copy is gone. Returns what the command reports beside the
+    snapshot: a finished forget's outcome, or what a completed text change
+    (`resume_text_change`) refreshed. `semantics` says whether a
+    publication's retry has captured facts to write (`publish_one`)."""
+    from .fixture import context_for, load_chunks
+    from .forget_fixture import reconcile_forget
+    from .revisions import replace_one
+    from .text_changes import TextChange
+
+    await publisher.refuse_natively_deleted(selected)
+    row = await publisher.records.row(selected)
+    if (finished := await reconcile_forget(publisher, row, selected)) is not None:
+        return finished
+    if row.resumed_by == "replace" and row.plan.get("text_change"):
+        return await resume_text_change(
+            publisher,
+            selected,
+            TextChange.from_plan(row.plan),
+            expected_revision=selected.revision,
+        )
+    if row.resumed_by == "replace":
+        await replace_one(publisher, selected, expected_revision=selected.revision)
+    else:
+        ctx = await context_for(selected.inputs[selected.original_input_ref].data_id)
+        await publish_one(
+            publisher,
+            selected,
+            await load_chunks(selected, ctx),
+            ctx,
+            operation="reconcile",
+            semantics=semantics,
+        )
+    return {}
 
 
 async def snapshot(publisher, sources, query="What does HC limit?"):
@@ -316,7 +348,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             else []
         ),
     )
-    from .native_copy import missing_native
+    from .native_copy import deleted_entry, missing_native
 
     for label, source in sources.items():
         from .registered import read_registered
@@ -349,7 +381,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             )
             continue
         if missing := await missing_native(publisher.graph, row):
-            result["sources"][label] = native_deleted_entry(row, missing)
+            result["sources"][label] = deleted_entry(row, missing)
             continue
         registered = await read_registered(source)
         mid = fixture_mention_id(source)
@@ -518,8 +550,6 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
 
 
 async def run(args, root):
-    from .fixture import context_for, load_chunks
-
     refresh = {}
     if args.command in {"multi-fixture", "chunked-fixture"}:
         publisher, prepared = await prepare(
@@ -574,42 +604,11 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
             )
         elif args.command == "reconcile":
-            from .forget_fixture import reconcile_forget
+            from .text_fixture import maintain_one
 
-            await publisher.refuse_natively_deleted(selected)
-            row = await publisher.records.row(selected)
-            if (
-                finished := await reconcile_forget(publisher, row, selected)
-            ) is not None:
-                refresh = finished
-            elif row.resumed_by == "replace":
-                if row.plan.get("text_change"):
-                    from .text_fixture import maintain_one
-                    from .text_changes import TextChange
-
-                    refresh = await maintain_one(
-                        publisher,
-                        selected,
-                        TextChange.from_plan(row.plan),
-                        expected_revision=selected.revision,
-                    )
-                else:
-                    from .revisions import replace_one
-
-                    await replace_one(
-                        publisher, selected, expected_revision=selected.revision
-                    )
-            else:
-                ctx = await context_for(
-                    selected.inputs[selected.original_input_ref].data_id
-                )
-                await publish_one(
-                    publisher,
-                    selected,
-                    await load_chunks(selected, ctx),
-                    ctx,
-                    operation="reconcile",
-                )
+            refresh = await reconcile_selected(
+                publisher, selected, resume_text_change=maintain_one
+            )
         # Forget and re-add change the saved descriptions; report the new ones.
         sources = await saved_or_file(publisher, fixture_files(root))
     if len(sources) == 1:

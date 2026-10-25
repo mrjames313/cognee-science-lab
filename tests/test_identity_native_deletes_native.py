@@ -95,24 +95,34 @@ def test_native_status_lists_no_source_the_lab_itself_changed(tmp_path):
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "creation",
-    [["fixture"], ["multi-fixture"], ["glossary-fixture", "--chain"]],
-    ids=["fixture", "multi", "chain"],
+    "creation, label",
+    [
+        (["fixture"], "doc01"),
+        (["multi-fixture"], "doc01"),
+        (["multi-fixture"], "doc02"),
+        (["glossary-fixture", "--chain"], "doc01"),
+    ],
+    ids=["fixture", "multi", "multi-doc02", "chain"],
 )
-def test_native_reconcile_refuses_a_source_deleted_outside_the_lab(tmp_path, creation):
+def test_native_reconcile_refuses_a_source_deleted_outside_the_lab(
+    tmp_path, creation, label
+):
     root = tmp_path / creation[0]
     command(root, *creation)
-    command(root, "native-forget", "--case", "data")
+    command(root, "native-forget", "--case", "data", "--source", label)
     before = status_of(root)
-    refused = output_of(command(root, "reconcile", "--source", "doc01", expect=1))
+    [gone] = before["native_deleted"]
+    refused = output_of(command(root, "reconcile", "--source", label, expect=1))
     assert refused["message"].startswith(
-        "The native copy of doc01 is gone or changed outside the lab"
+        f"The native copy of {label} is gone or changed outside the lab"
     )
     assert refused["details"] == dict(
+        source=gone["identity_data_id"],
         missing=["original_data", "document_node", "chunks", "stored_files"],
         revision=1,
-        next="forget --source doc01 --expected-revision 1",
+        next=f"forget --source {label} --expected-revision 1",
     )
+    assert gone["next"] == refused["details"]["next"]
     after = status_of(root)
     assert after["publications"] == before["publications"]
     assert after["recovery_events"] == before["recovery_events"]
@@ -193,7 +203,7 @@ def test_native_a_dependent_deleted_outside_the_lab_waits_for_its_own_forget(
     )
     assert "chunks" in waiting["native_deleted"]
     assert forgotten["dependents_failed"]["code"] == "dependent_unfinished"
-    assert forgotten["sources"]["doc02"]["native_deleted"] == waiting["native_deleted"]
+    assert forgotten["sources"]["doc02"]["missing"] == waiting["native_deleted"]
     second = output_of(
         command(root, "forget", "--source", "doc02", "--expected-revision", "1")
     )
