@@ -11,6 +11,7 @@ import json
 from .models import IdentitySource
 from .multisource import current_sources, fixture_id, snapshot
 from .publish import Publisher
+from .records import apply_reconfirm
 from .retrieve import retrieve
 from .validation import IntentError, cited_inputs, fresh_entity_id
 from .withholding import pending_moves
@@ -202,19 +203,10 @@ def reconfirmed(reader, assignment, replacements, producer_key, producer):
     is dropped. `replacements` maps an old input key to (new key, input)."""
 
     def change(payload):
-        records = [
-            payload["mention_resolutions"].get(assignment)
-            or payload["variant_assignments"][assignment]
-        ]
-        if assignment in payload["mention_resolutions"]:
-            records.append(payload["mention_groups"][records[0]["group_ref"]])
-        for old, (new, item) in replacements.items():
+        for new, item in replacements.values():
             payload["inputs"][new] = item
-            for record in records:
-                record["input_refs"] = [
-                    new if k == old else k for k in record["input_refs"]
-                ]
-        records[0]["producer_ref"] = producer_key
+        refs = {old: new for old, (new, _) in replacements.items()}
+        apply_reconfirm(payload, reader, assignment, refs, producer_key)
         payload["producers"][producer_key] = producer
 
     return next_revision(reader, change)

@@ -150,3 +150,23 @@ async def test_recipe_does_not_replace_missing_or_changed_reasoning_input(
     )
     assert drift == {"existing_A": reason}
     assert withheld_reasons(source, drift) == {"r01": reason, "v01": reason}
+
+
+def test_the_review_path_writes_resolutions_and_groups_only_through_records():
+    """review.py and revisions.reconfirmed change a decision's resolution
+    and group fields only through records.py (apply_removal,
+    apply_reconfirm), so a record kind's hooks own its layout. Fixture
+    builders such as revisions.corrected may write them directly."""
+    import ast
+    import inspect
+
+    from cognee_lab.identity import review, revisions
+
+    fields = {"mention_resolutions", "mention_groups"}
+    for code in (inspect.getsource(review), inspect.getsource(revisions.reconfirmed)):
+        named = {
+            node.value
+            for node in ast.walk(ast.parse(code))
+            if isinstance(node, ast.Constant) and node.value in fields
+        }
+        assert named == set()

@@ -258,6 +258,24 @@ def apply_removal(
                 payload[field][part_key] = part.model_dump(mode="json")
 
 
+def apply_reconfirm(payload, source, key, ref_map: RefMap, producer_key):
+    """Re-confirm record `key` in `payload`, a JSON dump of `source`: it and
+    the parts that hold its inputs (`RecordKind.stripped`) cite each input
+    of `ref_map` under its new key, and it names `producer_key`. Its
+    reviewed fields stay, so its fingerprint stays. Other records keep
+    citing what they cite. The caller adds the new inputs and the
+    producer."""
+    kind = REGISTRY[record_type_of(source, key)]
+    record = getattr(source, kind.field)[key]
+    refs = rewired(record.input_refs, ref_map, source.original_input_ref)
+    payload[kind.field][key] = record.model_copy(
+        update=dict(input_refs=refs, producer_ref=producer_key)
+    ).model_dump(mode="json", exclude_none=True)
+    for field, parts in kind.stripped(source, {key}, ref_map).items():
+        for part_key, part in parts.items():
+            payload[field][part_key] = part.model_dump(mode="json")
+
+
 def drops(description, key) -> bool:
     """Whether a removal drops the record (`RecordKind.outcome`), as it
     drops a variant, rather than keep it in place."""
