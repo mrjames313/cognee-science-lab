@@ -590,8 +590,7 @@ async def readded(call: Call) -> dict:
 
 async def refreshed(call: Call) -> dict:
     # The refresh is this command's own operation, so its failure raises.
-    written = []
-    await refresh(call.publisher, written, call.refresh_fault)
+    written = [w async for w in refresh(call.publisher, call.refresh_fault)]
     return await finish(call.publisher, call.root, call.args.query, refreshed=written)
 
 

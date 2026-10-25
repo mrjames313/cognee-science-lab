@@ -156,7 +156,7 @@ def written_ranges(revised: IdentitySource, moved) -> dict:
     )
 
 
-async def refresh(publisher, refreshed: list, fault_stage=None) -> None:
+async def refresh(publisher, fault_stage=None):
     """After an edit completes, write each current dependent's next revision
     with its moved spans' new ranges: an ordinary unchanged-text replacement
     through replace_one, whose withholding cleanup releases the moved
@@ -166,23 +166,28 @@ async def refresh(publisher, refreshed: list, fault_stage=None) -> None:
     hold the range of an earlier edit, so when `remap` rows still apply
     after it, the refresh remaps again.
 
-    Appends each range written to `refreshed`, and raises the failure that
-    stops the refresh. `refresh-dependents` runs it as its own operation."""
-
-    async def write(revised, row, moved):
-        await replace_one(
-            publisher, revised, expected_revision=row.revision, fault_stage=fault_stage
-        )
-        refreshed.append(written_ranges(revised, moved))
-
+    Yields each range written, and raises the failure that stops the
+    refresh. `refresh-dependents` runs it as its own operation."""
     for source, (row, moved) in (await pending_moves(publisher)).items():
         if row.state != "current" and row.resumed_by == "replace":
             saved = row.description
-            await write(saved, row, moved)
+            await replace_one(
+                publisher,
+                saved,
+                expected_revision=row.revision,
+                fault_stage=fault_stage,
+            )
+            yield written_ranges(saved, moved)
             row, moved = (await pending_moves(publisher)).get(source, (row, []))
         if row.state == "current" and moved:
-            current = row.description
-            await write(remapped(current, moved), row, moved)
+            revised = remapped(row.description, moved)
+            await replace_one(
+                publisher,
+                revised,
+                expected_revision=row.revision,
+                fault_stage=fault_stage,
+            )
+            yield written_ranges(revised, moved)
 
 
 async def refresh_dependents(publisher, fault_stage=None) -> dict:
@@ -193,7 +198,8 @@ async def refresh_dependents(publisher, fault_stage=None) -> dict:
     completed, and `refresh-dependents` reruns the refresh."""
     refreshed = []
     try:
-        await refresh(publisher, refreshed, fault_stage)
+        async for written in refresh(publisher, fault_stage):
+            refreshed.append(written)
     except Exception as exc:
         code = exc.code if isinstance(exc, IntentError) else type(exc).__name__
         return dict(
