@@ -20,6 +20,7 @@ removed it (`lab_removed`). A decision is kept when it, its group and the
 inputs it cites are as the source's last verified description has them.
 """
 
+from typing import NamedTuple
 from uuid import UUID
 
 from .erasure_rules import entity_ids_named
@@ -27,10 +28,10 @@ from .models import CorpusObjectInput, IdentitySource
 from .records import REGISTRY, naming, record_inputs, record_type_of
 from .validation import IntentError, reusable_recipes
 
-RECREATION = (
-    "entity_recreation",
-    "A publication does not recreate an Entity deleted outside the lab: {}; "
-    "pick another target or leave the mention unresolved",
+MESSAGES = dict(
+    missing_reasoning_input="Corpus input missing: {}",
+    entity_recreation="A publication does not recreate an Entity deleted outside "
+    "the lab: {}; pick another target or leave the mention unresolved",
 )
 
 
@@ -104,53 +105,84 @@ async def deleted_outside(graph, rows, source, verified) -> frozenset[UUID]:
     return frozenset([e for e in candidates if await graph.get_node(str(e)) is None])
 
 
+class Part(NamedTuple):
+    """A part of a description that cites or names an Entity: what it holds,
+    and whether it cites the Entity as a corpus input."""
+
+    held: object
+    cites: bool
+
+
+RECIPE = ("recipe",)
+
+
 def touching(description, entity_id) -> dict:
-    """Each part of the description that cites or names the Entity, by key,
-    with what it holds: the record, attribution included, or an unresolved
-    group, and the inputs it cites."""
+    """Each part of the description that cites or names the Entity, by key:
+    a record with its attribution, its producer and the inputs it cites; an
+    unresolved group with the same; and the Entity's recipe."""
     keys = {
         k
         for k, i in description.inputs.items()
         if isinstance(i, CorpusObjectInput) and i.entity_id == entity_id
     }
+
+    def held(part, inputs):
+        return (
+            part,
+            description.producers[part.producer_ref],
+            {i: description.inputs[i] for i in sorted(inputs)},
+        )
+
     found = {}
     for key, inputs in record_inputs(description).items():
         if inputs & keys or entity_id in naming(description, key):
             kind = REGISTRY[record_type_of(description, key)]
-            found[key] = (
-                getattr(description, kind.field)[key],
-                {i: description.inputs[i] for i in sorted(inputs)},
-            )
+            record = getattr(description, kind.field)[key]
+            found[key] = Part(held(record, inputs), bool(inputs & keys))
     resolved = {d.group_ref for d in description.mention_resolutions.values()}
     for key, group in description.mention_groups.items():
         if key not in resolved and keys & set(group.input_refs):
-            found[key] = (
-                group,
-                {i: description.inputs[i] for i in sorted(group.input_refs)},
-            )
+            found[key] = Part(held(group, group.input_refs), True)
+    if entity_id in description.entity_constructions:
+        found[RECIPE] = Part(description.entity_constructions[entity_id], False)
     return found
 
 
-def kept(source, verified, entity_id) -> bool:
-    """Whether every part of `source` that cites or names the Entity is kept
-    from `verified`."""
-    if verified is None:
-        return False
-    before = touching(verified, entity_id)
-    return all(before.get(k) == held for k, held in touching(source, entity_id).items())
+def refusal(source, verified, entity_id) -> str | None:
+    """Why a publication of `source` may not leave the Entity absent, or
+    None: every part of `source` that cites or names it is as `verified`,
+    the last verified description, has it. A new or changed part that cites
+    it as a corpus input is `missing_reasoning_input`, as for any missing
+    input; any other new or changed part would recreate it
+    (`entity_recreation`)."""
+    before = touching(verified, entity_id) if verified is not None else {}
+    changed = [
+        part
+        for key, part in touching(source, entity_id).items()
+        if before.get(key) != part
+    ]
+    if not changed:
+        return None
+    return (
+        "missing_reasoning_input"
+        if any(part.cites for part in changed)
+        else "entity_recreation"
+    )
 
 
-def check_no_recreation(source, verified, outside) -> frozenset[UUID]:
-    """The Entities deleted outside the lab that this publication leaves
-    absent: each one it names whose citing and naming parts are all kept.
-    Refuses one that a changed or new part names (`entity_recreation`).
-    The publisher skips their recipes, edges and contributions, in the
-    write and in its verification."""
-    named = outside & entity_ids_named(source)
+async def left_absent(graph, rows, source, previous) -> frozenset[UUID]:
+    """The Entities deleted outside the lab that a publication of `source`
+    names and leaves absent: those whose citing and naming parts are all
+    kept from the last verified description of `previous`, the source's
+    row. Refuses any other (`refusal`). The publisher skips their recipes,
+    edges and contributions, in the write and in its verification, and
+    admission lets a kept decision cite them."""
+    verified = verified_description(previous)
+    named = await deleted_outside(graph, rows, source, verified)
+    named &= entity_ids_named(source)
     for entity_id in sorted(named, key=str):
-        if not kept(source, verified, entity_id):
-            code, message = RECREATION
-            raise IntentError(code, message.format(entity_id))
+        if code := refusal(source, verified, entity_id):
+            raise IntentError(code, MESSAGES[code].format(entity_id))
     return frozenset(named)
 
 
@@ -164,5 +196,5 @@ async def check_readd(graph, tombstone, source, rows):
     ) - lab_removed(rows)
     for entity_id in sorted(candidates, key=str):
         if await graph.get_node(str(entity_id)) is None:
-            code, message = RECREATION
-            raise IntentError(code, message.format(entity_id))
+            code = "entity_recreation"
+            raise IntentError(code, MESSAGES[code].format(entity_id))

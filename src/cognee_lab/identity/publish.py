@@ -3,6 +3,7 @@ revision, and the re-add of a forgotten source."""
 
 import json
 from dataclasses import dataclass
+from typing import NamedTuple
 
 from .models import Accepted, IdentitySource, SourceTextInput
 from .chains import (
@@ -74,13 +75,22 @@ def identity_edges(source):
     return edges
 
 
-def present_edges(source, absent):
-    """The source's identity edges but those with an endpoint deleted
-    outside the lab that the publication leaves absent. Cognee's add_edges
-    drops an edge whose endpoint is gone, so it is neither written nor
-    verified (outside_deletion.py)."""
+class Written(NamedTuple):
+    """What a publication writes and verifies: the source's recipes and
+    identity edges, less those of the Entities deleted outside the lab that
+    it leaves absent (outside_deletion.left_absent). Cognee's add_edges
+    drops an edge whose endpoint is gone, so such an edge is not written."""
+
+    entities: dict
+    edges: list
+
+
+def written(source, absent=frozenset()) -> Written:
     gone = {str(e) for e in absent}
-    return [e for e in identity_edges(source) if not gone & {e[0], e[1]}]
+    return Written(
+        {e: r for e, r in source.entity_constructions.items() if e not in absent},
+        [e for e in identity_edges(source) if not gone & {e[0], e[1]}],
+    )
 
 
 def contributions(properties):
@@ -213,8 +223,7 @@ class Publisher:
         types. A re-add runs them before it writes anything. Saved-record
         citations stay in their dataset and off the citing source, a new
         one pins its record as it is now, and none closes a cycle
-        (chains.py). Returns the Entities deleted outside the lab that the
-        publication leaves absent (outside_deletion.check_no_recreation)."""
+        (chains.py). Returns what the publication writes (`written`)."""
         rows = await self.records.rows()
         check_citation_scope(source)
         # Another document's drift withholds decisions, never the source.
@@ -231,17 +240,11 @@ class Publisher:
             check_mention_inputs,
             mention_ids,
         )
-        from .outside_deletion import (
-            check_no_recreation,
-            deleted_outside,
-            verified_description,
-        )
+        from .outside_deletion import left_absent
 
         previous = await self.records.row(source)
-        verified = verified_description(previous)
-        outside = await deleted_outside(self.graph, rows, source, verified)
-        await check_corpus_inputs_exist(self.graph, source, verified, outside)
-        absent = check_no_recreation(source, verified, outside)
+        absent = await left_absent(self.graph, rows, source, previous)
+        await check_corpus_inputs_exist(self.graph, source, absent)
         others = [
             r
             for r in rows
@@ -265,7 +268,7 @@ class Publisher:
             node = await self.graph.get_node(str(entity_id))
             if node is not None and node.get("type") != "Entity":
                 raise IntentError("incompatible_type", f"{entity_id} is not an Entity")
-        return absent
+        return written(source, absent)
 
     async def preflight(
         self,
@@ -463,10 +466,9 @@ class Publisher:
         semantic_writer=None,
         verify_semantics=None,
     ):
-        absent = await self.preflight(
+        writes = await self.preflight(
             source, texts, chunks, ctx, saved_revision=saved_revision
         )
-        wanted = present_edges(source, absent)
         markers = [
             (str(source.inputs[key].chunk_id), str(group.entity_id), key)
             for group in source.mention_groups.values()
@@ -475,8 +477,8 @@ class Publisher:
         plan = dict(
             operation="identity_publish",
             revision=source.revision,
-            entities=[str(i) for i in source.entity_constructions if i not in absent],
-            identity_edges=[list(e[:3]) for e in wanted],
+            entities=[str(i) for i in writes.entities],
+            identity_edges=[list(e[:3]) for e in writes.edges],
             markers=[list(m[:2]) for m in markers],
             withdraw=[],
             runtime_profile=self.runtime_profile,
@@ -549,16 +551,12 @@ class Publisher:
         stage, created, referenced = "validation", [], []
         try:
             # Repeat after taking the project writer reservation.
-            absent = await self.preflight(source, texts, chunks, ctx)
-            wanted = present_edges(source, absent)
-            built = {
-                e: r for e, r in source.entity_constructions.items() if e not in absent
-            }
+            writes = await self.preflight(source, texts, chunks, ctx)
             owner = make_source_ref_key(source.dataset_id, source.identity_data_id)
             old_properties = {}
             stage = "nodes"
             new_nodes = []
-            for entity_id, recipe in built.items():
+            for entity_id, recipe in writes.entities.items():
                 node = await self.graph.get_node(str(entity_id))
                 if node is None:
                     new_nodes.append(
@@ -603,7 +601,7 @@ class Publisher:
                     source_ref_key=ref,
                 )
             stage = "identity_edges"
-            for source_id, target_id, relation, own in wanted:
+            for source_id, target_id, relation, own in writes.edges:
                 existing = await edge_metadata(
                     self.graph, source_id, target_id, relation
                 )
@@ -645,7 +643,7 @@ class Publisher:
                 await after_write()
 
             stage = "verification"
-            for entity_id in built:
+            for entity_id in writes.entities:
                 sid = str(entity_id)
                 node = await self.graph.get_node(sid)
                 if node is None or node.get("type") != "Entity":
@@ -659,7 +657,7 @@ class Publisher:
                     raise IntentError("verify_owner", "Entity owner missing")
                 if not await self.vector.retrieve("Entity_name", [sid]):
                     raise IntentError("verify_index", "Entity name vector missing")
-            for source_id, target_id, relation, own in wanted:
+            for source_id, target_id, relation, own in writes.edges:
                 edge = await edge_metadata(self.graph, source_id, target_id, relation)
                 if edge is None or own not in contributions(edge.edge_properties):
                     raise IntentError("verify_edge", "Identity contribution missing")

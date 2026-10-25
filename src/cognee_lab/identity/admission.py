@@ -639,28 +639,22 @@ def check_mention_inputs(source, mentions):
             )
 
 
-async def check_corpus_inputs_exist(graph, source, verified=None, outside=frozenset()):
+async def check_corpus_inputs_exist(graph, source, exempt=frozenset()):
     """Every corpus input the description cites, a group's included, names
     an Entity in the graph. `referenced_corpus_ids` relies on this, so a
     listed input cannot exempt an Entity this revision constructs from the
     derived-UUID rule. Only admission refuses; retrieval and publication
     verification withhold the decisions that read a removed Entity
-    instead. One exception: an Entity deleted outside the lab (`outside`)
-    stays cited by a decision kept from `verified`, the source's last
-    verified description, which live validation withholds
-    (outside_deletion.py). A changed or new citer is refused."""
-    from .outside_deletion import kept
-
+    instead. `exempt` holds the Entities deleted outside the lab that the
+    publication leaves absent, which only kept decisions cite
+    (outside_deletion.left_absent)."""
     cited = {
         source.inputs[key].entity_id
         for key in cited_inputs(source)
         if isinstance(source.inputs[key], CorpusObjectInput)
     }
-    for entity_id in sorted(cited, key=str):
-        if await graph.get_node(str(entity_id)) is not None:
-            continue
-        if entity_id in outside and kept(source, verified, entity_id):
-            continue
-        raise IntentError(
-            "missing_reasoning_input", f"Corpus input missing: {entity_id}"
-        )
+    for entity_id in sorted(cited - set(exempt), key=str):
+        if await graph.get_node(str(entity_id)) is None:
+            raise IntentError(
+                "missing_reasoning_input", f"Corpus input missing: {entity_id}"
+            )

@@ -9,15 +9,13 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from cognee_lab.identity.admission import check_corpus_inputs_exist
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.outside_deletion import (
-    check_no_recreation,
     check_readd,
     deleted_outside,
     verified_description,
 )
-from cognee_lab.identity.publish import present_edges
+from cognee_lab.identity.publish import Publisher
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import IntentError
 
@@ -25,13 +23,31 @@ HELIOS = UUID("8b4bff50-907b-56b6-bc80-3b0a7018714a")
 
 
 class Graph:
-    """Every node is present but the absent ones."""
+    """Every node is an Entity but the absent ones."""
 
     def __init__(self, *absent):
         self.absent = {str(a) for a in absent}
 
     async def get_node(self, node_id):
-        return None if str(node_id) in self.absent else {"id": node_id}
+        return None if str(node_id) in self.absent else {"type": "Entity"}
+
+
+async def admit(rows, source, *, absent=(HELIOS,), saved_revision=None):
+    """What Publisher.admit_inputs admits `source` to write, over these
+    saved rows, with the `absent` nodes deleted."""
+    from test_identity_dependencies import TEXT, memory_publisher, own_chunks
+
+    records = (await memory_publisher(rows)).records
+
+    async def row(of):
+        return next((r for r in rows if r.source == str(of.identity_data_id)), None)
+
+    records.row = row
+    publisher = Publisher(Graph(*absent), None, records)
+    await publisher.withholdings.initialize()
+    return await publisher.admit_inputs(
+        source, {"doc01": TEXT}, own_chunks(source), saved_revision=saved_revision
+    )
 
 
 def source_of(payload):
@@ -158,56 +174,77 @@ async def test_what_a_failed_replacement_retires_is_not_deleted_outside(
 
 
 async def test_a_kept_citer_may_cite_an_entity_deleted_outside(source_payload):
-    """replace-decision r01 while v01, unchanged, still cites Helios."""
+    """replace-decision r01 while v01, unchanged, still cites Helios: the
+    publication writes neither Helios nor an edge to it."""
     old = source_of(source_payload)
     new = source_of(unresolved_r01(source_payload))
-    await check_corpus_inputs_exist(Graph(HELIOS), new, old, frozenset({HELIOS}))
-    assert check_no_recreation(new, old, frozenset({HELIOS})) == {HELIOS}
+    writes = await admit([row_of(old)], new, saved_revision=1)
+    assert HELIOS not in writes.entities and len(writes.entities) == 2
+    assert writes.edges == []
+    assert len((await admit([row_of(old)], old, absent=())).edges) == 2
+
+
+def payload_with(payload, change):
+    changed = json.loads(json.dumps(payload))
+    change(changed)
+    return source_of(changed)
 
 
 async def test_a_changed_or_new_citer_of_an_entity_deleted_outside_is_refused(
     source_payload,
 ):
+    """v01 cites Helios on other inputs; a new v02 cites it; v01's producer
+    is redefined under the same key."""
     old = source_of(source_payload)
-    changed = json.loads(json.dumps(source_payload))
-    changed["variant_assignments"]["v01"]["input_refs"] = ["existing_A"]
-    added = json.loads(json.dumps(source_payload))
-    added["variant_assignments"]["v02"] = dict(
-        added["variant_assignments"]["v01"], producer_ref="review_v02"
-    )
-    added["producers"]["review_v02"] = added["producers"][
-        added["variant_assignments"]["v01"]["producer_ref"]
-    ]
-    for payload in (changed, added):
+
+    def changed(p):
+        p["variant_assignments"]["v01"]["input_refs"] = ["existing_A"]
+
+    def added(p):
+        v01 = p["variant_assignments"]["v01"]
+        p["variant_assignments"]["v02"] = dict(v01, producer_ref="review_v02")
+        p["producers"]["review_v02"] = p["producers"][v01["producer_ref"]]
+
+    def redefined(p):
+        producer = p["producers"][p["variant_assignments"]["v01"]["producer_ref"]]
+        producer["version"] = "0.2"
+
+    for change in (changed, added, redefined):
         with pytest.raises(IntentError) as refused:
-            await check_corpus_inputs_exist(
-                Graph(HELIOS), source_of(payload), old, frozenset({HELIOS})
-            )
-        assert refused.value.code == "missing_reasoning_input"
+            await admit([row_of(old)], payload_with(source_payload, change))
+        assert refused.value.code == "missing_reasoning_input", change.__name__
 
 
-async def test_a_missing_input_is_refused_without_a_verified_description_or_outside(
-    source_payload,
-):
-    source = source_of(source_payload)
-    for verified, outside in [(None, {HELIOS}), (source, frozenset())]:
-        with pytest.raises(IntentError) as refused:
-            await check_corpus_inputs_exist(
-                Graph(HELIOS), source, verified, frozenset(outside)
-            )
-        assert refused.value.code == "missing_reasoning_input"
-
-
-def test_a_changed_decision_naming_an_entity_deleted_outside_is_refused(
-    source_payload,
-):
-    """r01 retargeted at Helios under another producer: a publication would
-    recreate it."""
-    old = source_of(unresolved_r01(source_payload))
-    retargeted = source_of(source_payload)
+async def test_a_missing_input_is_refused_on_a_first_publication(source_payload):
     with pytest.raises(IntentError) as refused:
-        check_no_recreation(retargeted, old, frozenset({HELIOS}))
-    assert refused.value.code == "entity_recreation"
+        await admit([], source_of(source_payload))
+    assert refused.value.code == "missing_reasoning_input"
+
+
+async def test_a_changed_part_naming_an_entity_deleted_outside_is_refused(
+    source_payload,
+):
+    """r01 retargeted at Helios without citing it, and a changed recipe of
+    Helios: a publication would recreate it."""
+    old = source_of(unresolved_r01(source_payload))
+
+    def retargeted(p):
+        p["revision"] = 3
+        p["mention_resolutions"]["r01"]["input_refs"] = ["doc01"]
+
+    def recipe(p):
+        p["revision"] = 3
+        p["mention_resolutions"]["r01"] = old.mention_resolutions["r01"].model_dump(
+            mode="json"
+        )
+        p["entity_constructions"][str(HELIOS)]["description"] = "Changed recipe."
+
+    for change in (retargeted, recipe):
+        with pytest.raises(IntentError) as refused:
+            await admit(
+                [row_of(old)], payload_with(source_payload, change), saved_revision=2
+            )
+        assert refused.value.code == "entity_recreation", change.__name__
 
 
 def test_the_verified_description_follows_the_row(source_payload):
@@ -225,12 +262,6 @@ def test_the_verified_description_follows_the_row(source_payload):
     assert verified_description(row_of(old, "pending", verified_revision=0)) is None
     erasure = dict(operation="identity_publish", erased_from=["{}"])
     assert verified_description(row_of(old, "failed", erasure)) is None
-
-
-def test_edges_to_an_entity_left_absent_are_not_written(source_payload):
-    source = source_of(source_payload)
-    assert len(present_edges(source, frozenset())) == 2
-    assert present_edges(source, frozenset({HELIOS})) == []
 
 
 async def test_a_readd_naming_an_entity_deleted_outside_is_refused(source_payload):
@@ -276,11 +307,6 @@ async def test_an_entity_a_withdrawal_removed_stays_lab_removed_after_the_forget
     rows = [forgotten_row(owner, served=False), row_of(reader)]
     assert await deleted_outside(Graph(HELIOS), rows, reader, reader) == frozenset()
     with pytest.raises(IntentError) as refused:
-        await check_corpus_inputs_exist(
-            Graph(HELIOS),
-            reader,
-            reader,
-            await deleted_outside(Graph(HELIOS), rows, reader, reader),
-        )
+        await admit(rows, reader)
     assert refused.value.code == "missing_reasoning_input"
     await check_readd(Graph(HELIOS), rows[0].tombstone, owner, rows)
