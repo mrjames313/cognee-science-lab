@@ -311,7 +311,7 @@ Step 5 S2 (2026-10-25, built by the assistant on the user's Mac with loopback em
 - `dataset` calls `cognee.forget(dataset=...)` on the root's dataset.
 - `prune` calls `cognee.prune.prune_data()` and then `cognee.prune.prune_system()` with its defaults. That keeps Cognee's relational database, and so the lab's ledger.
 
-`status` compares each saved source with its native copy and lists the ones that differ under `native_deleted`. It checks five facets (`forget.NativeCopy`): the original's Data row, the identity Data row, the original's document node, every chunk the saved description names, and the raw files of both Data items. Each delete leaves its own pattern, measured on 2026-10-25 on a `fixture` root:
+`status` compares each saved source with its native copy and lists the ones that differ under `native_deleted`. It checks five facets (`native_copy.NativeCopy`): the original's Data row, the identity Data row, the original's document node, every chunk the saved description names, and the raw files of both Data items. Each delete leaves its own pattern, measured on 2026-10-25 on a `fixture` root:
 
 | Delete | `missing` |
 |---|---|
@@ -320,7 +320,7 @@ Step 5 S2 (2026-10-25, built by the assistant on the user's Mac with loopback em
 | `native-forget --case prune` | `document_node`, `chunks`, `stored_files` |
 | an incremental `cognee.update` of the original (`.audit/step5-update-probe.md`) | `chunks` |
 
-Each entry gives the row's `identity_data_id`, `dataset_id`, `state` and `revision`, the `missing` facets and `next`, the command that erases the lab's copy:
+Each entry gives the row's `identity_data_id`, `dataset_id`, `state` and `revision`, the `missing` facets and `next`, the command that erases the lab's copy. An entry for a row that the root's files do not name has no `next`:
 
 ```json
 "native_deleted": [{"identity_data_id": "718efce2-...", "dataset_id": "...", "state": "current",
@@ -330,7 +330,7 @@ Each entry gives the row's `identity_data_id`, `dataset_id`, `state` and `revisi
 
 `status` leaves out a row whose own attempt changes its native copy: a pending row, a row whose failed forget `forget` resumes, and a failed text change, whose retry rebuilds the document. A forgotten row has no description to compare. A withdrawn row is checked: withdrawal keeps the Data items, the document and its chunks.
 
-`reconcile` refuses such a source on every fixture kind (`native_deleted`), before it reads the missing document, and writes nothing: no saved intent can rebuild a copy Cognee no longer holds. The message names the missing facets and the forget, and `details` carries both:
+`reconcile` refuses such a source on every fixture kind (`native_deleted`, `Publisher.refuse_natively_deleted`), before it reads the missing document, and writes nothing: no saved intent can rebuild a copy Cognee no longer holds. The refusal's `details` carry the missing facets and the saved revision; the CLI adds `next`, the forget, and names it in the message:
 
 ```text
 The native copy of doc01 is gone or changed outside the lab (for example by cognee.forget, a prune or cognee.update): original_data, document_node, chunks, stored_files missing. Run `forget --source doc01 --expected-revision 1` to erase the lab's copy

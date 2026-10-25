@@ -38,6 +38,7 @@ from .erasure_rules import (
     removal_claim,
 )
 from .models import IdentitySource
+from .native_copy import missing_native
 from .records import (
     REGISTRY,
     RemovedRecord,
@@ -689,8 +690,6 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
     is one; the others fail removal revisions (`failing`). A dependent
     whose native copy is gone waits too, with what it misses: no removal
     revision can be registered for it, and its own forget erases it."""
-    from .forget import missing_native
-
     ids = source_ids(tombstone)
     done, waiting = [], []
     try:
@@ -703,7 +702,7 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
         missing = {
             step.row.source: gone
             for step in steps
-            if (gone := await missing_native(publisher, step.row))
+            if (gone := await missing_native(publisher.graph, step.row))
         }
         writable, held = ready(steps, frozenset(missing))
         waiting = [
@@ -713,11 +712,7 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
                 operation=step.row.operation,
                 level=step.level,
                 waits_for=behind,
-                **(
-                    dict(native_deleted=missing[step.row.source])
-                    if step.row.source in missing
-                    else {}
-                ),
+                native_deleted=missing.get(step.row.source),
             )
             for step, behind in held
         ]

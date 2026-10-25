@@ -3,6 +3,7 @@
 import json
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from .environment import DATASET_NAME
 from .models import IdentitySource
 from .native import edge_metadata
 from .publish import Publisher, contributions
@@ -96,7 +97,7 @@ async def prepare(root, *, chunked=False, dependent=False):
         DataItem(
             data=str(root / "source02.txt"), data_id=UUID(fixture_id("doc02:original"))
         ),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     ctx2 = await context_for(fixture_id("doc02:original"))
@@ -123,7 +124,7 @@ async def prepare(root, *, chunked=False, dependent=False):
     (root / "identity02.json").write_text(second.model_dump_json(indent=2) + "\n")
     await cognee.add(
         DataItem(data=str(root / "identity02.json"), data_id=second.identity_data_id),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     info = dict(
@@ -143,7 +144,6 @@ async def prepare(root, *, chunked=False, dependent=False):
 
 
 INFO = "multi-fixture-info.json"
-GLOSSARY_INFO = "glossary-fixture-info.json"
 
 
 def read_sources(root, info=INFO):
@@ -179,9 +179,12 @@ def fixture_files(root):
 
 
 def root_files(root):
-    """Each source's identity file on a root of any kind."""
-    if (root / GLOSSARY_INFO).exists():
-        return read_sources(root, GLOSSARY_INFO)
+    """Each source's identity file, by label, on a root of any kind."""
+    from .environment import read_fixture
+    from .glossary_fixture import files as glossary_files
+
+    if read_fixture(root) == "glossary-fixture":
+        return glossary_files(root)
     return fixture_files(root)
 
 
@@ -313,7 +316,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
             else []
         ),
     )
-    from .forget import missing_native
+    from .native_copy import missing_native
 
     for label, source in sources.items():
         from .registered import read_registered
@@ -345,7 +348,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
                 ),
             )
             continue
-        if missing := await missing_native(publisher, row):
+        if missing := await missing_native(publisher.graph, row):
             result["sources"][label] = native_deleted_entry(row, missing)
             continue
         registered = await read_registered(source)
@@ -571,11 +574,10 @@ async def run(args, root):
                 fault_stage=args.fault_stage,
             )
         elif args.command == "reconcile":
-            from .forget import refuse_natively_deleted
             from .forget_fixture import reconcile_forget
 
+            await publisher.refuse_natively_deleted(selected)
             row = await publisher.records.row(selected)
-            await refuse_natively_deleted(publisher, row, args.source)
             if (
                 finished := await reconcile_forget(publisher, row, selected)
             ) is not None:

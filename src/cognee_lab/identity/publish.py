@@ -360,6 +360,23 @@ class Publisher:
         if row and row.resumed_by in ("replace", "forget"):
             raise IntentError(*cell_for(row).otherwise)
 
+    async def refuse_natively_deleted(self, source):
+        """Refuse to reconcile a source whose native copy is gone or changed
+        outside the lab (native_copy.py): no saved intent can rebuild it, and
+        `forget` erases the lab's copy. `details` names the missing facets
+        and the saved revision, from which the CLI names the forget. Each
+        fixture front end calls it before it reads the source's document,
+        which may be what is gone, so before `reconcile`."""
+        from .native_copy import missing_native, refusal_message
+
+        row = await self.records.row(source)
+        if row is not None and (missing := await missing_native(self.graph, row)):
+            raise IntentError(
+                "native_deleted",
+                refusal_message(source.identity_data_id, missing),
+                details=dict(missing=missing, revision=row.revision),
+            )
+
     async def publish(self, source: IdentitySource, *, texts, chunks, ctx, **run):
         """A first publication: the source has no row yet."""
         await self.refuse_owned_retry(source)

@@ -6,6 +6,7 @@ import json
 from typing import NamedTuple
 from uuid import UUID
 
+from .environment import DATASET_NAME
 from .digests import object_digest
 from .models import IdentitySource
 from .validation import IntentError, text_digest
@@ -260,7 +261,7 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
 
     await cognee.add(
         DataItem(data=str(text_file), data_id=doc.data_id),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     ctx = await context_for(doc.data_id)
@@ -276,7 +277,7 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     path.write_text(source.model_dump_json(indent=2) + "\n")
     await cognee.add(
         DataItem(data=str(path), data_id=source.identity_data_id),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     await publish_one(

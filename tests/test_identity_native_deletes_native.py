@@ -110,6 +110,7 @@ def test_native_reconcile_refuses_a_source_deleted_outside_the_lab(tmp_path, cre
     )
     assert refused["details"] == dict(
         missing=["original_data", "document_node", "chunks", "stored_files"],
+        revision=1,
         next="forget --source doc01 --expected-revision 1",
     )
     after = status_of(root)

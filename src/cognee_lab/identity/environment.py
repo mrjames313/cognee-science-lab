@@ -17,6 +17,8 @@ from .fixture_embeddings import FixtureEmbeddings
 FIXTURE_ENV = Path(__file__).with_name("fixture.env")
 MARKER = "stage6-fixture.json"
 MARKER_KIND = "stage6-isolated-fixture"
+# The one dataset every fixture root registers its Data items in.
+DATASET_NAME = "stage6_isolated_fixture"
 CREATION_COMMANDS = frozenset(
     {"fixture", "multi-fixture", "chunked-fixture", "glossary-fixture"}
 )

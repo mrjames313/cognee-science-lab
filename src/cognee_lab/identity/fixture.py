@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from .environment import read_embedding
+from .environment import DATASET_NAME, read_embedding
 from .models import IdentitySource
 from .publish import Publisher
 from .retrieve import retrieve
@@ -264,7 +264,7 @@ async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amen
             DataItem(data=str(root / "seed.txt"), data_id=SEED_DATA_ID),
             DataItem(data=str(root / "source.txt"), data_id=original_id),
         ],
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     original_ctx = await context_for(original_id)
@@ -298,7 +298,7 @@ async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amen
     (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
     await cognee.add(
         DataItem(data=str(root / "identity.json"), data_id=generated_id),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     info = dict(
@@ -329,29 +329,31 @@ async def run(args, root):
     dataset_id = source.dataset_id
     args._fixture_publisher = publisher
     if args.command == "status":
-        from .forget import natively_deleted
         from .multisource import root_files
+        from .native_copy import forget_hint, natively_deleted
         from .retrieve import withholding_status
 
         rows = await publisher.records.rows(dataset_id)
+        labels = {str(s.identity_data_id): k for k, s in root_files(root).items()}
         return dict(
             publications=[row.record() for row in rows],
             recovery_events=await publisher.records.events(dataset_id),
             **await withholding_status(publisher, rows),
-            native_deleted=await natively_deleted(
-                publisher,
-                rows,
-                {str(s.identity_data_id): k for k, s in root_files(root).items()},
-            ),
+            native_deleted=[
+                (
+                    dict(entry, next=forget_hint(labels[key], entry["revision"]))
+                    if key in labels
+                    else entry
+                )
+                for key, entry in (
+                    await natively_deleted(publisher.graph, rows)
+                ).items()
+            ],
         )
     if args.command == "retrieve":
         return await retrieve(publisher, dataset_id, args.query)
     if args.command == "reconcile":
-        from .forget import refuse_natively_deleted
-
-        await refuse_natively_deleted(
-            publisher, await publisher.records.row(source), "doc01"
-        )
+        await publisher.refuse_natively_deleted(source)
     if chunks is None:
         original_ctx = await context_for(
             source.inputs[source.original_input_ref].data_id

@@ -16,6 +16,7 @@ not Describe.
 import json
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from .environment import DATASET_NAME
 from .digests import object_digest
 from .fixture import expect_current
 from .models import IdentitySource
@@ -144,7 +145,7 @@ async def prepare_doc03(root, doc01):
     (root / "doc03.txt").write_text(DOC03_TEXT)
     await cognee.add(
         DataItem(data=str(root / "doc03.txt"), data_id=DOC03_DATA_ID),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     ctx = await context_for(DOC03_DATA_ID)
@@ -154,7 +155,7 @@ async def prepare_doc03(root, doc01):
     (root / "doc03_identity.json").write_text(doc03.model_dump_json(indent=2) + "\n")
     await cognee.add(
         DataItem(data=str(root / "doc03_identity.json"), data_id=DOC03_IDENTITY_ID),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     return doc03, chunks, ctx

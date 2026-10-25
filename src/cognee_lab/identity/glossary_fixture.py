@@ -16,13 +16,13 @@ from pathlib import Path
 from typing import NamedTuple
 from uuid import NAMESPACE_URL, uuid5
 
+from .environment import DATASET_NAME
 from .captured_chunks import bind_chunks
 from .chain_fixture import cite, prepare_doc03
 from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
 from .fixture import context_for, expect_current, load_chunks
 from .fixture import prepare as prepare_doc01
-from .forget import missing_native, refuse_natively_deleted
 from .forget_fixture import (
     CALLER_FILES,
     forget_command,
@@ -31,8 +31,9 @@ from .forget_fixture import (
     reconcile_forget,
 )
 from .models import IdentitySource
-from .multisource import GLOSSARY_INFO as INFO
 from .multisource import current_sources, native_deleted_entry, publish_one
+from .multisource import read_sources
+from .native_copy import missing_native
 from .publish import Publisher
 from .records import saved_records
 from .registered import read_registered, read_texts
@@ -51,6 +52,7 @@ GLOSSARY_TEXT = (
 )
 GLOSSARY_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:glossary:original")
 GLOSSARY_IDENTITY_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:glossary:identity")
+INFO = "glossary-fixture-info.json"
 CHUNK_BUDGET = 512
 HC_LINE = re.compile(r"^HC: .*$", re.MULTILINE)
 # A fault in the refresh that follows an edit: doc01's refresh revision
@@ -58,6 +60,11 @@ HC_LINE = re.compile(r"^HC: .*$", re.MULTILINE)
 REFRESH_FAULT = "refresh_interrupted"
 # doc01's kind changes, which a glossary root also takes (chain_kind_change).
 KIND_CHANGES = ("change-kind-to-mention", "change-kind-to-reusable")
+
+
+def files(root):
+    """Each source's identity file on a glossary root, by label."""
+    return read_sources(root, INFO)
 
 
 def hc_entry(text):
@@ -176,7 +183,7 @@ async def prepare(root, *, chain=False):
     (root / "glossary.txt").write_text(GLOSSARY_TEXT)
     await cognee.add(
         DataItem(data=str(root / "glossary.txt"), data_id=GLOSSARY_DATA_ID),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     ctx = await context_for(GLOSSARY_DATA_ID)
@@ -190,7 +197,7 @@ async def prepare(root, *, chain=False):
         DataItem(
             data=str(root / "glossary_identity.json"), data_id=GLOSSARY_IDENTITY_ID
         ),
-        dataset_name="stage6_isolated_fixture",
+        dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     files = dict(doc01="identity.json", glossary="glossary_identity.json")
@@ -294,8 +301,8 @@ async def reconcile(publisher, label, selected):
     """Finish the selected source's failed attempt. Returns what the command
     reports beside the snapshot: a finished forget's outcome, or what a
     completed edit refreshed (a glossary edit refreshes its dependents)."""
+    await publisher.refuse_natively_deleted(selected)
     row = await publisher.records.row(selected)
-    await refuse_natively_deleted(publisher, row, label)
     if (finished := await reconcile_forget(publisher, row, selected)) is not None:
         return finished
     if row.resumed_by == "replace" and row.plan.get("text_change"):
@@ -326,12 +333,11 @@ async def snapshot(publisher, root, query):
     sources = await current_sources(root, publisher, INFO)
     rows = await publisher.records.rows()
     by_source = {r.source: r for r in rows}
-    found, gone = {}, set()
+    found = {}
     for label, source in sources.items():
         row = by_source[str(source.identity_data_id)]
-        if missing := await missing_native(publisher, row):
+        if missing := await missing_native(publisher.graph, row):
             found[label] = native_deleted_entry(row, missing)
-            gone.add(label)
             continue
         if row.tombstone is not None:
             found[label] = dict(
@@ -384,7 +390,7 @@ async def snapshot(publisher, root, query):
     # deleted outside the lab, so it has no text to show.
     erased = (
         by_source[str(glossary.identity_data_id)].state == "forgotten"
-        or "glossary" in gone
+        or "native_deleted" in found["glossary"]
     )
     text = None if erased else (await read_texts(glossary))["glossary"]
     entry = hc_entry(text) if text is not None else None

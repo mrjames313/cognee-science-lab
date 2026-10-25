@@ -296,6 +296,13 @@ def main():
             report = {"error": type(exc).__name__, "message": str(exc)}
             if getattr(exc, "details", None) is not None:
                 report["details"] = exc.details
+            if getattr(exc, "code", None) == "native_deleted":
+                from .native_copy import forget_hint, refusal_message
+
+                label = args.source or "doc01"
+                hint = forget_hint(label, exc.details["revision"])
+                report["message"] = refusal_message(label, exc.details["missing"], hint)
+                report["details"] = dict(exc.details, next=hint)
             print(json.dumps(report, default=str))
             raise SystemExit(1) from exc
         print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
