@@ -33,7 +33,7 @@ from .publish import Publisher
 from .records import saved_records
 from .registered import read_registered, read_texts
 from .retrieve import retrieve, withholding_status
-from .revisions import refresh_dependents, replace_one
+from .revisions import refresh, refresh_dependents, replace_one
 from .text_changes import TextChange, chunk_text, original_context, read_original
 from .text_fixture import maintain_one
 from .validation import IntentError, text_digest
@@ -595,11 +595,10 @@ async def readded(call: Call) -> dict:
 
 
 async def refreshed(call: Call) -> dict:
-    refresh = await refresh_dependents(call.publisher, call.refresh_fault)
-    # The refresh is this command's own operation, so it fails here.
-    if failed := refresh["refresh_failed"]:
-        raise IntentError(failed["code"], failed["message"])
-    return refresh
+    # The refresh is this command's own operation, so its failure raises.
+    written = []
+    await refresh(call.publisher, written, call.refresh_fault)
+    return dict(refreshed=written, refresh_failed=None)
 
 
 DOC01 = Scope(("doc01",), "{command} changes doc01")
@@ -629,11 +628,11 @@ async def run(args, root):
     dry_run = args.command == "forget" and args.dry_run
     command = FORGET_DRY_RUN if dry_run else COMMAND_TABLE[args.command]
     call = await (command.opens or opened)(args, root, command.scope)
-    refresh = await command.handler(call)
+    handled = await command.handler(call)
     if not command.snapshot:
-        return refresh
+        return handled
     result = await snapshot(call.publisher, root, args.query)
-    result.update(refresh)
+    result.update(handled)
     if command.after is not None:
         result.update(await command.after(call, result))
     (root / "glossary_result.json").write_text(

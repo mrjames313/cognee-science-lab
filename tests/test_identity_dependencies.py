@@ -684,6 +684,31 @@ async def test_any_refresh_failure_is_reported_by_class_and_message(
     assert len(await publisher.withholdings.rows()) == 2
 
 
+async def test_refresh_dependents_raises_its_own_failure_unchanged(
+    source_payload, monkeypatch
+):
+    """The refresh is refresh-dependents' own operation, so its failure
+    raises as itself, with its class and traceback, not as an IntentError
+    named after the class."""
+    from cognee_lab.identity.glossary_fixture import COMMAND_TABLE, Call
+
+    glossary = glossary_source(source_payload)
+    doc01 = citing(strip_corpus(source_payload))
+    publisher = await memory_publisher([row_of(glossary), row_of(doc01)])
+    await withhold_dependents(publisher, glossary, GLOSSARY, INSERTED, 2)
+    failure = OSError("disk full")
+
+    async def replace(_, description, *, expected_revision, fault_stage=None):
+        raise failure
+
+    monkeypatch.setattr(revisions, "replace_one", replace)
+    command = COMMAND_TABLE["refresh-dependents"]
+    with pytest.raises(OSError) as raised:
+        await command.handler(Call(publisher, None, None, {}, None, None))
+    assert raised.value is failure
+    assert len(await publisher.withholdings.rows()) == 2
+
+
 @pytest.mark.parametrize(
     "command", [["revise"], ["reconfirm", "--decision", "r01"], ["readd"]]
 )
