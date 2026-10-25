@@ -10,7 +10,7 @@ Read [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) first. It gives the curr
 - Never print a value from `.env`. A key name, an embedding model name or a dimension count is not a secret.
 - Do not run commands on, change or delete the reviewed roots under `outputs/stage6_*`. Make a new root for each new fixture.
 - The repository is public. Do not commit a secret or a value from `.env`.
-- A user auto-mode rule allows deletion under `outputs/`. The user also allows removing a branch's worktree and deleting the branch after the branch is merged into `main` (see "Land a change"). Ask the user before any other deletion.
+- A user auto-mode rule allows deletion under `outputs/`. The user also allows unlocking and removing a branch's worktree and deleting the branch after the branch is merged into `main` (see "Land a change"). Ask the user before any other deletion.
 
 ## Embedding profiles
 
@@ -37,7 +37,10 @@ Follow [.agents/playbooks/landing-on-main.md](.agents/playbooks/landing-on-main.
 3. Run the unit tests on the branch. At a checkpoint, also run `verify.py journey all`.
 4. Merge with `git merge --ff-only <branch>`. Do not open a pull request.
 5. Push `main` only when the user asks.
-6. After the merge, remove the branch's worktree with `git worktree remove <path>` and delete the branch with `git branch -d <branch>`. Do the same for a harness `worktree-agent-*` branch whose commits are on `main`. Never pass `--force` or `-D`. If either command refuses, or an agent still works in the worktree, ask the user.
+6. After the merge, remove the branch's worktree with `git worktree remove <path>` and delete the branch with `git branch -d <branch>`. Do the same for a harness `worktree-agent-*` branch whose commits are on `main`. Never pass `--force` or `-D`.
+   - The harness locks an agent's worktree with the reason `claude agent <name> (pid ...)`. Once that agent has finished and `git status` in the worktree is clean, run `git worktree unlock <path>` first. The user approved this on 2026-10-25: a merged worktree has nothing to keep.
+   - The main checkout may sit on another branch, so `git branch -d` can refuse a branch merged into `main` but not into HEAD. Run `git branch -u main <branch>` first.
+   - Ask the user if an agent still works in the worktree, if the worktree has uncommitted changes, if a lock has any other reason, or if a command still refuses.
 
 ## Update the docs after each checkpoint
 
