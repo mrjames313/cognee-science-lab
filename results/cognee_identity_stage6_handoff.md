@@ -8,7 +8,7 @@
 
 **Test configuration:** Ladybug, LanceDB and SQLite with shared physical storage. These providers do not define implementation dependencies.
 
-**Current status (2026-10-22):** The architecture review is complete. Bounded implementations cover parts of Stage-6 steps 1–4, including one general occurrence map for every text change. Step 4 remains partial. Standard entry-point integration and broader retrieval remain incomplete.
+**Current status (2026-10-25):** The architecture review is complete. Bounded implementations cover Stage-6 steps 1–4. The user declared step 4 / M3 complete on 2026-10-25; [the closing summary](#step-4--m3-closing-summary-2026-10-25) says where its remaining parts went. Step 5 / M4, standard entry-point integration and public retrieval, is next. It starts with a discussion session with the user.
 
 Start a new session with [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md). It records the delivered code baseline, verification limits and next task. Section 11 defines the implementation sequence. Section 12 records dated checkpoints.
 
@@ -550,7 +550,7 @@ Develop relevant tests alongside M0–M4. The complete inventory is not a prereq
 
 ## 11. Build order and unresolved engineering work
 
-The build order was accepted on 2026-10-17. Implementation now reaches a partial M3. These are implementation steps within Stage 6. They do not correspond to the roadmap's subsection numbers 6.1–6.6.
+The build order was accepted on 2026-10-17. Implementation completed M3 on 2026-10-25. These are implementation steps within Stage 6. They do not correspond to the roadmap's subsection numbers 6.1–6.6.
 
 Develop sequence tests with each step. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the delivered baseline and independently reviewed Mac results.
 
@@ -559,22 +559,26 @@ Develop sequence tests with each step. [SESSION_HANDOFF.md](../docs/SESSION_HAND
 | M0 / 1 | Runtime forms/schema, exact native chunk mapping and portable bookkeeping/capability checks exist. Tests cover only the initial backend profile. |
 | M1 / 2 | Captured custom Tasks publish a useful mention-anchored fact with original evidence. Explicit reconciliation works. Standard Cognify wiring and a registered public SearchType remain incomplete. |
 | M2 / 3 | Multi-source overlap, shared contributions, both withdrawal orders, singleton retention and unresolved mentions have fixtures. General exact-ID semantic conversion remains broader than the captured writer. |
-| M3 / 4 | Corrections, captured prefix/rechunk edits, partial removal, unresolved/resolved group retirement, captured additions/new-group publication, a captured split and combination, one general occurrence map and a captured mixed edit are implemented. The remaining areas appear below. |
-| M4 / 5 | Standard-entry-point wiring, consumed-store admission and broader scoped retrieval/delivery/offline diagnostics remain unimplemented. |
+| M3 / 4 | Complete (2026-10-25). Corrections, captured prefix/rechunk edits, partial removal, unresolved/resolved group retirement, captured additions/new-group publication, a captured split and combination, one general occurrence map, a captured mixed edit, changed interpretation and kind changes, forget and re-add, withholding of dependents, erasure with a cascade down chains of citations, and reviewer paths for edited Entities and removed records are implemented. The closing summary below says where the rest went. |
+| M4 / 5 | Standard-entry-point wiring, consumed-store admission and broader scoped retrieval/delivery/offline diagnostics remain unimplemented. Since 2026-10-25 step 5 also owns source-removal hooks, dataset Forget (T20), endpoint gaps during a rebuild and the outside-deletion deadlock. |
 | M5 / 6 | Seeded rules/model Describe and separate consistency/quality evaluation remain unimplemented. |
 | Checkpoint | Review R1–R6 evidence and G01–G18 transfer status before Stages 7–8. |
 
-### Step 4 / M3: remaining coverage
+### Step 4 / M3: closing summary, 2026-10-25
 
-The remaining areas are:
+On 2026-10-25 the user declared step 4 done, once the cleanups branch `stage6-cleanups`, `journey all` and the closing docs land. The remaining tracked follow-ups stay documented limits by the same decision. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md#cleanups-and-step-4-close-2026-10-25) has the cleanups, the real-embedding runs and the follow-up list.
 
-1. **Occurrence/group changes.** Representation-kind changes remain. Since 2026-10-21 one general occurrence map admits any mix of kept, removed, added and regrouped occurrences under the approved rules, with captured fixtures for removal, retirement, addition, split, combination and one mixed edit. These fixtures do not establish automatic matching.
-2. **Changed interpretation and semantic refresh.** Handle changed referents, definitions or applicability with coordinated saved decisions and regenerated facts/evidence. On 2026-10-22 the user decided that a changed decision retires the group and the reviewer declares a fresh group. Unchanged-text retargeting and captured same-binding edits do not establish general semantic refresh.
-3. **Dependencies.** Identify and reconsider sources that consumed changed documents, corpus fields or saved records. Support admitted span/record remapping. Current text edits reject known dependent sources. Positive dependencies alone do not identify new corpus opportunities.
-4. **Full source lifecycle.** Coordinate original removal, generated-source retirement/rebuild and authorized endpoint reconstruction. Preserve remaining owners. Distinguish missing reasoning inputs from missing reconstructible output. Identity withdrawal retains Data/descriptions and original facts, so it does not implement full source Forget.
-5. **Verification and recovery.** Extend revision/attempt, eligibility, ownership, index, evidence and retirement checks across these operations. Include incomplete/missing-plan diagnostics. General crash recovery is not a new prerequisite.
+The assistant and its subagents ran the evidence below on the user's Mac with loopback embeddings, except where a row says otherwise. Section 12 has each checkpoint.
 
-[SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the rules, the decisions, the proposed order and the next task. Group continuity alone does not authorize fact transfer.
+| Step-4 item | Checkpoints | Evidence | Where the rest went |
+|---|---|---|---|
+| 1. Occurrence and group changes | Group split and combination, general map A and B (2026-10-21), C (2026-10-22); kind changes under readers in K (2026-10-24) | `support/occurrence_check.py` agrees with an independent oracle on 540,045 small worlds, and its mutants break each admission rule; journeys O1 to O8, G1 to G4, I1 to I4, K1 to K9 | Automatic grouping and matching go to step 6 (Describe). |
+| 2. Changed interpretation and semantic refresh | D and E (2026-10-22); the user's kind-change decision and K (2026-10-24) | Journeys R1, R2, E1 to E4, I1 to I4, K1 to K9; occurrence check with mutants | Facts as saved records go to step 6, with the model that produces semantic output. General semantic refresh needs model Describe (step 6). |
+| 3. Dependencies | H, I, J1 (2026-10-23); J2, K (2026-10-24) | `support/chain_check.py` with its cascade half: 2,224,128 withholding worlds, 814,500 key-reuse cases and 34,752 cascade worlds, with mutants; journeys D1 to D16 | Facts as saved records and Describe-driven corpus matching (new-corpus opportunity selection) go to step 6. The outside-deletion deadlock goes to step 5 S2. |
+| 4. Full source lifecycle | F (2026-10-22); I and the re-add follow-ups (2026-10-23); J2 (2026-10-24); the single-source fix (2026-10-25) | Journeys F1 to F21; the user's real-embedding run M2 on their Mac, 2026-10-25, a cascade forget with crash and recovery, 16 PASS and 0 FAIL | Source-removal hooks, dataset Forget (T20) and endpoint gaps during a generated-source rebuild go to step 5. |
+| 5. Verification and recovery | Each checkpoint, with the ledger refactor (2026-10-22) | `support/ledger_check.py` (`PINNED` at 9205 nodes and 9050 sequences at depth 5 since J2), the occurrence check, the chain check and the cascade check, each with mutants that prove it can fail; injected-failure journeys per fault stage | Closed in practice by the checks with mutants. A general crash-recovery framework stays out of scope. |
+
+The user's real-embedding run M1 (2026-10-25, a glossary edit with two re-confirms, 22 PASS and 0 FAIL) adds env-profile evidence to items 2 and 3.
 
 ### Step 5 / M4: integration and retrieval
 
@@ -799,3 +803,20 @@ The fixture reuses whole-document replacement, the common publisher, eligibility
 The [addition guide](../docs/stage6_identity_occurrence_addition.md) and [session handoff](../docs/SESSION_HANDOFF.md) record current execution evidence. Native addition assertions used a host-only launcher after ordinary Linux CLI output exposed an interpreter-teardown timeout. The application has no forced-exit workaround. Those results do not establish clean ordinary Linux teardown.
 
 The user independently reproduced ordinary Mac addition, reopened retrieval, healthy reconcile and `replace_published` failure/recovery. Mac `text_chunks` failure, a later prefix edit and withdrawal after addition remain unreviewed. These evidence boundaries remain separate from the selected contract and broader scenario inventory.
+
+### Later checkpoints, 2026-10-21 to 2026-10-25
+
+These entries are brief. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) has each checkpoint's rules, decisions and full evidence, and each links its fixture guide. Unless an entry says otherwise, the assistant and its subagents ran the evidence on the user's Mac with loopback embeddings.
+
+- **Group split and combination, 2026-10-21.** A captured split of g01 into fresh g04 and g05, and their combination into fresh g06, with facts generated again from the fresh groups. The review added the fresh-ID rule: a fresh group's UUID includes the new revision. `journey all` gave 695 PASS and 0 FAIL in 34 runs.
+- **General occurrence map, Checkpoints A and B, 2026-10-21.** The user approved one map from old occurrences to new places, with one set of rules, to replace three admission modes. A proved the rules against an independent oracle on 540,045 small worlds. B switched every text change to `admit` and deleted the old modes. `journey all` gave 695 PASS and 0 FAIL in 34 runs.
+- **Checkpoint C, 2026-10-22.** A captured mixed edit keeps, removes and adds occurrences of g01 and retires g02, with no admission change.
+- **Checkpoint D, 2026-10-22.** The unchanged-text correction goes through the same admission, by way of `admit_replacement`, and the recipe and document-variant rules were relaxed by user decision. `journey all` gave 736 PASS and 0 FAIL in 37 runs.
+- **Checkpoint E, 2026-10-22.** Four captured fixtures: a changed interpretation to a new Entity and to unresolved, and doc01's HC variant turned into a local mention and back. `journey all` gave 965 PASS and 0 FAIL in 49 runs.
+- **Checkpoint F, 2026-10-22.** `forget` removes a source nothing depends on through Cognee's native document deletion, and `readd` publishes it again with new IDs. `journey all` gave 1159 PASS and 0 FAIL in 58 runs. A ledger refactor with no behaviour change followed and gave the same totals.
+- **Checkpoint H, dependencies, 2026-10-23.** A text edit of a consumed document withholds only the dependents' decisions that read what changed, until a refresh or a reviewer answers them. `journey all` gave 1287 PASS and 0 FAIL in 68 runs.
+- **Checkpoint I, erasure, 2026-10-23.** `forget` erases any source to a tombstone of identifiers and, after a confirmed dry run, removes the dependents' decisions that cite it. The re-add follow-ups F1 and F2 landed the same day. `journey all` gave 1439 PASS and 0 FAIL in 80 runs.
+- **Checkpoint J1, chains, 2026-10-23.** A decision may cite another source's decision as a saved record, and withholding spreads down the chain. `journey all` gave 1519 PASS and 0 FAIL in 86 runs.
+- **Checkpoint J2, cascade, 2026-10-24.** A forget removes every level of the chain under one dry run, one token and one confirmation, and resumes in order after a crash. `journey all` gave 1576 PASS and 0 FAIL in 91 runs.
+- **Checkpoint K, readers of a changed or retired Entity or record, 2026-10-24.** `edit-entity`, reviewer paths by input kind, `replace-citation`, the refusals `record_key_reused` and `mention_input`, and kind changes under readers. `journey all` gave 1658 PASS and 0 FAIL in 101 runs.
+- **Cleanups and step-4 close, 2026-10-25.** Branch `stage6-cleanups` closed the small tracked follow-ups with no change to admission or retrieval, and fixed `forget`, `readd` and `withdraw` on a single-source root (journey F21). An outside-deletion probe found a review deadlock, deferred to step 5 S2 by user decision. The user ran two fixtures with the env embedding profile on their Mac: M1 gave 22 PASS and M2 16 PASS, each with 0 FAIL. The user declared step 4 complete. See [the closing summary](#step-4--m3-closing-summary-2026-10-25).

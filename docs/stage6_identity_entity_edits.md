@@ -49,7 +49,7 @@ No saved schema changed. `RecordStore`, `TRANSITIONS`, the ledger model and the 
 - **`validation.selected_digest(node, item)`** is the one digest of a corpus input's selected fields. Live validation and the corpus re-confirm both use it.
 - **`records.names_record(item, source, key)`** is the one test of whether a citation names a record key of a source. `RemovedRecord.reads` builds on it and `chains.check_record_key_reuse` uses it.
 
-Nothing outside `records.REGISTRY` names a record type's fields in the new code; the re-confirm (`revisions.reconfirmed`, on `main` before this checkpoint) still does. One flow answers the three review commands (`review.review`): the gate (`review_gate`, with `refuse_command` deciding whether the command answers the decision's inputs), what the reviewer reads now, then the intended revision (`intended_revision`).
+Nothing outside `records.REGISTRY` names a record type's fields in the new code; the re-confirm (`revisions.reconfirmed`, on `main` before this checkpoint) still did. Since 2026-10-25 it writes through `records.apply_reconfirm`. `review.replaced_variant` still writes `variant_assignments` itself (a tracked follow-up). One flow answers the three review commands (`review.review`): the gate (`review_gate`, with `refuse_command` deciding whether the command answers the decision's inputs), what the reviewer reads now, then the intended revision (`intended_revision`).
 
 ## The edit
 
@@ -165,7 +165,23 @@ Each is reversible.
 - Facts as saved records (decision 7) and the non-identity example (decision 8).
 - An edit of `name` on a Cognee-extracted Entity. `cognify` cannot rewrite a lab-declared Entity, whose ID derivation differs from Cognee's; it could rewrite only an extracted Entity that a decision cites, which no fixture does. Such a rewrite of a selected field would be an edit and withhold.
 - A successor record, a remap analogue for Entity edits and scoped variants.
-- A journey for a decision withheld by a removed corpus node or glossary text. The lab's own commands cannot remove one under a reader (a sole-owned Entity under a reader is refused and a mention reader is refused), so only unit tests drive the reviewer path (fix round 1).
+- A journey for a decision withheld by a removed corpus node or glossary text. The lab's own commands cannot remove one under a reader (a sole-owned Entity under a reader is refused and a mention reader is refused), so only unit tests drive the reviewer path (fix round 1). See [Outside deletion, probed 2026-10-25](#outside-deletion-probed-2026-10-25) for why the journey is deferred to step 5.
+
+## Outside deletion, probed 2026-10-25
+
+The step-4 cleanups asked for a stand-in that deletes the Helios controller Entity through Cognee's own graph API, writing no ledger row, the way `edit-entity` edits it. A journey D17 would then answer r01 and v01. The brief said to prototype first. The assistant's subagent ran the probe on the user's Mac on 2026-10-25 with loopback embeddings, in `outputs/verify/20261025T144616Z-item4-delete-probe/` in the cleanups worktree.
+
+- The delete withholds r01 and v01 (`input_removed`) and, down the chain, c01 and c02 (`upstream_withheld`). `reconfirm` is refused, and retrieval serves 0 facts.
+- `replace-decision` on r01 and on v01 are both refused `missing_reasoning_input`, because the other withheld decision still cites `existing_A`. Neither can be answered first.
+- `graph.delete_node` removed the node and its edges but left its `Entity_name` vector point.
+
+The user decided on 2026-10-25:
+
+1. A withheld decision may keep citing a deleted Entity while a neighbouring decision is replaced (relax `admission.check_corpus_inputs_exist` for citers already withheld).
+2. A republish may not recreate an Entity deleted outside the lab. A replacement picks a new target or leaves the mention unresolved.
+3. Step 4 records the deadlock as a documented limit. The fix, journey D17 and the orphaned vector point go to step 5 S2 (removal).
+
+No stand-in was committed. The glossary text removal was left out, because only `forget` removes the glossary.
 
 ## Evidence
 
@@ -217,4 +233,4 @@ Run by the assistant (a subagent) on the user's Mac with loopback embeddings, on
 - `uv run python support/ledger_check.py`: PASS, verified within bound at depth 5, `PINNED` unchanged at 9205 nodes and 9050 sequences. `--mutants`: PASS. `RecordStore` is unchanged. The erasure's removal revision now drops recipes through `erasure_rules.drop_unnamed_recipes`, with the same rule as before.
 - Verify journeys D1 to D16, E1 to E4, F1 to F20, G1 to G4 and K1 to K9: 70 runs, 1053 PASS, 0 FAIL (D 235 in 20 runs, E 125 in 7, F 420 in 27, G 109 in 4, K 164 in 12). `journey all` was not run.
 - `uv run pytest -q -m integration` on the native files for dependencies, chains, forget, erasure retry, kind change and the shared native file: 57 passed, 1 deselected, in 1443 s.
-- Still open, tracked outside K: a command table for `glossary_fixture.run` (B8), and `revisions.reconfirmed` still writes resolution and group fields outside `records.py`.
+- Still open, tracked outside K: a command table for `glossary_fixture.run` (B8), and `revisions.reconfirmed` still writes resolution and group fields outside `records.py`. Branch `stage6-cleanups` closed both on 2026-10-25.
