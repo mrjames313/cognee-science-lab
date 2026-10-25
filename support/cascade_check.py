@@ -42,6 +42,11 @@ with s0 forgotten and every other source ok, blocked, drifted or reconciled
   written, every new citation of a record that the fence, the record
   checks and the cycle check admit leaves the cascade's removals inside
   the ones the confirmed token covers.
+- No stale citation. Once the cascade finishes, with no retirement or
+  after any withdrawal the fence allows while a removal is left to write,
+  no live source cites a record the forget took away or a removal dropped
+  or changed, by the fingerprint it pins. The removed records come from
+  the descriptions before and after, not from `cascade`.
 
 The code under test is erasure.cascade, erasure.remaining, the token,
 erasure.ready, erasure_rules.bound_removals and erasure_of through
@@ -63,6 +68,7 @@ from cascade_worlds import (
     FORGOTTEN,
     cascade_oracle,
     cascade_rows,
+    described,
     new_citation,
     pending_row,
     readded,
@@ -75,6 +81,7 @@ from cognee_lab.identity import (
     records,
 )
 from cognee_lab.identity.admission import admit, identity_map
+from cognee_lab.identity.models import SavedRecordInput
 from cognee_lab.identity.chains import (
     check_citation_cycles,
     check_record_citations,
@@ -378,6 +385,78 @@ def rejected_after_readd(rows, planned):
     return failures
 
 
+def fingerprints(description) -> set:
+    """(source, key, digest) of each record a description holds."""
+    return {
+        (
+            str(description.identity_data_id),
+            key,
+            records.record_digest(
+                description, records.record_type_of(description, key), key
+            ),
+        )
+        for key in records.record_keys(description)
+    }
+
+
+def removed_since(start, rows) -> set:
+    """(source, key, digest) of each record of `start`, the descriptions
+    before the forget, that `rows` no longer hold with that digest: every
+    record of the forgotten source, and each record a removal dropped or
+    changed. A withdrawn source keeps its description, so its records do
+    not count as removed."""
+    now = set().union(*(fingerprints(r.description) for r in rows if r.description))
+    return set().union(*(fingerprints(d) for d in start)) - now
+
+
+def stale_citations(start, rows) -> list:
+    """(source, record, cited) for each citation a live source makes of a
+    record removed since `start`, by the digest it pins."""
+    removed = removed_since(start, rows)
+    found = []
+    for row in rows:
+        if row.description is None or row.is_retired:
+            continue
+        for key, inputs in records.record_inputs(row.description).items():
+            for ref in sorted(inputs):
+                item = row.description.inputs[ref]
+                if not isinstance(item, SavedRecordInput):
+                    continue
+                cited = (str(item.identity_data_id), item.record_id)
+                if (*cited, item.content_sha256) in removed:
+                    found.append((row.source, key, cited))
+    return found
+
+
+def finished(rows, ids):
+    """`rows` once every removal the cascade lets write is written, in its
+    order, or None when a removal still waits."""
+    while True:
+        writable, _ = erasure.ready(erasure.cascade(rows, ids, ()))
+        if not writable:
+            break
+        rows = written(rows, writable[0])
+    return None if erasure.cascade(rows, ids, ()) else rows
+
+
+def stale_after_retirements(start, rows, ids):
+    """Disagreements when each source the fence lets withdraw now does, and
+    the cascade then finishes: a live source still cites a removed
+    record."""
+    failures = []
+    for row in rows:
+        if row.description is None or row.is_retired:
+            continue
+        try:
+            erasure.refuse_unfinished_cascade(row.description, rows)
+        except IntentError:
+            continue
+        done = finished(withdrawn(rows, {row.source}), ids)
+        if done is not None and (stale := stale_citations(start, done)):
+            failures.append(("stale after retirement", row.source, stale[0]))
+    return failures
+
+
 def check_world(graph, states, tokens, *, shrink):
     """Every disagreement in one world, as (check, detail)."""
     failures = []
@@ -393,6 +472,9 @@ def check_world(graph, states, tokens, *, shrink):
     if tokens.setdefault(found.token, signature) != signature:
         failures.append(("token", found.token))
     planned = {s.row.source: s for s in erasure.cascade(rows, ids, ())}
+    start = [described(FORGOTTEN, graph[FORGOTTEN])] + [
+        r.description for r in rows if r.description is not None
+    ]
     failures += misdated(rows, planned.values())
     for step in planned.values():
         if step.level > 1 and not erasure.blocked(step.row):
@@ -431,6 +513,7 @@ def check_world(graph, states, tokens, *, shrink):
         writable, _ = erasure.ready(steps)
         if not writable:
             break
+        failures += stale_after_retirements(start, rows, ids)
         step = writable[0]
         failures += retired_upstream(rows, step, ids, tomb)
         failures += rejected_after_upstream_retired(rows, step)
@@ -444,6 +527,7 @@ def check_world(graph, states, tokens, *, shrink):
         failures.append(("waiting", left))
     if not left:
         failures += rejected_after_readd(rows, planned.values())
+        failures += [("stale citation", *c) for c in stale_citations(start, rows)]
     return failures
 
 
@@ -583,6 +667,24 @@ def bind_on_retry(old, source, erasures, **options):
     return _erasure_of(old, source, erasures)
 
 
+def skip_citers_of_withdrawn(rows, ids, removed, token=None):
+    """A dependent that cites a withdrawn source leaves the cascade, though
+    it still cites a record the forget removed."""
+    withdrawn_ids = {r.source for r in rows if r.state == "withdrawn"}
+
+    def cites_withdrawn(description):
+        return any(
+            isinstance(i, SavedRecordInput) and str(i.identity_data_id) in withdrawn_ids
+            for i in description.inputs.values()
+        )
+
+    return tuple(
+        s
+        for s in _cascade(rows, ids, removed, token)
+        if not cites_withdrawn(s.row.description)
+    )
+
+
 def served_or_before(chain, erasures, served, saved):
     """Every step of a retry chain may list the revision before the served
     one, also the step new in this begin."""
@@ -627,6 +729,7 @@ MUTANTS = {
     "bind_every_step": (bind_every_step, (erasure_rules, "check_retry_chain")),
     "bind_on_retry": (bind_on_retry, (erasure_rules, "erasure_of")),
     "forget_only_live": (forget_only_live, (erasure_rules, "erasure_of")),
+    "skip_citers_of_withdrawn": (skip_citers_of_withdrawn, (erasure, "cascade")),
 }
 
 
