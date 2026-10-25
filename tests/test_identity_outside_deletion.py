@@ -76,6 +76,38 @@ def other_reader(payload):
     return source_of(other)
 
 
+def reader_only(payload):
+    """Another served source whose r01, left unresolved, cites Helios as a
+    corpus input; it declares no recipe of Helios."""
+    reader = json.loads(json.dumps(payload))
+    reader["identity_data_id"] = str(uuid4())
+    reader["inputs"]["doc01"]["data_id"] = str(uuid4())
+    reader["mention_resolutions"]["r01"] = dict(
+        group_ref="g01",
+        input_refs=["doc01", "existing_A"],
+        producer_ref=reader["mention_resolutions"]["r01"]["producer_ref"],
+        status="unresolved",
+    )
+    del reader["variant_assignments"]["v01"]
+    del reader["entity_constructions"][str(HELIOS)]
+    return source_of(reader)
+
+
+def forgotten_row(source, served, removed=()):
+    """The row a forget left: `served` says whether the source was served
+    when it was forgotten, as the forget's plan records it."""
+    tombstone = Tombstone.of(source, forgotten_at="now", removed_entity_ids=removed)
+    return replace(
+        row_of(
+            source,
+            state="forgotten",
+            plan=dict(operation="identity_forget", served=served),
+        ),
+        description=None,
+        tombstone=tombstone,
+    )
+
+
 async def test_an_absent_entity_a_served_source_names_is_deleted_outside(
     source_payload,
 ):
@@ -89,13 +121,11 @@ async def test_an_entity_a_forget_removed_is_not_deleted_outside(source_payload)
     """A forget, and a forget whose dependents are still unrevised: the
     dependent still cites the Entity its tombstone lists as removed."""
     forgotten = source_of(source_payload)
-    tombstone = Tombstone.of(
-        forgotten, forgotten_at="now", removed_entity_ids=[HELIOS]
-    )
+    tombstone = Tombstone.of(forgotten, forgotten_at="now", removed_entity_ids=[HELIOS])
     gone = replace(
         row_of(forgotten, state="forgotten"), description=None, tombstone=tombstone
     )
-    reader = other_reader(source_payload)
+    reader = reader_only(source_payload)
     rows = [gone, row_of(reader)]
     assert await deleted_outside(Graph(HELIOS), rows, reader, reader) == frozenset()
 
@@ -104,7 +134,7 @@ async def test_an_entity_a_withdrawn_sole_owner_declared_is_not_deleted_outside(
     source_payload,
 ):
     owner = source_of(source_payload)
-    reader = other_reader(source_payload)
+    reader = reader_only(source_payload)
     rows = [row_of(owner, state="withdrawn"), row_of(reader)]
     assert await deleted_outside(Graph(HELIOS), rows, reader, reader) == frozenset()
 
@@ -204,11 +234,11 @@ def test_edges_to_an_entity_left_absent_are_not_written(source_payload):
 
 
 async def test_a_readd_naming_an_entity_deleted_outside_is_refused(source_payload):
+    """Helios was deleted outside the lab while its source was served, then
+    the source was forgotten."""
     forgotten = source_of(source_payload)
-    tombstone = Tombstone.of(forgotten, forgotten_at="now")
-    gone = replace(
-        row_of(forgotten, state="forgotten"), description=None, tombstone=tombstone
-    )
+    gone = forgotten_row(forgotten, served=True)
+    tombstone = gone.tombstone
     with pytest.raises(IntentError) as refused:
         await check_readd(Graph(HELIOS), tombstone, forgotten, [gone])
     assert refused.value.code == "entity_recreation"
@@ -218,3 +248,47 @@ async def test_a_readd_naming_an_entity_deleted_outside_is_refused(source_payloa
     )
     other = replace(gone, source=str(uuid4()), tombstone=removed)
     await check_readd(Graph(HELIOS), tombstone, forgotten, [gone, other])
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="lab_removed counts a co-owner's or a forgotten owner's recipes wrongly",
+)
+async def test_an_entity_a_served_source_builds_is_deleted_outside_after_a_co_owner_left(
+    source_payload,
+):
+    """doc03, which declares doc01's Helios recipe too, is withdrawn; then
+    Helios is deleted outside the lab. doc01 still builds it."""
+    doc01 = source_of(source_payload)
+    co_owner = other_reader(source_payload)
+    rows = [row_of(doc01), row_of(co_owner, state="withdrawn")]
+    assert await deleted_outside(Graph(HELIOS), rows, doc01, doc01) == {HELIOS}
+    failed = replace(rows[1], state="failed", verified_revision=0)
+    assert await deleted_outside(Graph(HELIOS), [rows[0], failed], doc01, doc01) == {
+        HELIOS
+    }
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="lab_removed counts a co-owner's or a forgotten owner's recipes wrongly",
+)
+async def test_an_entity_a_withdrawal_removed_stays_lab_removed_after_the_forget(
+    source_payload,
+):
+    """The owner, the only one to declare Helios, is withdrawn, which
+    removes Helios, then forgotten: the forget finds Helios gone and does
+    not list it as removed. Its reader still cites Helios."""
+    owner = source_of(source_payload)
+    reader = reader_only(source_payload)
+    rows = [forgotten_row(owner, served=False), row_of(reader)]
+    assert await deleted_outside(Graph(HELIOS), rows, reader, reader) == frozenset()
+    with pytest.raises(IntentError) as refused:
+        await check_corpus_inputs_exist(
+            Graph(HELIOS),
+            reader,
+            reader,
+            await deleted_outside(Graph(HELIOS), rows, reader, reader),
+        )
+    assert refused.value.code == "missing_reasoning_input"
+    await check_readd(Graph(HELIOS), rows[0].tombstone, owner, rows)

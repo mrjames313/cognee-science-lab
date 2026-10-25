@@ -125,3 +125,32 @@ def test_native_a_readd_naming_a_deleted_entity_is_refused(tmp_path):
         "A publication does not recreate an Entity deleted outside the lab: " + HELIOS
     )
     assert helios_absent(root)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="lab_removed counts a co-owner's or a forgotten owner's recipes wrongly",
+)
+@pytest.mark.integration
+def test_native_a_withdrawn_co_owner_leaves_the_entity_deleted_outside(tmp_path):
+    """doc03 declares doc01's Helios recipe too. Once doc03 is withdrawn,
+    Helios is doc01's alone, so its delete outside the lab is answered as
+    before: r01 is replaced and Helios stays absent."""
+    root = tmp_path / "co-owner"
+    command(root, "glossary-fixture", "--chain")
+    command(root, "withdraw", "--source", "doc03")
+    command(root, "edit-entity", "--case", "delete")
+    first = output_of(
+        command(
+            root,
+            "replace-decision",
+            "--source",
+            "doc01",
+            "--decision",
+            "r01",
+            "--expected-revision",
+            "1",
+        )
+    )
+    assert first["sources"]["doc01"]["decisions"]["r01"]["status"] == "unresolved"
+    assert helios_absent(root)
