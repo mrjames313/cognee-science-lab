@@ -4,7 +4,7 @@ revision, and the re-add of a forgotten source."""
 import json
 from dataclasses import dataclass
 
-from .models import Accepted, ChunkInput, IdentitySource, SourceTextInput
+from .models import Accepted, IdentitySource, SourceTextInput
 from .chains import (
     check_citation_cycles,
     check_citation_scope,
