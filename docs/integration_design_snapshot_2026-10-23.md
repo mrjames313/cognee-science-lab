@@ -478,12 +478,15 @@ CLI and environment code (`F`) and scenario fixtures (`S.first`, `S.change`) are
 ## 15. TODO
 
 1. **Pressure-test the provenance observation** (user, 2026-10-23). The method is in section 14. A large share of identity's integration work seems to go into managing provenance and making the right updates when the underlying source documents change. Check that observation against the code: measure how much of identity's code, tests and checkpoints is about provenance and change response, as opposed to judgment, publishing or retrieval. Then look for common approaches, or even a framework, that the next integrations could reuse. Candidates already visible are input fingerprints, continuity maps, per-decision withholding, forward recovery from saved plans and the owner choice between borrowed and generated sources.
-2. **Compare with Cognee's default provenance** (user, 2026-10-23). List what Cognee records and does by default: source references and the deletion that follows them, `provenance_edge_evidence`, pipeline status, content-derived chunk IDs, incremental `update`'s chunk diff, and Forget's cascade. For each identity provenance mechanism, say whether Cognee already covers it, covers it partly, or does not cover it, and why identity needed its own.
+2. **Compare with Cognee's default provenance** (user, 2026-10-23). List what Cognee records and does by default: source references and the deletion that follows them, `provenance_edge_evidence`, pipeline status, content-derived chunk IDs, incremental `update`'s chunk diff, and Forget's cascade. For each identity provenance mechanism, say whether Cognee already covers it, covers it partly, or does not cover it, and why identity needed its own. First pass done on 2026-10-25, in sections 16 and 17. Not done yet: the Cognee survey's citations as a table of their own.
 3. Build the mapping from each activity and procedure to the identity code, tests and journeys, as the evidence column for the rewrite. Do it after the current code work lands.
 4. Write up the per-column trade-offs in full.
 5. Work through the hierarchical wiki in more depth.
 6. Dig into the two-description-copies case study (section 12).
 7. Revise the playbook, the roadmap pointer and the handoff to the new framing, once the user approves edits to them.
+8. Label the modules added since `012d8a6` in `scripts/purpose_census.py`, before running the census again. The script reports these as unclassified: `chain_fixture`, `chain_kind_change`, `chains`, `decisions`, `dependency`, `digests`, `entity_edit`, `erasure`, `erasure_rules`, `records` and `review`.
+9. Run the overwrite probe in section 17. It tests whether Cognee replaces a node's properties when a second document extracts the same Entity.
+10. Bring sections 5, 6 and 12 up to date with `main`. They describe the code at `012d8a6`.
 
 ## 16. Which operations rest on Cognee, identity or new code (2026-10-23)
 
@@ -540,3 +543,114 @@ Most of these are generic in shape but identity-specific in code. Continuity is 
 | Store setup check | In-graph refs exist only if the graph was empty at its first write (`markers.py:48-73`). | all three |
 
 The shared layer would be the second table, generalized, sitting on the first. The new functions are of two kinds. Some are Cognee gaps that every integration hits: invalidation, orphaned vectors and the setup check. These belong in a thin Cognee adapter, or upstream. The rest are domain logic for units or the wiki and stay out of the shared layer (inferred). The open question is continuity. It may generalize to a map plus a registry of retired IDs with rules per integration, or it may stay per-integration code (guess, to be tested against the wiki).
+
+## 17. Ownership, dependency and overlap with Cognee (2026-10-25)
+
+The assistant wrote this section on the user's Mac. It draws on the discussion of 2026-10-23 to 2026-10-25 and on `main` at `dc538d0`, which adds Checkpoints I (erasure), J1 (chains), J2 (cascade), K (readers of a changed Entity or record) and the step-4 close. The step-5 framing, its probes E1 to E5 and the rebuild evidence are in local, untracked notes under `.audit/` (`step5-framing.md`, `step5-probes-findings.md`, `step5-patch-rebuild-evidence.md`). Labels follow section 2. "Read" means the assistant read the code this session, "measured" means a run produced it, and "inferred" and "guess" keep their usual meaning.
+
+### 17.1 Cognee's provenance, in brief
+
+Cognee treats the graph as a cache derived from documents. Its provenance answers one question: which Data items and chunks own each graph object. It uses the answer to delete correctly and to rebuild cheaply. Keeping the graph aligned means recomputing from the source, not revising reasoning.
+
+- **Features.** Every node and edge carries source refs. Deletion follows the last owner, keeps the other refs on survivors, and converges on a retry (`provenance_delete_planner.py:96-172`). Chunk IDs come from content, so incremental `update` re-extracts only the changed regions. Cognify rollback undoes a failed run by removing its refs. Edge evidence records which data item, run and chunk asserted each edge. Read-time references, when enabled, trace an answer to the chunks used as context.
+- **Unused machinery.** The `ProvenanceEntry` ledger has `derived_from`, versions and a checksum chain. It is off by default, and no delete or update reads it.
+- **Gaps.** Nothing records what a decision read, and nothing checks currency at read time. In-graph refs exist only if the graph was empty at its first write (`markers.py:48-73`). The add-time hash is MD5, `Data.id` is random, and Entity IDs come from normalized names, so Entities from different documents merge. Incremental update falls back to a full rebuild for a custom graph model, prompt or chunker, and it never touches edge evidence. Forget is not transactional across stores and can leave Triplet and EdgeType vectors. Cached answers are invalidated on delete only. `include_references` is off by default. Without access control, a dataset argument does not confine a search (`search.py:454-470`).
+- **Ownership is shared, content is last writer (read).** The Ladybug adapter merges a node by ID and replaces its whole `properties` blob on a match (`ladybug/adapter.py:1207-1220`). It merges an edge on source, target and `relationship_name` and replaces its properties too (`adapter.py:1030-1040`). Refs are combined as a set union (`_provenance_fold_clause`, `adapter.py:89-106`). So when a second document extracts the same Entity, its description replaces the first one's. If the second document is then deleted, the node survives through the first document's ref but keeps the deleted document's description (inferred from the merge clause and `uuid5("Entity:{name}")`, not run). This is Cognee's own loss-of-support gap.
+
+### 17.2 Ownership and dependency
+
+The two answer different questions.
+
+- **Ownership** decides whether an object should exist. An object lives while one owner remains, and losing the last owner deletes it. Cognee implements this.
+- **Dependency** decides whether a decision is still right. A decision is suspect when an input it read changes. The response is to withhold, refresh or remove the decision, never to let it pass silently. Identity implements this.
+
+One input can be both. The test is what its change should do. An input is an owner if removing it should remove the object. It is a dependency if changing it should send the object to review.
+
+The distinction blurs in two places.
+
+1. **At the chunk.** Cognee records "this chunk's extraction produced it" as ownership (`chunk_ownership.py:1-27`), and a chunk's ID comes from its text. An edited chunk is a new chunk, so a content change arrives as a lost owner, and incremental update deletes what the chunk owned. A dependency response, remap or refresh, might have kept it. Identity's text changes hit the same problem, which is part of what continuity costs (inferred from section 14's labels).
+2. **At erasure.** Removing an input that a decision depends on forces a choice between withholding the decision and removing it. The user decided on 2026-10-23 that an erasure removes dependents and a text edit withholds them (handoff, "Erasure, decided and built", decisions 4 and 9). So the response to a dependency follows the intent of the change, not the mechanism. An edit means "this may still be right, review it". An erasure means "this must not be relied on".
+
+Keep ownership and dependency as separate records even when they name the same input. Merging them is what makes Cognee's update delete objects.
+
+### 17.3 Eligibility is three conditions
+
+Eligibility means "may this be served now". Identity's retrieval probe serves a decision only when three conditions hold.
+
+1. **The write finished and was read back.** The row is `current` and its revision equals its verified revision (`PublicationRow` in `storage.py`, used by `retrieve.py`). A pending, failed, withdrawn or forgotten row is not served.
+2. **Nothing holds it.** The withholding table, unfinished edits and unfinished cited records can hold a decision (`withholding.py`).
+3. **Its inputs are current.** Live validation recomputes the digests of each decision's inputs at read time, and since J1 it also follows chains of cited records (`chains.live_pass`).
+
+Only the third is a currency check. Cognee has none of the three.
+
+### 17.4 What a dependency record lets you conclude
+
+A dependency record lists, for each decision, the inputs it read, a digest or fingerprint of each, and the producer. It supports five conclusions.
+
+1. **Staleness.** An input's digest changed, so the decision may be wrong.
+2. **Impact.** Given a changed input, which decisions read it.
+3. **Loss of support.** Given an erased input, which surviving decisions leaned on it.
+4. **Justification.** Which specific inputs support a decision, finer than "this chunk was used as context".
+5. **Reproduction.** Rerun the producer on the current inputs.
+
+| Operation | Conclusions it needs | Notes |
+|---|---|---|
+| Ingest of a new document | none | Ingest writes dependency records. A decision that claims completeness over a set, such as "all mentions" or "a summary of all subsections", needs a separate scope record, because a new member makes it incomplete rather than stale. The wiki's summaries are like this. Whether identity has such decisions is a guess. |
+| Edit of a document | 1, 2, 5 | The main use. Cognee's delete-and-rebuild is enough only when the edited text alone owns every derived object. |
+| Deletion | 3 | Ownership removes objects whose last owner went. Dependency finds survivors that relied on the deleted input. |
+| Recall | 1, 4 | Edit processing would make the read check redundant only if every change went through the integration atomically. Cognee's stores are not transactional, and Cognee writes the graph on its own. |
+
+Since Checkpoint I one predicate answers the impact question for three callers: a text edit's withholding, forget's erasure and the retiring-source fence (`dependency.py`). Since J1 one registry says what a citation of each record type pins (`records.py`). This is the "record once, conclude many ways" shape in code (read).
+
+### 17.5 Forward recovery
+
+An operation across the relational, graph and vector stores has no transaction, and some steps are destructive. Undo would need the deleted data. So identity saves the plan before the first destructive write, as a `pending` row with the fields recovery needs (`REQUIRED_PLANS`). After a crash, `reconcile` reads the plan and completes the remaining idempotent steps, reaching the planned end state wherever it stopped. While it runs, the row fails eligibility condition 1, so readers never see the half-finished state. Cognee's cognify rollback goes the other way. It removes what a failed run added, which works because a cognify run mostly adds.
+
+Checkpoint I added one refinement (playbook lesson G24). A recovery that supersedes a failed attempt must also retire what the failed attempt wrote, read from the attempt's own plan, not only from the record that replaced it. Three review rounds found the gap.
+
+### 17.6 What Checkpoints I to K and the step-5 probes added
+
+Each item names the code or run it rests on.
+
+1. **Pin content, not versions.** A citation of another source's decision pins a SHA-256 fingerprint of the decision's reviewed fields, not its revision (`records.py`). A re-confirm keeps the fingerprint and releases dependents. A revision pin would have held them on every upstream revision. The fingerprint also names a mention UUID that is never reused, so a returning key cannot pass as its predecessor (J1, read).
+2. **Derive, don't store.** Withholding down a chain is computed at each read from the ledger rows, the withholding table and live validation, with no rows written (`chains.py`). The erasure cascade is rebuilt from the saved rows to a fixpoint on every read, with no progress cursor (`erasure.cascade`). Checkpoints I to K added no table (four `__tablename__` entries on `main`, measured by grep). The forget tombstone lives in the existing `description` column.
+3. **Change intent decides the dependency response.** An edit withholds dependents until they are re-confirmed or refreshed. An erasure removes them, as a removal revision of each dependent under a producer named for the forget, after a dry run whose token binds the impact set (`erasure.py`, `erasure_rules.py`). A tombstone keeps identifiers and drops content, so a forgotten UUID never returns.
+4. **Outside writers are real, and read time catches them.** `edit-entity` changes a native Entity through Cognee's `graph.update_node`, with no ledger row. Live validation digests the selected fields of each corpus input and withholds the readers at the next read, and a revert releases them (`entity_edit.py`, Checkpoint K journeys, measured). A delete through `graph.delete_node` withholds the readers too. It also exposed a review deadlock between two withheld decisions that cite the deleted Entity, and it left the Entity's `Entity_name` vector point behind (probe on 2026-10-25, measured). Both go to step 5 S2.
+5. **Depend on reviewed records, not internal IDs.** A mention UUID is local to a document, and an edit can retire it with no review of readers. Admission now refuses a cross-source input of a mention UUID (`mention_input`). A reader cites the mention's resolution as a saved record instead.
+6. **One removal routine for every retraction path.** A reviewer's drop, a replacement whose input went, and an erasure all remove through `records.apply_removal`, and they prune recipes through `drop_unnamed_recipes` (playbook lesson G27). Each second copy learned the side effects late.
+7. **Check the invariant, not the shapes found.** Four review rounds of the cascade each found a new chain shape. The fix that held stated the invariant and checked it on all 34,752 small worlds, which caught a shape no review had named (lesson G26, measured by the project's `chain_check`).
+8. **Native search exposes what the lab withholds.** On a root with withheld decisions, `GRAPH_COMPLETION` and the default `HYBRID_COMPLETION` served the mention label, both withheld `resolves_to` edges and a mention-anchored fact, while lab retrieval served none (probe E2, measured). `CHUNKS` and `RAG_COMPLETION` served document text only.
+9. **Native operations damage integration state.** A native forget of an original left the generated source and mention Entities, and `reconcile` could not repair the ledger (E4, measured). Prune and dataset Forget leave rows that `reconcile` cannot repair. A full-rebuild `update` with no `begin` made a concurrent read fail the row and open an incident. With `begin` first, the read saw `publication_pending` (E3, measured). The same rebuild's cognify also processed the lab's `identity.json` and `seed.txt` as documents (E3, measured). So Cognee treats the integration's generated sources as ordinary documents.
+10. **Cognee offers no hooks but one usable seam.** `cognify`, `update` and `remember` take no task list, and no hook exists in them or in delete (`.audit/step5-patch-rebuild-evidence.md`, read by a subagent). Every delete passes through `datasets.delete_data` or `datasets.empty_dataset`. `SearchType` can be extended at import time, and `search`, `recall` and FEELING_LUCKY then reach a registered retriever (E1, measured).
+11. **"Full rebuild" is native-level only.** Cognee's incremental update runs fixed tasks, so any custom task forces the native full rebuild. Identity stays incremental above it, through the occurrence map, group fate and dependent refresh. Native chunks and facts are recreated each time (rebuild evidence note, read).
+
+### 17.7 Designing for overlap with Cognee
+
+Identity puts almost everything on its own nodes, owned by its own generated source. Units and the wiki will tend to write onto Cognee's objects (inferred from section 10). Each kind of write has its own exposure.
+
+| Where the integration writes | What Cognee can do to it | Example |
+|---|---|---|
+| Its own nodes, owned by a generated source | Remove an attached edge when a Cognee endpoint is deleted. Process the generated source as a document (E3). | identity |
+| Its own edges between Cognee nodes | Delete the edge with an endpoint. Replace its properties when a Cognee edge has the same endpoints and name. | a units node linked to an Entity |
+| Attributes on Cognee nodes | Replace them whenever any document's extraction writes the node. Lose them on rebuild or consolidation. | units on an Entity, a section ID on a chunk |
+| Logic inside Cognee's pipeline | Run it as Cognee's own, but force a native full rebuild on update | a wiki chunker, a custom extraction task |
+
+Proposed rules, inferred from the facts above.
+
+1. **Keep authority outside the graph.** The ledger holds what the integration decided, and the graph holds a projection. Anything Cognee can overwrite must be rebuildable from the ledger.
+2. **Prefer the upper rows.** Annotate through integration nodes linked to Cognee nodes. Use relationship names Cognee never generates. Write onto a Cognee node only when native retrieval must read the attribute, and then treat every Cognee write to that node as a change event.
+3. **Detect Cognee's changes twice.** Route mutations through integration entry points for a prompt response, and verify at read time for safety. Item 4 of section 17.6 shows the read check working on an outside edit. The more overlap, the more the read check carries.
+4. **Refer to Cognee objects by IDs of known stability, with a digest of what was read.** Chunk IDs change with text. Entity IDs are names and merge across documents. Data IDs are stable. A dependency on an Entity's description needs the description's digest, which identity already takes for corpus inputs.
+5. **Choose each overlay object's owner by the response wanted on edit.** A borrowed chunk owner gives a cheap delete and rebuild with no continuity. A generated-source owner survives and must be judged.
+6. **Bracket every native operation with ledger state.** Mark the affected rows pending before a native rebuild or delete, and complete or reconcile after it (E3). This is forward recovery extended to Cognee's own operations.
+7. **Keep integration artifacts out of native processing.** Exclude generated sources from native cognify (E3), or store them where native pipelines do not read.
+
+### 17.8 Discussion points
+
+- **Is native search safe by default?** E2 shows it is not. The choice is between an identity SearchType with a documented warning, hiding hybrid products from native readers, and replacing a built-in type (step-5 question U1). Rule 2 suggests that integrations writing onto Cognee nodes cannot rely on a separate SearchType alone (inferred).
+- **What does a native delete mean?** Erasure with implied confirmation, refusal while dependents exist, or detection afterwards (U4). Overlap makes "detect afterwards" more likely to be needed anyway, because some native writes have no hook.
+- **Patch, wrapper or lab entry point?** Running lab tasks inside native `cognify`, `update` and `remember` needs a patch or a runtime swap of `get_default_tasks`. A lab entry point needs neither, but native callers then bypass the lab (rebuild evidence note).
+- **Native incremental update for integration-touched documents.** Identity accepts a native full rebuild under its own incremental layer. With a real LLM, a full rebuild costs more and may change extraction output (inferred). An integration that writes onto Cognee nodes loses those writes on each rebuild unless rule 1 holds.
+- **Cognee's shared-Entity content gap.** Any integration that depends on an Entity's description inherits last-writer-wins. The overwrite probe (TODO 9) should confirm it before the design depends on it.
+- **Scope records.** No identity code records completeness over a set. The wiki's hierarchy needs one (inferred from section 10).
+- **Where the shared layer starts.** `dependency.py` and the `records.py` registry are the first generic pieces in identity's code. Each is still shaped by identity's record types.
