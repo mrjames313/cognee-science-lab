@@ -153,10 +153,10 @@ async def test_recipe_does_not_replace_missing_or_changed_reasoning_input(
 
 
 def test_the_review_path_writes_resolutions_and_groups_only_through_records():
-    """review.py and revisions.reconfirmed change a decision's resolution
-    and group fields only through records.py (apply_removal,
-    apply_reconfirm), so a record kind's hooks own its layout. Fixture
-    builders such as revisions.corrected may write them directly."""
+    """review.py and revisions.reconfirmed write a decision's resolution and
+    group fields only through records.py (apply_removal, apply_reconfirm),
+    so a record kind's hooks own its layout. Fixture builders such as
+    revisions.corrected may write them directly."""
     import ast
     import inspect
 
@@ -164,9 +164,57 @@ def test_the_review_path_writes_resolutions_and_groups_only_through_records():
 
     fields = {"mention_resolutions", "mention_groups"}
     for code in (inspect.getsource(review), inspect.getsource(revisions.reconfirmed)):
-        named = {
-            node.value
+        written = {
+            name.value
             for node in ast.walk(ast.parse(code))
-            if isinstance(node, ast.Constant) and node.value in fields
+            if isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            for name in ast.walk(node)
+            if isinstance(name, ast.Constant) and name.value in fields
         }
-        assert named == set()
+        assert written == set()
+
+
+def test_reconfirm_rewires_the_record_and_its_group_only(source_payload):
+    """A re-confirmed resolution and its group cite the new input in place
+    of the old one, and the resolution names the reviewer's producer. Its
+    fingerprint stays, and a sibling resolution and its group, which cite
+    the same old input, keep citing it."""
+    import copy
+
+    from cognee_lab.identity.records import apply_reconfirm, record_digest
+
+    source_payload["mention_groups"]["g01"]["input_refs"].append("existing_A")
+    sibling = copy.deepcopy(source_payload["mention_groups"]["g01"])
+    sibling["entity_id"] = str(uuid4())
+    sibling["occurrences"] = sibling["occurrences"][:1]
+    source_payload["entity_constructions"][sibling["entity_id"]] = copy.deepcopy(
+        source_payload["entity_constructions"][
+            source_payload["mention_groups"]["g01"]["entity_id"]
+        ]
+    )
+    source_payload["mention_groups"]["g02"] = sibling
+    source_payload["mention_resolutions"]["r02"] = dict(
+        source_payload["mention_resolutions"]["r01"], group_ref="g02"
+    )
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    payload = source.model_dump(mode="json")
+    payload["inputs"]["existing_A_r2"] = dict(
+        payload["inputs"]["existing_A"], content_sha256="0" * 64
+    )
+    payload["producers"]["review"] = dict(
+        payload["producers"]["fixture"], implementation="review"
+    )
+
+    apply_reconfirm(payload, source, "r01", {"existing_A": "existing_A_r2"}, "review")
+    after = IdentitySource.model_validate_json(json.dumps(payload))
+
+    assert after.mention_resolutions["r01"].input_refs == ["doc01", "existing_A_r2"]
+    assert after.mention_resolutions["r01"].producer_ref == "review"
+    assert after.mention_groups["g01"].input_refs == ["doc01", "existing_A_r2"]
+    assert record_digest(after, "mention_resolution", "r01") == record_digest(
+        source, "mention_resolution", "r01"
+    )
+    assert after.mention_resolutions["r02"] == source.mention_resolutions["r02"]
+    assert after.mention_groups["g02"] == source.mention_groups["g02"]
+    assert after.variant_assignments == source.variant_assignments

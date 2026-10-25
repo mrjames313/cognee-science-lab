@@ -253,12 +253,10 @@ def apply_removal(
         else:
             payload[kind.field][key] = record.model_dump(mode="json", exclude_none=True)
     for kind in REGISTRY.values():
-        for field, parts in kind.stripped(source, keys, ref_map).items():
-            for part_key, part in parts.items():
-                payload[field][part_key] = part.model_dump(mode="json")
+        write_parts(payload, kind.stripped(source, keys, ref_map))
 
 
-def apply_reconfirm(payload, source, key, ref_map: RefMap, producer_key):
+def apply_reconfirm(payload, source, key, ref_map: Mapping[str, str], producer_key):
     """Re-confirm record `key` in `payload`, a JSON dump of `source`: it and
     the parts that hold its inputs (`RecordKind.stripped`) cite each input
     of `ref_map` under its new key, and it names `producer_key`. Its
@@ -271,8 +269,13 @@ def apply_reconfirm(payload, source, key, ref_map: RefMap, producer_key):
     payload[kind.field][key] = record.model_copy(
         update=dict(input_refs=refs, producer_ref=producer_key)
     ).model_dump(mode="json", exclude_none=True)
-    for field, parts in kind.stripped(source, {key}, ref_map).items():
-        for part_key, part in parts.items():
+    write_parts(payload, kind.stripped(source, {key}, ref_map))
+
+
+def write_parts(payload, parts: dict[str, dict[str, CitesInputs]]):
+    """Write each stripped part (`RecordKind.stripped`) into `payload`."""
+    for field, by_key in parts.items():
+        for part_key, part in by_key.items():
             payload[field][part_key] = part.model_dump(mode="json")
 
 
