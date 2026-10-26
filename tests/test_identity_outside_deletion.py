@@ -388,7 +388,7 @@ def forget_of(source, served, earlier=None):
     )
 
 
-async def test_a_withdrawal_removal_stays_lab_removed_across_readds(source_payload):
+async def test_a_withdrawal_removal_waits_for_its_reader_across_readds(source_payload):
     """W, the only one to declare Helios, is withdrawn, which removes
     Helios, and forgotten. W is re-added, then forgotten again while served.
     A publication treats Helios as removed by the lab through both; the
