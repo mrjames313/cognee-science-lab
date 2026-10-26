@@ -733,7 +733,7 @@ $V drive "$RUN" main noconf -- forget-dataset
 $V check "$RUN" noconf '.error == "IntentError" and (.message | startswith("forget-dataset needs the dry run")) and .details.dry_run' 'forget-dataset without a token is refused with the report'
 $V drive "$RUN" main dry -- forget-dataset --dry-run
 $V check "$RUN" dry '[.sources[] | [.label, .state, .revision, .order]] == [["glossary", "current", 1, 2], ["doc01", "current", 1, 1], ["doc03", "current", 1, 0]]' 'readers come before what they read'
-$V check "$RUN" dry '.pending == [] and .outside_dependents == [] and ([.other_data[].name] == ["seed"]) and (.token | length) == 64 and (.removed_entities | length) > 0' 'the dry run lists the seed as other Data and no dependent outside'
+$V check "$RUN" dry '.pending == [] and ([.other_data[].name] == ["seed"]) and (.token | length) == 64 and (.removed_entities | length) > 0' 'the dry run lists the seed as other Data'
 $V check "$RUN" dry 'all(.sources[]; .native_copy | to_entries | all(.value)) and all(.sources[]; .dependents == [])' 'each native copy is whole and no step revises another source'
 T=$(val dry '.token')
 SEED=$(val dry '.other_data[0].data_id')

@@ -25,9 +25,10 @@ from uuid import UUID
 
 from .dependency import Target, citations
 from .digests import object_digest
-from .erasure import RESIDUE, remaining, unfinished
+from .erasure import RESIDUE, impact, remaining, unfinished
 from .forget import FAULT_STAGES as FORGET_FAULTS
-from .forget import IMPACT_CHANGED, plan_for, preview, stored_files, sweep
+from .forget import IMPACT_CHANGED, delete_data, plan_for, stored_files
+from .outside_deletion import orphan_name_points, sweep_orphans
 from .retirement import removed_entities, source_ids
 from .validation import IntentError
 
@@ -141,7 +142,6 @@ def dependent_entries(found) -> list[dict]:
 
 async def dry_run(publisher, root) -> dict:
     """What `forget-dataset` does, with the token it needs. Writes nothing."""
-    from .erasure import impact
     from .forget_fixture import caller_files
     from .multisource import root_labels
     from .native_copy import native_copy
@@ -179,7 +179,6 @@ async def dry_run(publisher, root) -> dict:
             order=next((n for n, s in enumerate(steps) if s is row), None),
             native_copy=None,
             dependents=[],
-            outside_dependents=[],
         )
         sources.append(entry)
     entries = {e["identity_data_id"]: e for e in sources}
@@ -198,9 +197,6 @@ async def dry_run(publisher, root) -> dict:
                 await native_copy(publisher.graph, step.description)
             )._asdict()
         entry["dependents"] = dependent_entries(found)
-        entry["outside_dependents"] = [
-            d for d in entry["dependents"] if d["dataset_id"] != dataset
-        ]
         gone.add(step.source)
     present = await dataset_data(dataset)
     orphans = [] if pending else await orphan_name_points(publisher)
@@ -215,55 +211,12 @@ async def dry_run(publisher, root) -> dict:
         ],
         removed_entities=sorted(str(e) for e in removed),
         orphan_name_points=orphans,
-        outside_dependents=[d for e in sources for d in e["outside_dependents"]],
         caller_files=sorted(
             {f for label in labels.values() for f in caller_files(root, label)}
         ),
         residue=[*RESIDUE, "The Dataset row stays, so a re-add keeps its dataset ID"],
     )
     return dict(report, token=object_digest(report))
-
-
-async def forget_data(dataset_id, data_id):
-    """Delete one Data item no lab source publishes, as `forget` deletes a
-    source's own: Cognee's Data delete, then its sweep. Idempotent."""
-    from cognee import forget as native_forget
-    from cognee.modules.users.methods import get_default_user
-
-    from .native_copy import data_present
-
-    locations = (await stored_files([data_id])).get(str(data_id), [])
-    if await data_present(data_id, dataset_id):
-        await native_forget(
-            data_id=data_id, dataset_id=dataset_id, user=await get_default_user()
-        )
-    await sweep(dataset_id, data_id, locations)
-
-
-NAME_INDEX = "Entity_name"
-
-
-async def orphan_name_points(publisher) -> list[str]:
-    """Each point of the Entity name index whose node is gone: an Entity
-    deleted outside the lab (`edit-entity --case delete`, or Cognee's node
-    delete) keeps its point, which the handbook (§9) says must not outlive
-    the UUID. Retrieval seeds nothing from it, since it resolves vector
-    hits through the graph. Cognee's vector search with no limit returns
-    every point of the collection, whatever the query."""
-    vector = publisher.vector
-    if not await vector.has_collection(NAME_INDEX):
-        return []
-    points = await vector.search(NAME_INDEX, query_text="Entity", limit=None)
-    ids = sorted({str(p.id) for p in points})
-    return [i for i in ids if await publisher.graph.get_node(i) is None]
-
-
-async def sweep_orphans(publisher, listed) -> list[str]:
-    """Delete the orphaned name points the dry run listed that still have
-    no node."""
-    gone = [i for i in listed if await publisher.graph.get_node(i) is None]
-    await publisher.vector.delete_data_points(NAME_INDEX, gone)
-    return gone
 
 
 def repaired_later(outcome, later) -> bool:
@@ -296,6 +249,8 @@ async def forget_dataset(publisher, root, *, confirm, fault_stage=None) -> dict:
     beside the forgets that completed, unless every dependent it left
     waiting misses its native copy and is a later step: after a native
     dataset forget or a prune that later forget erases it (repair)."""
+    from cognee.modules.users.methods import get_default_user
+
     from .forget import forget
 
     report = await dry_run(publisher, root)
@@ -326,29 +281,18 @@ async def forget_dataset(publisher, root, *, confirm, fault_stage=None) -> dict:
     origin = "test/fault_injection" if fault_stage else "test"
     forgotten = []
     for n, entry in enumerate(steps):
-        row = next(
-            r for r in await records.rows() if r.source == entry["identity_data_id"]
-        )
-        if row.tombstone is not None and not unfinished(
-            row.tombstone, await records.rows()
-        ):
+        rows = await records.rows()
+        row = next(r for r in rows if r.source == entry["identity_data_id"])
+        if row.tombstone is not None and not unfinished(row.tombstone, rows):
             continue
         selected = row.description or row.tombstone
-        if row.tombstone is None:
-            seen = await preview(publisher, selected, expected_revision=row.revision)
-            outside = [
-                {
-                    k: d[k]
-                    for k in ("dataset_id", "identity_data_id", "revision", "level")
-                }
-                for d in seen["dependents"]
-                if d["dataset_id"] != report["dataset_id"]
-            ]
-            if outside != entry["outside_dependents"]:
-                raise IntentError(*IMPACT_CHANGED, details=report)
-            confirm_step = seen["token"]
-        else:
-            confirm_step = None
+        # The dataset token confirmed every step's impact; a forget of a
+        # saved source takes its own token, which forget computes the same way.
+        confirm_step = (
+            impact(selected, await plan_for(publisher, selected, row), rows).token
+            if row.tombstone is None
+            else None
+        )
         outcome = await forget(
             publisher,
             selected,
@@ -381,8 +325,10 @@ async def forget_dataset(publisher, root, *, confirm, fault_stage=None) -> dict:
     if any(r.state != "forgotten" for r in rows):
         raise IntentError(*IMPACT_CHANGED, details=report)
     listed = [d["data_id"] for d in report["other_data"]]
+    user = await get_default_user()
     for data_id in listed:
-        await forget_data(dataset, UUID(data_id))
+        locations = (await stored_files([data_id])).get(data_id, [])
+        await delete_data(dataset, UUID(data_id), locations, user)
     if unlisted := sorted(set(await dataset_data(dataset)) - lab_data(rows)):
         raise IntentError(*IMPACT_CHANGED, details=dict(report, unlisted_data=unlisted))
     swept = await sweep_orphans(publisher, report["orphan_name_points"])

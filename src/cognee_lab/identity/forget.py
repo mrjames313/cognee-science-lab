@@ -164,6 +164,24 @@ async def sweep(dataset_id, data_id, locations):
         await engine.remove_data_file_if_unreferenced(location)
 
 
+async def delete_data(dataset_id, data_id, locations, user, dying=None):
+    """Cognee's delete of one Data item, which removes every graph and
+    vector object that only its refs own, then its Data row, stored files
+    and evidence rows; then the sweep of what that delete sweeps after its
+    commit (`sweep`). A missing item has nothing left for it to delete, and
+    after a dataset forget outside the lab Cognee refuses to name the
+    dataset, so it is skipped and only the sweep runs: a retry converges.
+    `dying` is the context the delete runs in (`dying_after_commit`)."""
+    from contextlib import nullcontext
+
+    from cognee import forget as native_forget
+
+    if await data_present(data_id, dataset_id):
+        with dying or nullcontext():
+            await native_forget(data_id=data_id, dataset_id=dataset_id, user=user)
+    await sweep(dataset_id, data_id, locations)
+
+
 def dying_after_commit(stage, fault_stage):
     """A context that makes the native forget of this stage's item fail right
     after Cognee committed the Data delete, when the fault stage asks for it."""
@@ -387,7 +405,6 @@ async def forget(
     the dependents a completed forget did not revise; refuse when none is
     left. Returns the attempt and the dependents' outcome; a dependent
     failure is reported beside the completed forget, not raised."""
-    from cognee import forget as native_forget
     from cognee.modules.users.methods import get_default_user
 
     from .erasure import (
@@ -475,19 +492,15 @@ async def forget(
         await clear_withholdings(publisher, source)
         user = await get_default_user()
 
-    # Native deletion of a Data item removes every graph and vector object
-    # that only its refs own, then its Data row, stored files and evidence
-    # rows. A missing item has nothing left for it to delete, and after a
-    # dataset forget outside the lab Cognee refuses to name the dataset, so
-    # it is skipped; the sweep runs here too and a retry converges.
     def native_delete(data_id):
         async def stage(run):
-            if await data_present(data_id, source.dataset_id):
-                with dying_after_commit(run.stage, fault_stage):
-                    await native_forget(
-                        data_id=data_id, dataset_id=source.dataset_id, user=user
-                    )
-            await sweep(source.dataset_id, data_id, plan["stored_files"][str(data_id)])
+            await delete_data(
+                source.dataset_id,
+                data_id,
+                plan["stored_files"][str(data_id)],
+                user,
+                dying_after_commit(run.stage, fault_stage),
+            )
 
         return stage
 

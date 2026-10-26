@@ -264,3 +264,29 @@ def check_readd(source, cited: dict[UUID, list[dict]]):
         "without the Entity, then re-add",
         details=dict(citers=citers),
     )
+
+
+NAME_INDEX = "Entity_name"
+
+
+async def orphan_name_points(publisher) -> list[str]:
+    """Each point of the Entity name index whose node is gone: an Entity
+    deleted outside the lab (`edit-entity --case delete`, or Cognee's node
+    delete) keeps its point, which the handbook (§9) says must not outlive
+    the UUID. Retrieval seeds nothing from it, since it resolves vector
+    hits through the graph. Cognee's vector search with no limit returns
+    every point of the collection, whatever the query."""
+    vector = publisher.vector
+    if not await vector.has_collection(NAME_INDEX):
+        return []
+    points = await vector.search(NAME_INDEX, query_text="Entity", limit=None)
+    ids = sorted({str(p.id) for p in points})
+    return [i for i in ids if await publisher.graph.get_node(i) is None]
+
+
+async def sweep_orphans(publisher, listed) -> list[str]:
+    """Delete the orphaned name points the dry run listed that still have
+    no node."""
+    gone = [i for i in listed if await publisher.graph.get_node(i) is None]
+    await publisher.vector.delete_data_points(NAME_INDEX, gone)
+    return gone
