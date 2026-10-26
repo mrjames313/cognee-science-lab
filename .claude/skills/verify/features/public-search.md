@@ -2,7 +2,7 @@
 
 A user searches a root through Cognee's own `cognee.search` with the lab's `IDENTITY` search type. Since step 5 S1 the CLI `search` registers `IDENTITY` (`cognee_lab.identity.search`) and calls `cognee.search` as a user would. The search returns what the CLI `retrieve` returns, lists the same unavailable sources and withheld decisions, makes no LLM call and is logged in Cognee's search history as `IDENTITY`.
 
-Guide: `docs/stage6_identity_public_search.md` ("What a search returns", "Scope and mode", "What a search lists as unavailable", "Commands").
+Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types serve withheld and failed state", "What a search returns", "Scope and mode", "What a search lists as unavailable", "Refusals", "Commands").
 
 ## Sub-features
 
@@ -10,12 +10,16 @@ Guide: `docs/stage6_identity_public_search.md` ("What a search returns", "Scope 
 - `search-failed` lists a failed first publication as unavailable with its incident, and serves its fact again after `reconcile`.
 - `search-withheld` lists the decisions a glossary edit withholds, as `status` lists them.
 - `search-native-deleted` fails a source deleted outside the lab on the first search, with a `retrieval_validation` incident, and keeps serving the other source.
+- `search-refusals` refuses a scope or mode that is not built with `SearchRefused`, and a refused search writes no history row and changes no publication.
+- `search-dataset-required` refuses `datasets=None` once the user can read a second dataset (`native-add`, a plain `cognee.add`), and searches the root's dataset when it is named.
+- `native-search-unguarded` shows that a plain `cognee.search` with `SearchType.CHUNKS` (`native-search`) serves the text of a failed publication, which `IDENTITY` withholds.
 
 ## How to get to it (user POV)
 
 - Run `uv run python -m cognee_lab.identity fixture --root <new dir> --embedding loopback`, then `search` and `retrieve` against the same root.
 - Add `--all-datasets` to `search` to search every dataset (`datasets=None`).
 - Add `--scope` or `--mode` to `search` or `retrieve`.
+- Run `native-add` for a second dataset outside the lab, and `native-search` for a plain `cognee.search` with `SearchType.CHUNKS`.
 
 ## Driving it with verify.py
 
@@ -89,7 +93,55 @@ $V drive "$RUN" main again -- search
 $V check "$RUN" again '[.search_result[0].unavailable_sources[] | [.identity_data_id, .reason, .recovery_event_id]] == [["'"$DOC02"'", "publication_failed", "'"$EID"'"]] and (.search_result[0].facts | length) == 1' 'a later search lists the failed publication with the same incident'
 ```
 
+**S5 refusals write nothing.** Proves `search-refusals`. Guide: "Refusals". On a `fixture` root `search --scope identity_and_unattributed` exits 1 with `SearchRefused` and code `scope_not_built`, and `search --mode source_aware` with code `mode_not_built`. `retrieve --scope identity_and_unattributed` is refused the same way. `search --scope identity --mode semantic` then serves the accepted fact, and its `search_history` lists that one query: the refused searches logged nothing. `status` lists the publication current at revision 1 with no incident.
+
+```bash journey S5
+$V drive "$RUN" main fixture -- fixture
+$V drive "$RUN" main scope -- search --scope identity_and_unattributed
+$V check "$RUN" scope '.error == "SearchRefused" and .code == "scope_not_built"' 'scope identity_and_unattributed is refused'
+$V drive "$RUN" main mode -- search --mode source_aware
+$V check "$RUN" mode '.error == "SearchRefused" and .code == "mode_not_built"' 'mode source_aware is refused'
+$V drive "$RUN" main retrieve -- retrieve --scope identity_and_unattributed
+$V check "$RUN" retrieve '.error == "SearchRefused" and .code == "scope_not_built"' 'retrieve refuses the same scope'
+$V drive "$RUN" main search -- search --scope identity --mode semantic
+$V check "$RUN" search '[.search_result[0].facts[].text] == ["it limits oscillations"] and (.search_result[0] | .scope == "identity" and .mode == "semantic")' 'the built scope and mode serve the fact'
+$V check "$RUN" search '.search_history == [{"query_type": "IDENTITY", "text": "What does HC limit?"}]' 'the refused searches logged nothing'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.publications[] | [.state, .revision]] == [["current", 1]] and .recovery_events == []' 'a refusal changes no publication'
+```
+
+**S6 two datasets need a named dataset.** Proves `search-dataset-required`. Guide: "Refusals". On a `fixture` root `native-add` adds one text to `outside_dataset` with a plain `cognee.add`, so the user can read two datasets. `search --all-datasets` (`datasets=None`) exits 1 with `SearchRefused` and code `dataset_required`, since Cognee then gives the retriever no dataset. `search` with the root's dataset still serves the accepted fact, its history lists only that query, and `retrieve` in a new process returns the same result.
+
+```bash journey S6
+$V drive "$RUN" main fixture -- fixture
+$V drive "$RUN" main add -- native-add
+$V check "$RUN" add '.native_add.datasets == ["outside_dataset", "stage6_isolated_fixture"]' 'the user can read two datasets'
+$V drive "$RUN" main unscoped -- search --all-datasets
+$V check "$RUN" unscoped '.error == "SearchRefused" and .code == "dataset_required"' 'datasets=None over two datasets is refused'
+$V drive "$RUN" main search -- search
+$V check "$RUN" search '[.search_result[0].facts[].text] == ["it limits oscillations"] and .search_history == [{"query_type": "IDENTITY", "text": "What does HC limit?"}]' 'the root dataset is searched and the refusal logged nothing'
+$V drive "$RUN" main retrieve -- retrieve
+RET=$(val retrieve 'tojson')
+$V check "$RUN" search '.search_result == [('"$(jq -n --arg s "$RET" '$s')"' | fromjson)]' 'search returns exactly what retrieve returns'
+```
+
+**S7 a plain CHUNKS search serves a failed source's text.** Proves `native-search-unguarded`. Guide: "Warning: the other search types serve withheld and failed state". On a `glossary-fixture` root a failed `edit-glossary --case insert` exits 1 with `recovery_event_id`, as in the dependencies guide ("A failed edit"). `status` lists the glossary as failed at revision 2, verified at 1, with one open incident. `native-search`, a plain `cognee.search` with `SearchType.CHUNKS`, returns a chunk with the inserted line `ECRH: electron cyclotron resonance heating.`, text that no publication completed. `search` returns no fact and lists the glossary as `publication_failed` with the incident, and r01 and v01 of doc01 with `input_changed`.
+
+```bash journey S7 stages=text_chunks,replace_published
+$V drive "$RUN" main fixture -- glossary-fixture
+$V drive "$RUN" main fail -- edit-glossary --source glossary --case insert --expected-revision 1 --fault-stage "$STAGE"
+$V check "$RUN" fail '.error == "IntentError" and (.message | test("recovery_event_id=[0-9a-f-]{36}"))' 'the injected failure names a recovery event'
+EID=$(val fail '.message | capture("recovery_event_id=(?<id>[0-9a-f-]+)") | .id')
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.publications[] | select(.state == "failed") | [.revision, .verified_revision]] == [[2, 1]] and [.recovery_events[] | [.recovery_event_id, .resolved_at]] == [["'"$EID"'", null]]' 'the glossary edit failed at revision 2 with one open incident'
+$V drive "$RUN" main native -- native-search
+$V check "$RUN" native 'any(.native_search.chunks[]; .text | contains("ECRH: electron cyclotron resonance heating."))' 'plain CHUNKS serves the unpublished glossary text'
+$V drive "$RUN" main search -- search
+$V check "$RUN" search '.search_result[0].facts == [] and [.search_result[0].unavailable_sources[] | [.assignment_id, .reason, .recovery_event_id]] == [[null, "publication_failed", "'"$EID"'"], ["r01", "input_changed", null], ["v01", "input_changed", null]]' 'IDENTITY serves nothing of the failed glossary or of what reads it'
+```
+
 ## Gotchas
 
 - `search` prints `search_result`, the list `cognee.search` returns, so read facts at `.search_result[0].facts`. `retrieve` prints the result itself.
-- `search_history` holds every query Cognee logged in the root, so a check on its length counts the run's earlier searches too.
+- `search_history` holds every query Cognee logged in the root, so a check on its length counts the run's earlier searches too. A refused search logs none.
+- A refusal prints `.error == "SearchRefused"` and its `.code`, and exits 1.

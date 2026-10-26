@@ -1,8 +1,24 @@
 # Stage 6: the IDENTITY search type
 
-**Guide scope:** what `cognee.search` with the lab's `IDENTITY` search type returns, how a process registers it, and what a search lists as unavailable. For project status, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
+**Guide scope:** what `cognee.search` with the lab's `IDENTITY` search type returns, how a process registers it, what a search lists as unavailable, what it refuses, and what Cognee's other search types serve instead. For project status, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
 
 Built on 2026-10-26 against Cognee 1.6.2 and Python 3.12 (step 5, unit S1). The assistant built it on the user's Mac. The values below come from loopback fixture roots that the assistant ran on the user's Mac on 2026-10-26.
+
+## Warning: the other search types serve withheld and failed state
+
+Only `IDENTITY` applies the ledger. Cognee's own search types read the graph, the chunk index and the triplet index as they stand, so they serve what the lab withholds: a decision withheld after an edit of its input, a failed publication's new text, and the mention labels that are never query aliases. Use `IDENTITY` for answers that the lab's saved descriptions govern.
+
+Probe E2 measured this on 2026-10-26. An Opus subagent of the assistant ran `support/s1_probes.py` on the user's Mac, with loopback embeddings and every LLM call refused unless the probe stubbed it, on `glossary-fixture --chain` roots. For the query `What does HC limit?`:
+
+| Root | `IDENTITY` | `CHUNKS` | `GRAPH_COMPLETION` (`only_context`) | `TRIPLET_COMPLETION` (`only_context`) |
+|---|---|---|---|---|
+| Healthy | 1 fact, nothing unavailable | 3 chunks | 11 edges, 0 withheld facts | 11 triplets, 0 withheld facts |
+| After `edit-glossary --case cosmetic` | 0 facts; r01, v01, c01 and c02 withheld | 3 chunks | 11 edges, 1 withheld fact (`it limits oscillations` from the mention `The controller; it`) | 11 triplets, 1 withheld fact |
+| After a failed `edit-glossary --case insert` at `text_chunks` or `replace_published` | 0 facts; the glossary `publication_failed`, r01, v01, c01 and c02 withheld | 3 chunks, 1 of them the failed glossary's new text with the unpublished `ECRH` line | 11 edges, 1 withheld fact, 1 chunk node of the failed document | 11 triplets, 1 withheld fact, 1 chunk text of the failed document |
+
+In every root `GRAPH_COMPLETION` reached the two mention nodes `The controller; it` and `The regulator` and printed them as graph nodes. `TRIPLET_COMPLETION` raised `NoDataError` until the probe built the triplet index with Cognee's memify `create_triplet_embeddings`, which runs an LLM connection test that the probe stubbed. The `TRIPLET_COMPLETION` columns are from after that build.
+
+Journey S7 shows the `CHUNKS` cell of the failed insert on a `glossary-fixture` root through the CLI, with `native-search`, a plain `cognee.search` with `SearchType.CHUNKS`.
 
 ## What a search returns
 
@@ -53,6 +69,31 @@ A search lists what it withholds under `unavailable_sources`, as the CLI `retrie
 - **A withheld decision.** After `edit-glossary --case cosmetic` on a `glossary-fixture` root, the search returns no fact and lists r01 and v01 of doc01 with reason `input_changed`, the same decisions and reasons that `status` lists under `withheld_decisions` ([dependencies guide](stage6_identity_dependencies.md#a-cosmetic-change)). Both publications stay current.
 - **A source deleted outside the lab.** After `native-forget --source doc02 --case data` on a `multi-fixture` root, the first search fails doc02's row, since its own chunks are gone. It lists doc02 with reason `source_missing` and the new incident, and still serves doc01's fact. `status` then lists doc02 as failed at revision 1, one open incident at stage `retrieval_validation`, and doc02 under `native_deleted` with the forget to run ([forget guide](stage6_identity_forget.md)). A later search lists doc02 with reason `publication_failed` and the same incident.
 
+## Refusals
+
+`IdentityRetriever` raises every refusal in its constructor, which Cognee calls before it reads anything. The exception type is `SearchRefused`, an `IntentError` with a `code`. It is not a Cognee `NoDataError`, so it fails the whole search instead of becoming one dataset's empty entry, and Cognee writes no search history row for it. The CLI prints `{"error": "SearchRefused", "code": ..., "message": ...}` and exits 1.
+
+| Code | When |
+|---|---|
+| `dataset_required` | Cognee gives the retriever no dataset. With access control off, Cognee gives one only when the search covers exactly one dataset, so `datasets=None` is refused once the user can read two datasets. Pass `datasets=[name]`. |
+| `access_control_on` | `ENABLE_BACKEND_ACCESS_CONTROL` is on. The lab's ledger lives in the one shared relational database, and the per-dataset databases of access control are not built for it. |
+| `scope_not_built` | `scope` is `identity_and_unattributed`. |
+| `mode_not_built` | `mode` is `source_aware`. |
+| `config_invalid` | `retriever_specific_config` has a key other than `scope` and `mode`, or a value neither enum knows. The CLI rejects an unknown `--scope` or `--mode` value in its argument parser instead. |
+
+The CLI `retrieve` refuses `scope_not_built` and `mode_not_built` the same way.
+
+## Limits of the IDENTITY member
+
+- **Import order.** `IDENTITY` exists only in a process that imported `cognee_lab.identity.search`. A pydantic model that validates `SearchType` from JSON and was built before that import rejects `IDENTITY`. Cognee's HTTP router DTOs are such models unless the router is imported after the lab (probe E1). HTTP routes are out of scope for the lab (U-f).
+- **JSON round trips.** `SearchResultPayload.model_validate_json` rejects a payload whose search type is `IDENTITY`, because its schema was built before the member existed. Python-mode validation and `model_dump_json` work (probe E1).
+- **The `cognee search` CLI.** A fresh `cognee search` process never imports the lab, so `SearchType["IDENTITY"]` raises `KeyError` there (probe E1).
+- **`FEELING_LUCKY`.** Cognee's selector prompt does not name `IDENTITY`, so the LLM selection is not expected to pick it. When a stubbed selector answered `IDENTITY`, the lab retriever ran and the history row recorded `FEELING_LUCKY` (probe E1).
+- **`cognee.recall`.** Its query router never picks `IDENTITY`. `recall(query_type=SearchType.IDENTITY)` bypasses the router and returns one entry whose `raw` is the result (probe E1).
+- **Pinned versions.** Nothing in Cognee's dependency range (`cognee>=1.6,<1.7`) pins the enum internals that `add_member` writes. The import refuses any Cognee other than 1.6.2 and any Python other than 3.12.
+- **Seed crowding.** The search takes the top 10 `Entity_name` hits and then drops every Entity that no served source constructs. A store with many Entities in other datasets can push every lab Entity out of the top 10. The query would then return no fact (inferred from the code, not measured).
+- **Document names after an edit.** A text edit writes the original through Cognee's ingestion with a text payload, which renames its Data row, and so its document node, from the file name (for example `glossary`) to `text_<md5 of the text>`. This has held since the text changes of 2026-10-19 (`registered.write_text`) and is not caused by S4. Native search contexts show the new name. The IDENTITY result never uses document names.
+
 ## Commands
 
 Use a new root for each sequence:
@@ -67,3 +108,16 @@ uv run python -m cognee_lab.identity search --root outputs/stage6_search_check -
 `search` calls `cognee.search` with `IDENTITY` and the root's dataset, or with `datasets=None` under `--all-datasets`, and `top_k` 5, the limit of `retrieve`. It prints `search_result`, the list that Cognee returns, and `search_history`, the queries in Cognee's search history after the search.
 
 Expected: `search_result` is one result equal to the `retrieve` output, with the accepted fact `it limits oscillations`, `mode` `semantic` and `scope` `identity`. `search_history` lists the query once with type `IDENTITY`, and twice after the `--all-datasets` search. The root has one dataset, so `--all-datasets` returns the same result.
+
+Refusals and the stand-ins, each on a new `fixture` root:
+
+```bash
+uv run python -m cognee_lab.identity search --root <root> --scope identity_and_unattributed
+uv run python -m cognee_lab.identity search --root <root> --mode source_aware
+uv run python -m cognee_lab.identity native-add --root <root>
+uv run python -m cognee_lab.identity search --root <root> --all-datasets
+```
+
+Expected: the first two exit 1 with `SearchRefused` and the codes `scope_not_built` and `mode_not_built`. `native-add` adds `outside_dataset` with a plain `cognee.add`, so `native_add.datasets` lists `outside_dataset` and `stage6_isolated_fixture`. The `--all-datasets` search then exits 1 with `dataset_required`. A later `search` lists only its own query in `search_history`.
+
+`native-search` is a stand-in for a plain `cognee.search` with `SearchType.CHUNKS` on the root's dataset. It prints `native_search.chunks`, each chunk's id and text, and writes no ledger row. After a failed `edit-glossary --case insert` on a `glossary-fixture` root it returns the chunk with the unpublished `ECRH` line ("Warning: the other search types serve withheld and failed state").

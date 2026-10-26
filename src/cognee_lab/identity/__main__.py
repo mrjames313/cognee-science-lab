@@ -47,6 +47,8 @@ COMMAND_FAULT_STAGES = {
     "edit-entity": (),
     "native-forget": (),
     "native-cognify": (),
+    "native-add": (),
+    "native-search": (),
     "search": (),
     "refresh-dependents": (REFRESH_FAULT,),
     "withdraw": WITHDRAW_STAGES,
@@ -106,6 +108,8 @@ def main():
             *GLOSSARY_COMMANDS,
             "native-forget",
             "native-cognify",
+            "native-add",
+            "native-search",
             "retrieve",
             "search",
             "status",
@@ -299,6 +303,8 @@ def main():
             from .native_forget import run
         elif args.command == "native-cognify":
             from .native_cognify import run
+        elif args.command in {"native-add", "native-search"}:
+            from .native_search import run
         elif args.command == "edit-text":
             from .text_fixture import run
         elif args.command == "revise":
@@ -335,6 +341,8 @@ def main():
             result = asyncio.run(execute())
         except Exception as exc:
             report = {"error": type(exc).__name__, "message": str(exc)}
+            if getattr(exc, "code", None) is not None:
+                report["code"] = exc.code
             if getattr(exc, "details", None) is not None:
                 report["details"] = exc.details
             if getattr(exc, "code", None) == "native_deleted":
