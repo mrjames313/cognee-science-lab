@@ -96,27 +96,52 @@ class RebuiltSemantics:
             await verify_semantics(publisher, other, other_chunks, other_ctx)
 
 
+def record_revision(root, identity_name, text_name, intended, text):
+    """Save an edit's revision and its text in the root as `identity_name`
+    and `text_name`, each with `{}` for the revision number."""
+    (root / identity_name.format(intended.revision)).write_text(
+        intended.model_dump_json(indent=2) + "\n"
+    )
+    (root / text_name.format(intended.revision)).write_text(text)
+
+
+async def then_refresh(publisher, edit, refresh_fault=None) -> dict:
+    """Await a text edit, then refresh its dependents at once (the user
+    decided). A refresh failure is reported beside the completed edit."""
+    from .revisions import refresh_dependents
+
+    await edit
+    return await refresh_dependents(publisher, refresh_fault)
+
+
 async def edit_one(
-    publisher, source, text, describe_edit, *, expected_revision, fault_stage=None
+    publisher,
+    source,
+    text,
+    occurrence_map,
+    describe_edit,
+    *,
+    expected_revision,
+    fault_stage=None,
 ):
     """Edit `source` to `text` through the lab's update, then refresh its
     dependents."""
     from .entry_update import update
-    from .revisions import refresh_dependents
 
-    await update(
+    return await then_refresh(
         publisher,
-        source,
-        text,
-        describe_edit=describe_edit,
-        expected_revision=expected_revision,
-        semantics=RebuiltSemantics(),
-        fault_stage=fault_stage,
-        origin="test",
+        update(
+            publisher,
+            source,
+            text,
+            occurrence_map,
+            describe_edit=describe_edit,
+            expected_revision=expected_revision,
+            semantics=RebuiltSemantics(),
+            fault_stage=fault_stage,
+            origin="test",
+        ),
     )
-    # The edit completed: refresh its dependents at once (the user decided).
-    # A refresh failure is reported beside the completed edit.
-    return await refresh_dependents(publisher)
 
 
 async def maintain_one(
@@ -125,18 +150,19 @@ async def maintain_one(
     """Finish a failed text change of `source` with the change its plan
     saved (`entry_update.replace_text`), then refresh its dependents."""
     from .entry_update import replace_text
-    from .revisions import refresh_dependents
 
-    await replace_text(
+    return await then_refresh(
         publisher,
-        source,
-        change,
-        expected_revision=expected_revision,
-        semantics=RebuiltSemantics(),
-        fault_stage=fault_stage,
-        origin="test",
+        replace_text(
+            publisher,
+            source,
+            change,
+            expected_revision=expected_revision,
+            semantics=RebuiltSemantics(),
+            fault_stage=fault_stage,
+            origin="test",
+        ),
     )
-    return await refresh_dependents(publisher)
 
 
 def decision_method(source):
@@ -348,16 +374,20 @@ async def run(args, root):
         intended = describe_prefix_edit(
             draft.old, draft.text, draft.chunks, prefix=prefix
         )
-        (root / f"identity_doc01_text_revision{intended.revision}.json").write_text(
-            intended.model_dump_json(indent=2) + "\n"
+        record_revision(
+            root,
+            "identity_doc01_text_revision{}.json",
+            "source_doc01_revision{}.txt",
+            intended,
+            draft.text,
         )
-        (root / f"source_doc01_revision{intended.revision}.txt").write_text(draft.text)
-        return intended, identity_map(draft.old)
+        return intended
 
     refresh = await edit_one(
         publisher,
         old,
         prefix + before,
+        identity_map(old),
         describe,
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,

@@ -13,14 +13,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .entry import semantic_hooks
 from .models import IdentitySource
-from .validation import IntentError
 
 if TYPE_CHECKING:
     from cognee.modules.chunking.models import DocumentChunk
+    from cognee.modules.pipelines.models import PipelineContext
 
     from .admission import OccurrenceMap
     from .entry import Semantics
+    from .text_changes import TextChange
 
 
 @dataclass(frozen=True)
@@ -34,49 +36,57 @@ class EditDraft:
     chunks: list[DocumentChunk]
 
 
-EditDescriber = Callable[[EditDraft], tuple[IdentitySource, "OccurrenceMap"]]
+EditDescriber = Callable[[EditDraft], IdentitySource]
+
+
+class NoFacts:
+    """The semantics of a source with no captured facts. A text change
+    still names a writer and a verifier (`replace`); these write and check
+    nothing."""
+
+    async def write(self, *_):
+        pass
+
+    async def verify(self, *_):
+        pass
 
 
 async def update(
     publisher,
     source: IdentitySource,
     text: str,
+    occurrence_map: OccurrenceMap,
     *,
-    describe_edit: EditDescriber | None,
+    describe_edit: EditDescriber,
     expected_revision: int,
     semantics: Semantics | None,
     fault_stage: str | None = None,
     origin: str = "runtime",
 ) -> IdentitySource:
     """Replace the original of `source` with `text` and publish the next
-    revision that `describe_edit` gives, with its occurrence map, from the
-    new text's in-memory native chunks (`replace_text`). Cognee rebuilds
-    the whole document; the identity revision is admitted against the
-    occurrence map. Refused without a describer: no lab edit guesses a
-    description. Returns the published revision."""
+    revision that `describe_edit` gives from the new text's in-memory
+    native chunks, admitted against `occurrence_map`. Cognee rebuilds the
+    whole document. Returns the published revision."""
     from .captured_chunks import recorded_budget
-    from .registered import context_for
     from .native_chunks import chunk_text
+    from .registered import context_for
     from .text_changes import TextChange, original_context, read_original
 
-    if describe_edit is None:
-        raise IntentError(
-            "describer_missing",
-            "A lab update needs a describer for the edited description",
-        )
     # The budget is read from the native chunks, which may be what is gone.
     await publisher.refuse_natively_deleted(source)
-    ctx = await context_for(source.identity_data_id)
-    previous_text = await read_original(source, ctx)
+    generated = await context_for(source.identity_data_id)
+    previous_text = await read_original(source, generated)
     budget = await recorded_budget(source, publisher.graph)
-    chunks = await chunk_text(text, await original_context(source, ctx), budget)
-    intended, occurrence_map = describe_edit(
-        EditDraft(source, previous_text, text, chunks)
-    )
-    await replace_text(
+    original = await original_context(source, generated)
+    chunks = await chunk_text(text, original, budget)
+    intended = describe_edit(EditDraft(source, previous_text, text, chunks))
+    await _replace(
         publisher,
         intended,
         TextChange(previous_text, text, occurrence_map, budget),
+        chunks,
+        generated,
+        original,
         expected_revision=expected_revision,
         semantics=semantics,
         fault_stage=fault_stage,
@@ -85,84 +95,91 @@ async def update(
     return intended
 
 
-def rebuild_hooks(semantics, publisher, source, chunks, ctx) -> dict:
-    """The publisher's `semantic_writer` and `verify_semantics` for a text
-    change: `semantics` over the rebuilt chunks, which the text change puts
-    in `chunks`, with the original's context as it is then; checks of
-    nothing for a source with no captured facts."""
-    from .text_changes import original_context
-
-    async def write():
-        if semantics is not None:
-            await semantics.write(
-                publisher,
-                source,
-                list(chunks.values()),
-                await original_context(source, ctx),
-            )
-
-    async def verify():
-        if semantics is not None:
-            await semantics.verify(
-                publisher,
-                source,
-                list(chunks.values()),
-                await original_context(source, ctx),
-            )
-
-    return dict(semantic_writer=write, verify_semantics=verify)
-
-
 async def replace_text(
     publisher,
     intended: IdentitySource,
-    change,
+    change: TextChange,
     *,
     expected_revision: int,
     semantics: Semantics | None,
     fault_stage: str | None = None,
     origin: str = "runtime",
 ):
-    """Publish `intended` with its text change (`TextChange`) in one lab
-    Task, run by Cognee's `run_pipeline` under the pipeline name
-    `cognify_pipeline` over the original. The Task calls the publisher's
-    `replace`, which begins the attempt, forgets the original's memory,
-    registers the new text and rebuilds the chunks with the standard Tasks
-    (`build_chunks`), then publishes. `update` calls this for a new edit,
-    and `reconcile` for a failed one with the text change its plan saved.
-    A lab failure is recorded in the ledger, the run still completes, and
-    the failure is raised after the run."""
-    from cognee.modules.pipelines.operations.pipeline import run_pipeline
-    from cognee.modules.pipelines.tasks.task import Task
-
-    from .registered import context_for, read_texts
+    """Publish `intended` with its text change: `reconcile` of a failed
+    edit, with the text change its plan saved, and a forget's erasure retry
+    of one."""
     from .native_chunks import chunk_text
+    from .registered import context_for
     from .text_changes import original_context
 
     generated = await context_for(intended.identity_data_id)
     original = await original_context(intended, generated)
-    chunks = {
-        str(c.id): c
-        for c in await chunk_text(change.text, original, change.chunk_budget)
-    }
+    await _replace(
+        publisher,
+        intended,
+        change,
+        await chunk_text(change.text, original, change.chunk_budget),
+        generated,
+        original,
+        expected_revision=expected_revision,
+        semantics=semantics,
+        fault_stage=fault_stage,
+        origin=origin,
+    )
+
+
+async def _replace(
+    publisher,
+    intended: IdentitySource,
+    change: TextChange,
+    chunks: list[DocumentChunk],
+    generated: PipelineContext,
+    original: PipelineContext,
+    *,
+    expected_revision: int,
+    semantics: Semantics | None,
+    fault_stage: str | None,
+    origin: str,
+):
+    """Publish `intended` with its text change in one lab Task, run by
+    Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over
+    the original. `chunks` are the new text's in-memory native chunks. The
+    Task calls the publisher's `replace` with the identity Data's context
+    (`generated`), which carries no run ID. `replace` begins the attempt,
+    forgets the original's memory, registers the new text and rebuilds the
+    chunks with the standard Tasks (`build_chunks`), then publishes. A lab
+    failure is recorded in the ledger, the run still completes, and the
+    failure is raised after the run."""
+    from cognee.modules.pipelines.operations.pipeline import run_pipeline
+    from cognee.modules.pipelines.tasks.task import Task
+
+    from .registered import read_texts
+    from .text_changes import original_context
+
+    # The text change puts the rebuilt chunks here.
+    by_id = {str(c.id): c for c in chunks}
     failures = []
 
     async def identity_update(items, ctx=None):
-        """Replace the source with the identity Data's context, which
-        carries no run ID, never the run's."""
         try:
             await publisher.replace(
                 intended,
                 texts=await read_texts(
                     intended, known={intended.original_input_ref: change.text}
                 ),
-                chunks=chunks,
+                chunks=by_id,
                 ctx=generated,
                 expected_revision=expected_revision,
                 text_change=change,
                 origin="test/fault_injection" if fault_stage else origin,
                 fault_stage=fault_stage,
-                **rebuild_hooks(semantics, publisher, intended, chunks, generated),
+                **semantic_hooks(
+                    semantics or NoFacts(),
+                    publisher,
+                    intended,
+                    lambda: list(by_id.values()),
+                    lambda: original_context(intended, generated),
+                ),
             )
         except Exception as exc:
             failures.append(exc)

@@ -69,19 +69,20 @@ await update(
     publisher,
     source,          # the current description
     text,            # the new text of the original
+    occurrence_map,  # old occurrences to new, which admission checks
     describe_edit=describe,
     expected_revision=1,
     semantics=None,  # or the captured facts to rebuild
 )
 ```
 
-1. `update` reads the registered text, chunks the new text in memory with the chunk budget the native chunks record, and calls `describe_edit` with an `EditDraft` (the current description, the registered text, the new text and its chunks). The describer returns the next revision and its occurrence map.
-2. `update` builds the `TextChange` and calls `replace_text`. `replace_text` runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over the original, with one lab Task, `identity_update`. As in `cognify`, the run passes no rollback handler and `incremental_loading=False`, and every Task declares `needs_llm=False`.
+1. `update` refuses a source whose native copy is gone or changed outside the lab with `native_deleted` and the forget hint, as `reconcile` does. Then it reads the registered text, chunks the new text in memory with the chunk budget the native chunks record, and calls `describe_edit` with an `EditDraft` (the current description, the registered text, the new text and its chunks). The describer returns the next revision. The occurrence map is the caller's, since it never depends on the new chunks.
+2. `update` builds the `TextChange` from the occurrence map and runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over the original, with one lab Task, `identity_update`. As in `cognify`, the run passes no rollback handler and `incremental_loading=False`, and every Task declares `needs_llm=False`.
 3. The lab Task calls the publisher's `replace` with the text change and the identity Data item's context, which carries no run ID. `replace` begins the attempt, withholds the dependents' affected decisions, forgets the original's memory (`cognee.forget(memory_only=True)` on the one Data item), stamps the original again at once, registers the new text and then runs Cognee's standard Tasks (`classify_documents`, `extract_chunks_from_documents`, `add_data_points`) nested, outside any run, with the lab's own context. Then it registers the description and publishes it.
 
 Cognee rebuilds the whole document, so every chunk of the original is new. The identity revision is incremental: admission checks the occurrence map against the previous revision, and the Entities, markers and facts that the map keeps keep their IDs.
 
-**No describer, no update.** `update` refuses with `describer_missing` when `describe_edit` is None. The lab never guesses an edited description (the user's decision U-e, made by the assistant on 2026-10-26 and awaiting confirmation).
+**No describer, no update.** `describe_edit` is a required argument of `update`, so the lab never guesses an edited description (the user's decision U-e, made by the assistant on 2026-10-26 and awaiting confirmation). Until fix round 1 of S4 a describer of None was refused at run time with `describer_missing`.
 
 **The nested Tasks write with the lab's context.** The standard Tasks inside `replace` run with a context that has no pipeline run ID, so Cognee's rollback or startup recovery of the update run never finds the rebuilt chunks. Had they carried the run's ID, a recovery could remove chunks that a completed revision cites.
 

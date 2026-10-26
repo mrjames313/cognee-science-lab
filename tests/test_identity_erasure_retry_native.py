@@ -121,17 +121,14 @@ with fixture_environment(root):
   sources=await current_sources(root,p)
   old=sources["doc02"]
   before=await read_original(old,await context_for(old.identity_data_id))
-  described=[]
-  def describe(d):
-   described.append(describe_prefix_edit(d.old,d.text,d.chunks))
-   return described[0],identity_map(d.old)
   try:
-   await update(p,old,PREFIX+before,describe_edit=describe,expected_revision=1,semantics=RebuiltSemantics(),fault_stage=fault)
+   await update(p,old,PREFIX+before,identity_map(old),describe_edit=lambda d:describe_prefix_edit(d.old,d.text,d.chunks),expected_revision=1,semantics=RebuiltSemantics(),fault_stage=fault)
    raise SystemExit("the injected failure did not fail the text change")
   except SystemExit: raise
   except Exception: pass
   row=await p.records.row(old)
   assert (row.state,row.revision,row.resumed_by)==("failed",2,"replace"),row
+  intended=row.description
   doc01=sources["doc01"]
   report=await preview(p,doc01,expected_revision=1)
   (dependent,)=report["dependents"]
@@ -140,7 +137,6 @@ with fixture_environment(root):
   assert outcome["dependents_failed"] is None,outcome
   row=await p.records.row(old)
   assert (row.state,row.revision)==("current",2),row
-  (intended,)=described
   assert row.description.inputs[row.description.original_input_ref].text_sha256==intended.inputs[intended.original_input_ref].text_sha256
   doc01_data=doc01.inputs[doc01.original_input_ref].data_id
   assert not any(getattr(i,"data_id",None)==doc01_data for i in row.description.inputs.values()),row.description.inputs

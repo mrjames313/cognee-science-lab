@@ -38,9 +38,9 @@ from .publish import Publisher
 from .records import saved_records
 from .registered import context_for, read_registered, read_texts
 from .retrieve import retrieve, withholding_status
-from .revisions import refresh, refresh_dependents
+from .revisions import refresh
 from .text_changes import read_original
-from .text_fixture import maintain_one
+from .text_fixture import maintain_one, record_revision, then_refresh
 from .validation import IntentError, text_digest
 from .withholding import document_inputs
 
@@ -196,16 +196,19 @@ async def change_glossary(
 ):
     """Finish a failed glossary edit with the text change its plan saved
     (`entry_update.replace_text`), then refresh its dependents' moved spans."""
-    await replace_text(
+    return await then_refresh(
         publisher,
-        intended,
-        change,
-        expected_revision=expected_revision,
-        semantics=None,
-        fault_stage=fault_stage,
-        origin="test",
+        replace_text(
+            publisher,
+            intended,
+            change,
+            expected_revision=expected_revision,
+            semantics=None,
+            fault_stage=fault_stage,
+            origin="test",
+        ),
+        refresh_fault,
     )
-    return await refresh_dependents(publisher, refresh_fault)
 
 
 async def edit(
@@ -226,23 +229,30 @@ async def edit(
         intended = describe_glossary(
             glossary.dataset_id, draft.text, draft.chunks, old=draft.old
         )
-        (root / f"glossary_revision{intended.revision}.txt").write_text(draft.text)
-        (root / f"glossary_identity_revision{intended.revision}.json").write_text(
-            intended.model_dump_json(indent=2) + "\n"
+        record_revision(
+            root,
+            "glossary_identity_revision{}.json",
+            "glossary_revision{}.txt",
+            intended,
+            draft.text,
         )
-        return intended, {}
+        return intended
 
-    await update(
+    return await then_refresh(
         publisher,
-        glossary,
-        CASES[case](before),
-        describe_edit=describe,
-        expected_revision=expected_revision,
-        semantics=None,
-        fault_stage=fault_stage,
-        origin="test",
+        update(
+            publisher,
+            glossary,
+            CASES[case](before),
+            {},
+            describe_edit=describe,
+            expected_revision=expected_revision,
+            semantics=None,
+            fault_stage=fault_stage,
+            origin="test",
+        ),
+        refresh_fault,
     )
-    return await refresh_dependents(publisher, refresh_fault)
 
 
 async def reconcile(publisher, label, selected):

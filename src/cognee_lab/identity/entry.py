@@ -137,15 +137,26 @@ async def chunk_budget_of(source, graph, default: int) -> int:
     return default
 
 
+async def known(value):
+    """`value`, for a semantic hook whose input is fixed when it is made."""
+    return value
+
+
 def semantic_hooks(semantics, publisher, source, chunks, original) -> dict:
     """The publisher's `semantic_writer` and `verify_semantics` for
-    `semantics` over the source's chunks, with the original's context; None
-    for both when the source has no captured facts."""
+    `semantics` over the source's chunks (`chunks()`), with the original's
+    context (`await original()`), both read when a hook runs: a text change
+    rebuilds them after the hooks are made. None for both when the source
+    has no captured facts."""
     if semantics is None:
         return dict(semantic_writer=None, verify_semantics=None)
+
+    async def run(method):
+        await method(publisher, source, chunks(), await original())
+
     return dict(
-        semantic_writer=lambda: semantics.write(publisher, source, chunks, original),
-        verify_semantics=lambda: semantics.verify(publisher, source, chunks, original),
+        semantic_writer=partial(run, semantics.write),
+        verify_semantics=partial(run, semantics.verify),
     )
 
 
@@ -215,7 +226,13 @@ async def cognify(
                 ctx=await context_for(source.identity_data_id),
                 origin="test/fault_injection" if fault_stage else origin,
                 fault_stage=fault_stage,
-                **semantic_hooks(semantics, publisher, source, chunks, original),
+                **semantic_hooks(
+                    semantics,
+                    publisher,
+                    source,
+                    lambda: chunks,
+                    partial(known, original),
+                ),
             )
         except Exception as exc:
             failures.append(exc)

@@ -243,7 +243,9 @@ async def reconcile_one(publisher, source, *, semantics, fault_stage=None):
     native pipeline: finish a failed attempt or verify a current one.
     `semantics` writes the missing captured facts and verifies them; None
     for a source without captured facts."""
-    from .entry import semantic_hooks
+    from functools import partial
+
+    from .entry import known, semantic_hooks
     from .fixture import load_chunks
     from .registered import context_for, read_texts
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
@@ -262,7 +264,13 @@ async def reconcile_one(publisher, source, *, semantics, fault_stage=None):
                 ctx=ctx,
                 origin="test/fault_injection" if fault_stage else "test",
                 fault_stage=fault_stage,
-                **semantic_hooks(semantics, publisher, item, chunks, original),
+                **semantic_hooks(
+                    semantics,
+                    publisher,
+                    item,
+                    lambda: chunks,
+                    partial(known, original),
+                ),
             )
         return items
 

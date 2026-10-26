@@ -172,7 +172,7 @@ async def run(args, root):
     from .multisource import current_sources, snapshot
     from .publish import Publisher
     from .retrieve import retrieve
-    from .text_fixture import edit_one
+    from .text_fixture import edit_one, record_revision
 
     command = COMMANDS[args.command]
     if args.source != "doc01" or not (root / "chunked-fixture-info.json").exists():
@@ -193,16 +193,20 @@ async def run(args, root):
 
     def describe(draft):
         intended = command.describe(draft.old, draft.previous_text, draft.chunks)
-        (
-            root / f"identity_doc01_occurrence_revision{intended.revision}.json"
-        ).write_text(intended.model_dump_json(indent=2) + "\n")
-        (root / f"source_doc01_revision{intended.revision}.txt").write_text(draft.text)
-        return intended, command.occurrence_map
+        record_revision(
+            root,
+            "identity_doc01_occurrence_revision{}.json",
+            "source_doc01_revision{}.txt",
+            intended,
+            draft.text,
+        )
+        return intended
 
     refresh = await edit_one(
         publisher,
         old,
         command.after,
+        command.occurrence_map,
         describe,
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,

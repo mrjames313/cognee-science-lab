@@ -111,12 +111,13 @@ async def change_kind(
     def describe_kind(draft):
         intended = describe(draft.old, draft.text, draft.chunks)
         write_revision(root, "doc01", intended)
-        return intended, occurrence_map
+        return intended
 
     return await edit_one(
         publisher,
         doc01,
         before,
+        occurrence_map,
         describe_kind,
         expected_revision=expected_revision,
         fault_stage=fault_stage,
