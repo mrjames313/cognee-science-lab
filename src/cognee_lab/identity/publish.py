@@ -241,10 +241,11 @@ class Publisher:
             check_no_removed_recipes,
             mention_ids,
         )
-        from .outside_deletion import left_absent, recorded_removals
+        from .outside_deletion import left_absent
 
         previous = await self.records.row(source)
-        absent = await left_absent(self.graph, rows, source, previous)
+        removed = await self.records.removed()
+        absent = await left_absent(self.graph, rows, source, previous, removed)
         await check_corpus_inputs_exist(self.graph, source, absent)
         others = [
             r
@@ -265,7 +266,7 @@ class Publisher:
         check_record_citations(source, rows, new_citations(source, previous))
         check_record_key_reuse(source, rows, new_record_keys(source, previous))
         check_citation_cycles(source, rows)
-        await check_no_removed_recipes(self.graph, source, recorded_removals(rows))
+        await check_no_removed_recipes(self.graph, source, removed, previous)
         for entity_id in source.entity_constructions:
             node = await self.graph.get_node(str(entity_id))
             if node is not None and node.get("type") != "Entity":
@@ -447,7 +448,9 @@ class Publisher:
                 "The forget has not revised every dependent yet; run forget or reconcile on the forgotten source first",
                 details=dict(dependents=[r.source for r in waiting]),
             )
-        found = await readd_plan(self.graph, row.tombstone, row.plan, rows)
+        found = await readd_plan(
+            self.graph, row.tombstone, row.plan, rows, await self.records.removed()
+        )
         removed = found.for_source(source)
         await admit_readd(self.graph, row.tombstone, source, removed)
         await self.admit_inputs(source, texts, chunks, saved_revision=row.revision)
@@ -512,6 +515,7 @@ class Publisher:
             # What the failed attempts wrote for the descriptions an erasure
             # retry superseded, and the removal no longer declares, goes.
             from .replace import plan_retirement, retire, verify_retired
+            from .retirement import record_removals
 
             await plan_retirement(self.graph, plan, superseded, source)
 
@@ -520,6 +524,7 @@ class Publisher:
                 await verify_retired(
                     self.graph, self.vector, self.records, source, plan
                 )
+                await record_removals(self.graph, self.records, source, plan)
 
         attempt = await self.records.begin(
             source,

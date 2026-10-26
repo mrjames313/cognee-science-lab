@@ -79,7 +79,7 @@ async def test_the_refusal_names_every_live_citer_with_its_dataset_and_state(
     Helios but whose previous one names it. A forgotten citer does not
     count."""
     caller = without_input(source_payload)
-    gone = forgotten_row(caller, served=True)
+    gone = forgotten_row(caller)
     reader = reader_only(source_payload)
     withdrawn = co_owner(source_payload)
     elsewhere = co_owner(source_payload, dataset=str(uuid4()))
@@ -93,7 +93,7 @@ async def test_the_refusal_names_every_live_citer_with_its_dataset_and_state(
             previous_description=replacing.model_dump_json(),
         ),
     )
-    forgotten = forgotten_row(co_owner(source_payload), served=True)
+    forgotten = forgotten_row(co_owner(source_payload))
     rows = [
         gone,
         row_of(reader),
@@ -131,7 +131,7 @@ async def test_the_refusal_names_every_live_citer_with_its_dataset_and_state(
 
 async def test_a_readd_that_does_not_name_the_entity_is_not_refused(source_payload):
     caller = without_input(source_payload)
-    gone = forgotten_row(caller, served=True)
+    gone = forgotten_row(caller)
     rows = [gone, row_of(reader_only(source_payload))]
     unnamed = dropped_helios(json.loads(caller.model_dump_json()))
     assert HELIOS in await readd_removed(
@@ -139,14 +139,16 @@ async def test_a_readd_that_does_not_name_the_entity_is_not_refused(source_paylo
     )
 
 
-async def readd_writes(rows, tombstone, caller):
+async def readd_writes(rows, tombstone, caller, record=None):
     """The re-add described from the caller's file, admitted against the
-    tombstone: what `forget_fixture.readd` and `Publisher.admit_readd` do
-    before any write, both from `readd_removed`."""
+    tombstone and the removal record: what `forget_fixture.readd` and
+    `Publisher.admit_readd` do before any write, both from
+    `readd_removed`."""
     graph = OccupiedGraph(tombstone.all_reusable_ids - {HELIOS})
-    removed = await readd_removed(graph, tombstone, PLAN, rows, caller)
+    removed = await readd_removed(graph, tombstone, PLAN, rows, caller, record)
     source = describe_readd(caller, tombstone, removed, TEXT, chunks_of(caller, TEXT))
-    assert await readd_removed(graph, tombstone, PLAN, rows, source) == removed
+    found = await readd_removed(graph, tombstone, PLAN, rows, source, record)
+    assert found == removed
     await admit_readd(graph, tombstone, source, removed)
     return source
 
@@ -155,11 +157,11 @@ async def test_once_the_citers_are_forgotten_the_readd_derives_a_new_uuid(
     source_payload,
 ):
     caller = without_input(source_payload)
-    gone = forgotten_row(caller, served=True)
+    gone = forgotten_row(caller)
     reader = reader_only(source_payload)
     with pytest.raises(IntentError):
         await readd_writes([gone, row_of(reader)], gone.tombstone, caller)
-    rows = [gone, forgotten_row(reader, served=True)]
+    rows = [gone, forgotten_row(reader)]
     source = await readd_writes(rows, gone.tombstone, caller)
     assert HELIOS not in source.entity_constructions
     assert str(HELIOS) not in source.model_dump_json()
@@ -171,7 +173,7 @@ async def test_once_the_citer_is_replaced_without_it_the_readd_derives_a_new_uui
     source_payload,
 ):
     caller = without_input(source_payload)
-    gone = forgotten_row(caller, served=True)
+    gone = forgotten_row(caller)
     owner = co_owner(source_payload)
     with pytest.raises(IntentError):
         await readd_writes([gone, row_of(owner)], gone.tombstone, caller)
@@ -186,7 +188,7 @@ async def test_a_readd_still_citing_the_entity_is_refused_once_nothing_else_does
     """The caller's file keeps its corpus input of Helios: the re-add may
     not cite a removed Entity."""
     caller = source_of(source_payload)
-    gone = forgotten_row(caller, served=True)
+    gone = forgotten_row(caller)
     with pytest.raises(IntentError) as refused:
         await readd_writes([gone], gone.tombstone, caller)
     assert refused.value.code == "forgotten_uuid_reused"
@@ -197,7 +199,7 @@ async def test_two_co_owners_readded_separately_derive_two_uuids(source_payload)
     replacement from its own identity source, so one Entity becomes two."""
     first = without_input(source_payload)
     second = without_input(json.loads(co_owner(source_payload).model_dump_json()))
-    rows = [forgotten_row(first, served=True), forgotten_row(second, served=True)]
+    rows = [forgotten_row(first), forgotten_row(second)]
     a = await readd_writes(rows, rows[0].tombstone, first)
     b = await readd_writes(rows, rows[1].tombstone, second)
     one = a.mention_resolutions["r01"].target_entity_id
@@ -214,7 +216,7 @@ async def test_an_unserved_forget_does_not_prove_an_absent_entity_lab_removed(
     finds Helios gone. No lab record says a lab operation removed Helios, so
     the re-add derives a new UUID and never writes the old one."""
     caller = without_input(source_payload)
-    gone = forgotten_row(caller, served=False)
+    gone = forgotten_row(caller)
     assert HELIOS in await readd_removed(
         Graph(HELIOS), gone.tombstone, PLAN, [gone], caller
     )
@@ -230,7 +232,7 @@ async def test_a_failed_co_owner_blocks_the_readd_of_an_unserved_source(
     failed, still builds Helios: its retry would write the old UUID while
     the re-add writes a derived one, so the re-add is refused naming W."""
     caller = without_input(source_payload)
-    gone = forgotten_row(caller, served=False)
+    gone = forgotten_row(caller)
     from cognee.infrastructure.databases.provenance import make_source_ref_key
 
     owner = co_owner(source_payload)
@@ -246,7 +248,7 @@ async def test_a_failed_co_owner_blocks_the_readd_of_an_unserved_source(
         await readd_removed(
             Graph(HELIOS), gone.tombstone, plan, [gone, withdrawn], caller
         )
-    rows = [gone, forgotten_row(owner, served=False)]
+    rows = [gone, forgotten_row(owner)]
     assert HELIOS in await readd_removed(
         Graph(HELIOS), gone.tombstone, plan, rows, caller
     )
@@ -261,8 +263,8 @@ async def test_an_entity_a_co_owner_forget_removed_while_withdrawn_is_derived_an
     a = without_input(source_payload)
     b = co_owner(source_payload)
     rows = [
-        forgotten_row(a, served=False),
-        forgotten_row(b, served=True, removed=(HELIOS,)),
+        forgotten_row(a),
+        forgotten_row(b, removed=(HELIOS,)),
     ]
     source = await readd_writes(rows, rows[0].tombstone, a)
     assert str(HELIOS) not in source.model_dump_json()
@@ -279,7 +281,7 @@ async def test_an_entity_a_co_owner_replacement_retired_while_withdrawn_is_deriv
         dropped_helios(json.loads(b.model_dump_json())),
         plan=dict(operation="identity_replace", retired_entities={str(HELIOS): {}}),
     )
-    rows = [forgotten_row(a, served=False), replaced]
+    rows = [forgotten_row(a), replaced]
     source = await readd_writes(rows, rows[0].tombstone, a)
     assert str(HELIOS) not in source.model_dump_json()
 
@@ -288,19 +290,22 @@ async def test_a_lab_removed_entity_a_failed_co_owner_builds_does_not_block_the_
     source_payload,
 ):
     """A, B and C build Helios; A is withdrawn and C's first attempt failed;
-    B's forget removes Helios. C's retry is refused, since it would write
-    the old UUID (`check_no_removed_recipes`), so the re-add of A does not
-    wait for C and derives a new UUID."""
+    B's forget removes Helios and records the removal. C's retry is
+    refused, since it would write the old UUID (`check_no_removed_recipes`),
+    so the re-add of A does not wait for C and derives a new UUID."""
     a = without_input(source_payload)
     b = co_owner(renamed(source_payload))
     c = without_input(json.loads(co_owner(renamed(source_payload)).model_dump_json()))
     rows = [
-        forgotten_row(a, served=False),
-        forgotten_row(b, served=True, removed=(HELIOS,)),
+        forgotten_row(a),
+        forgotten_row(b, removed=(HELIOS,)),
         row_of(c, state="failed", verified_revision=0),
     ]
+    removed = {HELIOS: "identity_forget"}
     with pytest.raises(IntentError) as refused:
-        await admit(rows, c)
+        await admit(rows, c, removed=removed)
     assert refused.value.code == "entity_recreation"
-    source = await readd_writes(rows, rows[0].tombstone, a)
+    with pytest.raises(IntentError):
+        await readd_writes(rows, rows[0].tombstone, a)
+    source = await readd_writes(rows, rows[0].tombstone, a, removed)
     assert str(HELIOS) not in source.model_dump_json()

@@ -27,6 +27,7 @@ from .retirement import (
     has_contribution,
     owned_by,
     ownership_snapshot,
+    record_removals,
     released,
     retired_sources,
     source_ids,
@@ -332,11 +333,10 @@ def resumes(row):
 async def plan_for(publisher, source, row):
     """A failed forget's saved plan, which keeps the ownership the first
     attempt found before native deletion detached or removed it; otherwise a
-    new plan from the graph, with whether the source was served, which its
-    tombstone keeps (`Tombstone.served_entity_ids`)."""
-    if not resumes(row):
-        return dict(await forget_plan(publisher, source), served=row.is_served)
-    return require_stored_files(dict(row.plan))
+    new plan from the graph."""
+    if resumes(row):
+        return require_stored_files(dict(row.plan))
+    return await forget_plan(publisher, source)
 
 
 def require_stored_files(plan):
@@ -475,6 +475,10 @@ async def forget(
         impact_token=found.token,
         dependents=[d.identity_data_id for d in found.dependents],
     )
+    if not retry and row.state == "failed":
+        # begin replaces a failed publication's plan: record first what its
+        # erasure retry retired.
+        await record_removals(graph, records, source, row.plan)
     user = None
 
     async def check_impact(_):
@@ -509,13 +513,13 @@ async def forget(
     async def verification(run):
         nonlocal tombstone
         await verify_forgotten(publisher, source, plan)
+        await record_removals(graph, records, source, plan)
         tombstone = Tombstone.of(
             source,
             forgotten_at=now(),
             removed_entity_ids=[UUID(e) for e in found.removed_entities],
             impact_token=found.token if found.dependents else None,
             earlier=(await records.row(source)).last_tombstone,
-            served=plan.get("served", False),
         )
         run.completion = dict(tombstone=tombstone)
 

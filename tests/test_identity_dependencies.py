@@ -215,7 +215,7 @@ def row_of(source, state="current", plan=None):
     )
 
 
-async def memory_publisher(rows):
+async def memory_publisher(rows, removed=None):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import StaticPool
 
@@ -227,6 +227,9 @@ async def memory_publisher(rows):
 
         async def rows(self, dataset=None):
             return list(rows)
+
+        async def removed(self):
+            return dict(removed or {})
 
     publisher = SimpleNamespace(records=Records())
     publisher.withholdings = WithholdingStore(factory)

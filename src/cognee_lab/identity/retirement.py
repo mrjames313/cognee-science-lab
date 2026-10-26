@@ -123,33 +123,62 @@ class ReaddPlan(NamedTuple):
         return set(self.removed)
 
 
-async def readd_plan(graph, tombstone, plan, rows) -> ReaddPlan:
+async def readd_plan(graph, tombstone, plan, rows, removed) -> ReaddPlan:
     """The Entities a re-add replaces: those its forget removed, and every
     Entity its plan recorded or a forgotten life built that the graph no
     longer holds. A removed Entity UUID is never reused, whoever removed
     it: the user's decision of 2026-10-26. Each absent one stays absent
     under its old UUID one of two ways. A publication refuses to build one
-    a lab record proves removed (`admission.check_no_removed_recipes`). Any
-    other, deleted outside the lab or by a withdrawal, blocks the re-add
-    while a saved source still cites or builds it, since a retry of that
-    source would write the old UUID beside the derived one.
+    the removal record (`removed`) lists (`admission.check_no_removed_recipes`).
+    Any other, deleted outside the lab, and one a withdrawal deleted, blocks
+    the re-add while a saved source still cites or builds it, since a retry
+    of that source would write the old UUID beside the derived one.
     `describe_readd` and `Publisher.admit_readd` both read this plan."""
-    from .outside_deletion import live_citers, recorded_removals
+    from .outside_deletion import exempt_from_citers, live_citers
 
     async def absent(ids):
         return {e for e in ids if await graph.get_node(str(e)) is None}
 
-    removed = removed_entities(tombstone, plan, rows)
+    forgotten = removed_entities(tombstone, plan, rows)
     recorded = {
         UUID(key) for key, node in plan["entities"].items() if node["type"] == "Entity"
     }
     gone = await absent(recorded | set(tombstone.earlier_entity_ids))
-    reusable = await absent(tombstone.all_reusable_ids - removed)
-    replaced = removed | gone | reusable
-    unrecorded = await absent(replaced - recorded_removals(rows))
+    reusable = await absent(tombstone.all_reusable_ids - forgotten)
+    replaced = forgotten | gone | reusable
+    waiting = await absent(replaced - exempt_from_citers(removed))
     return ReaddPlan(
         frozenset(replaced),
-        {e: c for e in unrecorded if (c := live_citers(rows, e))},
+        {e: c for e in waiting if (c := live_citers(rows, e))},
+    )
+
+
+def removal_candidates(plan) -> set[str]:
+    """The Entities an attempt with this plan may delete: what a
+    replacement or an erasure retry retires, and the Entities a withdrawal
+    or a forget found the source owning. Each goes only if no other source
+    owns it."""
+    if plan.get("operation") in {"identity_withdraw", "identity_forget"}:
+        return {k for k, n in plan.get("entities", {}).items() if n["type"] == "Entity"}
+    return set(plan.get("retired_entities", {}))
+
+
+async def record_removals(graph, records, source, plan):
+    """Append each candidate of `plan` the graph no longer holds to the
+    removal record (`RecordStore.record_removed`). Each operation calls it
+    in its verification stage, after its delete: a crash before it leaves
+    the attempt failed with its plan, which only its own retry resumes and
+    records. Withdraw and forget also call it on a failed publication's
+    saved plan before their begin replaces that plan."""
+    ids = source_ids(source)
+    candidates = sorted(removal_candidates(plan))
+    present = await graph.get_node_delete_data(candidates) if candidates else {}
+    gone = [k for k in candidates if k not in present]
+    await records.record_removed(
+        gone,
+        dataset=ids.dataset_id,
+        source=ids.identity_data_id,
+        operation=plan["operation"],
     )
 
 

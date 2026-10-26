@@ -246,7 +246,11 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
             "source_changed", "The caller's text file and identity file disagree"
         )
     found = await readd_plan(
-        publisher.graph, tombstone, row.plan, await publisher.records.rows()
+        publisher.graph,
+        tombstone,
+        row.plan,
+        await publisher.records.rows(),
+        await publisher.records.removed(),
     )
     removed = found.for_source(caller)
     budget = chunk_budget(root)

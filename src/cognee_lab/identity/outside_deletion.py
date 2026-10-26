@@ -16,9 +16,10 @@ on 2026-10-25:
 
 An Entity counts as deleted outside the lab when a served source's
 description, or the publishing source's last verified one, names it as a
-corpus input or a reusable recipe, its node is absent, and no lab operation
-removed it (`lab_removed`). A decision is kept when it, its group and the
-inputs it cites are as the source's last verified description has them.
+corpus input or a reusable recipe, its node is absent, and the removal
+record (`RecordStore.removed`) does not list it (`lab_removed`). A
+decision is kept when it, its group and the inputs it cites are as the
+source's last verified description has them.
 """
 
 from typing import NamedTuple
@@ -27,6 +28,7 @@ from uuid import UUID
 from .erasure_rules import entity_ids_named
 from .models import CorpusObjectInput, IdentitySource
 from .records import REGISTRY, naming, record_inputs, record_type_of
+from .retirement import removal_candidates
 from .validation import MISSING_INPUT, IntentError, reusable_recipes
 
 MESSAGES = dict(
@@ -58,28 +60,6 @@ def corpus_entities(description) -> set[UUID]:
     } | set(reusable_recipes(description))
 
 
-def tombstones(row):
-    return [t for t in (row.tombstone, row.last_tombstone) if t is not None]
-
-
-def retired_by(row) -> set[UUID]:
-    """What the row's replacement planned to retire."""
-    return {UUID(key) for key in row.plan.get("retired_entities", {})}
-
-
-def recorded_removals(rows) -> set[UUID]:
-    """The Entities a lab record shows a lab operation removed: what each
-    forget removed, each forgotten life's mention UUIDs, and what a
-    replacement planned to retire."""
-    found = set()
-    for row in rows:
-        for tombstone in tombstones(row):
-            found |= set(tombstone.removed_entity_ids)
-            found |= set(tombstone.all_mention_ids)
-        found |= retired_by(row)
-    return found
-
-
 def served_recipes(rows, own=None, verified=None) -> set[UUID]:
     """What a served source builds, which no lab operation removes while it
     is served. `own` is the source being published, whose attempt in
@@ -89,33 +69,35 @@ def served_recipes(rows, own=None, verified=None) -> set[UUID]:
     for row in rows:
         if (row.dataset, row.source) == own:
             if verified is not None:
-                built |= set(reusable_recipes(verified)) - retired_by(row)
+                retiring = {UUID(e) for e in removal_candidates(row.plan)}
+                built |= set(reusable_recipes(verified)) - retiring
         elif row.description is not None and row.is_served:
             built |= set(reusable_recipes(row.description))
     return built
 
 
-def lab_removed(rows, own=None, verified=None) -> set[UUID]:
-    """The Entities a lab operation removed, or may have, as a publication
-    of `own` sees them: those a record shows (`recorded_removals`); every reusable Entity of a forgotten life
-    but those its forget found served (`Tombstone.served_entity_ids`), since
-    a withdrawal or a failed attempt may have removed one before the forget
-    found it gone; and the recipes of a source that is not served. Less what
-    a served source builds (`served_recipes`)."""
+def lab_removed(rows, removed, own=None, verified=None) -> set[UUID]:
+    """The absent Entities not deleted outside the lab, as a publication of
+    `own` sees them: those the removal record lists (`removed`); what an
+    attempt in flight may have deleted before its verification records it
+    (`removal_candidates` of its plan, which only its own retry resumes);
+    and the recipes of a source that is not served, which may never have
+    been written. Less what a served source builds (`served_recipes`)."""
     maybe = set()
     for row in rows:
-        for tombstone in tombstones(row):
-            maybe |= tombstone.all_reusable_ids - set(tombstone.served_entity_ids)
+        if row.state in {"pending", "failed"}:
+            maybe |= {UUID(e) for e in removal_candidates(row.plan)}
         unserved = row.description is not None and not row.is_served
         if unserved and (row.dataset, row.source) != own:
             maybe |= set(row.description.entity_constructions)
-    return (recorded_removals(rows) | maybe) - served_recipes(rows, own, verified)
+    return (set(removed) | maybe) - served_recipes(rows, own, verified)
 
 
-async def deleted_outside(graph, rows, source, verified) -> frozenset[UUID]:
+async def deleted_outside(graph, rows, source, verified, removed) -> frozenset[UUID]:
     """The Entities deleted outside the lab, as the publication of `source`
-    sees them. Its own row counts through `verified` alone, since an
-    attempt in flight leaves it unserved."""
+    sees them, with `removed` the removal record. Its own row counts
+    through `verified` alone, since an attempt in flight leaves it
+    unserved."""
     own = (str(source.dataset_id), str(source.identity_data_id))
     named = set().union(
         *(
@@ -125,7 +107,7 @@ async def deleted_outside(graph, rows, source, verified) -> frozenset[UUID]:
         ),
         corpus_entities(verified) if verified is not None else (),
     )
-    candidates = named - lab_removed(rows, own, verified)
+    candidates = named - lab_removed(rows, removed, own, verified)
     return frozenset([e for e in candidates if await graph.get_node(str(e)) is None])
 
 
@@ -192,7 +174,7 @@ def refusal(source, verified, entity_id) -> str | None:
     )
 
 
-async def left_absent(graph, rows, source, previous) -> frozenset[UUID]:
+async def left_absent(graph, rows, source, previous, removed) -> frozenset[UUID]:
     """The Entities deleted outside the lab that a publication of `source`
     names and leaves absent: those whose citing and naming parts are all
     kept from the last verified description of `previous`, the source's
@@ -200,12 +182,21 @@ async def left_absent(graph, rows, source, previous) -> frozenset[UUID]:
     edges and contributions, in the write and in its verification, and
     admission lets a kept decision cite them."""
     verified = verified_description(previous)
-    named = await deleted_outside(graph, rows, source, verified)
+    named = await deleted_outside(graph, rows, source, verified, removed)
     named &= entity_ids_named(source)
     for entity_id in sorted(named, key=str):
         if code := refusal(source, verified, entity_id):
             raise IntentError(code, MESSAGES[code].format(entity_id))
     return frozenset(named)
+
+
+def exempt_from_citers(removed) -> set[UUID]:
+    """The recorded removals a re-add replaces without waiting for their
+    citers (`removed`, the removal record): every one but a withdrawal's.
+    A publication refuses to rebuild any recorded one
+    (`admission.check_no_removed_recipes`); a withdrawal's delete still
+    waits for its citers, as the user decided on 2026-10-26."""
+    return {e for e, operation in removed.items() if operation != "identity_withdraw"}
 
 
 def live_citers(rows, entity_id) -> list[dict]:

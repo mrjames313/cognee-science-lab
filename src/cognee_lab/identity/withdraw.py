@@ -10,6 +10,7 @@ from .retirement import (
     current_claims,
     owned_by,
     ownership_snapshot,
+    record_removals,
     released,
     retired_sources,
     verify_no_contributions,
@@ -63,6 +64,8 @@ async def withdraw(
     if row.state != "withdrawn" and row.operation == "identity_withdraw":
         plan = dict(row.plan)
     else:
+        if row.state == "failed":
+            await record_removals(graph, records, source, row.plan)
         nodes = await graph.get_node_delete_data(
             await graph.find_nodes_by_source_ref(owner)
         )
@@ -108,6 +111,7 @@ async def withdraw(
             retired,
             current_claims(rows),
         )
+        await record_removals(graph, records, source, plan)
         run.inject(run.stage, "Injected failure before withdrawal acknowledgement")
 
     attempt, results = await run_attempt(

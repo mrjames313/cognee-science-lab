@@ -664,20 +664,39 @@ async def check_corpus_inputs_exist(graph, source, exempt=frozenset()):
 
 REMOVED_RECIPE = (
     "A publication does not recreate a removed Entity: {}; a removed Entity "
-    "UUID is never reused. Replace the decisions without it, picking another "
-    "target or leaving the mention unresolved, or forget this source and "
-    "re-add it, which builds it under a new UUID"
+    "UUID is never reused. {}"
+)
+REMEDIES = dict(
+    new="Pick another target or leave the mention unresolved",
+    unserved="Forget this source and re-add it, which builds the Entity under "
+    "a new UUID",
+    served="Replace the decisions without it, picking another target or "
+    "leaving the mention unresolved, or forget this source and re-add it, "
+    "which builds the Entity under a new UUID",
 )
 
 
-async def check_no_removed_recipes(graph, source, removed):
-    """No recipe builds an absent Entity whose UUID a lab record proves
-    removed (`removed`, from outside_deletion.recorded_removals): a re-add
-    of the source that built it derives a new UUID for it, so a retry,
-    reconcile or replacement that wrote the old one would split the Entity
-    in two (the user's decision of 2026-10-26). A present one only gains
-    this source's ref. Run by every admission of a publication; a re-add's
-    own recipes carry derived UUIDs."""
-    for entity_id in sorted(set(source.entity_constructions) & removed, key=str):
+def removed_recipe_remedy(previous) -> str:
+    """What the caller of a refused publication does next: a new source
+    changes its files; a current one may be replaced; any other, such as a
+    failed first publication, whose retry may not change its description,
+    is forgotten and re-added."""
+    if previous is None:
+        return REMEDIES["new"]
+    return REMEDIES["served" if previous.state == "current" else "unserved"]
+
+
+async def check_no_removed_recipes(graph, source, removed, previous):
+    """No recipe builds an absent Entity the removal record lists
+    (`removed`, from `RecordStore.removed`): a re-add of the source that
+    built it derives a new UUID for it, so a retry, reconcile or
+    replacement that wrote the old one would split the Entity in two (the
+    user's decision of 2026-10-26). A present one only gains this source's
+    ref. Run by every admission of a publication, with `previous` the
+    source's row; a re-add's own recipes carry derived UUIDs."""
+    for entity_id in sorted(set(source.entity_constructions) & set(removed), key=str):
         if await graph.get_node(str(entity_id)) is None:
-            raise IntentError("entity_recreation", REMOVED_RECIPE.format(entity_id))
+            raise IntentError(
+                "entity_recreation",
+                REMOVED_RECIPE.format(entity_id, removed_recipe_remedy(previous)),
+            )

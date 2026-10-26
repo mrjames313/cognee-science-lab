@@ -822,6 +822,7 @@ async def test_a_second_forget_keeps_the_first_life_uuids(source_payload, monkey
         "clear_withholdings",
         "sweep",
         "verify_forgotten",
+        "record_removals",
         "data_present",
     ):
         monkeypatch.setattr(forgetting, name, nothing)

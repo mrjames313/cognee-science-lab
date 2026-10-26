@@ -7,6 +7,7 @@ from .erasure_rules import NO_ERASURES, check_retry_chain, erasures_of
 from .models import IdentitySource
 from .native import edge_metadata, require_graph_methods
 from .registered import read_registered, write_registered
+from .retirement import record_removals
 from .stages import Operation, run_attempt, saved_row
 from .storage import STALE_REVISION, encode, erased_from, superseding_plan
 from .validation import IntentError
@@ -410,6 +411,7 @@ async def replace(
         await retire(graph, vector, source, plan)
         run.inject("replace_retired")
         await verify_retired(graph, vector, records, source, plan)
+        await record_removals(graph, records, source, plan)
         if await read_registered(source) != source:
             raise IntentError(
                 "generated_source_changed",

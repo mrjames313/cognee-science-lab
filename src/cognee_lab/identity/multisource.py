@@ -622,6 +622,11 @@ async def run(args, root):
         )
     else:
         result = await snapshot(publisher, sources, args.query)
+    if args.command == "status":
+        removed = await publisher.records.removed()
+        result["removed_entities"] = {
+            str(e): removed[e] for e in sorted(removed, key=str)
+        }
     # A reconcile that completed a text change reports its refresh beside it.
     result.update(refresh)
     (root / "multisource_result.json").write_text(json.dumps(result, indent=2))
