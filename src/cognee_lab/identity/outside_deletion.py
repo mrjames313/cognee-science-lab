@@ -214,31 +214,40 @@ def live_citers(rows, entity_id) -> list[dict]:
     pending or failed one included, or whose replacement in flight replaces
     a description that names it. Withheld and withdrawn rows count, in any
     dataset: a later retry or reconcile of one would publish the Entity
-    again under its old UUID."""
+    again under its old UUID. `remedy` is `reconcile` for a pending or
+    failed row whose latest description no longer names it, since its own
+    retry drops it; a retry of any other would write the old UUID."""
     found = []
     for row in rows:
         if row.state == "forgotten" or row.description is None:
             continue
-        held = [row.description]
+        latest = entity_id in entity_ids_named(row.description)
+        held = []
         if row.operation == "identity_replace" and row.state in {"pending", "failed"}:
             held.append(
                 IdentitySource.model_validate_json(row.plan["previous_description"])
             )
-        if any(entity_id in entity_ids_named(d) for d in held):
-            found.append(
-                dict(
-                    dataset_id=row.dataset, identity_data_id=row.source, state=row.state
-                )
+        if not latest and not any(entity_id in entity_ids_named(d) for d in held):
+            continue
+        transient = row.state in {"pending", "failed"} and not latest
+        found.append(
+            dict(
+                dataset_id=row.dataset,
+                identity_data_id=row.source,
+                state=row.state,
+                remedy="reconcile" if transient else "forget_or_replace",
             )
+        )
     return found
 
 
 def check_readd(source, cited: dict[UUID, list[dict]]):
     """A re-add whose files name a removed Entity that a saved source still
     cites or builds (`cited`, from `live_citers`) is refused
-    (`entity_recreation`), naming each such source: the user's decisions of
-    2026-10-25 for Q2 and of 2026-10-26. Once each is forgotten, or replaced
-    without the Entity, the re-add replaces it under a derived UUID."""
+    (`entity_recreation`), naming each such source and its remedy: the
+    user's decisions of 2026-10-25 for Q2 and of 2026-10-26. Once each is
+    reconciled, forgotten, or replaced without the Entity, the re-add
+    replaces it under a derived UUID."""
     named = sorted(set(cited) & entity_ids_named(source), key=str)
     if not named:
         return
@@ -247,12 +256,24 @@ def check_readd(source, cited: dict[UUID, list[dict]]):
         f"{c['identity_data_id']} in dataset {c['dataset_id']} ({c['state']})"
         for c in citers
     )
+    retried = sorted(
+        {c["identity_data_id"] for c in citers if c["remedy"] == "reconcile"}
+    )
+    remedies = []
+    if retried:
+        remedies.append(
+            f"Reconcile {', '.join(retried)}, whose saved revision no longer names it"
+        )
+    if any(c["remedy"] != "reconcile" for c in citers):
+        remedies.append(
+            ("forget the others" if retried else "Forget those sources")
+            + ", or replace their decisions without the Entity"
+        )
     raise IntentError(
         "entity_recreation",
         "A re-add does not recreate a removed Entity while a "
         f"saved source still cites or builds it: {', '.join(map(str, named))} "
-        f"by {listed}. Forget those sources, or replace their decisions "
-        "without the Entity, then re-add",
+        f"by {listed}. {'; '.join(remedies)}, then re-add",
         details=dict(citers=citers),
     )
 

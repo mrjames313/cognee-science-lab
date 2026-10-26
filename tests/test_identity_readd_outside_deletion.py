@@ -118,7 +118,15 @@ async def test_the_refusal_names_every_live_citer_with_its_dataset_and_state(
     message = str(refused.value)
     for identity, dataset, state in named:
         assert f"{identity} in dataset {dataset} ({state})" in message
-    assert "Forget those sources, or replace their decisions" in message
+    reconcile = f"Reconcile {dropped.source}, whose saved revision no longer names it"
+    assert reconcile in message
+    assert "; forget the others, or replace their decisions" in message
+    assert [c["remedy"] for c in refused.value.details["citers"]] == [
+        "forget_or_replace",
+        "forget_or_replace",
+        "forget_or_replace",
+        "reconcile",
+    ]
 
 
 async def test_a_readd_that_does_not_name_the_entity_is_not_refused(source_payload):
