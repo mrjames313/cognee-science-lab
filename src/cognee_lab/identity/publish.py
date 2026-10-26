@@ -238,9 +238,10 @@ class Publisher:
         from .admission import (
             check_corpus_inputs_exist,
             check_mention_inputs,
+            check_no_removed_recipes,
             mention_ids,
         )
-        from .outside_deletion import left_absent
+        from .outside_deletion import left_absent, recorded_removals
 
         previous = await self.records.row(source)
         absent = await left_absent(self.graph, rows, source, previous)
@@ -264,6 +265,7 @@ class Publisher:
         check_record_citations(source, rows, new_citations(source, previous))
         check_record_key_reuse(source, rows, new_record_keys(source, previous))
         check_citation_cycles(source, rows)
+        await check_no_removed_recipes(self.graph, source, recorded_removals(rows))
         for entity_id in source.entity_constructions:
             node = await self.graph.get_node(str(entity_id))
             if node is not None and node.get("type") != "Entity":

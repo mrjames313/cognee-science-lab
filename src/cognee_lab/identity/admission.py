@@ -15,7 +15,8 @@ Two rules read the graph, so their callers run them apart from `admit`. On
 a first attempt no UUID the revision introduces may be a node yet
 (`check_absent_from_graph`), and every corpus input a decision lists names
 an Entity that exists (`check_corpus_inputs_exist`, run by every admission
-of a publication), whether a decision or a group cites it.
+of a publication), whether a decision or a group cites it, and no recipe
+builds an absent Entity a lab operation removed (`check_no_removed_recipes`).
 """
 
 from collections import defaultdict
@@ -659,3 +660,24 @@ async def check_corpus_inputs_exist(graph, source, exempt=frozenset()):
             raise IntentError(
                 "missing_reasoning_input", MISSING_INPUT.format(entity_id)
             )
+
+
+REMOVED_RECIPE = (
+    "A publication does not recreate a removed Entity: {}; a removed Entity "
+    "UUID is never reused. Replace the decisions without it, picking another "
+    "target or leaving the mention unresolved, or forget this source and "
+    "re-add it, which builds it under a new UUID"
+)
+
+
+async def check_no_removed_recipes(graph, source, removed):
+    """No recipe builds an absent Entity whose UUID a lab record proves
+    removed (`removed`, from outside_deletion.recorded_removals): a re-add
+    of the source that built it derives a new UUID for it, so a retry,
+    reconcile or replacement that wrote the old one would split the Entity
+    in two (the user's decision of 2026-10-26). A present one only gains
+    this source's ref. Run by every admission of a publication; a re-add's
+    own recipes carry derived UUIDs."""
+    for entity_id in sorted(set(source.entity_constructions) & removed, key=str):
+        if await graph.get_node(str(entity_id)) is None:
+            raise IntentError("entity_recreation", REMOVED_RECIPE.format(entity_id))

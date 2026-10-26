@@ -276,13 +276,13 @@ async def test_an_entity_a_co_owner_replacement_retired_while_withdrawn_is_deriv
     assert str(HELIOS) not in source.model_dump_json()
 
 
-async def test_a_lab_removed_entity_a_failed_co_owner_builds_blocks_the_readd(
+async def test_a_lab_removed_entity_a_failed_co_owner_builds_does_not_block_the_readd(
     source_payload,
 ):
     """A, B and C build Helios; A is withdrawn and C's first attempt failed;
-    B's forget removes Helios. C's retry would write Helios under its old
-    UUID while the re-add of A derives a new one, so the re-add waits for C
-    as it does for an Entity deleted outside the lab."""
+    B's forget removes Helios. C's retry is refused, since it would write
+    the old UUID (`check_no_removed_recipes`), so the re-add of A does not
+    wait for C and derives a new UUID."""
     a = without_input(source_payload)
     b = co_owner(renamed(source_payload))
     c = without_input(json.loads(co_owner(renamed(source_payload)).model_dump_json()))
@@ -291,11 +291,8 @@ async def test_a_lab_removed_entity_a_failed_co_owner_builds_blocks_the_readd(
         forgotten_row(b, served=True, removed=(HELIOS,)),
         row_of(c, state="failed", verified_revision=0),
     ]
-    assert HELIOS in (await admit(rows, c)).entities
     with pytest.raises(IntentError) as refused:
-        await readd_writes(rows, rows[0].tombstone, a)
+        await admit(rows, c)
     assert refused.value.code == "entity_recreation"
-    assert [x["state"] for x in refused.value.details["citers"]] == ["failed"]
-    rows[2] = forgotten_row(c, served=False)
     source = await readd_writes(rows, rows[0].tombstone, a)
     assert str(HELIOS) not in source.model_dump_json()

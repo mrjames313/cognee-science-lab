@@ -127,12 +127,14 @@ async def readd_plan(graph, tombstone, plan, rows) -> ReaddPlan:
     """The Entities a re-add replaces: those its forget removed, and every
     Entity its plan recorded or a forgotten life built that the graph no
     longer holds. A removed Entity UUID is never reused, whoever removed
-    it: the user's decision of 2026-10-26. An absent reusable Entity that a
-    saved source still cites or builds blocks the re-add, whether a lab
-    operation or a writer outside the lab removed it, since a retry of that
-    source would write the old UUID beside the derived one. `describe_readd`
-    and `Publisher.admit_readd` both read this plan."""
-    from .outside_deletion import live_citers
+    it: the user's decision of 2026-10-26. Each absent one stays absent
+    under its old UUID one of two ways. A publication refuses to build one
+    a lab record proves removed (`admission.check_no_removed_recipes`). Any
+    other, deleted outside the lab or by a withdrawal, blocks the re-add
+    while a saved source still cites or builds it, since a retry of that
+    source would write the old UUID beside the derived one.
+    `describe_readd` and `Publisher.admit_readd` both read this plan."""
+    from .outside_deletion import live_citers, recorded_removals
 
     async def absent(ids):
         return {e for e in ids if await graph.get_node(str(e)) is None}
@@ -143,9 +145,11 @@ async def readd_plan(graph, tombstone, plan, rows) -> ReaddPlan:
     }
     gone = await absent(recorded | set(tombstone.earlier_entity_ids))
     reusable = await absent(tombstone.all_reusable_ids - removed)
+    replaced = removed | gone | reusable
+    unrecorded = await absent(replaced - recorded_removals(rows))
     return ReaddPlan(
-        frozenset(removed | gone | reusable),
-        {e: c for e in reusable if (c := live_citers(rows, e))},
+        frozenset(replaced),
+        {e: c for e in unrecorded if (c := live_citers(rows, e))},
     )
 
 
