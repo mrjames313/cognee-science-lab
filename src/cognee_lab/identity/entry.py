@@ -129,11 +129,12 @@ async def cognify(
     fault_stage: str | None = None,
     origin: str = "runtime",
 ):
-    """Chunk each source's original with Cognee's standard Tasks and publish
+    """Chunk the source's original with Cognee's standard Tasks and publish
     the source in a lab Task: a first publication when it has no row, else a
     reconcile, which finishes a failed publication or verifies a current
     one. A lab failure is recorded in the ledger, the run still completes,
-    and the failure is raised after the run."""
+    and the failure is raised after the run. One source per run until
+    several are tested (step 5, unit S3b)."""
     from cognee.modules.pipelines.operations.pipeline import run_pipeline
     from cognee.modules.pipelines.tasks.task import Task
     from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
@@ -143,31 +144,24 @@ async def cognify(
     from .registered import read_texts, stamp
     from .text_changes import chunk_text
 
-    if len({s.dataset_id for s in sources}) != 1:
-        raise IntentError("dataset_scope", "cognify takes sources of one dataset")
-    by_original, budgets = {}, set()
-    for source in sources:
-        data_id = source.inputs[source.original_input_ref].data_id
-        if await publisher.records.row(source) is not None:
-            # Chunking again would hide a copy deleted outside the lab.
-            await publisher.refuse_natively_deleted(source)
-        original = await context_for(data_id)
-        text = (await read_texts(source))[source.original_input_ref]
-        budget = await chunk_budget_of(source, publisher.graph, chunk_budget)
-        planned = await chunk_text(text, original, budget)
-        if {str(c.id) for c in planned} != described_chunks(source):
-            raise IntentError(
-                "chunk_policy",
-                "The native chunks of the original differ from the description's",
-            )
-        by_original[data_id] = (source, original)
-        budgets.add(budget)
-    if len(budgets) != 1:
-        raise IntentError("chunk_policy", "cognify takes one chunk budget per run")
+    if len(sources) != 1:
+        raise IntentError("one_source", "cognify takes one source per run")
+    (source,) = sources
+    if await publisher.records.row(source) is not None:
+        # Chunking again would hide a copy deleted outside the lab.
+        await publisher.refuse_natively_deleted(source)
+    original = await context_for(source.inputs[source.original_input_ref].data_id)
+    text = (await read_texts(source))[source.original_input_ref]
+    budget = await chunk_budget_of(source, publisher.graph, chunk_budget)
+    planned = await chunk_text(text, original, budget)
+    if {str(c.id) for c in planned} != described_chunks(source):
+        raise IntentError(
+            "chunk_policy",
+            "The native chunks of the original differ from the description's",
+        )
     failures = []
 
     async def identity_publish(chunks, ctx=None):
-        source, original = by_original[ctx.data_item.id]
         # Stamp once the native chunks are written, whatever the lab outcome:
         # a regular run writes no stamp of its own.
         await stamp(original.data_item.id, source.dataset_id)
@@ -182,11 +176,7 @@ async def cognify(
     async for _ in run_pipeline(
         tasks=[
             Task(classify_documents, needs_llm=False),
-            Task(
-                extract_chunks_from_documents,
-                max_chunk_size=budgets.pop(),
-                needs_llm=False,
-            ),
+            Task(extract_chunks_from_documents, max_chunk_size=budget, needs_llm=False),
             Task(
                 add_data_points,
                 task_config={"batch_size": WHOLE_DOCUMENT},
@@ -198,9 +188,9 @@ async def cognify(
                 needs_llm=False,
             ),
         ],
-        data=[original.data_item for _, original in by_original.values()],
-        datasets=[sources[0].dataset_id],
-        user=next(iter(by_original.values()))[1].user,
+        data=[original.data_item],
+        datasets=[source.dataset_id],
+        user=original.user,
         pipeline_name="cognify_pipeline",
         incremental_loading=False,
         rollback_handler=None,
@@ -208,7 +198,8 @@ async def cognify(
     ):
         pass
     if failures:
-        raise failures[0]
+        (failure,) = failures
+        raise failure
 
 
 async def publish_one(

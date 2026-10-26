@@ -92,3 +92,12 @@ async def test_the_lab_task_refuses_part_of_the_chunk_set_before_the_ledger(
     with pytest.raises(IntentError) as refused:
         await entry.publish_one(Untouchable(), source, [], None, None, None, "test")
     assert refused.value.code == "chunk_mapping"
+
+
+async def test_cognify_refuses_more_than_one_source_before_the_ledger(
+    source_payload,
+):
+    source = described(source_payload)
+    with pytest.raises(IntentError) as refused:
+        await entry.cognify(Untouchable(), [source, source], semantics=None)
+    assert refused.value.code == "one_source"

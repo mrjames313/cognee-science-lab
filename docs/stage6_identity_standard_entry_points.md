@@ -23,7 +23,7 @@ The fixture environment points the LLM at a closed loopback port (`http://127.0.
 `src/cognee_lab/identity/entry.py` holds three functions:
 
 - **`add`** registers the original through `cognee.add`, chunks it in memory with Cognee's chunker, asks the caller's describer for the identity description, writes the description to a file, registers that file through `cognee.add` and stamps it.
-- **`cognify`** runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over the originals. Cognee's standard Tasks run first: `classify_documents`, `extract_chunks_from_documents` and `add_data_points`. Then one lab Task, `identity_publish`, runs once per document over the whole chunk set. It stamps the original, then publishes the description: a first publication when the source has no row, else a reconcile.
+- **`cognify`** runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over one source's original. It refuses more than one source (`one_source`) until unit S3b tests that case. Cognee's standard Tasks run first: `classify_documents`, `extract_chunks_from_documents` and `add_data_points`. Then one lab Task, `identity_publish`, runs once per document over the whole chunk set. It stamps the original, then publishes the description: a first publication when the source has no row, else a reconcile.
 - **`remember`** is `add`, then `cognify`. It never runs Cognee's improve step.
 
 The run uses captured decisions only. Cognee's `extract_graph_and_summarize` Task does not run; a native extractor waits for step 6. Every Task declares `needs_llm=False`, so the run skips Cognee's LLM connection probe.
