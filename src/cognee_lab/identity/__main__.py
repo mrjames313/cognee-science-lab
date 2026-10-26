@@ -45,6 +45,7 @@ COMMAND_FAULT_STAGES = {
     "edit-glossary": (*REPLACE_STAGES, REFRESH_FAULT),
     "edit-entity": (),
     "native-forget": (),
+    "native-cognify": (),
     "refresh-dependents": (REFRESH_FAULT,),
     "withdraw": WITHDRAW_STAGES,
     "forget": FORGET_STAGES,
@@ -102,6 +103,7 @@ def main():
             "readd",
             *GLOSSARY_COMMANDS,
             "native-forget",
+            "native-cognify",
             "retrieve",
             "status",
             "reconcile",
@@ -272,6 +274,8 @@ def main():
             from .occurrence_fixture import run
         elif args.command == "native-forget":
             from .native_forget import run
+        elif args.command == "native-cognify":
+            from .native_cognify import run
         elif args.command == "edit-text":
             from .text_fixture import run
         elif args.command == "revise":
