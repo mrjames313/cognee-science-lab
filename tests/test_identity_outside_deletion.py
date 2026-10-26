@@ -11,12 +11,18 @@ import pytest
 
 from cognee_lab.identity.models import IdentitySource, Tombstone
 from cognee_lab.identity.outside_deletion import deleted_outside, verified_description
-from cognee_lab.identity.retirement import readd_removed
+from cognee_lab.identity.retirement import readd_plan
 from cognee_lab.identity.publish import Publisher
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import IntentError
 
 HELIOS = UUID("8b4bff50-907b-56b6-bc80-3b0a7018714a")
+
+
+async def readd_removed(graph, tombstone, plan, rows, source):
+    """What a re-add of `source` replaces, refused as `describe_readd` and
+    `Publisher.admit_readd` refuse it."""
+    return (await readd_plan(graph, tombstone, plan, rows)).for_source(source)
 
 
 class Graph:
@@ -308,12 +314,15 @@ async def test_an_entity_a_served_source_builds_is_deleted_outside_after_a_co_ow
     }
 
 
-async def test_an_entity_a_withdrawal_removed_stays_lab_removed_after_the_forget(
+async def test_an_entity_a_withdrawal_removed_is_derived_anew_on_readd(
     source_payload,
 ):
     """The owner, the only one to declare Helios, is withdrawn, which
     removes Helios, then forgotten: the forget finds Helios gone and does
-    not list it as removed. Its reader still cites Helios."""
+    not list it as removed. Its reader still cites Helios, which a
+    publication treats as removed by the lab. No record survives the
+    forget to prove that, so the re-add waits for the reader, then derives
+    a new UUID."""
     owner = source_of(source_payload)
     reader = reader_only(source_payload)
     rows = [forgotten_row(owner, served=False), row_of(reader)]
@@ -321,7 +330,11 @@ async def test_an_entity_a_withdrawal_removed_stays_lab_removed_after_the_forget
     with pytest.raises(IntentError) as refused:
         await admit(rows, reader)
     assert refused.value.code == "missing_reasoning_input"
-    assert await readd(Graph(HELIOS), rows[0].tombstone, owner, rows) == set()
+    with pytest.raises(IntentError) as refused:
+        await readd(Graph(HELIOS), rows[0].tombstone, owner, rows)
+    assert refused.value.code == "entity_recreation"
+    alone = rows[:1]
+    assert await readd(Graph(HELIOS), rows[0].tombstone, owner, alone) == {HELIOS}
 
 
 async def test_a_replacement_that_drops_the_recipe_and_citation_is_admitted(
@@ -378,7 +391,8 @@ def forget_of(source, served, earlier=None):
 async def test_a_withdrawal_removal_stays_lab_removed_across_readds(source_payload):
     """W, the only one to declare Helios, is withdrawn, which removes
     Helios, and forgotten. W is re-added, then forgotten again while served.
-    Helios stays removed by the lab through both."""
+    A publication treats Helios as removed by the lab through both; the
+    second re-add waits for the reader that still cites it."""
     owner = source_of(source_payload)
     reader = reader_only(renamed(source_payload))
     first = forget_of(owner, served=False)
@@ -388,8 +402,9 @@ async def test_a_withdrawal_removal_stays_lab_removed_across_readds(source_paylo
         await admit([live, row_of(reader)], reader)
     assert refused.value.code == "missing_reasoning_input"
     second = forget_of(life, served=True, earlier=first.tombstone)
-    rows = [second, row_of(reader)]
-    assert HELIOS in await readd(Graph(HELIOS), second.tombstone, owner, rows)
+    with pytest.raises(IntentError):
+        await readd(Graph(HELIOS), second.tombstone, owner, [second, row_of(reader)])
+    assert HELIOS in await readd(Graph(HELIOS), second.tombstone, owner, [second])
 
 
 async def test_an_entity_deleted_outside_stays_so_across_readds(source_payload):

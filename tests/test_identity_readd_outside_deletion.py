@@ -12,7 +12,6 @@ import pytest
 
 from cognee_lab.identity.erasure_rules import admit_readd
 from cognee_lab.identity.forget_fixture import describe_readd
-from cognee_lab.identity.retirement import readd_removed
 from cognee_lab.identity.validation import IntentError
 from test_identity_forget import TEXT, OccupiedGraph, chunks_of
 from test_identity_outside_deletion import (
@@ -20,6 +19,7 @@ from test_identity_outside_deletion import (
     Graph,
     forgotten_row,
     payload_with,
+    readd_removed,
     reader_only,
     row_of,
     source_of,
@@ -194,3 +194,49 @@ async def test_two_co_owners_readded_separately_derive_two_uuids(source_payload)
     two = b.mention_resolutions["r01"].target_entity_id
     assert one != two
     assert a.entity_constructions[one] == b.entity_constructions[two]
+
+
+async def test_an_unserved_forget_does_not_prove_an_absent_entity_lab_removed(
+    source_payload,
+):
+    """The review's scenario: doc01's attempt fails, so it is not served;
+    Helios is deleted outside the lab; doc01 is forgotten, and its forget
+    finds Helios gone. No lab record says a lab operation removed Helios, so
+    the re-add derives a new UUID and never writes the old one."""
+    caller = without_input(source_payload)
+    gone = forgotten_row(caller, served=False)
+    assert HELIOS in await readd_removed(
+        Graph(HELIOS), gone.tombstone, PLAN, [gone], caller
+    )
+    source = await readd_writes([gone], gone.tombstone, caller)
+    assert str(HELIOS) not in source.model_dump_json()
+
+
+async def test_a_failed_co_owner_blocks_the_readd_of_an_unserved_source(
+    source_payload,
+):
+    """doc01 is forgotten while not served, and its forget recorded Helios;
+    Helios is then deleted outside the lab. W, a co-owner whose own attempt
+    failed, still builds Helios: its retry would write the old UUID while
+    the re-add writes a derived one, so the re-add is refused naming W."""
+    caller = without_input(source_payload)
+    gone = forgotten_row(caller, served=False)
+    from cognee.infrastructure.databases.provenance import make_source_ref_key
+
+    owner = co_owner(source_payload)
+    ref = make_source_ref_key(owner.dataset_id, owner.identity_data_id)
+    plan = dict(entities={str(HELIOS): dict(type="Entity", refs=[ref])})
+    failed = row_of(owner, state="failed", verified_revision=0)
+    with pytest.raises(IntentError) as refused:
+        await readd_removed(Graph(HELIOS), gone.tombstone, plan, [gone, failed], caller)
+    assert refused.value.code == "entity_recreation"
+    assert [c["state"] for c in refused.value.details["citers"]] == ["failed"]
+    withdrawn = replace(failed, state="withdrawn")
+    with pytest.raises(IntentError):
+        await readd_removed(
+            Graph(HELIOS), gone.tombstone, plan, [gone, withdrawn], caller
+        )
+    rows = [gone, forgotten_row(owner, served=False)]
+    assert HELIOS in await readd_removed(
+        Graph(HELIOS), gone.tombstone, plan, rows, caller
+    )

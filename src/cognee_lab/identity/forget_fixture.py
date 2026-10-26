@@ -231,7 +231,7 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     from .erasure_rules import differs_from_forgotten
     from .multisource import publish_one
     from .registered import read_texts
-    from .retirement import readd_removed
+    from .retirement import readd_plan
     from .text_changes import chunk_text
 
     files = CALLER_FILES[label]
@@ -245,9 +245,10 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
         raise IntentError(
             "source_changed", "The caller's text file and identity file disagree"
         )
-    removed = await readd_removed(
-        publisher.graph, tombstone, row.plan, await publisher.records.rows(), caller
+    found = await readd_plan(
+        publisher.graph, tombstone, row.plan, await publisher.records.rows()
     )
+    removed = found.for_source(caller)
     budget = chunk_budget(root)
     document = SimpleNamespace(
         data_item=SimpleNamespace(

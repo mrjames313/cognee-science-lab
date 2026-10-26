@@ -58,39 +58,66 @@ def corpus_entities(description) -> set[UUID]:
     } | set(reusable_recipes(description))
 
 
-def lab_removed(rows, own=None, verified=None, *, unserved=True) -> set[UUID]:
-    """The Entities a lab operation removed, or may have: what each forget
-    removed and each forgotten life's mention UUIDs; every reusable Entity
-    of a forgotten life but those its forget found served
-    (`Tombstone.served_entity_ids`), since a withdrawal or a failed attempt
-    may have removed one before the forget found it gone; what a
-    replacement planned to retire; and, with `unserved`, the recipes of a
-    source that is not served. Less what a served source still builds,
-    which no lab operation removes while it is served. `own` is the source
-    being published, whose attempt in flight leaves it unserved: it builds
-    the recipes of `verified`, its last verified description, that it has
-    not planned to retire. A re-add passes `unserved=False`: an unserved
-    source that names the Entity is a live citer (`live_citers`), whose
-    retry would publish it again."""
-    removed, built = set(), set()
+def tombstones(row):
+    return [t for t in (row.tombstone, row.last_tombstone) if t is not None]
+
+
+def retired_by(row) -> set[UUID]:
+    """What the row's replacement planned to retire."""
+    return {UUID(key) for key in row.plan.get("retired_entities", {})}
+
+
+def recorded_removals(rows) -> set[UUID]:
+    """The Entities a lab record shows a lab operation removed: what each
+    forget removed, each forgotten life's mention UUIDs, and what a
+    replacement planned to retire."""
+    found = set()
     for row in rows:
-        for tombstone in (row.tombstone, row.last_tombstone):
-            if tombstone is not None:
-                removed |= set(tombstone.removed_entity_ids)
-                removed |= set(tombstone.all_mention_ids)
-                removed |= tombstone.all_reusable_ids - set(tombstone.served_entity_ids)
-        retired = {UUID(key) for key in row.plan.get("retired_entities", {})}
-        removed |= retired
+        for tombstone in tombstones(row):
+            found |= set(tombstone.removed_entity_ids)
+            found |= set(tombstone.all_mention_ids)
+        found |= retired_by(row)
+    return found
+
+
+def served_recipes(rows, own=None, verified=None) -> set[UUID]:
+    """What a served source builds, which no lab operation removes while it
+    is served. `own` is the source being published, whose attempt in
+    flight leaves it unserved: it builds the recipes of `verified`, its last
+    verified description, that it has not planned to retire."""
+    built = set()
+    for row in rows:
         if (row.dataset, row.source) == own:
             if verified is not None:
-                built |= set(reusable_recipes(verified)) - retired
-        elif row.description is None:
-            continue
-        elif row.is_served:
+                built |= set(reusable_recipes(verified)) - retired_by(row)
+        elif row.description is not None and row.is_served:
             built |= set(reusable_recipes(row.description))
-        elif unserved:
-            removed |= set(row.description.entity_constructions)
-    return removed - built
+    return built
+
+
+def lab_removed_by_operations(rows) -> set[UUID]:
+    """The Entities a lab record proves a lab operation removed
+    (`recorded_removals`), less what a served source builds. A re-add
+    derives a new UUID for any other absent Entity of the forgotten source."""
+    return recorded_removals(rows) - served_recipes(rows)
+
+
+def lab_removed(rows, own=None, verified=None) -> set[UUID]:
+    """The Entities a lab operation removed, or may have, as a publication
+    of `own` sees them: those a record proves
+    (`lab_removed_by_operations`); every reusable Entity of a forgotten life
+    but those its forget found served (`Tombstone.served_entity_ids`), since
+    a withdrawal or a failed attempt may have removed one before the forget
+    found it gone; and the recipes of a source that is not served. Less what
+    a served source builds (`served_recipes`)."""
+    maybe = set()
+    for row in rows:
+        for tombstone in tombstones(row):
+            maybe |= tombstone.all_reusable_ids - set(tombstone.served_entity_ids)
+        if (row.dataset, row.source) != own and row.description is not None:
+            if not row.is_served:
+                maybe |= set(row.description.entity_constructions)
+    return (recorded_removals(rows) | maybe) - served_recipes(rows, own, verified)
 
 
 async def deleted_outside(graph, rows, source, verified) -> frozenset[UUID]:

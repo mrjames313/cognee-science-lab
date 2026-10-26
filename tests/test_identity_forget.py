@@ -386,7 +386,7 @@ async def test_a_readd_replaces_an_entity_a_later_forget_of_a_co_owner_removed(
     co-owner's forget then removed it, and the co-owner was re-added, so the
     ledger shows a live owner again. The re-add still replaces the Entity,
     because the graph no longer holds it."""
-    from cognee_lab.identity.retirement import readd_removed
+    from test_identity_outside_deletion import readd_removed
 
     source = source_of(source_payload)
     other = reader_of(source_payload)
@@ -665,7 +665,7 @@ async def test_a_second_readd_replaces_what_the_first_forget_removed(source_payl
     UUID, which the first forget removed and the first re-add replaced. The
     second forget removes the replacement. The second re-add must replace
     the first UUID too, since it is gone, and may not bring it back."""
-    from cognee_lab.identity.retirement import readd_removed
+    from test_identity_outside_deletion import readd_removed
 
     payload = json.loads(json.dumps(source_payload))
     singleton = uuid4()

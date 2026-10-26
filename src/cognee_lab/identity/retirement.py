@@ -106,21 +106,34 @@ def removed_entities(source, plan, rows):
     }
 
 
-async def readd_removed(graph, tombstone, plan, rows, source):
-    """The Entities a re-add of this forgotten source replaces under derived
-    UUIDs: those its forget removed; every Entity its plan recorded, or
-    that an earlier forgotten life built, that the graph no longer holds;
-    and every reusable Entity of any forgotten life that was deleted outside
-    the lab (absent, and `outside_deletion.lab_removed` does not hold it).
-    A co-owner's later forget can remove an Entity this forget left, and
-    that co-owner's re-add makes the ledger show a live owner again, so the
-    rows alone cannot tell what is gone; the caller's file may still name an
-    Entity by the UUID an earlier forget removed; and a forget after a
-    repair records no plan. While a saved source still cites or builds an
-    Entity deleted outside the lab, a re-add of `source` that names it is
-    refused (`outside_deletion.check_readd`). `describe_readd` and
-    `Publisher.admit_readd` both read this set."""
-    from .outside_deletion import check_readd, lab_removed, live_citers
+class ReaddPlan(NamedTuple):
+    """What a re-add of a forgotten source replaces under derived UUIDs
+    (`removed`), and which of those Entities, deleted outside the lab, a
+    saved source still cites or builds (`cited`, from
+    `outside_deletion.live_citers`)."""
+
+    removed: frozenset[UUID]
+    cited: dict[UUID, list[dict]]
+
+    def for_source(self, source) -> set[UUID]:
+        """`removed`, once a re-add of `source` may proceed: refused while
+        it names an Entity in `cited` (`outside_deletion.check_readd`)."""
+        from .outside_deletion import check_readd
+
+        check_readd(source, self.cited)
+        return set(self.removed)
+
+
+async def readd_plan(graph, tombstone, plan, rows) -> ReaddPlan:
+    """The Entities a re-add replaces: those its forget removed, and every
+    Entity its plan recorded or a forgotten life built that the graph no
+    longer holds. An absent reusable Entity of a forgotten life counts as
+    deleted outside the lab unless a lab record shows a lab operation
+    removed it (`outside_deletion.lab_removed_by_operations`). No record
+    survives of what a withdrawal removed, since the forget's plan replaces
+    the withdrawal's, so that counts as deleted outside too.
+    `describe_readd` and `Publisher.admit_readd` both read this plan."""
+    from .outside_deletion import lab_removed_by_operations, live_citers
 
     async def absent(ids):
         return {e for e in ids if await graph.get_node(str(e)) is None}
@@ -130,10 +143,13 @@ async def readd_removed(graph, tombstone, plan, rows, source):
         UUID(key) for key, node in plan["entities"].items() if node["type"] == "Entity"
     }
     gone = await absent(recorded | set(tombstone.earlier_entity_ids))
-    lab = lab_removed(rows, unserved=False)
-    outside = await absent(tombstone.all_reusable_ids - removed - lab)
-    check_readd(source, {e: c for e in outside if (c := live_citers(rows, e))})
-    return removed | gone | outside
+    outside = await absent(
+        tombstone.all_reusable_ids - removed - lab_removed_by_operations(rows)
+    )
+    return ReaddPlan(
+        frozenset(removed | gone | outside),
+        {e: c for e in outside if (c := live_citers(rows, e))},
+    )
 
 
 def retiring_by_forget(row):
