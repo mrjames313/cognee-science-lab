@@ -152,6 +152,10 @@ def reopen_problem(root: Path) -> str | None:
     return None
 
 
+# Port 9 (discard) is not served on the tested hosts.
+CLOSED_LLM_ENDPOINT = "http://127.0.0.1:9/v1"
+
+
 @contextmanager
 def fixture_environment(root: Path):
     """Point this process at the root's own stores and its recorded embedding profile.
@@ -182,6 +186,9 @@ def fixture_environment(root: Path):
         LLM_PROVIDER="openai",
         LLM_MODEL="gpt-4o-mini",
         LLM_API_KEY="fixture",
+        # A closed loopback port, so a leaked LLM call fails visibly instead
+        # of sending the fake key to the provider's real endpoint.
+        LLM_ENDPOINT=CLOSED_LLM_ENDPOINT,
         CACHING="false",
         TELEMETRY_DISABLED="true",
         EDGE_EVIDENCE_ENABLED="true",

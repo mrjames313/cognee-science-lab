@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from cognee_lab.identity.environment import MARKER, MARKER_KIND, reopen_problem
+from cognee_lab.identity.environment import (
+    CLOSED_LLM_ENDPOINT,
+    MARKER,
+    MARKER_KIND,
+    reopen_problem,
+)
 from cognee_lab.identity.fixture_embeddings import FixtureEmbeddings
 
 REPO = Path(__file__).resolve().parents[1]
@@ -21,6 +26,7 @@ OPERATOR = {
     "DATA_ROOT_DIRECTORY": "/decoy/data",
     "SYSTEM_ROOT_DIRECTORY": "/decoy/system",
     "LLM_API_KEY": "operator-llm-secret",
+    "LLM_ENDPOINT": "http://operator-llm.invalid/v1",
 }
 ENV_RECORD = {"profile": "env", "model": "operator-model", "dimensions": 2048}
 LOOPBACK_RECORD = {
@@ -43,6 +49,7 @@ with fixture_environment(Path(sys.argv[1])):
   cache=base.cache_root_directory,model=embedding.embedding_model,
   dimensions=embedding.embedding_dimensions,endpoint=embedding.embedding_endpoint,
   tokenizer=embedding.huggingface_tokenizer,llm_key=llm.llm_api_key,
+  llm_endpoint=llm.llm_endpoint,
   env_file=os.environ["COGNEE_ENV_FILE"])))
 """
 
@@ -122,6 +129,7 @@ def test_env_profile_uses_operator_embeddings_and_the_root_stores(tmp_path):
     assert config["endpoint"] == "http://operator.invalid/v1"
     assert config["tokenizer"] == "operator/tokenizer"
     assert config["llm_key"] == "fixture"
+    assert config["llm_endpoint"] == CLOSED_LLM_ENDPOINT
     on_disk = [p for p in root.rglob("*") if p.is_file()]
     assert not any("operator-secret" in p.read_text(errors="ignore") for p in on_disk)
 
@@ -133,6 +141,7 @@ def test_loopback_profile_uses_local_embeddings(tmp_path):
     assert config["dimensions"] == 64
     assert config["endpoint"].startswith("http://127.0.0.1:")
     assert config["llm_key"] == "fixture"
+    assert config["llm_endpoint"] == CLOSED_LLM_ENDPOINT
 
 
 def test_pre_profile_root_loads_the_operator_env_file(tmp_path):
