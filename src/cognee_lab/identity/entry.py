@@ -394,6 +394,8 @@ async def update(
             "describer_missing",
             "A lab update needs a describer for the edited description",
         )
+    # The budget is read from the native chunks, which may be what is gone.
+    await publisher.refuse_natively_deleted(source)
     ctx = await context_for(source.identity_data_id)
     previous_text = await read_original(source, ctx)
     budget = await recorded_budget(source, publisher.graph)

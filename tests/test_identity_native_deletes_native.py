@@ -233,3 +233,73 @@ def test_native_a_chain_root_reports_a_glossary_deleted_outside_the_lab(tmp_path
         "chunks",
         "stored_files",
     ]
+
+
+DELETE_CHUNK = r"""
+import asyncio,sys
+from pathlib import Path
+from cognee_lab.identity.environment import fixture_environment
+root=Path(sys.argv[1]);label=sys.argv[2]
+with fixture_environment(root):
+ from cognee_lab.identity.multisource import root_files
+ from cognee_lab.identity.publish import Publisher
+ from cognee_lab.identity.models import ChunkInput
+ async def delete():
+  p=await Publisher.configured()
+  s=root_files(root)[label]
+  chunk=next(i.chunk_id for i in s.inputs.values() if isinstance(i,ChunkInput) and i.document_ref==s.original_input_ref)
+  await p.graph.delete_node(str(chunk))
+  for engine in (p.vector,p.graph):
+   result=engine.close()
+   if hasattr(result,"__await__"): await result
+ asyncio.run(delete())
+"""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "creation, label, edit",
+    [
+        (["multi-fixture"], "doc01", ["edit-text"]),
+        (["glossary-fixture"], "glossary", ["edit-glossary", "--case", "elsewhere"]),
+    ],
+    ids=["edit-text", "edit-glossary"],
+)
+def test_native_an_edit_refuses_a_source_whose_chunk_was_deleted_outside_the_lab(
+    tmp_path, creation, label, edit
+):
+    """A chunk deleted outside the lab, as an incremental `cognee.update`
+    would, points the edit at `forget`, as `reconcile` does, before the edit
+    reads the chunk budget the chunk recorded."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = tmp_path / creation[0]
+    command(root, *creation)
+    deleted = subprocess.run(
+        [sys.executable, "-c", DELETE_CHUNK, str(root), label],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+        timeout=150,
+    )
+    assert deleted.returncode == 0, deleted.stdout[-2000:] + deleted.stderr[-2000:]
+    before = status_of(root)
+    [gone] = before["native_deleted"]
+    assert gone["missing"] == ["chunks"]
+    refused = output_of(
+        command(root, *edit, "--source", label, "--expected-revision", "1", expect=1)
+    )
+    assert refused["message"].startswith(
+        f"The native copy of {label} is gone or changed outside the lab"
+    )
+    assert refused["details"] == dict(
+        source=gone["identity_data_id"],
+        missing=["chunks"],
+        revision=1,
+        next=f"forget --source {label} --expected-revision 1",
+    )
+    after = status_of(root)
+    assert after["publications"] == before["publications"]
+    assert after["recovery_events"] == before["recovery_events"]
