@@ -30,6 +30,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-cascade-blocked` lists a level-2 dependent whose withdrawal failed as blocked; its removal waits.
 - `forget-single-source` forgets, re-adds and withdraws doc01 on a single-source `fixture` root, which has no two-source manifest; each command exits 0 with its one source's report.
 - `native-deleted` lists, in `status`, a source whose native copy a delete outside the lab took (`native-forget`), with the facets it misses and the `forget` that erases the lab's copy; `reconcile` refuses it and `forget` erases it (native tests in `tests/test_identity_native_deletes_native.py` cover the dataset forget, the prune and a dependent).
+- `readd-outside-deleted` refuses a re-add whose files name an Entity deleted outside the lab while a saved source still cites or builds it, naming each such source with its dataset and state; once each is forgotten or replaced without it, the re-add builds the Entity under a derived UUID and never writes the old one.
 - `forget-cascade-retire-refused` refuses a withdrawal or forget of a source that holds a removal while the cascade below it is unfinished (`cascade_unfinished`); once `forget` on the forgotten source finishes the cascade, the withdrawal goes ahead.
 
 ## How to get to it (user POV)
@@ -609,6 +610,36 @@ $V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1
 $V check "$RUN" forget '[.publications[] | [.state, .revision]] == [["forgotten", 1]] and .dependents_failed == null and .forget.dependents_revised == []' 'the lab forget erases doc01'
 $V drive "$RUN" main gone -- status
 $V check "$RUN" gone '.native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'status lists nothing deleted outside the lab and no open incident'
+```
+
+**F28 a re-add after an Entity is deleted outside the lab.** Proves `readd-outside-deleted`. Guide: `docs/stage6_identity_entity_edits.md`, "A re-add naming it waits for its citers". On a `glossary-fixture --chain` root, `edit-entity --case delete` deletes Helios, which doc01 and doc03 both build. doc03 is forgotten with no dependent. Its re-add is refused while doc01, `current`, still names Helios: the message names doc01's identity source, its dataset and its state and says to forget or replace it, and `details.citers` lists it. doc01 is forgotten, with no dependent since doc03 is forgotten. The user drops doc03's citations of doc01's records from `doc03_identity.json` (a re-add may not cite a forgotten source's records), and doc03's re-add publishes revision 2 with its Helios recipe under a derived UUID. The user drops doc01's corpus input of Helios from `identity.json`, since a re-add may not cite a removed Entity, and doc01's re-add publishes revision 2 the same way. No description names the old Helios UUID and no fact reaches it. The two re-adds derive two different UUIDs for the one Helios they built before (case 10 of the user's review, pre-existing: `replacement_entity_id` and `fresh_entity_id` key on the identity source).
+
+```bash journey F28
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main del -- edit-entity --case delete
+$V check "$RUN" del '.entity_edit | .case == "delete" and .node_present == false' 'Helios is deleted outside the lab'
+H=$(val del '.entity_edit.entity_id')
+D01=$(val fixture '.sources.doc01.identity_data_id')
+$V drive "$RUN" main f3 -- forget --source doc03 --expected-revision 1
+$V check "$RUN" f3 '[.sources.doc03.state, .sources.doc01.state] == ["forgotten", "current"] and .forget.dependents_revised == []' 'doc03 is forgotten with no dependent'
+$V drive "$RUN" main refused -- readd --source doc03 --expected-revision 1
+$V check "$RUN" refused '.error == "IntentError" and (.message | startswith("A re-add does not recreate an Entity deleted outside the lab while a saved source still cites or builds it: '"$H"' by '"$D01"' in dataset ")) and (.message | endswith("(current). Forget those sources, or replace their decisions without the Entity, then re-add"))' 'the re-add is refused naming doc01, its dataset and its state'
+$V check "$RUN" refused '[.details.citers[] | [.entity_id, .identity_data_id, .state]] == [["'"$H"'", "'"$D01"'", "current"]] and (.details.citers[0].dataset_id | length) > 0' 'the details list doc01 as the live citer'
+$V drive "$RUN" main still -- status
+$V check "$RUN" still '[.publications[] | [.revision, .state]] == [[1, "current"], [1, "current"], [1, "forgotten"]] and .recovery_events == []' 'the refusal wrote nothing'
+$V drive "$RUN" main f1 -- forget --source doc01 --expected-revision 1
+$V check "$RUN" f1 '[.sources.doc01.state, .sources.doc03.state] == ["forgotten", "forgotten"] and .forget.dependents_revised == []' 'doc01, the live citer, is forgotten'
+python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]) / "doc03_identity.json"; i = json.loads(p.read_text()); [i["inputs"].pop(k) for k in ("doc01_r01", "doc01_v01")]; [r.__setitem__("input_refs", [k for k in r["input_refs"] if not k.startswith("doc01_")]) for r in [*i["mention_resolutions"].values(), *i["variant_assignments"].values()]]; p.write_text(json.dumps(i))' "$RUN/roots/main"
+$V drive "$RUN" main r3 -- readd --source doc03 --expected-revision 1
+$V check "$RUN" r3 '[.sources.doc03.state, .sources.doc03.saved_revision, .sources.doc03.verified_revision] == ["current", 2, 2]' 'with no live citer doc03 is re-added at revision 2'
+python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]) / "identity.json"; i = json.loads(p.read_text()); i["inputs"].pop("existing_A"); [r.__setitem__("input_refs", [k for k in r["input_refs"] if k != "existing_A"]) for r in [*i["mention_resolutions"].values(), *i["variant_assignments"].values()]]; p.write_text(json.dumps(i))' "$RUN/roots/main"
+$V drive "$RUN" main r1 -- readd --source doc01 --expected-revision 1
+$V check "$RUN" r1 '[.sources.doc01.state, .sources.doc01.saved_revision, .sources.doc01.verified_revision] == ["current", 2, 2]' 'doc01 is re-added at revision 2'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '([.publications[] | .description // "" | contains("'"$H"'")] | any | not) and .recovery_events == [] and .native_deleted == []' 'no description names the old Helios UUID and no incident is open'
+$V check "$RUN" status '[.publications[] | select(.description != null) | .description | fromjson | select(.revision == 2) | [.entity_constructions | to_entries[] | select(.value.name == "Helios controller") | .key]] | (map(length) == [1, 1]) and (.[0][0] != .[1][0]) and all(.[][]; . != "'"$H"'")' 'each re-add built Helios under its own derived UUID (case 10)'
+$V drive "$RUN" main ask -- retrieve --query "Helios controller"
+$V check "$RUN" ask '(.facts | tojson | contains("'"$H"'")) | not' 'no fact reaches the old Helios UUID'
 ```
 
 ## Gotchas

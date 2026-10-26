@@ -10,11 +10,8 @@ from uuid import UUID, uuid4
 import pytest
 
 from cognee_lab.identity.models import IdentitySource, Tombstone
-from cognee_lab.identity.outside_deletion import (
-    check_readd,
-    deleted_outside,
-    verified_description,
-)
+from cognee_lab.identity.outside_deletion import deleted_outside, verified_description
+from cognee_lab.identity.retirement import readd_removed
 from cognee_lab.identity.publish import Publisher
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import IntentError
@@ -116,10 +113,15 @@ def forgotten_row(source, served, removed=()):
         source, forgotten_at="now", removed_entity_ids=removed, served=served
     )
     return replace(
-        row_of(source, state="forgotten", plan=dict(operation="identity_forget")),
+        row_of(source, state="forgotten", plan=forget_plan(source)),
         description=None,
         tombstone=tombstone,
     )
+
+
+def forget_plan(source):
+    doc = source.inputs[source.original_input_ref]
+    return dict(operation="identity_forget", original_data_id=str(doc.data_id))
 
 
 async def test_an_absent_entity_a_served_source_names_is_deleted_outside(
@@ -262,21 +264,33 @@ def test_the_verified_description_follows_the_row(source_payload):
     assert verified_description(row_of(old, "failed", erasure)) is None
 
 
-async def test_a_readd_naming_an_entity_deleted_outside_is_refused(source_payload):
+async def readd(graph, tombstone, source, rows):
+    """What a re-add of `source` replaces (`readd_removed`), with no plan:
+    the forget found nothing of the source in the graph."""
+    return await readd_removed(graph, tombstone, dict(entities={}), rows, source)
+
+
+async def test_a_readd_naming_an_entity_deleted_outside_is_refused_while_cited(
+    source_payload,
+):
     """Helios was deleted outside the lab while its source was served, then
-    the source was forgotten."""
+    the source was forgotten. Another served source still cites Helios."""
     forgotten = source_of(source_payload)
     gone = forgotten_row(forgotten, served=True)
     tombstone = gone.tombstone
+    reader = row_of(reader_only(source_payload))
     with pytest.raises(IntentError) as refused:
-        await check_readd(Graph(HELIOS), tombstone, forgotten, [gone])
+        await readd(Graph(HELIOS), tombstone, forgotten, [gone, reader])
     assert refused.value.code == "entity_recreation"
-    await check_readd(Graph(), tombstone, forgotten, [gone])
+    assert await readd(Graph(), tombstone, forgotten, [gone, reader]) == set()
+    assert await readd(Graph(HELIOS), tombstone, forgotten, [gone]) == {HELIOS}
     removed = Tombstone.of(
         other_reader(source_payload), forgotten_at="now", removed_entity_ids=[HELIOS]
     )
     other = replace(gone, source=str(uuid4()), tombstone=removed)
-    await check_readd(Graph(HELIOS), tombstone, forgotten, [gone, other])
+    assert await readd(Graph(HELIOS), tombstone, forgotten, [gone, other, reader]) == (
+        set()
+    )
 
 
 async def test_an_entity_a_served_source_builds_is_deleted_outside_after_a_co_owner_left(
@@ -307,7 +321,7 @@ async def test_an_entity_a_withdrawal_removed_stays_lab_removed_after_the_forget
     with pytest.raises(IntentError) as refused:
         await admit(rows, reader)
     assert refused.value.code == "missing_reasoning_input"
-    await check_readd(Graph(HELIOS), rows[0].tombstone, owner, rows)
+    assert await readd(Graph(HELIOS), rows[0].tombstone, owner, rows) == set()
 
 
 async def test_a_replacement_that_drops_the_recipe_and_citation_is_admitted(
@@ -355,7 +369,7 @@ def forget_of(source, served, earlier=None):
     """The row a forget of `source` left, whose last forget left `earlier`."""
     tombstone = Tombstone.of(source, forgotten_at="now", earlier=earlier, served=served)
     return replace(
-        row_of(source, state="forgotten", plan=dict(operation="identity_forget")),
+        row_of(source, state="forgotten", plan=forget_plan(source)),
         description=None,
         tombstone=tombstone,
     )
@@ -374,7 +388,8 @@ async def test_a_withdrawal_removal_stays_lab_removed_across_readds(source_paylo
         await admit([live, row_of(reader)], reader)
     assert refused.value.code == "missing_reasoning_input"
     second = forget_of(life, served=True, earlier=first.tombstone)
-    await check_readd(Graph(HELIOS), second.tombstone, owner, [second])
+    rows = [second, row_of(reader)]
+    assert HELIOS in await readd(Graph(HELIOS), second.tombstone, owner, rows)
 
 
 async def test_an_entity_deleted_outside_stays_so_across_readds(source_payload):
@@ -389,5 +404,6 @@ async def test_an_entity_deleted_outside_stays_so_across_readds(source_payload):
     assert await deleted_outside(Graph(HELIOS), rows, reader, reader) == {HELIOS}
     second = forget_of(life, served=True, earlier=first.tombstone)
     with pytest.raises(IntentError) as refused:
-        await check_readd(Graph(HELIOS), second.tombstone, doc01, [second])
+        await readd(Graph(HELIOS), second.tombstone, doc01, [second, row_of(reader)])
     assert refused.value.code == "entity_recreation"
+    assert HELIOS in await readd(Graph(HELIOS), second.tombstone, doc01, [second])

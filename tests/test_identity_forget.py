@@ -202,6 +202,16 @@ class OccupiedGraph:
         return {"id": node_id} if str(node_id) in self.present else None
 
 
+class Missing:
+    """Every node is present but the missing ones."""
+
+    def __init__(self, *missing):
+        self.missing = {str(m) for m in missing}
+
+    async def get_node(self, node_id):
+        return None if str(node_id) in self.missing else {"id": node_id}
+
+
 def chunks_of(source, text):
     from types import SimpleNamespace
 
@@ -392,8 +402,8 @@ async def test_a_readd_replaces_an_entity_a_later_forget_of_a_co_owner_removed(
     )
     rows = [row_of(source, "forgotten", plan), row_of(other, "current")]
     kept = tomb(source)
-    assert await readd_removed(AbsentGraph(), kept, plan, rows) == {entity}
-    assert await readd_removed(OccupiedGraph([entity]), kept, plan, rows) == set()
+    assert await readd_removed(Missing(entity), kept, plan, rows, source) == {entity}
+    assert await readd_removed(Missing(), kept, plan, rows, source) == set()
 
 
 FORGET_GRAPH_METHODS = (
@@ -673,9 +683,11 @@ async def test_a_second_readd_replaces_what_the_first_forget_removed(source_payl
             str(second_singleton): dict(refs=[own], type="Entity", indexed_fields=[])
         }
     )
-    removed = await readd_removed(AbsentGraph(), second, plan, [])
+    removed = await readd_removed(
+        Missing(second_singleton, singleton), second, plan, [], caller
+    )
     assert removed == {second_singleton, singleton}
-    assert await readd_removed(OccupiedGraph([singleton]), second, plan, []) == {
+    assert await readd_removed(Missing(second_singleton), second, plan, [], caller) == {
         second_singleton
     }
 

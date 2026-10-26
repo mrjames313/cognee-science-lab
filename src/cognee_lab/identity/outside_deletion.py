@@ -11,7 +11,8 @@ on 2026-10-25:
    a time.
 2. A publication never recreates the Entity: a replacement picks a new
    target or leaves the mention unresolved, and a re-add whose files name
-   it is refused.
+   it is refused while a saved source still cites or builds it, then
+   builds it under a derived UUID (Q2, `check_readd`).
 
 An Entity counts as deleted outside the lab when a served source's
 description, or the publishing source's last verified one, names it as a
@@ -57,18 +58,20 @@ def corpus_entities(description) -> set[UUID]:
     } | set(reusable_recipes(description))
 
 
-def lab_removed(rows, own=None, verified=None) -> set[UUID]:
+def lab_removed(rows, own=None, verified=None, *, unserved=True) -> set[UUID]:
     """The Entities a lab operation removed, or may have: what each forget
     removed and each forgotten life's mention UUIDs; every reusable Entity
     of a forgotten life but those its forget found served
     (`Tombstone.served_entity_ids`), since a withdrawal or a failed attempt
     may have removed one before the forget found it gone; what a
-    replacement planned to retire; and the recipes of a source that is not
-    served. Less what a served source still builds, which no lab operation
-    removes while it is served. `own` is the source being published, whose
-    attempt in flight leaves it unserved: it builds the recipes of
-    `verified`, its last verified description, that it has not planned to
-    retire."""
+    replacement planned to retire; and, with `unserved`, the recipes of a
+    source that is not served. Less what a served source still builds,
+    which no lab operation removes while it is served. `own` is the source
+    being published, whose attempt in flight leaves it unserved: it builds
+    the recipes of `verified`, its last verified description, that it has
+    not planned to retire. A re-add passes `unserved=False`: an unserved
+    source that names the Entity is a live citer (`live_citers`), whose
+    retry would publish it again."""
     removed, built = set(), set()
     for row in rows:
         for tombstone in (row.tombstone, row.last_tombstone):
@@ -85,7 +88,7 @@ def lab_removed(rows, own=None, verified=None) -> set[UUID]:
             continue
         elif row.is_served:
             built |= set(reusable_recipes(row.description))
-        else:
+        elif unserved:
             removed |= set(row.description.entity_constructions)
     return removed - built
 
@@ -186,15 +189,51 @@ async def left_absent(graph, rows, source, previous) -> frozenset[UUID]:
     return frozenset(named)
 
 
-async def check_readd(graph, tombstone, source, rows):
-    """A re-add whose files name a reusable Entity of a forgotten life that
-    is now deleted outside the lab is refused (`entity_recreation`): the
-    user's default of 2026-10-25 for Q2. An Entity a lab operation removed
-    is replaced by a derived UUID instead (`describe_readd`)."""
-    candidates = (
-        set(tombstone.all_reusable_ids) & entity_ids_named(source)
-    ) - lab_removed(rows)
-    for entity_id in sorted(candidates, key=str):
-        if await graph.get_node(str(entity_id)) is None:
-            code = "entity_recreation"
-            raise IntentError(code, MESSAGES[code].format(entity_id))
+def live_citers(rows, entity_id) -> list[dict]:
+    """The saved sources that still cite or build the Entity: each row not
+    forgotten whose latest description names it (`entity_ids_named`), a
+    pending or failed one included, or whose replacement in flight replaces
+    a description that names it. Withheld and withdrawn rows count, in any
+    dataset: a later retry or reconcile of one would publish the Entity
+    again under its old UUID."""
+    found = []
+    for row in rows:
+        if row.state == "forgotten" or row.description is None:
+            continue
+        held = [row.description]
+        if row.operation == "identity_replace" and row.state in {"pending", "failed"}:
+            held.append(
+                IdentitySource.model_validate_json(row.plan["previous_description"])
+            )
+        if any(entity_id in entity_ids_named(d) for d in held):
+            found.append(
+                dict(
+                    dataset_id=row.dataset, identity_data_id=row.source, state=row.state
+                )
+            )
+    return found
+
+
+def check_readd(source, cited: dict[UUID, list[dict]]):
+    """A re-add whose files name an Entity deleted outside the lab that a
+    saved source still cites or builds (`cited`, from `live_citers`) is
+    refused (`entity_recreation`), naming each such source: the user's
+    decision of 2026-10-25 for Q2. Once each is forgotten, or replaced
+    without the Entity, the re-add replaces it under a derived UUID as it
+    does an Entity a lab operation removed."""
+    named = sorted(set(cited) & entity_ids_named(source), key=str)
+    if not named:
+        return
+    citers = [dict(c, entity_id=str(e)) for e in named for c in cited[e]]
+    listed = "; ".join(
+        f"{c['identity_data_id']} in dataset {c['dataset_id']} ({c['state']})"
+        for c in citers
+    )
+    raise IntentError(
+        "entity_recreation",
+        "A re-add does not recreate an Entity deleted outside the lab while a "
+        f"saved source still cites or builds it: {', '.join(map(str, named))} "
+        f"by {listed}. Forget those sources, or replace their decisions "
+        "without the Entity, then re-add",
+        details=dict(citers=citers),
+    )

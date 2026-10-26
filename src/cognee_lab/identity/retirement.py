@@ -106,20 +106,34 @@ def removed_entities(source, plan, rows):
     }
 
 
-async def readd_removed(graph, source, plan, rows):
-    """The Entities a re-add of this forgotten source must replace: those its
-    forget removed, and every Entity its plan recorded that the graph no
-    longer holds. A co-owner's later forget can remove an Entity this forget
-    left, and that co-owner's re-add makes the ledger show a live owner
-    again, so the rows alone cannot tell what is gone. Also every reusable
-    Entity of an earlier forgotten life that the graph no longer holds: the
-    caller's file may still name it by the UUID an earlier forget removed."""
-    recorded = [
-        key for key, node in plan["entities"].items() if node["type"] == "Entity"
-    ]
-    recorded += [str(e) for e in source.earlier_entity_ids]
-    absent = {UUID(key) for key in recorded if await graph.get_node(key) is None}
-    return removed_entities(source, plan, rows) | absent
+async def readd_removed(graph, tombstone, plan, rows, source):
+    """The Entities a re-add of this forgotten source replaces under derived
+    UUIDs: those its forget removed; every Entity its plan recorded, or
+    that an earlier forgotten life built, that the graph no longer holds;
+    and every reusable Entity of any forgotten life that was deleted outside
+    the lab (absent, and `outside_deletion.lab_removed` does not hold it).
+    A co-owner's later forget can remove an Entity this forget left, and
+    that co-owner's re-add makes the ledger show a live owner again, so the
+    rows alone cannot tell what is gone; the caller's file may still name an
+    Entity by the UUID an earlier forget removed; and a forget after a
+    repair records no plan. While a saved source still cites or builds an
+    Entity deleted outside the lab, a re-add of `source` that names it is
+    refused (`outside_deletion.check_readd`). `describe_readd` and
+    `Publisher.admit_readd` both read this set."""
+    from .outside_deletion import check_readd, lab_removed, live_citers
+
+    async def absent(ids):
+        return {e for e in ids if await graph.get_node(str(e)) is None}
+
+    removed = removed_entities(tombstone, plan, rows)
+    recorded = {
+        UUID(key) for key, node in plan["entities"].items() if node["type"] == "Entity"
+    }
+    gone = await absent(recorded | set(tombstone.earlier_entity_ids))
+    lab = lab_removed(rows, unserved=False)
+    outside = await absent(tombstone.all_reusable_ids - removed - lab)
+    check_readd(source, {e: c for e in outside if (c := live_citers(rows, e))})
+    return removed | gone | outside
 
 
 def retiring_by_forget(row):

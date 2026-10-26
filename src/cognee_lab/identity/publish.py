@@ -432,7 +432,6 @@ class Publisher:
         checks. A forget whose dependents are not all revised yet refuses."""
         from .erasure_rules import admit_readd
         from .erasure import unfinished
-        from .outside_deletion import check_readd
         from .retirement import readd_removed
 
         row = await self.forgotten_row(source)
@@ -443,8 +442,7 @@ class Publisher:
                 "The forget has not revised every dependent yet; run forget or reconcile on the forgotten source first",
                 details=dict(dependents=[r.source for r in waiting]),
             )
-        removed = await readd_removed(self.graph, row.tombstone, row.plan, rows)
-        await check_readd(self.graph, row.tombstone, source, rows)
+        removed = await readd_removed(self.graph, row.tombstone, row.plan, rows, source)
         await admit_readd(self.graph, row.tombstone, source, removed)
         await self.admit_inputs(source, texts, chunks, saved_revision=row.revision)
         return row

@@ -246,7 +246,7 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
             "source_changed", "The caller's text file and identity file disagree"
         )
     removed = await readd_removed(
-        publisher.graph, tombstone, row.plan, await publisher.records.rows()
+        publisher.graph, tombstone, row.plan, await publisher.records.rows(), caller
     )
     budget = chunk_budget(root)
     document = SimpleNamespace(

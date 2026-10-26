@@ -1,7 +1,7 @@
 """An Entity deleted outside the lab through real configured stores in
 fresh subprocesses: `edit-entity --case delete`, the replacements that
 answer its readers one at a time without recreating it, a failed
-replacement's retry, and the re-add refusal."""
+replacement's retry, and a re-add that waits for the Entity's live citer."""
 
 import json
 
@@ -97,34 +97,44 @@ def test_native_a_failed_replacement_retries_without_recreating_the_entity(
 
 
 @pytest.mark.integration
-def test_native_a_readd_naming_a_deleted_entity_is_refused(tmp_path):
+def test_native_a_readd_waits_for_the_live_citer_then_derives_a_new_uuid(tmp_path):
+    """doc03 is forgotten; its re-add is refused while doc01 still builds
+    Helios. Once doc01 is forgotten and the caller drops doc03's citations
+    of doc01's records, doc03 is re-added with Helios under a new UUID."""
     root = tmp_path / "readd"
-    command(root, "glossary-fixture", "--chain")
+    fixture = output_of(command(root, "glossary-fixture", "--chain"))
     command(root, "edit-entity", "--case", "delete")
-    dry = output_of(
-        command(
-            root, "forget", "--source", "doc01", "--expected-revision", "1", "--dry-run"
-        )
-    )
-    command(
-        root,
-        "forget",
-        "--source",
-        "doc01",
-        "--expected-revision",
-        "1",
-        "--confirm",
-        dry["token"],
-    )
-    refused = output_of(
-        command(
-            root, "readd", "--source", "doc01", "--expected-revision", "1", expect=1
-        )
-    )
+    forget = ("forget", "--expected-revision", "1")
+    command(root, *forget, "--source", "doc03")
+    readd = ("readd", "--source", "doc03", "--expected-revision", "1")
+    refused = output_of(command(root, *readd, expect=1))
+    doc01 = fixture["sources"]["doc01"]["identity_data_id"]
     assert refused["message"].startswith(
-        "A publication does not recreate an Entity deleted outside the lab: " + HELIOS
+        "A re-add does not recreate an Entity deleted outside the lab while a "
+        f"saved source still cites or builds it: {HELIOS} by {doc01} in dataset "
     )
-    assert helios_absent(root)
+    assert [c["identity_data_id"] for c in refused["details"]["citers"]] == [doc01]
+    command(root, *forget, "--source", "doc01")
+    path = root / "doc03_identity.json"
+    caller = json.loads(path.read_text())
+    for key in ("doc01_r01", "doc01_v01"):
+        del caller["inputs"][key]
+    for record in (
+        *caller["mention_resolutions"].values(),
+        *caller["variant_assignments"].values(),
+    ):
+        record["input_refs"] = [
+            k for k in record["input_refs"] if not k.startswith("doc01_")
+        ]
+    path.write_text(json.dumps(caller))
+    command(root, *readd)
+    status = output_of(command(root, "status"))
+    served = [p for p in status["publications"] if p["state"] == "current"]
+    assert [p["revision"] for p in served] == [1, 2]
+    assert not any(HELIOS in p["description"] for p in served)
+    doc03 = json.loads((root / "identity_doc03_revision2.json").read_text())
+    names = [e["name"] for e in doc03["entity_constructions"].values()]
+    assert "Helios controller" in names
 
 
 @pytest.mark.integration
