@@ -20,12 +20,13 @@ The fixture environment points the LLM at a closed loopback port (`http://127.0.
 
 ## What the entry points do
 
-`src/cognee_lab/identity/entry.py` holds three functions:
+`src/cognee_lab/identity/entry.py` holds four functions:
 
 - **`add`** registers the original through `cognee.add`, chunks it in memory with Cognee's chunker, asks the caller's describer for the identity description, writes the description to a file, registers that file through `cognee.add` and stamps it.
 - **`cognify`** runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over one source's original. Cognee's standard Tasks run first: `classify_documents`, `extract_chunks_from_documents` and `add_data_points`. Then one lab Task, `identity_publish`, runs once per document over the whole chunk set. It stamps the original, then publishes the description: a first publication when the source has no row, a re-add at the expected revision when its row is forgotten, else a reconcile. A source with no captured facts (the glossary, doc03) publishes with no semantic writer.
-- **One source per run.** `cognify` refuses more than one source (`one_source`). Cognee runs the data items of one run concurrently, up to 20 at a time (`run_tasks.py`, `asyncio.gather`), and a root's sources must publish in order: doc03 cites doc01's published decisions, so doc01 must be current first, and a failed source stops the sources after it. A root with several sources runs `cognify` once per source, in sequence.
+- **One source per run.** `cognify` takes one source. Cognee runs the data items of one run concurrently, up to 20 at a time (`run_tasks.py`, `asyncio.gather`), and a root's sources must publish in order: doc03 cites doc01's published decisions, so doc01 must be current first.
 - **`remember`** is `add`, then `cognify`. It never runs Cognee's improve step.
+- **`remember_in_order`** runs `add`, then `cognify`, for each source of a root in publication order. A failure stops it before the next source is added.
 
 The run uses captured decisions only. Cognee's `extract_graph_and_summarize` Task does not run; a native extractor waits for step 6. Every Task declares `needs_llm=False`, so the run skips Cognee's LLM connection probe.
 
@@ -33,12 +34,12 @@ The run uses captured decisions only. Cognee's `extract_graph_and_summarize` Tas
 
 | Command | Sources, in publication order | Through |
 | --- | --- | --- |
-| `fixture` | doc01 | `remember` |
-| `multi-fixture`, `chunked-fixture` | doc01, doc02 | `add` for each, then one `cognify` each |
-| `glossary-fixture [--chain]` | glossary, doc01 [, doc03] | `add` for each, then one `cognify` each |
+| `fixture` | doc01 | `remember_in_order` |
+| `multi-fixture`, `chunked-fixture` | doc01, doc02 | `remember_in_order`: `add`, then `cognify`, for each |
+| `glossary-fixture [--chain]` | glossary, doc01 [, doc03] | `remember_in_order`: `add`, then `cognify`, for each |
 | `readd` | the forgotten source | `add`, then `cognify` at `--expected-revision` |
 
-Every source is registered before the first `cognify` runs, because a description can read another source's text (doc01's reads the glossary). With `--fault-stage` and `--source`, the selected source's publication fails and the sources after it are not published; their originals stay unchunked and unstamped. `readd` admits the re-add on the in-memory text and chunks before `add` writes anything, as before, and `add` refuses (`chunk_mapping`) if Cognee's chunks differ from the admitted ones.
+Each describer reads only the descriptions of the sources before it: doc02's derives from doc01's, and doc03's cites doc01's decisions. doc01's description on a glossary root holds the glossary's text as the fixture writes it, not the registered copy. Admission reads the registered glossary when doc01 publishes, so doc01 is added after the glossary is registered. With `--fault-stage` and `--source`, the selected source's publication fails and the sources after it are never added: no original is left registered without a stamp. The root's manifest still names them, and a command that selects one refuses it (`source_missing`). A source that was added but whose first `cognify` never began has no publication; `reconcile` and the glossary root's report refuse it (`not_published`). `readd` admits the re-add on the in-memory text and chunks before `add` writes anything, as before, and `add` refuses (`chunk_mapping`) if Cognee's chunks differ from the admitted ones.
 
 `reconcile` of a failed first publication runs `cognify` again on every root kind. Any other row is reconciled over the chunks Cognee holds, which the lab chunks again in memory without writing them (`fixture.load_chunks`). The hand-built creation route (chunk in memory, `add_data_points`, then a publish Task in `run_tasks_base`) is gone.
 
@@ -66,7 +67,7 @@ uv run python -m cognee_lab.identity native-cognify --root outputs/stage6_entry
 uv run python -m cognee_lab.identity retrieve --root outputs/stage6_entry
 ```
 
-- `fixture` builds doc01 through `remember`. Its output adds `cognify_stamps`: `original`, `identity` and `seed` are each `true`.
+- `fixture` builds doc01 through `add`, then `cognify` (`remember_in_order`). Its output adds `cognify_stamps`: `original`, `identity` and `seed` are each `true`.
 - `native-cognify` is a stand-in for a plain `cognee.cognify()` outside the lab, with Cognee's defaults. It prints `native_cognify.items`, the run result of each Data item. On a `fixture` root each of the three items is `PipelineRunAlreadyCompleted`, and `retrieve` then returns the same fact as before.
 - `multi-fixture`, `chunked-fixture` and `glossary-fixture --chain` stamp every file they register too: `native-cognify` skips the five Data items of a two-source root and the seven of a chain root.
 - `fixture --fault-stage nodes|identity_edges|verification` fails the first publication at that stage. The command exits 1 with `recovery_event_id`. The stamps stay, so `native-cognify` still skips every item. `reconcile` restores the fact and resolves the incident with outcome `restored`.

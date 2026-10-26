@@ -1,15 +1,15 @@
 # Standard entry points
 
-A user builds a root with any creation command. Since step 5 S3a, `fixture` goes through the lab's `remember`: Cognee's own `cognify_pipeline` chunks doc01 with its standard Tasks, then a lab Task publishes the identity description. Since S3b, `multi-fixture`, `chunked-fixture` and `glossary-fixture` register every source through the lab's `add` and run its `cognify` once per source, in order, and `readd` goes through `add` and `cognify` too. The lab stamps every file it manages as cognified, so a plain `cognee.cognify` outside the lab skips them and makes no LLM call. A failed first publication keeps its chunks and its stamps, and `reconcile` finishes it.
+A user builds a root with any creation command. Since step 5 S3a, `fixture` goes through the lab's `remember`: Cognee's own `cognify_pipeline` chunks doc01 with its standard Tasks, then a lab Task publishes the identity description. Since S3b, every creation command runs the lab's `add`, then its `cognify`, for each source in publication order (`remember_in_order`, which is `remember` per source), so a failed source stops the run before the next source is added, and `readd` goes through `add` and `cognify` too. The lab stamps every file it manages as cognified, so a plain `cognee.cognify` outside the lab skips them and makes no LLM call. A failed first publication keeps its chunks and its stamps, and `reconcile` finishes it.
 
 Guide: `docs/stage6_identity_standard_entry_points.md` ("Commands", "A failure", "Warning: a plain Cognee call bypasses the identity layer"), with `docs/stage6_identity_first_slice.md` for the published fact.
 
 ## Sub-features
 
-- `entry-remember` builds doc01 through `remember` and stamps the original, the description and the seed.
+- `entry-remember` builds doc01 through `add`, then `cognify`, and stamps the original, the description and the seed.
 - `native-cognify-skips` runs a plain `cognee.cognify()` (`native-cognify`), which skips every stamped item and leaves the publication and its fact unchanged.
 - `entry-publish-fault` fails the first publication inside the lab Task at a publish stage. The CLI exits 1 with the recovery event, the stamps stay, and `reconcile` finishes the saved plan.
-- `entry-every-root` builds the two-source, chunked and chain roots through `add` and one `cognify` per source, and stamps every file on each.
+- `entry-every-root` builds the two-source, chunked and chain roots through `add`, then `cognify`, per source in order, and stamps every file on each.
 - `entry-readd` re-adds a forgotten source through `add` and `cognify`, which stamp its files.
 
 ## How to get to it (user POV)
