@@ -104,8 +104,7 @@ def lab_removed_by_operations(rows) -> set[UUID]:
 
 def lab_removed(rows, own=None, verified=None) -> set[UUID]:
     """The Entities a lab operation removed, or may have, as a publication
-    of `own` sees them: those a record proves
-    (`lab_removed_by_operations`); every reusable Entity of a forgotten life
+    of `own` sees them: those a record shows (`recorded_removals`); every reusable Entity of a forgotten life
     but those its forget found served (`Tombstone.served_entity_ids`), since
     a withdrawal or a failed attempt may have removed one before the forget
     found it gone; and the recipes of a source that is not served. Less what
@@ -114,9 +113,9 @@ def lab_removed(rows, own=None, verified=None) -> set[UUID]:
     for row in rows:
         for tombstone in tombstones(row):
             maybe |= tombstone.all_reusable_ids - set(tombstone.served_entity_ids)
-        if (row.dataset, row.source) != own and row.description is not None:
-            if not row.is_served:
-                maybe |= set(row.description.entity_constructions)
+        unserved = row.description is not None and not row.is_served
+        if unserved and (row.dataset, row.source) != own:
+            maybe |= set(row.description.entity_constructions)
     return (recorded_removals(rows) | maybe) - served_recipes(rows, own, verified)
 
 
