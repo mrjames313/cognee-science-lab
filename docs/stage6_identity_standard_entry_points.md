@@ -40,7 +40,9 @@ With `ENABLE_BACKEND_ACCESS_CONTROL=true`, each nested Cognee call inside an ite
 
 A failure in the lab Task is recorded in the ledger as a failed attempt with its recovery event, as before. The run still completes, so Cognee keeps the native chunks and the stamp, and the entry point then raises the same error. The CLI exits 1 and prints it with its `recovery_event_id`, exactly as the [first slice guide](stage6_identity_first_slice.md) describes.
 
-`reconcile` of a failed first publication runs the lab's `cognify` again. Cognee's Tasks chunk the original again with the same chunk IDs, using the chunk budget the chunks record, or 512 when they are gone. Then the lab Task finishes the saved plan. Because of this, `status` does not list the document node and chunks of a failed first publication under `native_deleted`. Every other facet, and every other row, is listed as before ([forget guide](stage6_identity_forget.md#deletes-outside-the-lab)).
+`reconcile` of a failed first publication runs the lab's `cognify` again. Cognee's Tasks chunk the original again with the same chunk IDs and the chunk budget the chunks record. Then the lab Task finishes the saved plan.
+
+`status` compares a failed first publication with Cognee's copy like any other row. The lab never rolls its own chunks back, and Cognee's startup recovery keeps them because the original is stamped. So if they are gone, something outside the lab removed them, for example a `cognee.forget(memory_only=True)` of the original or a `cognee.update` that changed its text. `status` lists the row under `native_deleted`, and `reconcile` refuses it ([forget guide](stage6_identity_forget.md#deletes-outside-the-lab)).
 
 ## Commands
 

@@ -1,6 +1,7 @@
 """The lab's cognify through real configured stores, in fresh subprocesses:
-what Cognee's rollback of the run can reach, how reconcile finishes a
-failed first publication after it, and the stamp gap that a plain
+what Cognee's rollback of the run can reach, what Cognee's startup
+recovery keeps of a failed first publication, a memory-only forget of one
+reported as a delete, and the stamp gap that a plain
 non-incremental cognify leaves."""
 
 import json
@@ -40,14 +41,21 @@ async def main(root, action):
     graph = await get_graph_engine()
     run_ids = await runs_of("cognify_pipeline")
     out = dict(tagged=sorted({t for r in run_ids for t in await tagged_types(graph, r)}))
-    if action == "rollback":
+    if action == "recover":
         from cognee.modules.cognify.rollback import cognify_rollback_handler
 
+        # What Cognee's API startup recovery does to an abandoned run.
         (run_id,) = run_ids
         ctx = await context_for(original)
         await cognify_rollback_handler(
             pipeline_run_id=run_id, dataset=ctx.dataset, user=ctx.user,
-            keep_completed_data=False,
+            keep_completed_data=True,
+        )
+    if action == "forget-memory":
+        import cognee
+
+        await cognee.forget(
+            data_id=original, dataset_id=source.dataset_id, memory_only=True
         )
     if action == "full-cognify":
         import cognee
@@ -98,14 +106,15 @@ def test_the_run_tags_only_native_chunks_and_document(tmp_path):
 
 
 @pytest.mark.integration
-def test_reconcile_finishes_a_failed_first_publication_after_a_rollback(tmp_path):
+def test_startup_recovery_keeps_a_failed_first_publication(tmp_path):
     root = tmp_path / "entry"
     failed = command(root, "fixture", "--fault-stage", "identity_edges", expect=1)
     assert "recovery_event_id=" in output(failed)["message"]
-    rolled = in_root(root, "rollback")
-    # The rollback took the native chunks and the stamp, not the lab's nodes.
-    assert rolled["chunks"] == [False] and rolled["stamped"] is False
-    assert all(rolled["mentions"])
+    recovered = in_root(root, "recover")
+    # The lab Task stamped the original before it published, so the
+    # recovery kept the native chunks.
+    assert all(recovered["chunks"]) and recovered["stamped"]
+    assert all(recovered["mentions"])
     status = output(command(root, "status"))
     assert [p["state"] for p in status["publications"]] == ["failed"]
     assert status["native_deleted"] == []
@@ -114,8 +123,19 @@ def test_reconcile_finishes_a_failed_first_publication_after_a_rollback(tmp_path
     assert reconciled["cognify_stamps"] == dict(original=True, identity=True, seed=True)
     (event,) = reconciled["recovery_events"]
     assert event["outcome"] == "restored"
-    after = in_root(root, "look")
-    assert all(after["chunks"]) and after["stamped"]
+
+
+@pytest.mark.integration
+def test_a_memory_only_forget_of_a_failed_first_publication_is_a_delete(tmp_path):
+    root = tmp_path / "entry"
+    command(root, "fixture", "--fault-stage", "identity_edges", expect=1)
+    forgotten = in_root(root, "forget-memory")
+    assert forgotten["chunks"] == [False] and forgotten["stamped"] is False
+    (gone,) = output(command(root, "status"))["native_deleted"]
+    assert gone["state"] == "failed"
+    assert gone["missing"] == ["document_node", "chunks"]
+    refused = output(command(root, "reconcile", expect=1))
+    assert "gone or changed outside the lab" in refused["message"]
 
 
 @pytest.mark.integration

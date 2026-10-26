@@ -485,9 +485,8 @@ async def cognify_stamps(source):
 
 async def reconcile(root, args, publisher, source):
     """Finish or verify doc01's saved revision. A failed first publication
-    goes through the lab's cognify again, which chunks the original again in
-    case Cognee removed its chunks; any other row is reconciled over the
-    chunks Cognee holds."""
+    finishes through the lab's cognify, as it started; any other row is
+    reconciled over the chunks Cognee holds."""
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 

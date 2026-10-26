@@ -1,5 +1,5 @@
 """The lab entry points' rules that need no store: which native facets a
-failed first publication reports, the chunk budget a reconcile chunks with,
+failed publication reports, the chunk budget a reconcile chunks with,
 and the whole-chunk-set check of the lab Task."""
 
 import json
@@ -47,21 +47,14 @@ def emptied(monkeypatch):
     monkeypatch.setattr(native_copy, "raw_file_present", absent)
 
 
-async def test_a_failed_first_publication_does_not_report_its_chunks(
-    source_payload, emptied
+@pytest.mark.parametrize("verified_revision", [0, 1])
+async def test_a_failed_publication_reports_every_missing_facet(
+    source_payload, emptied, verified_revision
 ):
-    row = failed_publication(described(source_payload), verified_revision=0)
-    assert await native_copy.missing_native(Graph(), row) == [
-        "original_data",
-        "identity_data",
-        "stored_files",
-    ]
-
-
-async def test_a_failed_publication_after_a_served_revision_reports_every_facet(
-    source_payload, emptied
-):
-    row = failed_publication(described(source_payload), verified_revision=1)
+    """A memory-only forget or an outside text change of a failed first
+    publication's original is a delete outside the lab like any other: the
+    lab's cognify never rolls its own chunks back."""
+    row = failed_publication(described(source_payload), verified_revision)
     assert await native_copy.missing_native(Graph(), row) == [
         "original_data",
         "identity_data",

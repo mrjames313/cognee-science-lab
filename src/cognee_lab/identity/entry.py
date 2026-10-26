@@ -110,9 +110,8 @@ def described_chunks(source) -> set[str]:
 
 
 async def chunk_budget_of(source, graph, default: int) -> int:
-    """The budget to chunk a saved source's original with: the one its
-    native chunks record, or `default` when they are gone (a failed first
-    publication, whose chunks `cognify` writes again)."""
+    """The budget to chunk a source's original with: the one its native
+    chunks record, or `default` before its first `cognify` writes them."""
     from .captured_chunks import recorded_budget
 
     for chunk_id in described_chunks(source):
