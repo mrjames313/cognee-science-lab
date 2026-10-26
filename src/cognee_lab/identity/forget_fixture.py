@@ -46,6 +46,14 @@ CALLER_FILES = {
 RESULT_FILES = ("*_result.json", "result.json")
 
 
+def semantics_for(label):
+    """How the lab writes and checks the source's captured facts
+    (`entry.Semantics`), or None for a source without any."""
+    from .fixture import CapturedSemantics
+
+    return CapturedSemantics() if CALLER_FILES[label].facts else None
+
+
 def write_revision(root, label, intended):
     """The caller's file for a reviewed or cited revision of a source, named
     as `CALLER_FILES` names that source's revisions."""
@@ -223,14 +231,11 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     from what was forgotten, and report whether they do. The re-add is
     admitted on the in-memory text and chunks before anything is written,
     so a refusal leaves the stores as the forget left them."""
-    import cognee
     from types import SimpleNamespace
-    from cognee.tasks.ingestion.data_item import DataItem
-    from cognee.tasks.storage import add_data_points
-    from .fixture import load_chunks
+
+    from . import entry
     from .erasure_rules import differs_from_forgotten
-    from .multisource import publish_one
-    from .registered import context_for, read_texts
+    from .registered import read_texts
     from .retirement import readd_plan
     from .text_changes import chunk_text
 
@@ -264,36 +269,30 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     texts = await read_texts(source, known={source.original_input_ref: text})
     await publisher.admit_readd(source, texts, {str(c.id): c for c in projected})
 
-    await cognee.add(
-        DataItem(data=str(text_file), data_id=doc.data_id),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
+    def admitted(draft):
+        if [(str(c.id), c.text) for c in draft.chunks] != [
+            (str(c.id), c.text) for c in projected
+        ]:
+            raise IntentError(
+                "chunk_mapping", "Native chunks differ from the admitted ones"
+            )
+        return source
+
+    await entry.add(
+        DATASET_NAME,
+        entry.Original(text_file, doc.data_id),
+        describe=admitted,
+        identity_path=root / f"identity_{label}_revision{source.revision}.json",
+        chunk_budget=budget,
     )
-    ctx = await context_for(doc.data_id)
-    chunks = await load_chunks(None, ctx, budget=budget)
-    if [(str(c.id), c.text) for c in chunks] != [
-        (str(c.id), c.text) for c in projected
-    ]:
-        raise IntentError(
-            "chunk_mapping", "Native chunks differ from the admitted ones"
-        )
-    await add_data_points(chunks, ctx=ctx)
-    path = root / f"identity_{label}_revision{source.revision}.json"
-    path.write_text(source.model_dump_json(indent=2) + "\n")
-    await cognee.add(
-        DataItem(data=str(path), data_id=source.identity_data_id),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
-    )
-    await publish_one(
+    await entry.cognify(
         publisher,
-        source,
-        chunks,
-        ctx,
-        operation="readd",
+        [source],
+        semantics=semantics_for(label),
+        chunk_budget=budget,
         expected_revision=expected_revision,
         fault_stage=fault_stage,
-        semantics=files.facts,
+        origin="test",
     )
     return dict(differs_from_forgotten=differs_from_forgotten(tombstone, source))
 

@@ -98,19 +98,13 @@ async def finish_publication(publisher, source, *, fault_stage=None):
     Publisher.reconcile plans and the store checks). The registered
     snapshot shows `source` first, as preflight requires; a rerun finds it
     written."""
-    from .fixture import load_chunks
-    from .multisource import publish_one
+    from .fixture import CapturedSemantics
+    from .multisource import reconcile_one
     from .registered import context_for, write_registered
 
-    ctx = await context_for(source.inputs[source.original_input_ref].data_id)
     await write_registered(source, await context_for(source.identity_data_id))
-    await publish_one(
-        publisher,
-        source,
-        await load_chunks(source, ctx),
-        ctx,
-        operation="reconcile",
-        fault_stage=fault_stage,
+    await reconcile_one(
+        publisher, source, semantics=CapturedSemantics(), fault_stage=fault_stage
     )
 
 

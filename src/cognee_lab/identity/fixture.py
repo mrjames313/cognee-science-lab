@@ -16,19 +16,16 @@ SEED_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:seed-document")
 OSCILLATIONS_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:oscillations")
 
 
-async def load_chunks(source, ctx, *, budget=None):
+async def load_chunks(source, ctx):
+    """The native chunks of a saved source's original, chunked again in
+    memory with the budget its chunks record. Writes nothing."""
+    from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.modules.chunking.TextChunker import TextChunker
     from cognee.modules.data.processing.document_types import TextDocument
 
-    if budget is None:
-        if source is None:
-            budget = 512
-        else:
-            from cognee.infrastructure.databases.graph import get_graph_engine
-            from .captured_chunks import recorded_budget
+    from .captured_chunks import recorded_budget
 
-            budget = await recorded_budget(source, await get_graph_engine())
-
+    budget = await recorded_budget(source, await get_graph_engine())
     doc = TextDocument(
         id=ctx.data_item.id,
         name=ctx.data_item.name,
@@ -307,75 +304,74 @@ def write_info(root, source):
     (root / "fixture-info.json").write_text(json.dumps(info, indent=2))
 
 
+async def start_doc01(root, source_text=None):
+    """doc01's captured template and original, the original's text written
+    to the root (the fixture text or `source_text`), and the publisher of
+    the root's stores once the seed corpus is registered."""
+    from . import entry
+
+    template = doc01_template(source_text)
+    original = entry.Original(
+        root / "source.txt", UUID(template["inputs"]["doc01"]["data_id"])
+    )
+    original.path.write_text(
+        source_text
+        if source_text is not None
+        else (FIXTURES / "source.txt").read_text()
+    )
+    return template, original, await seed_corpus(root, template)
+
+
+def doc01_describer(root, template, **options):
+    """The lab's `add` describer for doc01 (`describe_doc01` with
+    `options`), which also writes the root's fixture-info.json."""
+
+    def describe(draft):
+        # Written before the publication, so a failed run leaves it too.
+        source = describe_doc01(
+            template, draft.dataset_id, draft.text, draft.chunks, **options
+        )
+        write_info(root, source)
+        return source
+
+    return describe
+
+
 async def create(root, args):
     """The doc01 root through the lab's remember: the seed corpus first,
     then doc01 registered, described from its chunks and published in
     Cognee's cognify pipeline. The CLI closes the publisher's stores."""
     from . import entry
 
-    template = doc01_template()
-    original = entry.Original(
-        root / "source.txt", UUID(template["inputs"]["doc01"]["data_id"])
-    )
-    original.path.write_text((FIXTURES / "source.txt").read_text())
-    publisher = await seed_corpus(root, template)
+    template, original, publisher = await start_doc01(root)
     args._fixture_publisher = publisher
-
-    def describe(draft):
-        # Written before the publication, so a failed run leaves it too.
-        source = describe_doc01(template, draft.dataset_id, draft.text, draft.chunks)
-        write_info(root, source)
-        return source
-
-    source = await entry.remember(
+    return await entry.remember(
         publisher,
         DATASET_NAME,
         original,
-        describe=describe,
+        describe=doc01_describer(root, template),
         identity_path=root / "identity.json",
         semantics=CapturedSemantics(),
         fault_stage=args.fault_stage,
         origin="test",
     )
-    return source
 
 
-async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amend=None):
-    """Register doc01 and its description by hand, for the fixtures that
-    have not moved to the lab's entry points yet. `amend(payload)` edits
-    the description before it is registered."""
-    import cognee
-    from cognee.tasks.ingestion.data_item import DataItem
-    from cognee.tasks.storage import add_data_points
+async def add_doc01(root, *, chunk_budget=512, source_text=None, **options):
+    """Register doc01 and its description through the lab's `add`, for a
+    root with more sources, which then publishes each one in order. Returns
+    the publisher and doc01's description (`doc01_describer`'s options)."""
+    from . import entry
 
-    template = doc01_template(source_text)
-    original_id = UUID(template["inputs"]["doc01"]["data_id"])
-    text = (
-        source_text
-        if source_text is not None
-        else (FIXTURES / "source.txt").read_text()
+    template, original, publisher = await start_doc01(root, source_text)
+    source = await entry.add(
+        DATASET_NAME,
+        original,
+        describe=doc01_describer(root, template, **options),
+        identity_path=root / "identity.json",
+        chunk_budget=chunk_budget,
     )
-    (root / "source.txt").write_text(text)
-    publisher = await seed_corpus(root, template)
-    await cognee.add(
-        DataItem(data=str(root / "source.txt"), data_id=original_id),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
-    )
-    original_ctx = await context_for(original_id)
-    chunks = await load_chunks(None, original_ctx, budget=chunk_budget)
-    source = describe_doc01(
-        template, original_ctx.dataset.id, text, chunks, multi=multi, amend=amend
-    )
-    await add_data_points(chunks, ctx=original_ctx)
-    (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
-    await cognee.add(
-        DataItem(data=str(root / "identity.json"), data_id=source.identity_data_id),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
-    )
-    write_info(root, source)
-    return source, chunks, original_ctx, publisher
+    return publisher, source
 
 
 async def run(args, root):
@@ -462,52 +458,10 @@ async def cognify_stamps(source):
 
 
 async def reconcile(root, args, publisher, source):
-    """Finish or verify doc01's saved revision. A failed first publication
-    finishes through the lab's cognify, as it started; any other row is
-    reconciled over the chunks Cognee holds."""
-    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
-    from cognee.modules.pipelines.tasks.task import Task
-
-    from . import entry
+    """Finish or verify doc01's saved revision (`reconcile_publication`)."""
+    from .multisource import reconcile_publication
 
     await publisher.refuse_natively_deleted(source)
-    row = await publisher.records.row(source)
-    if (
-        row is not None
-        and row.failed_attempt == "publish"
-        and not row.verified_revision
-    ):
-        await entry.cognify(
-            publisher,
-            [source],
-            semantics=CapturedSemantics(),
-            fault_stage=args.fault_stage,
-            origin="test",
-        )
-        return
-    original_ctx = await context_for(source.inputs[source.original_input_ref].data_id)
-    chunks = await load_chunks(source, original_ctx)
-    ctx = await context_for(source.identity_data_id)
-
-    async def publish_fixture(items, ctx=None):
-        for item in items:
-            await publisher.reconcile(
-                item,
-                texts={"doc01": (root / "source.txt").read_text()},
-                chunks={str(c.id): c for c in chunks},
-                ctx=ctx,
-                origin="test/fault_injection" if args.fault_stage else "test",
-                fault_stage=args.fault_stage,
-                semantic_writer=lambda: write_semantics(
-                    publisher, item, chunks, original_ctx
-                ),
-                verify_semantics=lambda: verify_semantics(
-                    publisher, item, chunks, original_ctx
-                ),
-            )
-        return items
-
-    async for _ in run_tasks_base(
-        [Task(publish_fixture, needs_llm=False)], [source], ctx.user, ctx
-    ):
-        pass
+    await reconcile_publication(
+        publisher, source, semantics=CapturedSemantics(), fault_stage=args.fault_stage
+    )

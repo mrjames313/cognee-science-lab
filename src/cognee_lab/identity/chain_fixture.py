@@ -133,33 +133,19 @@ def describe_doc03(doc01: IdentitySource, chunks) -> IdentitySource:
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def prepare_doc03(root, doc01):
-    """Register doc03's text, chunks and description; return them with its
-    context."""
-    import cognee
-    from cognee.tasks.ingestion.data_item import DataItem
-    from cognee.tasks.storage import add_data_points
+async def add_doc03(root, doc01):
+    """Register doc03's text and its description through the lab's `add`;
+    return the description."""
+    from . import entry
 
-    from .fixture import load_chunks
-    from .registered import context_for
-
-    (root / "doc03.txt").write_text(DOC03_TEXT)
-    await cognee.add(
-        DataItem(data=str(root / "doc03.txt"), data_id=DOC03_DATA_ID),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
+    original = entry.Original(root / "doc03.txt", DOC03_DATA_ID)
+    original.path.write_text(DOC03_TEXT)
+    return await entry.add(
+        DATASET_NAME,
+        original,
+        describe=lambda draft: describe_doc03(doc01, draft.chunks),
+        identity_path=root / "doc03_identity.json",
     )
-    ctx = await context_for(DOC03_DATA_ID)
-    chunks = await load_chunks(None, ctx, budget=512)
-    await add_data_points(chunks, ctx=ctx)
-    doc03 = describe_doc03(doc01, chunks)
-    (root / "doc03_identity.json").write_text(doc03.model_dump_json(indent=2) + "\n")
-    await cognee.add(
-        DataItem(data=str(root / "doc03_identity.json"), data_id=DOC03_IDENTITY_ID),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
-    )
-    return doc03, chunks, ctx
 
 
 async def cite(publisher, root, args, sources):

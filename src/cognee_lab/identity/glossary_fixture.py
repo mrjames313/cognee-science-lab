@@ -18,19 +18,18 @@ from uuid import NAMESPACE_URL, uuid5
 
 from .environment import DATASET_NAME
 from .captured_chunks import bind_chunks
-from .chain_fixture import cite, prepare_doc03
+from .chain_fixture import add_doc03, cite
 from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
-from .fixture import expect_current, load_chunks
-from .fixture import prepare as prepare_doc01
+from .fixture import add_doc01, expect_current
 from .forget_fixture import (
-    CALLER_FILES,
     forget_command,
     forget_dry_run,
     readd,
+    semantics_for,
 )
 from .models import IdentitySource
-from .multisource import current_sources, publish_one, reconcile_selected
+from .multisource import current_sources, reconcile_selected
 from .multisource import read_sources
 from .native_copy import deleted_entry, missing_native
 from .publish import Publisher
@@ -167,43 +166,35 @@ def describe_glossary(dataset_id, text, chunks, revision=1, old=None):
 
 async def prepare(root, *, chain=False):
     """Register the glossary and doc01 and, with `chain`, doc03, which cites
-    doc01's decisions (chain_fixture.py)."""
+    doc01's decisions (chain_fixture.py), through the lab's `add`. Returns
+    the publisher and the descriptions in publication order."""
     import cognee
-    from cognee.tasks.ingestion.data_item import DataItem
-    from cognee.tasks.storage import add_data_points
+
+    from . import entry
 
     if cognee.__version__ != "1.6.2":
         raise IntentError(
             "unsupported_version", "Glossary fixture requires inspected Cognee 1.6.2"
         )
-    doc01, chunks1, ctx1, publisher = await prepare_doc01(
+    publisher, doc01 = await add_doc01(
         root, amend=lambda payload: glossary_inputs(payload, GLOSSARY_TEXT)
     )
-    (root / "glossary.txt").write_text(GLOSSARY_TEXT)
-    await cognee.add(
-        DataItem(data=str(root / "glossary.txt"), data_id=GLOSSARY_DATA_ID),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
-    )
-    ctx = await context_for(GLOSSARY_DATA_ID)
-    chunks = await load_chunks(None, ctx, budget=CHUNK_BUDGET)
-    await add_data_points(chunks, ctx=ctx)
-    glossary = describe_glossary(doc01.dataset_id, GLOSSARY_TEXT, chunks)
-    (root / "glossary_identity.json").write_text(
-        glossary.model_dump_json(indent=2) + "\n"
-    )
-    await cognee.add(
-        DataItem(
-            data=str(root / "glossary_identity.json"), data_id=GLOSSARY_IDENTITY_ID
+    original = entry.Original(root / "glossary.txt", GLOSSARY_DATA_ID)
+    original.path.write_text(GLOSSARY_TEXT)
+    glossary = await entry.add(
+        DATASET_NAME,
+        original,
+        describe=lambda draft: describe_glossary(
+            draft.dataset_id, draft.text, draft.chunks
         ),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
+        identity_path=root / "glossary_identity.json",
+        chunk_budget=CHUNK_BUDGET,
     )
     files = dict(doc01="identity.json", glossary="glossary_identity.json")
-    prepared = {"glossary": (glossary, chunks, ctx), "doc01": (doc01, chunks1, ctx1)}
+    prepared = {"glossary": glossary, "doc01": doc01}
     if chain:
         files["doc03"] = "doc03_identity.json"
-        prepared["doc03"] = await prepare_doc03(root, doc01)
+        prepared["doc03"] = await add_doc03(root, doc01)
     (root / INFO).write_text(
         json.dumps(
             dict(
@@ -302,9 +293,9 @@ async def reconcile(publisher, label, selected):
     change (chain_kind_change.py)."""
     return await reconcile_selected(
         publisher,
+        label,
         selected,
         resume_text_change=change_glossary if label == "glossary" else maintain_one,
-        semantics=CALLER_FILES[label].facts,
     )
 
 
@@ -452,17 +443,18 @@ async def finish(publisher, root, query, **extra) -> dict:
 async def create(args, root) -> dict:
     """Make the root and publish each source in citation order: doc03 pins
     doc01's decisions as published. No current source is read first."""
+    from . import entry
+
     publisher, prepared = await prepare(root, chain=args.chain)
     args._fixture_publisher = publisher
-    for label, (source, chunks, ctx) in prepared.items():
-        await publish_one(
+    for label, source in prepared.items():
+        await entry.cognify(
             publisher,
-            source,
-            chunks,
-            ctx,
-            operation="publish",
+            [source],
+            semantics=semantics_for(label),
+            chunk_budget=CHUNK_BUDGET,
             fault_stage=args.fault_stage if label == args.source else None,
-            semantics=CALLER_FILES[label].facts,
+            origin="test",
         )
     return await finish(publisher, root, args.query)
 

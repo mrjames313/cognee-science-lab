@@ -61,12 +61,41 @@ def add_lifecycle_records(payload, label, text):
     )
 
 
+def describe_doc02(first, text, chunks, *, dependent=False):
+    """doc02's captured description, derived from doc01's (`first`): its own
+    Data items, mention and private records over `text` and its chunks,
+    and with `dependent` the consumption of doc01 (forget_fixture)."""
+    from .captured_chunks import bind_chunks
+
+    payload = first.model_dump(mode="json")
+    payload["identity_data_id"] = fixture_id("doc02:identity")
+    payload["inputs"]["doc01"]["data_id"] = fixture_id("doc02:original")
+    payload["inputs"]["doc01"]["text_sha256"] = text_digest(text)
+    old_mid = str(first.mention_groups["g01"].entity_id)
+    new_mid = fixture_id("doc02:mention")
+    payload["entity_constructions"][new_mid] = payload["entity_constructions"].pop(
+        old_mid
+    )
+    payload["mention_groups"]["g01"]["entity_id"] = new_mid
+    for key in [fixture_id("doc01:singleton"), fixture_id("doc01:unresolved")]:
+        payload["entity_constructions"].pop(key)
+    add_lifecycle_records(payload, "doc02", text)
+    if dependent:
+        from .forget_fixture import add_dependency
+
+        add_dependency(payload, first, text)
+    bind_chunks(payload, text, chunks)
+    return IdentitySource.model_validate_json(json.dumps(payload))
+
+
 async def prepare(root, *, chunked=False, dependent=False):
+    """Register doc01 and doc02 and their descriptions through the lab's
+    `add`. Returns the publisher, the descriptions in publication order and
+    the chunk budget."""
     import cognee
-    from cognee.tasks.ingestion.data_item import DataItem
-    from cognee.tasks.storage import add_data_points
-    from .fixture import prepare as prepare_first, load_chunks
-    from .registered import context_for
+
+    from . import entry
+    from .fixture import add_doc01
 
     if cognee.__version__ != "1.6.2":
         raise IntentError(
@@ -84,49 +113,22 @@ async def prepare(root, *, chunked=False, dependent=False):
             .replace(". The controller", ", the controller")
             .replace("; it", ", and it")
         )
-    first, chunks1, ctx1, publisher = await prepare_first(
+    publisher, first = await add_doc01(
         root, multi=True, chunk_budget=budget, source_text=text
     )
-    payload = first.model_dump(mode="json")
-    payload["identity_data_id"] = fixture_id("doc02:identity")
-    payload["inputs"]["doc01"]["data_id"] = fixture_id("doc02:original")
-    text = (root / "source.txt").read_text().rstrip(
-        "\n"
-    ) + " During startup, HC remains active.\n"
-    (root / "source02.txt").write_text(text)
-    await cognee.add(
-        DataItem(
-            data=str(root / "source02.txt"), data_id=UUID(fixture_id("doc02:original"))
+    original = entry.Original(root / "source02.txt", UUID(fixture_id("doc02:original")))
+    original.path.write_text(
+        (root / "source.txt").read_text().rstrip("\n")
+        + " During startup, HC remains active.\n"
+    )
+    second = await entry.add(
+        DATASET_NAME,
+        original,
+        describe=lambda draft: describe_doc02(
+            first, draft.text, draft.chunks, dependent=dependent
         ),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
-    )
-    ctx2 = await context_for(fixture_id("doc02:original"))
-    chunks2 = await load_chunks(None, ctx2, budget=budget)
-    await add_data_points(chunks2, ctx=ctx2)
-    payload["inputs"]["doc01"]["text_sha256"] = text_digest(text)
-    old_mid = str(first.mention_groups["g01"].entity_id)
-    new_mid = fixture_id("doc02:mention")
-    payload["entity_constructions"][new_mid] = payload["entity_constructions"].pop(
-        old_mid
-    )
-    payload["mention_groups"]["g01"]["entity_id"] = new_mid
-    for key in [fixture_id("doc01:singleton"), fixture_id("doc01:unresolved")]:
-        payload["entity_constructions"].pop(key)
-    add_lifecycle_records(payload, "doc02", text)
-    if dependent:
-        from .forget_fixture import add_dependency
-
-        add_dependency(payload, first, text)
-    from .captured_chunks import bind_chunks
-
-    bind_chunks(payload, text, chunks2)
-    second = IdentitySource.model_validate_json(json.dumps(payload))
-    (root / "identity02.json").write_text(second.model_dump_json(indent=2) + "\n")
-    await cognee.add(
-        DataItem(data=str(root / "identity02.json"), data_id=second.identity_data_id),
-        dataset_name=DATASET_NAME,
-        skip_connection_test=True,
+        identity_path=root / "identity02.json",
+        chunk_budget=budget,
     )
     info = dict(
         dataset_id=str(first.dataset_id),
@@ -138,10 +140,7 @@ async def prepare(root, *, chunked=False, dependent=False):
         (root / "chunked-fixture-info.json").write_text(
             json.dumps(dict(chunk_budget=budget, prefix="Δ review: "), indent=2)
         )
-    return publisher, {
-        "doc01": (first, chunks1, ctx1),
-        "doc02": (second, chunks2, ctx2),
-    }
+    return publisher, {"doc01": first, "doc02": second}, budget
 
 
 INFO = "multi-fixture-info.json"
@@ -201,41 +200,23 @@ async def current_sources(root, publisher, info=INFO):
     return await saved_or_file(publisher, read_sources(root, info))
 
 
-async def publish_one(
-    publisher,
-    source,
-    chunks,
-    original_ctx,
-    *,
-    operation,
-    expected_revision=None,
-    fault_stage=None,
-    semantics=True,
-):
-    """Run one publication through the native pipeline: `publish` a first
-    revision, `reconcile` the saved one, or `readd` a forgotten source at the
-    next one. Each writes the captured facts that are missing and verifies
-    them; a source without captured facts passes `semantics=False`."""
-    from .fixture import write_semantics, verify_semantics
-    from .registered import context_for
+async def reconcile_one(publisher, source, *, semantics, fault_stage=None):
+    """Reconcile the saved revision over the chunks Cognee holds, in the
+    native pipeline: finish a failed attempt or verify a current one.
+    `semantics` writes the missing captured facts and verifies them; None
+    for a source without captured facts."""
+    from .fixture import load_chunks
+    from .registered import context_for, read_texts
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 
+    original = await context_for(source.inputs[source.original_input_ref].data_id)
+    chunks = await load_chunks(source, original)
     ctx = await context_for(source.identity_data_id)
-    entry = {
-        "publish": publisher.publish,
-        "reconcile": publisher.reconcile,
-        "readd": publisher.readd,
-    }[operation]
-    guard = (
-        {} if expected_revision is None else dict(expected_revision=expected_revision)
-    )
 
     async def task(items, ctx=None):
-        from .registered import read_texts
-
         for item in items:
-            await entry(
+            await publisher.reconcile(
                 item,
                 texts=await read_texts(item),
                 chunks={str(c.id): c for c in chunks},
@@ -243,16 +224,15 @@ async def publish_one(
                 origin="test/fault_injection" if fault_stage else "test",
                 fault_stage=fault_stage,
                 semantic_writer=(
-                    (lambda: write_semantics(publisher, item, chunks, original_ctx))
-                    if semantics
-                    else None
+                    None
+                    if semantics is None
+                    else lambda: semantics.write(publisher, item, chunks, original)
                 ),
                 verify_semantics=(
-                    (lambda: verify_semantics(publisher, item, chunks, original_ctx))
-                    if semantics
-                    else None
+                    None
+                    if semantics is None
+                    else lambda: semantics.verify(publisher, item, chunks, original)
                 ),
-                **guard,
             )
         return items
 
@@ -262,17 +242,36 @@ async def publish_one(
         pass
 
 
-async def reconcile_selected(
-    publisher, selected, *, resume_text_change, semantics=True
-) -> dict:
+async def reconcile_publication(publisher, source, *, semantics, fault_stage=None):
+    """Finish or verify a publication's saved revision. A failed first
+    publication finishes through the lab's cognify, as it started; any other
+    row is reconciled over the chunks Cognee holds (`reconcile_one`). The
+    caller refuses a source whose native copy is gone first."""
+    from . import entry
+
+    row = await publisher.records.row(source)
+    if (
+        row is not None
+        and row.failed_attempt == "publish"
+        and not row.verified_revision
+    ):
+        await entry.cognify(
+            publisher,
+            [source],
+            semantics=semantics,
+            fault_stage=fault_stage,
+            origin="test",
+        )
+        return
+    await reconcile_one(publisher, source, semantics=semantics, fault_stage=fault_stage)
+
+
+async def reconcile_selected(publisher, label, selected, *, resume_text_change) -> dict:
     """Finish the selected source's failed attempt, after refusing one whose
     native copy is gone. Returns what the command reports beside the
     snapshot: a finished forget's outcome, or what a completed text change
-    (`resume_text_change`) refreshed. `semantics` says whether a
-    publication's retry has captured facts to write (`publish_one`)."""
-    from .fixture import load_chunks
-    from .registered import context_for
-    from .forget_fixture import reconcile_forget
+    (`resume_text_change`) refreshed."""
+    from .forget_fixture import reconcile_forget, semantics_for
     from .revisions import replace_one
     from .text_changes import TextChange
 
@@ -290,15 +289,7 @@ async def reconcile_selected(
     if row.resumed_by == "replace":
         await replace_one(publisher, selected, expected_revision=selected.revision)
     else:
-        ctx = await context_for(selected.inputs[selected.original_input_ref].data_id)
-        await publish_one(
-            publisher,
-            selected,
-            await load_chunks(selected, ctx),
-            ctx,
-            operation="reconcile",
-            semantics=semantics,
-        )
+        await reconcile_publication(publisher, selected, semantics=semantics_for(label))
     return {}
 
 
@@ -555,21 +546,23 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
 async def run(args, root):
     refresh = {}
     if args.command in {"multi-fixture", "chunked-fixture"}:
-        publisher, prepared = await prepare(
+        from . import entry
+        from .fixture import CapturedSemantics
+
+        publisher, sources, budget = await prepare(
             root,
             chunked=args.command == "chunked-fixture",
             dependent=args.dependent,
         )
         args._fixture_publisher = publisher
-        sources = {label: value[0] for label, value in prepared.items()}
-        for label, (source, chunks, ctx) in prepared.items():
-            await publish_one(
+        for label, source in sources.items():
+            await entry.cognify(
                 publisher,
-                source,
-                chunks,
-                ctx,
-                operation="publish",
+                [source],
+                semantics=CapturedSemantics(),
+                chunk_budget=budget,
                 fault_stage=args.fault_stage if label == args.source else None,
+                origin="test",
             )
     else:
         publisher = await Publisher.configured()
@@ -610,7 +603,7 @@ async def run(args, root):
             from .text_fixture import maintain_one
 
             refresh = await reconcile_selected(
-                publisher, selected, resume_text_change=maintain_one
+                publisher, args.source, selected, resume_text_change=maintain_one
             )
         # Forget and re-add change the saved descriptions; report the new ones.
         sources = await saved_or_file(publisher, fixture_files(root))
