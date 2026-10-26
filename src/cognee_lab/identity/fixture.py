@@ -209,6 +209,12 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
             raise IntentError("verify_index", "Original chunk vector missing")
 
 
+def captured_semantics():
+    from .entry import Semantics
+
+    return Semantics(write_semantics, verify_semantics)
+
+
 async def expect_current(publisher, source, expected_revision, recovery):
     """A fixture command starts from the source's current row at the
     expected revision. `recovery` tells the user what to reconcile when the
@@ -223,26 +229,13 @@ async def expect_current(publisher, source, expected_revision, recovery):
     return row
 
 
-async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amend=None):
-    """Register doc01 and its description. `amend(payload)` edits the
-    description before it is registered."""
-    import cognee
-    from cognee.modules.engine.models import Entity
-    from cognee.tasks.ingestion.data_item import DataItem
-    from cognee.tasks.storage import add_data_points
-
+def doc01_template(text=None) -> dict:
+    """The captured doc01 description before it is bound to a dataset and
+    chunks, for the fixture text or for `text`."""
     template = json.loads(
         (FIXTURES / "cognee_identity_source_example.json").read_text()
     )
-    original_id = UUID(template["inputs"]["doc01"]["data_id"])
-    generated_id = UUID(template["identity_data_id"])
-    text = (
-        source_text
-        if source_text is not None
-        else (FIXTURES / "source.txt").read_text()
-    )
-    (root / "source.txt").write_text(text)
-    if source_text is not None:
+    if text is not None:
         from .validation import text_digest
 
         template["inputs"]["doc01"]["text_sha256"] = text_digest(text)
@@ -258,6 +251,124 @@ async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amen
                 text="it",
             ),
         ]
+    return template
+
+
+def borrowed_entity(template):
+    """The reusable Entity doc01 resolves to, which the seed document
+    already holds."""
+    from cognee.modules.engine.models import Entity
+
+    a = UUID(template["mention_resolutions"]["r01"]["target_entity_id"])
+    recipe = template["entity_constructions"][str(a)]
+    return Entity(id=a, name=recipe["name"], description=recipe["description"])
+
+
+def describe_doc01(template, dataset_id, text, chunks, *, multi=False, amend=None):
+    """Bind the captured description to the dataset and the native chunks.
+    `amend(payload)` edits it before validation."""
+    from .captured_chunks import bind_chunks
+
+    template["dataset_id"] = str(dataset_id)
+    for item in template["inputs"].values():
+        if "dataset_id" in item:
+            item["dataset_id"] = str(dataset_id)
+    a = template["mention_resolutions"]["r01"]["target_entity_id"]
+    # Deliberately different creation values must not overwrite a borrowed node.
+    template["entity_constructions"][a][
+        "description"
+    ] = "Creation seed only; never overwrite an existing Entity."
+    if multi:
+        from .multisource import add_lifecycle_records
+
+        add_lifecycle_records(template, "doc01", text)
+    if amend is not None:
+        amend(template)
+    bind_chunks(template, text, chunks)
+    return IdentitySource.model_validate_json(json.dumps(template))
+
+
+async def seed_corpus(root, template):
+    """Register the seed document, stamped, with the Entity doc01 borrows,
+    and return the publisher of the root's stores."""
+    import cognee
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.storage import add_data_points
+
+    from .registered import stamp
+
+    (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
+    await cognee.add(
+        DataItem(data=str(root / "seed.txt"), data_id=SEED_DATA_ID),
+        dataset_name=DATASET_NAME,
+        skip_connection_test=True,
+    )
+    seed = await context_for(SEED_DATA_ID)
+    await stamp(SEED_DATA_ID, seed.dataset.id)
+    entity = borrowed_entity(template)
+    await add_data_points([entity], ctx=seed)
+    publisher = await Publisher.configured()
+    await publisher.graph.update_node(
+        str(entity.id), {"fixture_sentinel": "preserve me"}
+    )
+    return publisher
+
+
+def write_info(root, source):
+    info = dict(
+        dataset_id=str(source.dataset_id),
+        original_data_id=str(source.inputs[source.original_input_ref].data_id),
+        identity_data_id=str(source.identity_data_id),
+        expected_fact_target=str(OSCILLATIONS_ID),
+    )
+    (root / "fixture-info.json").write_text(json.dumps(info, indent=2))
+
+
+async def create(root, args):
+    """The doc01 root through the lab's remember: the seed corpus first,
+    then doc01 registered, described from its chunks and published in
+    Cognee's cognify pipeline. The CLI closes the publisher's stores."""
+    from . import entry
+
+    template = doc01_template()
+    original = entry.Original(
+        root / "source.txt", UUID(template["inputs"]["doc01"]["data_id"])
+    )
+    original.path.write_text((FIXTURES / "source.txt").read_text())
+    publisher = await seed_corpus(root, template)
+    args._fixture_publisher = publisher
+    source = await entry.remember(
+        publisher,
+        DATASET_NAME,
+        original,
+        describe=lambda draft: describe_doc01(
+            template, draft.dataset_id, draft.text, draft.chunks
+        ),
+        identity_path=root / "identity.json",
+        semantics=captured_semantics(),
+        fault_stage=args.fault_stage,
+        origin="test",
+    )
+    write_info(root, source)
+    return source
+
+
+async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amend=None):
+    """Register doc01 and its description by hand, for the fixtures that
+    have not moved to the lab's entry points yet. `amend(payload)` edits
+    the description before it is registered."""
+    import cognee
+    from cognee.tasks.ingestion.data_item import DataItem
+    from cognee.tasks.storage import add_data_points
+
+    template = doc01_template(source_text)
+    original_id = UUID(template["inputs"]["doc01"]["data_id"])
+    text = (
+        source_text
+        if source_text is not None
+        else (FIXTURES / "source.txt").read_text()
+    )
+    (root / "source.txt").write_text(text)
     (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
     await cognee.add(
         [
@@ -268,46 +379,24 @@ async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amen
         skip_connection_test=True,
     )
     original_ctx = await context_for(original_id)
-    dataset = original_ctx.dataset.id
-    template["dataset_id"] = str(dataset)
-    for item in template["inputs"].values():
-        if "dataset_id" in item:
-            item["dataset_id"] = str(dataset)
-    a = UUID(template["mention_resolutions"]["r01"]["target_entity_id"])
-    recipe = template["entity_constructions"][str(a)]
-    await add_data_points(
-        [Entity(id=a, name=recipe["name"], description=recipe["description"])],
-        ctx=await context_for(SEED_DATA_ID),
-    )
+    entity = borrowed_entity(template)
+    await add_data_points([entity], ctx=await context_for(SEED_DATA_ID))
     publisher = await Publisher.configured()
-    await publisher.graph.update_node(str(a), {"fixture_sentinel": "preserve me"})
-    # Deliberately different creation values must not overwrite a borrowed node.
-    recipe["description"] = "Creation seed only; never overwrite an existing Entity."
+    await publisher.graph.update_node(
+        str(entity.id), {"fixture_sentinel": "preserve me"}
+    )
     chunks = await load_chunks(None, original_ctx, budget=chunk_budget)
-    if multi:
-        from .multisource import add_lifecycle_records
-
-        add_lifecycle_records(template, "doc01", text)
-    if amend is not None:
-        amend(template)
-    from .captured_chunks import bind_chunks
-
-    bind_chunks(template, text, chunks)
+    source = describe_doc01(
+        template, original_ctx.dataset.id, text, chunks, multi=multi, amend=amend
+    )
     await add_data_points(chunks, ctx=original_ctx)
-    source = IdentitySource.model_validate_json(json.dumps(template))
     (root / "identity.json").write_text(source.model_dump_json(indent=2) + "\n")
     await cognee.add(
-        DataItem(data=str(root / "identity.json"), data_id=generated_id),
+        DataItem(data=str(root / "identity.json"), data_id=source.identity_data_id),
         dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
-    info = dict(
-        dataset_id=str(dataset),
-        original_data_id=str(original_id),
-        identity_data_id=str(generated_id),
-        expected_fact_target=str(OSCILLATIONS_ID),
-    )
-    (root / "fixture-info.json").write_text(json.dumps(info, indent=2))
+    write_info(root, source)
     return source, chunks, original_ctx, publisher
 
 
@@ -319,15 +408,15 @@ async def run(args, root):
             "unsupported_version", "First fixture requires inspected Cognee 1.6.2"
         )
     if args.command == "fixture":
-        source, chunks, original_ctx, publisher = await prepare(root)
+        source = await create(root, args)
+        publisher = args._fixture_publisher
     else:
         source = IdentitySource.model_validate_json(
             (root / "identity.json").read_text()
         )
         publisher = await Publisher.configured()
-        original_ctx, chunks = None, None
+        args._fixture_publisher = publisher
     dataset_id = source.dataset_id
-    args._fixture_publisher = publisher
     if args.command == "status":
         from .multisource import root_labels
         from .native_copy import forget_hint, natively_deleted
@@ -354,23 +443,77 @@ async def run(args, root):
     if args.command == "retrieve":
         return await retrieve(publisher, dataset_id, args.query)
     if args.command == "reconcile":
-        await publisher.refuse_natively_deleted(source)
-    if chunks is None:
-        original_ctx = await context_for(
-            source.inputs[source.original_input_ref].data_id
+        await reconcile(root, args, publisher, source)
+    answer = await retrieve(publisher, dataset_id, args.query)
+    if not any(
+        f["relationship"] == "limits"
+        and f["target_id"] == str(OSCILLATIONS_ID)
+        and f.get("identity", {}).get("state") == "accepted"
+        for f in answer["facts"]
+    ):
+        raise IntentError(
+            "fixture_retrieval", "Expected mention-anchored fact was not retrieved"
         )
-        chunks = await load_chunks(source, original_ctx)
+    result = dict(
+        cognee_version=cognee.__version__,
+        fixture_root=str(root),
+        profile="native configured stores; no LLM",
+        embedding=read_embedding(root),
+        result=answer,
+        recovery_events=await publisher.records.events(dataset_id),
+        cognify_stamps=await cognify_stamps(source),
+    )
+    (root / "result.json").write_text(json.dumps(result, indent=2))
+    return result
 
+
+async def cognify_stamps(source):
+    """Whether each Data item of the root is stamped as cognified, so a
+    plain `cognee.cognify` skips it."""
+    from .registered import stamped
+
+    ids = dict(
+        original=source.inputs[source.original_input_ref].data_id,
+        identity=source.identity_data_id,
+        seed=SEED_DATA_ID,
+    )
+    return {
+        label: await stamped(data_id, source.dataset_id)
+        for label, data_id in ids.items()
+    }
+
+
+async def reconcile(root, args, publisher, source):
+    """Finish or verify doc01's saved revision. A failed first publication
+    goes through the lab's cognify again, which chunks the original again in
+    case Cognee removed its chunks; any other row is reconciled over the
+    chunks Cognee holds."""
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 
-    ctx = await context_for(source.identity_data_id)
+    from . import entry
 
-    creating = args.command == "fixture"
+    await publisher.refuse_natively_deleted(source)
+    row = await publisher.records.row(source)
+    if (
+        row is not None
+        and row.failed_attempt == "publish"
+        and not row.verified_revision
+    ):
+        await entry.cognify(
+            publisher,
+            [source],
+            semantics=captured_semantics(),
+            fault_stage=args.fault_stage,
+        )
+        return
+    original_ctx = await context_for(source.inputs[source.original_input_ref].data_id)
+    chunks = await load_chunks(source, original_ctx)
+    ctx = await context_for(source.identity_data_id)
 
     async def publish_fixture(items, ctx=None):
         for item in items:
-            await (publisher.publish if creating else publisher.reconcile)(
+            await publisher.reconcile(
                 item,
                 texts={"doc01": (root / "source.txt").read_text()},
                 chunks={str(c.id): c for c in chunks},
@@ -390,23 +533,3 @@ async def run(args, root):
         [Task(publish_fixture, needs_llm=False)], [source], ctx.user, ctx
     ):
         pass
-    answer = await retrieve(publisher, dataset_id, args.query)
-    if not any(
-        f["relationship"] == "limits"
-        and f["target_id"] == str(OSCILLATIONS_ID)
-        and f.get("identity", {}).get("state") == "accepted"
-        for f in answer["facts"]
-    ):
-        raise IntentError(
-            "fixture_retrieval", "Expected mention-anchored fact was not retrieved"
-        )
-    result = dict(
-        cognee_version=cognee.__version__,
-        fixture_root=str(root),
-        profile="native configured stores; no LLM",
-        embedding=read_embedding(root),
-        result=answer,
-        recovery_events=await publisher.records.events(dataset_id),
-    )
-    (root / "result.json").write_text(json.dumps(result, indent=2))
-    return result
