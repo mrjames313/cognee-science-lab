@@ -108,9 +108,8 @@ def removed_entities(source, plan, rows):
 
 class ReaddPlan(NamedTuple):
     """What a re-add of a forgotten source replaces under derived UUIDs
-    (`removed`), and which of those Entities, deleted outside the lab, a
-    saved source still cites or builds (`cited`, from
-    `outside_deletion.live_citers`)."""
+    (`removed`), and which of those Entities a saved source still cites or
+    builds (`cited`, from `outside_deletion.live_citers`)."""
 
     removed: frozenset[UUID]
     cited: dict[UUID, list[dict]]
@@ -127,13 +126,13 @@ class ReaddPlan(NamedTuple):
 async def readd_plan(graph, tombstone, plan, rows) -> ReaddPlan:
     """The Entities a re-add replaces: those its forget removed, and every
     Entity its plan recorded or a forgotten life built that the graph no
-    longer holds. An absent reusable Entity of a forgotten life counts as
-    deleted outside the lab unless a lab record shows a lab operation
-    removed it (`outside_deletion.lab_removed_by_operations`). No record
-    survives of what a withdrawal removed, since the forget's plan replaces
-    the withdrawal's, so that counts as deleted outside too.
-    `describe_readd` and `Publisher.admit_readd` both read this plan."""
-    from .outside_deletion import lab_removed_by_operations, live_citers
+    longer holds. A removed Entity UUID is never reused, whoever removed
+    it: the user's decision of 2026-10-26. An absent reusable Entity that a
+    saved source still cites or builds blocks the re-add, whether a lab
+    operation or a writer outside the lab removed it, since a retry of that
+    source would write the old UUID beside the derived one. `describe_readd`
+    and `Publisher.admit_readd` both read this plan."""
+    from .outside_deletion import live_citers
 
     async def absent(ids):
         return {e for e in ids if await graph.get_node(str(e)) is None}
@@ -143,12 +142,10 @@ async def readd_plan(graph, tombstone, plan, rows) -> ReaddPlan:
         UUID(key) for key, node in plan["entities"].items() if node["type"] == "Entity"
     }
     gone = await absent(recorded | set(tombstone.earlier_entity_ids))
-    outside = await absent(
-        tombstone.all_reusable_ids - removed - lab_removed_by_operations(rows)
-    )
+    reusable = await absent(tombstone.all_reusable_ids - removed)
     return ReaddPlan(
-        frozenset(removed | gone | outside),
-        {e: c for e in outside if (c := live_citers(rows, e))},
+        frozenset(removed | gone | reusable),
+        {e: c for e in reusable if (c := live_citers(rows, e))},
     )
 
 

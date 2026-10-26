@@ -95,13 +95,6 @@ def served_recipes(rows, own=None, verified=None) -> set[UUID]:
     return built
 
 
-def lab_removed_by_operations(rows) -> set[UUID]:
-    """The Entities a lab record proves a lab operation removed
-    (`recorded_removals`), less what a served source builds. A re-add
-    derives a new UUID for any other absent Entity of the forgotten source."""
-    return recorded_removals(rows) - served_recipes(rows)
-
-
 def lab_removed(rows, own=None, verified=None) -> set[UUID]:
     """The Entities a lab operation removed, or may have, as a publication
     of `own` sees them: those a record shows (`recorded_removals`); every reusable Entity of a forgotten life
@@ -241,12 +234,11 @@ def live_citers(rows, entity_id) -> list[dict]:
 
 
 def check_readd(source, cited: dict[UUID, list[dict]]):
-    """A re-add whose files name an Entity deleted outside the lab that a
-    saved source still cites or builds (`cited`, from `live_citers`) is
-    refused (`entity_recreation`), naming each such source: the user's
-    decision of 2026-10-25 for Q2. Once each is forgotten, or replaced
-    without the Entity, the re-add replaces it under a derived UUID as it
-    does an Entity a lab operation removed."""
+    """A re-add whose files name a removed Entity that a saved source still
+    cites or builds (`cited`, from `live_citers`) is refused
+    (`entity_recreation`), naming each such source: the user's decisions of
+    2026-10-25 for Q2 and of 2026-10-26. Once each is forgotten, or replaced
+    without the Entity, the re-add replaces it under a derived UUID."""
     named = sorted(set(cited) & entity_ids_named(source), key=str)
     if not named:
         return
@@ -257,7 +249,7 @@ def check_readd(source, cited: dict[UUID, list[dict]]):
     )
     raise IntentError(
         "entity_recreation",
-        "A re-add does not recreate an Entity deleted outside the lab while a "
+        "A re-add does not recreate a removed Entity while a "
         f"saved source still cites or builds it: {', '.join(map(str, named))} "
         f"by {listed}. Forget those sources, or replace their decisions "
         "without the Entity, then re-add",

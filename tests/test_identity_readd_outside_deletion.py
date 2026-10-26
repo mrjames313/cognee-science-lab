@@ -17,10 +17,12 @@ from test_identity_forget import TEXT, OccupiedGraph, chunks_of
 from test_identity_outside_deletion import (
     HELIOS,
     Graph,
+    admit,
     forgotten_row,
     payload_with,
     readd_removed,
     reader_only,
+    renamed,
     row_of,
     source_of,
     unresolved_r01,
@@ -240,3 +242,60 @@ async def test_a_failed_co_owner_blocks_the_readd_of_an_unserved_source(
     assert HELIOS in await readd_removed(
         Graph(HELIOS), gone.tombstone, plan, rows, caller
     )
+
+
+async def test_an_entity_a_co_owner_forget_removed_while_withdrawn_is_derived_anew(
+    source_payload,
+):
+    """The review's steps: A and B build Helios; A is withdrawn; B's forget
+    removes Helios; A's forget finds it gone. The re-add of A never writes
+    the old UUID (the user's decision of 2026-10-26)."""
+    a = without_input(source_payload)
+    b = co_owner(source_payload)
+    rows = [
+        forgotten_row(a, served=False),
+        forgotten_row(b, served=True, removed=(HELIOS,)),
+    ]
+    source = await readd_writes(rows, rows[0].tombstone, a)
+    assert str(HELIOS) not in source.model_dump_json()
+
+
+async def test_an_entity_a_co_owner_replacement_retired_while_withdrawn_is_derived_anew(
+    source_payload,
+):
+    """A and B build Helios; A is withdrawn; B's replacement drops Helios
+    and retires it; A is forgotten and re-added."""
+    a = without_input(source_payload)
+    b = co_owner(source_payload)
+    replaced = row_of(
+        dropped_helios(json.loads(b.model_dump_json())),
+        plan=dict(operation="identity_replace", retired_entities={str(HELIOS): {}}),
+    )
+    rows = [forgotten_row(a, served=False), replaced]
+    source = await readd_writes(rows, rows[0].tombstone, a)
+    assert str(HELIOS) not in source.model_dump_json()
+
+
+async def test_a_lab_removed_entity_a_failed_co_owner_builds_blocks_the_readd(
+    source_payload,
+):
+    """A, B and C build Helios; A is withdrawn and C's first attempt failed;
+    B's forget removes Helios. C's retry would write Helios under its old
+    UUID while the re-add of A derives a new one, so the re-add waits for C
+    as it does for an Entity deleted outside the lab."""
+    a = without_input(source_payload)
+    b = co_owner(renamed(source_payload))
+    c = without_input(json.loads(co_owner(renamed(source_payload)).model_dump_json()))
+    rows = [
+        forgotten_row(a, served=False),
+        forgotten_row(b, served=True, removed=(HELIOS,)),
+        row_of(c, state="failed", verified_revision=0),
+    ]
+    assert HELIOS in (await admit(rows, c)).entities
+    with pytest.raises(IntentError) as refused:
+        await readd_writes(rows, rows[0].tombstone, a)
+    assert refused.value.code == "entity_recreation"
+    assert [x["state"] for x in refused.value.details["citers"]] == ["failed"]
+    rows[2] = forgotten_row(c, served=False)
+    source = await readd_writes(rows, rows[0].tombstone, a)
+    assert str(HELIOS) not in source.model_dump_json()

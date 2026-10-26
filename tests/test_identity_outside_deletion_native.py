@@ -110,7 +110,7 @@ def test_native_a_readd_waits_for_the_live_citer_then_derives_a_new_uuid(tmp_pat
     refused = output_of(command(root, *readd, expect=1))
     doc01 = fixture["sources"]["doc01"]["identity_data_id"]
     assert refused["message"].startswith(
-        "A re-add does not recreate an Entity deleted outside the lab while a "
+        "A re-add does not recreate a removed Entity while a "
         f"saved source still cites or builds it: {HELIOS} by {doc01} in dataset "
     )
     assert [c["identity_data_id"] for c in refused["details"]["citers"]] == [doc01]

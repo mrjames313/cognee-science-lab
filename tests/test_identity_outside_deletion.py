@@ -280,7 +280,8 @@ async def test_a_readd_naming_an_entity_deleted_outside_is_refused_while_cited(
     source_payload,
 ):
     """Helios was deleted outside the lab while its source was served, then
-    the source was forgotten. Another served source still cites Helios."""
+    the source was forgotten. Another served source still cites Helios. A
+    record that a lab operation removed it does not lift the refusal."""
     forgotten = source_of(source_payload)
     gone = forgotten_row(forgotten, served=True)
     tombstone = gone.tombstone
@@ -294,9 +295,9 @@ async def test_a_readd_naming_an_entity_deleted_outside_is_refused_while_cited(
         other_reader(source_payload), forgotten_at="now", removed_entity_ids=[HELIOS]
     )
     other = replace(gone, source=str(uuid4()), tombstone=removed)
-    assert await readd(Graph(HELIOS), tombstone, forgotten, [gone, other, reader]) == (
-        set()
-    )
+    with pytest.raises(IntentError):
+        await readd(Graph(HELIOS), tombstone, forgotten, [gone, other, reader])
+    assert await readd(Graph(HELIOS), tombstone, forgotten, [gone, other]) == {HELIOS}
 
 
 async def test_an_entity_a_served_source_builds_is_deleted_outside_after_a_co_owner_left(

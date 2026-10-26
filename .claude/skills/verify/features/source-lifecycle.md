@@ -648,7 +648,7 @@ D01=$(val fixture '.sources.doc01.identity_data_id')
 $V drive "$RUN" main f3 -- forget --source doc03 --expected-revision 1
 $V check "$RUN" f3 '[.sources.doc03.state, .sources.doc01.state] == ["forgotten", "current"] and .forget.dependents_revised == []' 'doc03 is forgotten with no dependent'
 $V drive "$RUN" main refused -- readd --source doc03 --expected-revision 1
-$V check "$RUN" refused '.error == "IntentError" and (.message | startswith("A re-add does not recreate an Entity deleted outside the lab while a saved source still cites or builds it: '"$H"' by '"$D01"' in dataset ")) and (.message | endswith("(current). Forget those sources, or replace their decisions without the Entity, then re-add"))' 'the re-add is refused naming doc01, its dataset and its state'
+$V check "$RUN" refused '.error == "IntentError" and (.message | startswith("A re-add does not recreate a removed Entity while a saved source still cites or builds it: '"$H"' by '"$D01"' in dataset ")) and (.message | endswith("(current). Forget those sources, or replace their decisions without the Entity, then re-add"))' 'the re-add is refused naming doc01, its dataset and its state'
 $V check "$RUN" refused '[.details.citers[] | [.entity_id, .identity_data_id, .state]] == [["'"$H"'", "'"$D01"'", "current"]] and (.details.citers[0].dataset_id | length) > 0' 'the details list doc01 as the live citer'
 $V drive "$RUN" main still -- status
 $V check "$RUN" still '[.publications[] | [.revision, .state]] == [[1, "current"], [1, "current"], [1, "forgotten"]] and .recovery_events == []' 'the refusal wrote nothing'
