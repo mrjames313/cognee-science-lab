@@ -168,8 +168,8 @@ async def record_removals(graph, records, source, plan):
     removal record (`RecordStore.record_removed`). Each operation calls it
     in its verification stage, after its delete: a crash before it leaves
     the attempt failed with its plan, which only its own retry resumes and
-    records. Withdraw and forget also call it on a failed publication's
-    saved plan before their begin replaces that plan."""
+    records. Before a begin that replaces another attempt's failed plan,
+    `record_before_begin` calls it on that plan."""
     ids = source_ids(source)
     candidates = sorted(removal_candidates(plan))
     present = await graph.get_node_delete_data(candidates) if candidates else {}
@@ -399,3 +399,12 @@ async def verify_survivors(graph, vector, source, plan, released, retired, claim
                     raise IntentError(
                         "verify_survivor", "Independent contribution was lost"
                     )
+
+
+async def record_before_begin(graph, records, source, row, method):
+    """What a failed attempt removed, recorded before `method` begins over
+    its row with a plan of its own: begin replaces the failed plan, which
+    only that attempt's own retry would have recorded. Withdraw and forget
+    call it on a failed publication, and forget on a failed replacement."""
+    if row.state == "failed" and row.resumed_by != method:
+        await record_removals(graph, records, source, row.plan)

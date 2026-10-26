@@ -795,7 +795,7 @@ $V check "$RUN" fdone '([.publications[] | .state] | unique) == ["forgotten"] an
 
 - Forget needs `--expected-revision`. Withdraw does not.
 - A forgotten source leaves its row in `status`: its last revision, a tombstone in place of its description, and a plan that keeps identifiers only. `retrieve` neither returns it nor lists it as unavailable.
-- Any source can be forgotten: current, withdrawn, or one whose first publication failed. A failed replacement or withdrawal is finished by its own method first. A dependent's failed replacement or publication is not blocked: the forget applies the removal to its saved revision.
+- Any source can be forgotten: current, withdrawn, one whose publication failed, or one whose replacement failed (since 2026-10-26). A failed withdrawal is finished by withdraw first. A dependent's failed replacement or publication is not blocked: the forget applies the removal to its saved revision.
 - A forget's dry run lists `levels`; each dependent has its `level`, the records its removal removes (`removed_records`) and the removed records of other dependents it cites (`cited_records`). Removal revisions are written in level order, and a removal waits (`waits_for`) behind a blocked one whose records it cites.
 - A forget that removes another source's decisions needs `--confirm <token>` from its dry run. A dry run writes nothing and returns before any result file is written. The token changes when the set of affected decisions changes, including a dependent that becomes blocked, changes state or moves to another revision.
 - `drive` exits 1 for an injected failure, a refused forget, a refused `readd` and a forget whose dependent removal stopped. That is the expected result. Check `.error`, `.details` or `.dependents_failed`.

@@ -465,7 +465,7 @@ BEGIN_MATRIX = {
         "reconcile": RETRY_REPLACEMENT,
         "replace": None,
         "withdraw": RETRY_REPLACEMENT,
-        "forget": RETRY_REPLACEMENT,
+        "forget": None,
     },
     "failed withdraw": {
         "publish": LINEAGE,
@@ -556,11 +556,14 @@ def test_step_one_entries_hold_the_next_revision():
     assert set(TRANSITIONS[None, None].admits.values()) == {1}
 
 
-def test_owned_entries_admit_only_their_owner():
+def test_owned_entries_admit_only_their_owner_and_a_replacement_forget():
+    """Only its owner resumes a failed row's plan; forget may also erase a
+    failed replacement, with a plan of its own."""
     for (state, operation), cell in TRANSITIONS.items():
         if cell.owner:
             assert state == "failed" and operation
-            assert dict(cell.admits) == {cell.owner: 0}
+            erasers = {"forget": 0} if operation == "identity_replace" else {}
+            assert dict(cell.admits) == {cell.owner: 0, **erasers}
 
 
 def test_unknown_row_state_is_refused_clearly(source_payload):

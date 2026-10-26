@@ -251,7 +251,7 @@ PRESERVE_REPLACEMENT = Refusal(
 )
 FORGET_STATE = Refusal(
     "forget_state",
-    "Forget a current, withdrawn or failed-publication source, or retry its failed forget",
+    "Forget a current, withdrawn, failed-publication or failed-replacement source, or retry its failed forget",
 )
 DESCRIPTION_FORMAT = Refusal(
     "description_format",
@@ -324,7 +324,12 @@ TRANSITIONS = {
     ("failed", None): lineage_row({"reconcile": 0, "withdraw": 0, "forget": 0}),
     ("failed", "identity_withdraw"): owned("withdraw", FAILED_WITHDRAWAL),
     ("failed", "identity_forget"): owned("forget", FAILED_FORGET),
-    ("failed", "identity_replace"): owned("replace", FAILED_REPLACEMENT),
+    # Forget also erases a failed replacement, which a retry may not be able
+    # to finish: one whose description builds an Entity the lab removed
+    # since (admission.check_no_removed_recipes) is forgotten and re-added.
+    ("failed", "identity_replace"): lineage_row(
+        {"replace": 0, "forget": 0}, FAILED_REPLACEMENT, owner="replace"
+    ),
     ("withdrawn", None): Transition(
         {"withdraw": 0, "forget": 0}, otherwise=WITHDRAWN_SOURCE
     ),

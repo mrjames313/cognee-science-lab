@@ -27,6 +27,7 @@ from .retirement import (
     has_contribution,
     owned_by,
     ownership_snapshot,
+    record_before_begin,
     record_removals,
     released,
     retired_sources,
@@ -319,11 +320,12 @@ async def clear_withholdings(publisher, source):
 def resumes(row):
     """Whether forget resumes this row's failed forget. Refuses, earlier than
     begin(), a row forget neither begins nor resumes: a pending one, or a
-    failed replacement or withdrawal, which only its own method resumes.
-    begin() refuses the same rows under the reservation."""
+    failed withdrawal, which only withdraw resumes. A failed replacement
+    is erased with a new plan from the graph. begin() refuses the same rows
+    under the reservation."""
     retry = row.resumed_by == "forget"
     fresh = row.state in ("current", "withdrawn") or (
-        row.state == "failed" and row.resumed_by is None
+        row.state == "failed" and row.resumed_by in (None, "replace")
     )
     if not (retry or fresh):
         raise IntentError(*FORGET_STATE)
@@ -475,10 +477,7 @@ async def forget(
         impact_token=found.token,
         dependents=[d.identity_data_id for d in found.dependents],
     )
-    if not retry and row.state == "failed":
-        # begin replaces a failed publication's plan: record first what its
-        # erasure retry retired.
-        await record_removals(graph, records, source, row.plan)
+    await record_before_begin(graph, records, source, row, "forget")
     user = None
 
     async def check_impact(_):

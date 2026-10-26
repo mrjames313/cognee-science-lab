@@ -113,8 +113,8 @@ MUTANTS = {
         "P5",
     ),
     "no-replace-recovery-choice": Mutant(
-        'owned("replace", FAILED_REPLACEMENT)',
-        'lineage_row({"replace": 0, "reconcile": 0}, FAILED_REPLACEMENT, owner="replace")',
+        '{"replace": 0, "forget": 0}, FAILED_REPLACEMENT, owner="replace"',
+        '{"replace": 0, "forget": 0, "reconcile": 0}, FAILED_REPLACEMENT, owner="replace"',
         "P5",
     ),
     # The failed withdrawal row falls back to the plain failed row's entry.
@@ -165,13 +165,15 @@ MUTANTS = {
         'lineage_row({"forget": 0, "reconcile": 0, "withdraw": 0}, owner="forget")',
         "P5",
     ),
-    # A failed replacement or withdrawal is resumed only by its own method,
-    # never erased by a forget that would drop its saved intent.
-    "forget-on-failed-replacement": Mutant(
-        'owned("replace", FAILED_REPLACEMENT)',
-        'lineage_row({"replace": 0, "forget": 0}, FAILED_REPLACEMENT, owner="replace")',
-        "P5",
+    # Forget refuses a failed replacement, as before 2026-10-26: one whose
+    # retry rebuilds an Entity the lab removed has no way out.
+    "forget-refuses-failed-replacement": Mutant(
+        '{"replace": 0, "forget": 0}, FAILED_REPLACEMENT, owner="replace"',
+        '{"replace": 0}, FAILED_REPLACEMENT, owner="replace"',
+        "INCONCLUSIVE",
     ),
+    # A failed withdrawal is resumed only by withdraw, never erased by a
+    # forget that would drop its saved intent.
     "forget-on-failed-withdrawal": Mutant(
         'owned("withdraw", FAILED_WITHDRAWAL)',
         'lineage_row({"withdraw": 0, "forget": 0}, FAILED_WITHDRAWAL, owner="withdraw")',

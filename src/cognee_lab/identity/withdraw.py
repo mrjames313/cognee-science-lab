@@ -10,6 +10,7 @@ from .retirement import (
     current_claims,
     owned_by,
     ownership_snapshot,
+    record_before_begin,
     record_removals,
     released,
     retired_sources,
@@ -64,8 +65,7 @@ async def withdraw(
     if row.state != "withdrawn" and row.operation == "identity_withdraw":
         plan = dict(row.plan)
     else:
-        if row.state == "failed":
-            await record_removals(graph, records, source, row.plan)
+        await record_before_begin(graph, records, source, row, "withdraw")
         nodes = await graph.get_node_delete_data(
             await graph.find_nodes_by_source_ref(owner)
         )

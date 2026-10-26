@@ -257,10 +257,11 @@ def begin_rules(op, prior):
             and op.variant != removal(actual, prior.verified_revision)
         ):
             yield f"{op.method} began an erasure removal that lists r01 as last served at another revision than S{op.source + 1}'s verified {prior.verified_revision}"
-    if not (state in method.begins or method.owns(state, saved.operation)):
+    erases = method.erases_row(state, saved.operation)
+    if not (state in method.begins or method.owns(state, saved.operation) or erases):
         yield f"{op.method} began on a {state} {saved.operation} row"
     owners = {m.name for m in METHODS.values() if m.owns(state, saved.operation)}
-    if owners and op.method not in owners:
+    if owners and op.method not in owners and not erases:
         yield f"{state} {saved.operation} row resumed through {op.method}"
     if state == "failed" and method.owns(state, saved.operation):
         for name in method.preserved_on_retry:

@@ -357,7 +357,8 @@ class Harness:
 
 # A pass that never reaches one of these says nothing about it, so the run is
 # INCONCLUSIVE: row states, accepted calls of each step kind, a publish
-# accepted on a forgotten row (the re-add), an erasure retry that superseded a
+# accepted on a forgotten row (the re-add), a forget accepted on a failed
+# publication and on a failed replacement, an erasure retry that superseded a
 # failed replacement's description and one that superseded a failed
 # publication's, and a failed row that completed as current again.
 REACHABLE = (
@@ -370,6 +371,7 @@ REACHABLE = (
     "accepted readd",
     "forget withdrawn",
     "forget failed publish",
+    "forget failed replace",
     "erasure retry replace",
     "erasure retry reconcile",
     "accepted complete",
@@ -396,8 +398,9 @@ def tally(reached, step):
         if prior and prior.state == "withdrawn":
             reached["forget withdrawn"] += 1
         if prior and prior.state == "failed":
-            if prior.plan["operation"] == "identity_publish":
-                reached["forget failed publish"] += 1
+            reached[
+                f"forget failed {Plan.of(step.op.source, prior.plan).operation}"
+            ] += 1
     if isinstance(step.op, Begin) and step.op.plan.erased:
         prior = Plan.of(step.op.source, step.obs_before.rows[step.op.source].plan)
         if step.op.plan.erased != prior.erased:

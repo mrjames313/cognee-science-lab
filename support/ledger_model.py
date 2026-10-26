@@ -563,6 +563,10 @@ class Method:
     # description at the saved revision when its plan adds the saved one to
     # `erased`; otherwise a retry keeps `erased`.
     supersedes: bool = False
+    # Saved plan operations of failed rows another method owns that this one
+    # may still begin on at the saved revision with a plan of its own, which
+    # erases the saved intent: forget() on a failed replacement.
+    erases: frozenset[str] = frozenset()
 
     def __post_init__(self):
         assert self.recovers or not self.requires_plan, (
@@ -576,6 +580,10 @@ class Method:
         return state in self.terminals or (
             state == "failed" and self.owns_recovery and operation == self.recovers
         )
+
+    def erases_row(self, state, operation):
+        """This method may begin on a failed row another method owns."""
+        return state == "failed" and operation in self.erases
 
 
 METHODS = {
@@ -643,7 +651,7 @@ METHODS = {
             requires_plan=False,
             preserved_on_retry=(),
         ),
-        Method(  # forget(): any source, current, withdrawn or failed
+        Method(  # forget(): current, withdrawn, failed publication or replacement
             name="forget",
             intents=forget_intents,
             done_state="forgotten",
@@ -657,6 +665,7 @@ METHODS = {
             terminals=frozenset({"withdrawn"}),
             requires_plan=True,
             preserved_on_retry=(),
+            erases=frozenset({"replace"}),
         ),
     )
 }
