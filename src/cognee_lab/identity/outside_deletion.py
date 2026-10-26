@@ -28,6 +28,7 @@ from uuid import UUID
 from .erasure_rules import entity_ids_named
 from .models import CorpusObjectInput, IdentitySource
 from .records import REGISTRY, naming, record_inputs, record_type_of
+from .removal_record import RemovalOperation
 from .retirement import removal_candidates
 from .validation import MISSING_INPUT, IntentError, reusable_recipes
 
@@ -190,7 +191,7 @@ async def left_absent(graph, rows, source, previous, removed) -> frozenset[UUID]
     return frozenset(named)
 
 
-def exempt_from_citers(removed) -> set[UUID]:
+def exempt_from_citers(removed: dict[UUID, RemovalOperation]) -> set[UUID]:
     """The recorded removals a re-add replaces without waiting for their
     citers (`removed`, the removal record): every one but a withdrawal's.
     A publication refuses to rebuild any recorded one

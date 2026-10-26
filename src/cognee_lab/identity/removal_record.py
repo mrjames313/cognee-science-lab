@@ -42,6 +42,11 @@ class RemovalRecord:
             found = (await session.execute(select(RemovedEntity))).scalars().all()
             return {UUID(r.entity): r.operation for r in found}
 
+    async def removal_report(self) -> dict[str, RemovalOperation]:
+        """The record as the fixtures' status prints it, by UUID."""
+        removed = await self.removed()
+        return {str(e): removed[e] for e in sorted(removed, key=str)}
+
     async def record_removed(
         self, entity_ids, *, dataset, source, operation: RemovalOperation
     ):

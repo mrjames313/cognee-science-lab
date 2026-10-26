@@ -335,11 +335,10 @@ async def run(args, root):
 
         rows = await publisher.records.rows(dataset_id)
         labels = root_labels(root)
-        removed = await publisher.records.removed()
         return dict(
             publications=[row.record() for row in rows],
             recovery_events=await publisher.records.events(dataset_id),
-            removed_entities={str(e): removed[e] for e in sorted(removed, key=str)},
+            removed_entities=await publisher.records.removal_report(),
             **await withholding_status(publisher, rows),
             native_deleted=[
                 (
