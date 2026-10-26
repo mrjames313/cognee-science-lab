@@ -110,6 +110,7 @@ def test_startup_recovery_keeps_a_failed_first_publication(tmp_path):
     root = tmp_path / "entry"
     failed = command(root, "fixture", "--fault-stage", "identity_edges", expect=1)
     assert "recovery_event_id=" in output(failed)["message"]
+    assert (root / "fixture-info.json").exists()
     recovered = in_root(root, "recover")
     # The lab Task stamped the original before it published, so the
     # recovery kept the native chunks.
@@ -123,6 +124,8 @@ def test_startup_recovery_keeps_a_failed_first_publication(tmp_path):
     assert reconciled["cognify_stamps"] == dict(original=True, identity=True, seed=True)
     (event,) = reconciled["recovery_events"]
     assert event["outcome"] == "restored"
+    (row,) = output(command(root, "status"))["publications"]
+    assert row["plan"]["origin"] == "test"
 
 
 @pytest.mark.integration

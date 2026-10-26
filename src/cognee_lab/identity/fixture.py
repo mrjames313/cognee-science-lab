@@ -337,19 +337,23 @@ async def create(root, args):
     original.path.write_text((FIXTURES / "source.txt").read_text())
     publisher = await seed_corpus(root, template)
     args._fixture_publisher = publisher
+
+    def describe(draft):
+        # Written before the publication, so a failed run leaves it too.
+        source = describe_doc01(template, draft.dataset_id, draft.text, draft.chunks)
+        write_info(root, source)
+        return source
+
     source = await entry.remember(
         publisher,
         DATASET_NAME,
         original,
-        describe=lambda draft: describe_doc01(
-            template, draft.dataset_id, draft.text, draft.chunks
-        ),
+        describe=describe,
         identity_path=root / "identity.json",
         semantics=captured_semantics(),
         fault_stage=args.fault_stage,
         origin="test",
     )
-    write_info(root, source)
     return source
 
 
@@ -504,6 +508,7 @@ async def reconcile(root, args, publisher, source):
             [source],
             semantics=captured_semantics(),
             fault_stage=args.fault_stage,
+            origin="test",
         )
         return
     original_ctx = await context_for(source.inputs[source.original_input_ref].data_id)
