@@ -31,6 +31,8 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-single-source` forgets, re-adds and withdraws doc01 on a single-source `fixture` root, which has no two-source manifest; each command exits 0 with its one source's report.
 - `native-deleted` lists, in `status`, a source whose native copy a delete outside the lab took (`native-forget`), with the facets it misses and the `forget` that erases the lab's copy; `reconcile` refuses it and `forget` erases it (native tests in `tests/test_identity_native_deletes_native.py` cover the dataset forget, the prune and a dependent).
 - `readd-outside-deleted` refuses a re-add whose files name an Entity deleted outside the lab while a saved source still cites or builds it, naming each such source with its dataset and state; once each is forgotten or replaced without it, the re-add builds the Entity under a derived UUID and never writes the old one.
+- `forget-dataset` forgets every source of the root's dataset, readers first, each through the lab's `forget`, then deletes item by item the Data no lab source publishes (the seed), which its dry run lists under `other_data`; it always needs the dry run's token, which covers that list, and a rerun has nothing to do.
+- `forget-dataset-crash` fails the dataset forget at an injected stage (`first:<forget stage>`, `last:<forget stage>` or `dataset_cleanup`); the old token is refused (`impact_changed`), and a new dry run and confirmation finish it, a crashed source's forget resuming through forget's own retry.
 - `forget-cascade-retire-refused` refuses a withdrawal or forget of a source that holds a removal while the cascade below it is unfinished (`cascade_unfinished`); once `forget` on the forgotten source finishes the cascade, the withdrawal goes ahead.
 
 ## How to get to it (user POV)
@@ -38,6 +40,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - Run `uv run python -m cognee_lab.identity multi-fixture --root <new dir>`. Add `--dependent` to make doc02 consume doc01's text and private singleton.
 - Run `forget --root <dir> --source doc01 --expected-revision 1 --dry-run` for the report and token, then `forget --root <dir> --source doc01 --expected-revision 1 --confirm <token>`. A forget with no dependent needs no token.
 - Add `--fault-stage forget_impact|forget_contributions|forget_identity|forget_document|forget_verification|forget_identity_committed|forget_document_committed` to inject a failure, then run `reconcile --source doc01`. The two `_committed` stages fail after Cognee committed the Data delete and before it swept the item's evidence rows and stored files.
+- Run `forget-dataset --root <dir> --dry-run` for the dataset report and token, then `forget-dataset --root <dir> --confirm <token>`. Add `--fault-stage first:<stage>` or `last:<stage>` (a forget stage, applied to the first or last source in the order) or `dataset_cleanup` (after every forget, before the other Data is deleted).
 - Add `--fault-stage forget_dependents` (before the first removal revision) or `forget_dependent_revision` (inside it: at `replace_registered` for a replacement, at `nodes` for a failed publication) to interrupt a dependent's removal after the forget completed, then run `reconcile --source doc01`. `forget_cascade_revision` fails only the removals below level 1, after level 1 is written.
 - On a `glossary-fixture --chain` root, `forget --source glossary` cascades to doc03 at level 2; `withdraw --source doc03` also works there.
 - Add `--fault-stage nodes|identity_edges|verification` to `readd` to fail the re-add, then run `reconcile --source doc01`.
@@ -640,6 +643,70 @@ $V check "$RUN" status '([.publications[] | .description // "" | contains("'"$H"
 $V check "$RUN" status '[.publications[] | select(.description != null) | .description | fromjson | select(.revision == 2) | [.entity_constructions | to_entries[] | select(.value.name == "Helios controller") | .key]] | (map(length) == [1, 1]) and (.[0][0] != .[1][0]) and all(.[][]; . != "'"$H"'")' 'each re-add built Helios under its own derived UUID (case 10)'
 $V drive "$RUN" main ask -- retrieve --query "Helios controller"
 $V check "$RUN" ask '(.facts | tojson | contains("'"$H"'")) | not' 'no fact reaches the old Helios UUID'
+```
+
+**F25 forget the dataset of a live chain root.** Proves `forget-dataset`. Guide: `docs/stage6_identity_forget.md`, "Forget a dataset". `forget-dataset` without `--confirm` is refused and names the dry run. The dry run orders doc03, which cites doc01's records, before doc01, which reads the glossary, before the glossary (`order` 0, 1, 2), lists no pending row and no dependent outside the dataset, and lists the seed under `other_data`. The confirmed run forgets the three in that order with no removal revision (each source's readers are forgotten before it) and deletes the seed. Every row is `forgotten` at revision 1 with no incident, and no fact is served. A second dry run has no step and no other Data, and its confirmation does nothing. The glossary is then re-added from its files at revision 2 in the same dataset: the Dataset row and its ID survive (prototype, 2026-10-25).
+
+```bash journey F25
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main noconf -- forget-dataset
+$V check "$RUN" noconf '.error == "IntentError" and (.message | startswith("forget-dataset needs the dry run")) and .details.dry_run' 'forget-dataset without a token is refused with the report'
+$V drive "$RUN" main dry -- forget-dataset --dry-run
+$V check "$RUN" dry '[.sources[] | [.label, .state, .revision, .order]] == [["glossary", "current", 1, 2], ["doc01", "current", 1, 1], ["doc03", "current", 1, 0]]' 'readers come before what they read'
+$V check "$RUN" dry '.pending == [] and .outside_dependents == [] and ([.other_data[].name] == ["seed"]) and (.token | length) == 64 and (.removed_entities | length) > 0' 'the dry run lists the seed as other Data and no dependent outside'
+$V check "$RUN" dry 'all(.sources[]; .native_copy | to_entries | all(.value)) and all(.sources[]; .dependents == [])' 'each native copy is whole and no step revises another source'
+T=$(val dry '.token')
+SEED=$(val dry '.other_data[0].data_id')
+D=$(val dry '.dataset_id')
+$V drive "$RUN" main go -- forget-dataset --confirm "$T"
+$V check "$RUN" go '[.forgotten[] | .label] == ["doc03", "doc01", "glossary"] and all(.forgotten[]; .dependents_revised == [] and .tombstone.kind == "identity_source_tombstone") and .other_data_deleted == ["'"$SEED"'"] and .dependents_failed == null' 'the three are forgotten in order and the seed is deleted'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.publications[] | [.state, .revision]] == [["forgotten", 1], ["forgotten", 1], ["forgotten", 1]] and .recovery_events == [] and .native_deleted == []' 'every row is a tombstone and no incident is open'
+$V drive "$RUN" main ask -- retrieve
+$V check "$RUN" ask '.facts == []' 'nothing is served'
+$V drive "$RUN" main dry2 -- forget-dataset --dry-run
+$V check "$RUN" dry2 'all(.sources[]; .order == null) and .other_data == [] and .removed_entities == []' 'a second dry run has nothing to do'
+T2=$(val dry2 '.token')
+$V drive "$RUN" main go2 -- forget-dataset --confirm "$T2"
+$V check "$RUN" go2 '.forgotten == [] and .other_data_deleted == []' 'its confirmation does nothing'
+$V drive "$RUN" main readd -- readd --source glossary --expected-revision 1
+$V check "$RUN" readd '[.sources.glossary.state, .sources.glossary.saved_revision] == ["current", 2]' 'the glossary is re-added at revision 2'
+$V drive "$RUN" main after -- status
+$V check "$RUN" after '([.publications[] | .dataset] | unique | length) == 1 and .publications[0].dataset == "'"$D"'"' 'the re-add keeps the dataset ID'
+```
+
+**F26 a dataset forget that crashes, then a new dry run.** Proves `forget-dataset-crash`. Guide: `docs/stage6_identity_forget.md`, "Forget a dataset". On root `main`, `--fault-stage dataset_cleanup` fails after the three forgets completed and before the seed is deleted. A rerun with the old token is refused `impact_changed`. A new dry run has no step and lists only the seed, and its confirmation deletes it. On root `first`, `--fault-stage first:forget_identity` fails doc03's forget, the first step: doc03 is `failed` with an open forget incident and the other two are untouched. The old token is refused. A new dry run lists doc03 `failed` at order 0, and its confirmation resumes doc03's forget through forget's own retry and finishes the rest.
+
+```bash journey F26
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+$V drive "$RUN" main dry -- forget-dataset --dry-run
+T=$(val dry '.token')
+$V drive "$RUN" main crash -- forget-dataset --confirm "$T" --fault-stage dataset_cleanup
+$V check "$RUN" crash '.error == "IntentError" and .message == "Injected failure before the dataset cleanup"' 'the cleanup crashes'
+$V drive "$RUN" main old -- forget-dataset --confirm "$T"
+$V check "$RUN" old '.error == "IntentError" and (.message | startswith("The impact changed since the token was issued"))' 'the old token is refused'
+$V drive "$RUN" main dry2 -- forget-dataset --dry-run
+$V check "$RUN" dry2 'all(.sources[]; .state == "forgotten" and .order == null) and ([.other_data[].name] == ["seed"])' 'the new dry run lists only the seed'
+T2=$(val dry2 '.token')
+$V drive "$RUN" main go -- forget-dataset --confirm "$T2"
+$V check "$RUN" go '.forgotten == [] and (.other_data_deleted | length) == 1 and .dependents_failed == null' 'its confirmation deletes the seed'
+
+$V drive "$RUN" first fixture1 -- glossary-fixture --chain
+$V drive "$RUN" first fdry -- forget-dataset --dry-run
+F=$(val fdry '.token')
+$V drive "$RUN" first fcrash -- forget-dataset --confirm "$F" --fault-stage first:forget_identity
+$V check "$RUN" fcrash '.error == "IntentError" and (.message | contains("forget_identity"))' 'the first forget fails at forget_identity'
+$V drive "$RUN" first fstatus -- status
+$V check "$RUN" fstatus '[.publications[] | .state] == ["current", "current", "failed"] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 1' 'doc03 failed with an open incident; the others are untouched'
+$V drive "$RUN" first fold -- forget-dataset --confirm "$F"
+$V check "$RUN" fold '.error == "IntentError" and (.message | startswith("The impact changed since the token was issued"))' 'the old token is refused'
+$V drive "$RUN" first fdry2 -- forget-dataset --dry-run
+$V check "$RUN" fdry2 '[.sources[] | [.label, .state, .order]] == [["glossary", "current", 2], ["doc01", "current", 1], ["doc03", "failed", 0]]' 'the new dry run resumes doc03 first'
+F2=$(val fdry2 '.token')
+$V drive "$RUN" first fgo -- forget-dataset --confirm "$F2"
+$V check "$RUN" fgo '[.forgotten[] | .label] == ["doc03", "doc01", "glossary"] and (.other_data_deleted | length) == 1' 'the confirmation finishes the dataset forget'
+$V drive "$RUN" first fdone -- status
+$V check "$RUN" fdone '([.publications[] | .state] | unique) == ["forgotten"] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'every row is forgotten and the incident is resolved'
 ```
 
 ## Gotchas

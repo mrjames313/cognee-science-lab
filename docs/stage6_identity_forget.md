@@ -28,6 +28,7 @@ On a `multi-fixture` root, on a single-source `fixture` root for `doc01`, and on
 - `forget --source <doc> --expected-revision N --confirm <token>` forgets a source whose forget removes other sources' decisions.
 - `reconcile --source <doc>` finishes a failed forget, the unfinished removals of a completed forget, or a failed re-add.
 - `readd --source <doc> --expected-revision N` publishes a forgotten source again at revision N+1 from the caller's files.
+- `forget-dataset --dry-run`, then `forget-dataset --confirm <token>`, forgets every source of the root's dataset and the Data no lab source publishes ([Forget a dataset](#forget-a-dataset)).
 - `multi-fixture --dependent` creates the two-source fixture with doc02 reading doc01.
 
 The CLI routes `reconcile`, `forget` and `readd` by the fixture kind that the root marker `stage6-fixture.json` records under `fixture` (the creation command). A root made before this checkpoint has no fixture kind, and those three commands refuse it with `Root predates fixture kinds; regenerate it`.
@@ -345,6 +346,17 @@ Before this, `reconcile` failed on whatever it read first: `Fixture Data item mi
 - The command's own report shows such a source as identifiers, revisions and `native_deleted`, instead of failing to read its registered snapshot or text (`Registered identity snapshot is unreadable or invalid`, `Original Data item missing`).
 
 `retrieve` still fails a natively deleted row and opens a `retrieval_validation` incident (step 5 unit 6). The forget resolves that incident.
+
+## Forget a dataset
+
+Step 5 S2 part 2 (2026-10-25, built by the assistant on the user's Mac with loopback embeddings; module `dataset_forget.py`). `forget-dataset` forgets every saved source of the root's dataset, on any fixture kind, and then deletes the Data that no lab source publishes. The user decided on 2026-10-25 (Q3) that it deletes that Data too, that the dry run lists it separately, and that the token covers the list.
+
+- `forget-dataset --dry-run` writes nothing. It returns `dataset_id`; `sources`, each with `label`, `identity_data_id`, `revision`, `state`, `order` (its step, or `null` for a forgotten source with nothing left to do), `native_copy` (the five facets) and the `dependents` its forget revises; `pending`; `other_data` (each Data item of the dataset that is not a lab source's document or identity source, with its name: the seed, anything added with plain `cognee.add`); `removed_entities`, computed as if every source of the dataset retires; `outside_dependents`; `caller_files`, which no forget deletes; `residue`; and `token`, the digest of the whole report.
+- `forget-dataset --confirm <token>` recomputes the report and refuses a token that differs (`impact_changed`), or none (`confirmation_required`), with the report in `details`. It refuses while any row is `pending` (`dataset_pending`): a killed attempt leaves a pending row, which only its own method finishes. Then it runs each source's own `forget` in order and deletes each listed Data item as `forget` deletes a source's own (Cognee's Data delete, then its sweep). It never calls `cognee.forget(dataset=...)`, which would delete whatever Data the dataset holds when it runs, listed or not. After the deletes it refuses `impact_changed` if any row is not `forgotten` or any Data item it did not list remains. It returns `forgotten` (each source with its label and tombstone), `other_data_deleted` and `dependents_failed`.
+- The order puts each source after every source that reads it: its document, a saved record of it, or an Entity it builds that the reader does not build itself, by the descriptions alone. Each forget therefore finds its readers in the dataset already forgotten, and writes no removal revision. On a `glossary-fixture --chain` root the order is doc03, doc01, glossary. In a cycle, which the fixtures do not build, the first forget writes the other source's removal revision, as a single forget does.
+- A crash anywhere changes the report, so a rerun with the old token is refused. A new dry run lists what is left: a source whose forget failed comes back as a step and resumes through forget's own retry, and a forgotten source drops out. `--fault-stage first:<stage>` or `last:<stage>` fails the first or last source's forget at a forget stage; `dataset_cleanup` fails after every forget and before the Data deletes. A forget whose dependents' removal stops ends the run and is reported under `dependents_failed`.
+- The Dataset row stays, so a re-add after a dataset forget keeps its dataset ID (prototype on 2026-10-25: the glossary re-added at revision 2 into the same dataset, journey F25).
+- The ledger sees no new sequence: the command only composes `forget` calls.
 
 ## Scope
 

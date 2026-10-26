@@ -16,6 +16,7 @@ from .environment import (
     read_fixture,
 )
 from .chain_fixture import CITATIONS
+from .dataset_forget import FAULT_STAGES as DATASET_FORGET_STAGES
 from .entity_edit import ENTITY_CASES
 from .forget import FAULT_STAGES as FORGET_STAGES
 from .glossary_fixture import CASES as GLOSSARY_CASES
@@ -47,6 +48,7 @@ COMMAND_FAULT_STAGES = {
     "refresh-dependents": (REFRESH_FAULT,),
     "withdraw": WITHDRAW_STAGES,
     "forget": FORGET_STAGES,
+    "forget-dataset": DATASET_FORGET_STAGES,
 }
 REVISION_COMMANDS = {
     "revise",
@@ -96,6 +98,7 @@ def main():
             *OCCURRENCE_COMMANDS,
             "withdraw",
             "forget",
+            "forget-dataset",
             "readd",
             *GLOSSARY_COMMANDS,
             "native-forget",
@@ -159,6 +162,7 @@ def main():
             *PUBLISH_STAGES,
             *WITHDRAW_STAGES,
             *FORGET_STAGES,
+            *DATASET_FORGET_STAGES,
             *REPLACE_STAGES,
             REFRESH_FAULT,
         ],
@@ -166,14 +170,14 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="forget only: report what the forget would remove, with the token "
-        "to confirm, and write nothing",
+        help="forget and forget-dataset only: report what the forget would "
+        "remove, with the token to confirm, and write nothing",
     )
     parser.add_argument(
         "--confirm",
         metavar="TOKEN",
-        help="forget only: the dry run's token, required when the forget "
-        "removes other sources' decisions",
+        help="forget and forget-dataset only: the dry run's token, required when "
+        "the forget removes other sources' decisions, and always by forget-dataset",
     )
     parser.add_argument(
         "--dependent",
@@ -223,8 +227,11 @@ def main():
         )
     if args.dependent and args.command != "multi-fixture":
         parser.error("--dependent applies to multi-fixture only")
-    if (args.dry_run or args.confirm) and args.command != "forget":
-        parser.error("--dry-run and --confirm apply to forget only")
+    if (args.dry_run or args.confirm) and args.command not in {
+        "forget",
+        "forget-dataset",
+    }:
+        parser.error("--dry-run and --confirm apply to forget and forget-dataset only")
     if args.dry_run and (args.confirm or args.fault_stage):
         parser.error("A dry run takes neither --confirm nor --fault-stage")
     creating = args.command in CREATION_COMMANDS
@@ -241,7 +248,12 @@ def main():
         elif error := _reopen_error(args, root):
             parser.error(error)
         kind = args.command if creating else read_fixture(root)
-        if kind is None and args.command in {"reconcile", "forget", "readd"}:
+        if kind is None and args.command in {
+            "reconcile",
+            "forget",
+            "forget-dataset",
+            "readd",
+        }:
             parser.error("Root predates fixture kinds; regenerate it")
         environment.enter_context(fixture_environment(root))
     except ValueError as exc:
@@ -250,7 +262,9 @@ def main():
             root.rmdir()
         parser.error(str(exc))
     with environment:
-        if args.command in GLOSSARY_COMMANDS or (
+        if args.command == "forget-dataset":
+            from .dataset_forget import run
+        elif args.command in GLOSSARY_COMMANDS or (
             args.command in GLOSSARY_SHARED and kind == "glossary-fixture"
         ):
             from .glossary_fixture import run
