@@ -258,7 +258,7 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     from .erasure_rules import differs_from_forgotten
     from .registered import read_texts
     from .retirement import readd_plan
-    from .text_changes import chunk_text
+    from .native_chunks import chunk_text
 
     files = CALLER_FILES[label]
     text_file, identity_file = root / files.text, root / files.identity

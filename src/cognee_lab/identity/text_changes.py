@@ -4,6 +4,7 @@ from dataclasses import dataclass, fields
 
 from .admission import OccurrenceMap, identity_map, occurrence, parse_occurrence_map
 from .models import ChunkInput
+from .native_chunks import build_chunks, chunk_text
 from .validation import IntentError, map_chunks
 
 
@@ -115,26 +116,6 @@ async def read_original(source, ctx):
     return text
 
 
-async def chunk_text(text, ctx, budget=512):
-    """Run the native chunker in memory before any destructive write."""
-    from cognee.modules.chunking.TextChunker import TextChunker
-    from cognee.modules.data.processing.document_types import TextDocument
-
-    async def get_text():
-        yield text
-
-    doc = TextDocument(
-        id=ctx.data_item.id,
-        name=ctx.data_item.name,
-        raw_data_location=ctx.data_item.raw_data_location,
-        external_metadata=None,
-    )
-    return [
-        c
-        async for c in TextChunker(doc, get_text=get_text, max_chunk_size=budget).read()
-    ]
-
-
 @dataclass(frozen=True)
 class TextChange:
     previous_text: str
@@ -238,7 +219,6 @@ class TextChange:
 
     async def apply(self, publisher, old, source, chunks, ctx, boundary):
         from cognee import forget
-        from .entry import build_chunks
         from .registered import stamp, write_text
 
         # Repeat preconditions under the durable project writer reservation.

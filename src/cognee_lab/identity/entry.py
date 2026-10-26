@@ -41,10 +41,6 @@ if TYPE_CHECKING:
     from .admission import OccurrenceMap
     from .publish import Publisher
 
-# Cognee batches the chunks it hands each Task. One batch larger than any
-# document gives the lab Task the document's whole chunk set at once.
-WHOLE_DOCUMENT = 1_000_000
-
 
 @dataclass(frozen=True)
 class Original:
@@ -103,7 +99,7 @@ async def add(
     from cognee.tasks.ingestion.data_item import DataItem
 
     from .registered import context_for, stamp
-    from .text_changes import chunk_text
+    from .native_chunks import chunk_text
 
     await cognee.add(
         DataItem(data=str(original.path), data_id=original.data_id),
@@ -122,41 +118,6 @@ async def add(
     )
     await stamp(source.identity_data_id, source.dataset_id)
     return source
-
-
-def standard_tasks(budget: int) -> list:
-    """Cognee's standard Tasks that build a document and its chunks:
-    `classify_documents`, `extract_chunks_from_documents` and
-    `add_data_points`, the last over the whole chunk set at once."""
-    from cognee.modules.pipelines.tasks.task import Task
-    from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
-    from cognee.tasks.storage import add_data_points
-
-    return [
-        Task(classify_documents, needs_llm=False),
-        Task(extract_chunks_from_documents, max_chunk_size=budget, needs_llm=False),
-        Task(
-            add_data_points,
-            task_config={"batch_size": WHOLE_DOCUMENT},
-            needs_llm=False,
-        ),
-    ]
-
-
-async def build_chunks(original: PipelineContext, budget: int) -> list[DocumentChunk]:
-    """Run the standard Tasks over the registered original, outside any
-    pipeline run, with `original`, the lab's context. It carries no run ID,
-    so a rollback or a startup recovery of the run that called this never
-    finds the chunks, and a resumed edit need not chunk again."""
-    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
-
-    return [
-        chunk
-        async for batch in run_tasks_base(
-            standard_tasks(budget), [original.data_item], original.user, original
-        )
-        for chunk in batch
-    ]
 
 
 def described_chunks(source) -> set[str]:
@@ -214,8 +175,8 @@ async def cognify(
     from cognee.modules.pipelines.operations.pipeline import run_pipeline
     from cognee.modules.pipelines.tasks.task import Task
 
+    from .native_chunks import WHOLE_DOCUMENT, chunk_text, standard_tasks
     from .registered import context_for, read_texts, stamp
-    from .text_changes import chunk_text
 
     if await publisher.records.row(source) is not None:
         # Chunking again would hide a copy deleted outside the lab.
@@ -387,7 +348,8 @@ async def update(
     description. Returns the published revision."""
     from .captured_chunks import recorded_budget
     from .registered import context_for
-    from .text_changes import TextChange, chunk_text, original_context, read_original
+    from .native_chunks import chunk_text
+    from .text_changes import TextChange, original_context, read_original
 
     if describe_edit is None:
         raise IntentError(
@@ -466,7 +428,8 @@ async def replace_text(
     from cognee.modules.pipelines.tasks.task import Task
 
     from .registered import context_for, read_texts
-    from .text_changes import chunk_text, original_context
+    from .native_chunks import chunk_text
+    from .text_changes import original_context
 
     generated = await context_for(intended.identity_data_id)
     original = await original_context(intended, generated)
