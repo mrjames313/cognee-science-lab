@@ -146,6 +146,10 @@ def test_a_memory_only_forget_of_a_failed_first_publication_is_a_delete(tmp_path
     assert gone["missing"] == ["document_node", "chunks"]
     refused = output(command(root, "reconcile", expect=1))
     assert "gone or changed outside the lab" in refused["message"]
+    hint = refused["details"]["next"].split()
+    erased = output(command(root, *hint))
+    assert [p["state"] for p in erased["publications"]] == ["forgotten"]
+    assert output(command(root, "status"))["native_deleted"] == []
 
 
 @pytest.mark.integration
