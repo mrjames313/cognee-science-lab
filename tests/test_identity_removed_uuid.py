@@ -151,3 +151,17 @@ async def test_a_withdrawal_removal_waits_for_its_citers(source_payload):
         "failed",
     ]
     await refusal(rows, c, withdrew)
+
+
+async def test_a_readd_derives_a_new_uuid_for_an_entity_a_replacement_retired(
+    source_payload,
+):
+    """A replacement retired Helios and the removal record lists it; the
+    source is then forgotten at the revision that no longer builds it, so
+    neither its forget plan nor its tombstone names Helios. Its re-add from
+    a file that builds Helios again derives a new UUID rather than keep the
+    old one, which a publication refuses with no remedy on a forgotten row."""
+    a = without_input(source_payload)
+    rows = [forgotten_row(dropped_helios(source_payload))]
+    readded_a = await readd_writes(rows, rows[0].tombstone, a, RETIRED)
+    assert str(HELIOS) not in readded_a.model_dump_json()

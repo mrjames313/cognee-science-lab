@@ -145,7 +145,8 @@ async def readd_plan(graph, tombstone, plan, rows, removed) -> ReaddPlan:
     }
     gone = await absent(recorded | set(tombstone.earlier_entity_ids))
     reusable = await absent(tombstone.all_reusable_ids - forgotten)
-    replaced = forgotten | gone | reusable
+    retired = await absent(exempt_from_citers(removed))
+    replaced = forgotten | gone | reusable | retired
     waiting = await absent(replaced - exempt_from_citers(removed))
     return ReaddPlan(
         frozenset(replaced),
