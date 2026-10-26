@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from cognee_lab.identity import entry, native_copy
+from cognee_lab.identity import entry, entry_update, native_copy
 from cognee_lab.identity.models import IdentitySource
 from cognee_lab.identity.storage import PublicationRow
 from cognee_lab.identity.validation import IntentError
@@ -206,7 +206,7 @@ async def test_the_glossary_snapshot_refuses_a_source_with_no_publication(
 async def test_an_update_without_a_describer_is_refused(source_payload):
     """A lab update never guesses the edited description."""
     with pytest.raises(IntentError) as refused:
-        await entry.update(
+        await entry_update.update(
             None,
             described(source_payload),
             "An edited text.",

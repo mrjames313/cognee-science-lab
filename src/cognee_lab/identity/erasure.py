@@ -628,7 +628,7 @@ async def write_replacement(publisher, row, description, revise):
 async def write_text_change(publisher, row, description, revise):
     """A failed text change's retry with its saved text change, through the
     lab's `replace_text` and the captured edit's writer and verifier."""
-    from .entry import replace_text
+    from .entry_update import replace_text
     from .text_changes import TextChange
     from .text_fixture import RebuiltSemantics
 

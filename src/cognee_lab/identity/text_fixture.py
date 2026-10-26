@@ -101,7 +101,7 @@ async def edit_one(
 ):
     """Edit `source` to `text` through the lab's update, then refresh its
     dependents."""
-    from .entry import update
+    from .entry_update import update
     from .revisions import refresh_dependents
 
     await update(
@@ -123,8 +123,8 @@ async def maintain_one(
     publisher, source, change, *, expected_revision, fault_stage=None
 ):
     """Finish a failed text change of `source` with the change its plan
-    saved (`entry.replace_text`), then refresh its dependents."""
-    from .entry import replace_text
+    saved (`entry_update.replace_text`), then refresh its dependents."""
+    from .entry_update import replace_text
     from .revisions import refresh_dependents
 
     await replace_text(

@@ -21,7 +21,7 @@ from .captured_chunks import bind_chunks
 from .chain_fixture import add_doc03, cite
 from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
-from .entry import replace_text, update
+from .entry_update import replace_text, update
 from .fixture import add_doc01, expect_current, seed_corpus
 from .forget_fixture import (
     CALLER_FILES,
@@ -195,7 +195,7 @@ async def change_glossary(
     refresh_fault=None,
 ):
     """Finish a failed glossary edit with the text change its plan saved
-    (`entry.replace_text`), then refresh its dependents' moved spans."""
+    (`entry_update.replace_text`), then refresh its dependents' moved spans."""
     await replace_text(
         publisher,
         intended,

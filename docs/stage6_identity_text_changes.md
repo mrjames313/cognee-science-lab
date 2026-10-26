@@ -72,7 +72,7 @@ Maintain uses a full rebuild of this original document, even if an incremental u
 5. Update the registered generated identity JSON under its existing Data ID. Run the common identity publisher and the supplied semantic writer. Rebuild facts/evidence from the new chunk context, attach new original-owned mention markers and replace versioned identity contributions.
 6. Verify required semantic output and independent-source survival, current occurrence/chunk mapping, native ownership, registered snapshot agreement, removal of retired chunk graph/vectors, and absence of old document evidence in the captured fact. Only then acknowledge the matching revision/attempt as current.
 
-This sequence combines native Tasks for removal, ingestion, chunking, storage, and provenance. It does not call or modify the high-level `cognee.update` pipeline: the default update path would also select/run native extraction. Standard task-transform wiring remained step 5. Since S4 (2026-10-26) the edit runs as a lab Task under `cognify_pipeline` through `entry.update`, still without the high-level `cognee.update`. Existing compatible Entity fields are referenced without ordinary-property overwrite.
+This sequence combines native Tasks for removal, ingestion, chunking, storage, and provenance. It does not call or modify the high-level `cognee.update` pipeline: the default update path would also select/run native extraction. Standard task-transform wiring remained step 5. Since S4 (2026-10-26) the edit runs as a lab Task under `cognify_pipeline` through `entry_update.update`, still without the high-level `cognee.update`. Existing compatible Entity fields are referenced without ordinary-property overwrite.
 
 ### Ownership finding
 

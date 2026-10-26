@@ -109,7 +109,7 @@ from cognee_lab.identity.environment import fixture_environment
 root=Path(sys.argv[1]);fault=sys.argv[2]
 with fixture_environment(root):
  from cognee_lab.identity.admission import identity_map
- from cognee_lab.identity.entry import update
+ from cognee_lab.identity.entry_update import update
  from cognee_lab.identity.registered import context_for
  from cognee_lab.identity.forget import forget, preview
  from cognee_lab.identity.multisource import current_sources

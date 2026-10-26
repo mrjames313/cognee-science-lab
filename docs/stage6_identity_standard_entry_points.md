@@ -21,7 +21,7 @@ The fixture environment points the LLM at a closed loopback port (`http://127.0.
 
 ## What the entry points do
 
-`src/cognee_lab/identity/entry.py` holds four functions for a new source (since S4 it also holds `update` and `replace_text`, "The lab's update"):
+`src/cognee_lab/identity/entry.py` holds four functions for a new source (since S4 `entry_update.py` holds `update` and `replace_text`, "The lab's update"):
 
 - **`add`** registers the original through `cognee.add`, chunks it in memory with Cognee's chunker, asks the caller's describer for the identity description, writes the description to a file, registers that file through `cognee.add` and stamps it.
 - **`cognify`** runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over one source's original. Cognee's standard Tasks run first: `classify_documents`, `extract_chunks_from_documents` and `add_data_points`. Then one lab Task, `identity_publish`, runs once per document over the whole chunk set. It stamps the original, then publishes the description: a first publication when the source has no row, a re-add at the expected revision when its row is forgotten, else a reconcile. A source with no captured facts (the glossary, doc03) publishes with no semantic writer.
@@ -62,7 +62,7 @@ A failure in the lab Task is recorded in the ledger as a failed attempt with its
 
 ## The lab's update
 
-A text edit changes the original document of a published source and publishes the next revision of its identity description. Since S4 every edit command goes through `entry.update`:
+A text edit changes the original document of a published source and publishes the next revision of its identity description. Since S4 every edit command goes through `entry_update.update`:
 
 ```python
 await update(
