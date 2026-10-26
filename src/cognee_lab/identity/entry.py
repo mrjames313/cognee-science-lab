@@ -120,6 +120,41 @@ async def add(
     return source
 
 
+def standard_tasks(budget: int) -> list:
+    """Cognee's standard Tasks that build a document and its chunks:
+    `classify_documents`, `extract_chunks_from_documents` and
+    `add_data_points`, the last over the whole chunk set at once."""
+    from cognee.modules.pipelines.tasks.task import Task
+    from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
+    from cognee.tasks.storage import add_data_points
+
+    return [
+        Task(classify_documents, needs_llm=False),
+        Task(extract_chunks_from_documents, max_chunk_size=budget, needs_llm=False),
+        Task(
+            add_data_points,
+            task_config={"batch_size": WHOLE_DOCUMENT},
+            needs_llm=False,
+        ),
+    ]
+
+
+async def build_chunks(original: PipelineContext, budget: int) -> list[DocumentChunk]:
+    """Run the standard Tasks over the registered original, outside any
+    pipeline run, with `original`, the lab's context. It carries no run ID,
+    so a rollback or a startup recovery of the run that called this never
+    finds the chunks, and a resumed edit need not chunk again."""
+    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
+
+    return [
+        chunk
+        async for batch in run_tasks_base(
+            standard_tasks(budget), [original.data_item], original.user, original
+        )
+        for chunk in batch
+    ]
+
+
 def described_chunks(source) -> set[str]:
     return {
         str(item.chunk_id)
@@ -174,8 +209,6 @@ async def cognify(
     a root's sources publish in order (`remember_in_order`)."""
     from cognee.modules.pipelines.operations.pipeline import run_pipeline
     from cognee.modules.pipelines.tasks.task import Task
-    from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
-    from cognee.tasks.storage import add_data_points
 
     from .registered import context_for, read_texts, stamp
     from .text_changes import chunk_text
@@ -228,13 +261,7 @@ async def cognify(
 
     async for _ in run_pipeline(
         tasks=[
-            Task(classify_documents, needs_llm=False),
-            Task(extract_chunks_from_documents, max_chunk_size=budget, needs_llm=False),
-            Task(
-                add_data_points,
-                task_config={"batch_size": WHOLE_DOCUMENT},
-                needs_llm=False,
-            ),
+            *standard_tasks(budget),
             Task(
                 identity_publish,
                 task_config={"batch_size": WHOLE_DOCUMENT},

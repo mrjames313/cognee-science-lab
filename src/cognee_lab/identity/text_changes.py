@@ -238,7 +238,7 @@ class TextChange:
 
     async def apply(self, publisher, old, source, chunks, ctx, boundary):
         from cognee import forget
-        from cognee.tasks.storage import add_data_points
+        from .entry import build_chunks
         from .registered import stamp, write_text
 
         # Repeat preconditions under the durable project writer reservation.
@@ -266,16 +266,15 @@ class TextChange:
                 "source_changed", "Registered original differs from intended text"
             )
         await boundary("text_registered")
-        # Recreate the native Document/DocumentChunk structures and their indexes.
-        # The supplied chunks were obtained from the native chunker before writes.
-        rebuilt = await chunk_text(self.text, original, self.chunk_budget)
+        # Cognee's standard Tasks rebuild the Document and its chunks; the
+        # supplied chunks came from the same chunker before any write.
+        rebuilt = await build_chunks(original, self.chunk_budget)
         if {str(c.id): c.text for c in rebuilt} != {
             k: c.text for k, c in chunks.items()
         }:
             raise IntentError("chunk_mapping", "Native chunks changed after ingestion")
         chunks.clear()
         chunks.update({str(c.id): c for c in rebuilt})
-        await add_data_points(rebuilt, ctx=original)
         await boundary("text_chunks")
 
     async def verify(self, publisher, old, source, chunks):
