@@ -101,11 +101,17 @@ async def native_copy(graph, source) -> NativeCopy:
     )
 
 
+# What the lab's cognify writes again when it finishes a failed first
+# publication (entry.cognify), so their absence is not a delete to report.
+RECHUNKED = frozenset({"document_node", "chunks"})
+
+
 async def missing_native(graph, row) -> list[str]:
     """The facets of the row's native copy that are gone. None for a row
     with no native copy to compare: a forgotten row, one whose forget
     resumes, a pending one, or a failed text change, whose own retry
-    rebuilds the document."""
+    rebuilds the document. A failed first publication does not report its
+    document node and chunks, which its reconcile chunks again."""
     if (
         row.description is None
         or row.state == "pending"
@@ -113,7 +119,10 @@ async def missing_native(graph, row) -> list[str]:
         or row.failed_attempt == "text_change"
     ):
         return []
-    return (await native_copy(graph, row.description)).missing
+    missing = (await native_copy(graph, row.description)).missing
+    if row.failed_attempt == "publish" and row.verified_revision == 0:
+        return [facet for facet in missing if facet not in RECHUNKED]
+    return missing
 
 
 def deleted_entry(row, missing) -> dict:
