@@ -1,7 +1,9 @@
-"""Small fixture retriever; native requests/registration follow in the next milestone."""
+"""The lab's bounded retriever over saved sources, and `retrieve_settled`, the
+one entry the CLI `retrieve` and the IDENTITY SearchType (search.py) share."""
 
 import re
 from dataclasses import asdict
+from enum import StrEnum
 from functools import partial
 from types import SimpleNamespace
 from uuid import UUID
@@ -171,22 +173,92 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
     return valid, unavailable
 
 
+LIMIT = 5
+
+
+class SearchScope(StrEnum):
+    """What a search returns: identity-anchored facts only (the default), or
+    also native hits no saved source attributes, which is not built yet."""
+
+    IDENTITY = "identity"
+    IDENTITY_AND_UNATTRIBUTED = "identity_and_unattributed"
+
+
+class SearchMode(StrEnum):
+    """How facts are found: from the saved decisions (`semantic`), or by
+    source as well (`source_aware`), which is not built yet."""
+
+    SEMANTIC = "semantic"
+    SOURCE_AWARE = "source_aware"
+
+
+class SearchRefused(IntentError):
+    """A search the lab refuses before it reads anything. Through
+    `cognee.search` it fails the whole search, before Cognee logs the query."""
+
+
+NOT_BUILT = {
+    SearchScope.IDENTITY_AND_UNATTRIBUTED: (
+        "scope_not_built",
+        "Scope identity_and_unattributed is not built; search with scope identity",
+    ),
+    SearchMode.SOURCE_AWARE: (
+        "mode_not_built",
+        "Mode source_aware is not built; search with mode semantic",
+    ),
+}
+# A writer changed the ledger during the read: a source's row moved
+# (`retrieval_changed`), or a writer began on a source that retrieval was
+# failing (`stale_attempt` from RecordStore.fail). A second read sees the new
+# rows.
+UNSETTLED = {"retrieval_changed", "stale_attempt"}
+
+
+def refuse_unbuilt(scope: SearchScope, mode: SearchMode) -> None:
+    for value in (scope, mode):
+        if value in NOT_BUILT:
+            raise SearchRefused(*NOT_BUILT[value])
+
+
+async def retrieve_settled(
+    publisher,
+    dataset_id,
+    query,
+    *,
+    limit=LIMIT,
+    scope=SearchScope.IDENTITY,
+    mode=SearchMode.SEMANTIC,
+):
+    """`retrieve`, read once more if a writer changed the ledger during the
+    first read, with the scope, the mode and the dataset beside the facts.
+    A scope or mode that is not built is refused first."""
+    refuse_unbuilt(scope, mode)
+    try:
+        found = await retrieve(publisher, dataset_id, query, limit=limit)
+    except IntentError as exc:
+        if exc.code not in UNSETTLED:
+            raise
+        found = await retrieve(publisher, dataset_id, query, limit=limit)
+    return dict(mode=mode, scope=scope, dataset_id=str(dataset_id), **found)
+
+
 def words(text):
     return {w.rstrip("s") for w in re.findall(r"\w+", text.casefold()) if len(w) > 1}
 
 
-async def select_seed_entities(graph, candidates, mention_ids, query):
+async def select_seed_entities(graph, candidates, allowed, query):
     """Prefer explicit reusable names, using current graph fields, not payload shape.
 
     Native vector indexes need not expose an Entity's ``name`` in their payload.
     Resolve their IDs through the graph interface and keep vector order only as
-    the fallback for queries without an explicit candidate name.
+    the fallback for queries without an explicit candidate name. Only a
+    candidate in `allowed` (a served source's reusable Entity) can seed.
     """
     reusable, exact, seen = [], [], set()
     query_words = words(query)
     for candidate in candidates:
         entity_id = str(candidate.id)
-        if entity_id in mention_ids or entity_id in seen:
+        if entity_id not in allowed or entity_id in seen:
             continue
         seen.add(entity_id)
         node = await graph.get_node(entity_id)
@@ -199,11 +271,11 @@ async def select_seed_entities(graph, candidates, mention_ids, query):
     return set(exact or reusable[:1])
 
 
-async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
+async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200):
     """Rank actual facts, with document-context variant expansion and local mentions.
 
     This intentionally bounded first slice scans saved source descriptions. Full
-    graph traversal, arbitrary external facts and public SearchType are later work.
+    graph traversal and arbitrary external facts are later work.
     """
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from cognee.modules.engine.utils import generate_edge_object_id
@@ -240,7 +312,12 @@ async def retrieve(publisher, dataset_id, query, *, limit=5, work_limit=200):
     )
     # Local mention labels are not reusable query aliases. Prefer explicit name
     # matches; vector candidates remain available for natural-language queries.
-    seeds = await select_seed_entities(publisher.graph, candidates, mention_ids, query)
+    # Entity_name is shared by every dataset of the store, so another dataset's
+    # Entity can rank first, but no served source reads it.
+    allowed = {
+        str(e) for source, _, _ in current for e in source.entity_constructions
+    } - mention_ids
+    seeds = await select_seed_entities(publisher.graph, candidates, allowed, query)
     facts, seen, work, limited, fact_limited = [], set(), 0, False, False
     for source, row, held in current:
         if work >= work_limit:

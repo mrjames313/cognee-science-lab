@@ -9,7 +9,7 @@ from .forget_fixture import CALLER_FILES, semantics_for
 from .models import IdentitySource
 from .publish import Publisher
 from .registered import context_for
-from .retrieve import retrieve
+from .retrieve import retrieve, retrieve_settled
 from .validation import IntentError
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tests/fixtures/identity"
@@ -402,7 +402,7 @@ async def run(args, root):
             ],
         )
     if args.command == "retrieve":
-        return await retrieve(publisher, dataset_id, args.query)
+        return await retrieve_settled(publisher, dataset_id, args.query)
     if args.command == "reconcile":
         await reconcile(root, args, publisher, source)
     answer = await retrieve(publisher, dataset_id, args.query)
