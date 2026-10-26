@@ -22,17 +22,6 @@ QUERY = "What does HC limit?"
 def plain(value):
     return json.loads(json.dumps(value, default=str))
 
-async def history():
-    from sqlalchemy import select
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.search.models.Query import Query
-
-    async with get_relational_engine().get_async_session() as session:
-        rows = await session.execute(
-            select(Query.query_type, Query.text).order_by(Query.created_at)
-        )
-        return [list(row) for row in rows.all()]
-
 async def refused(**kwargs):
     import cognee
     from cognee_lab.identity.search import IDENTITY
@@ -51,14 +40,18 @@ async def main(root, action):
     from cognee_lab.identity import search
     from cognee_lab.identity.environment import DATASET_NAME
     from cognee_lab.identity.publish import Publisher
-    from cognee_lab.identity.retrieve import LIMIT, retrieve_settled
+    from cognee_lab.identity.native_search import OUTSIDE_DATASET, OUTSIDE_TEXT
+    from cognee_lab.identity.search import search_history
+    from cognee_lab.identity.settled import LIMIT, SearchRequest, retrieve_settled
 
     publisher = await Publisher.configured()
     user = await get_default_user()
     (dataset,) = await get_datasets_by_name(DATASET_NAME, user.id)
     out = {}
     if action == "compare":
-        direct = plain(await retrieve_settled(publisher, dataset.id, QUERY))
+        direct = plain(
+            await retrieve_settled(publisher, dataset.id, QUERY, SearchRequest.parse())
+        )
         named = await cognee.search(
             QUERY, query_type=SearchType.IDENTITY, datasets=[DATASET_NAME], top_k=LIMIT
         )
@@ -86,15 +79,13 @@ async def main(root, action):
             endpoint_types=sorted(
                 {(await publisher.graph.get_node(e) or {}).get("type") for e in ends}
             ),
-            history=await history(),
+            history=await search_history(),
         )
     if action == "refuse":
         await cognee.add(
-            "Aurora controller limits vibrations.",
-            dataset_name="outside_dataset",
-            skip_connection_test=True,
+            OUTSIDE_TEXT, dataset_name=OUTSIDE_DATASET, skip_connection_test=True
         )
-        before = await history()
+        before = await search_history()
         out.update(
             unscoped=await refused(datasets=None),
             scope=await refused(
@@ -105,7 +96,7 @@ async def main(root, action):
                 datasets=[DATASET_NAME],
                 retriever_specific_config={"mode": "source_aware"},
             ),
-            logged_by_refusals=(await history())[len(before):],
+            logged_by_refusals=(await search_history())[len(before):],
             named=plain(
                 await cognee.search(
                     QUERY, query_type=search.IDENTITY, datasets=[DATASET_NAME]
@@ -150,7 +141,10 @@ def test_search_returns_what_retrieve_returns_and_logs_identity(tmp_path):
     ]
     # Cognee's access tracking reads top-level chunks and entities keys.
     assert not {"chunks", "entities"} & set(direct)
-    assert found["history"] == [["IDENTITY", "What does HC limit?"]] * 3
+    assert (
+        found["history"]
+        == [dict(query_type="IDENTITY", text="What does HC limit?")] * 3
+    )
 
 
 @pytest.mark.integration

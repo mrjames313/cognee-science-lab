@@ -9,7 +9,8 @@ from .forget_fixture import CALLER_FILES, semantics_for
 from .models import IdentitySource
 from .publish import Publisher
 from .registered import context_for
-from .retrieve import LIMIT, SearchMode, SearchScope, retrieve, retrieve_settled
+from .retrieve import retrieve
+from .settled import SearchRequest, retrieve_settled
 from .validation import IntentError
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tests/fixtures/identity"
@@ -401,14 +402,22 @@ async def run(args, root):
                 ).items()
             ],
         )
-    scope = SearchScope(args.scope or SearchScope.IDENTITY)
-    mode = SearchMode(args.mode or SearchMode.SEMANTIC)
     if args.command == "retrieve":
         return await retrieve_settled(
-            publisher, dataset_id, args.query, scope=scope, mode=mode
+            publisher,
+            dataset_id,
+            args.query,
+            SearchRequest.parse(args.scope, args.mode),
         )
     if args.command == "search":
-        return await searched(args.query, scope, mode, all_datasets=args.all_datasets)
+        from .search import searched
+
+        return await searched(
+            dataset_id,
+            args.query,
+            SearchRequest.parse(args.scope, args.mode),
+            all_datasets=args.all_datasets,
+        )
     if args.command == "reconcile":
         await reconcile(root, args, publisher, source)
     answer = await retrieve(publisher, dataset_id, args.query)
@@ -432,34 +441,6 @@ async def run(args, root):
     )
     (root / "result.json").write_text(json.dumps(result, indent=2))
     return result
-
-
-async def searched(query, scope, mode, *, all_datasets):
-    """`search`: the IDENTITY SearchType through `cognee.search`, as a user
-    calls it, with the root's dataset or every dataset (`datasets=None`),
-    and the queries Cognee's search history holds afterwards."""
-    import cognee
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.search.models.Query import Query
-    from sqlalchemy import select
-
-    from .search import IDENTITY
-
-    result = await cognee.search(
-        query,
-        query_type=IDENTITY,
-        datasets=None if all_datasets else [DATASET_NAME],
-        top_k=LIMIT,
-        retriever_specific_config=dict(scope=scope, mode=mode),
-    )
-    async with get_relational_engine().get_async_session() as session:
-        logged = await session.execute(
-            select(Query.query_type, Query.text).order_by(Query.created_at)
-        )
-    return dict(
-        search_result=result,
-        search_history=[dict(query_type=t, text=q) for t, q in logged.all()],
-    )
 
 
 async def cognify_stamps(source):

@@ -1,21 +1,13 @@
-"""The IDENTITY SearchType: `cognee.search(query, query_type=SearchType.IDENTITY,
-datasets=[name])` returns what the lab's `retrieve_settled` returns, with no LLM.
-
-Importing this module adds IDENTITY to Cognee's closed SearchType enum and
-registers `IdentityRetriever` for it, or fails the import (`register`). It
-imports cognee, so configure the process first. A model that validates
-SearchType from JSON and was built before this import, such as Cognee's HTTP
-router DTOs, rejects IDENTITY, and the `cognee search` CLI never imports the
-lab, so neither can name it.
-
-The first search in a process opens the configured stores through
-`Publisher.configured`, which creates the lab's ledger tables in Cognee's
-relational database when they are missing.
+"""The IDENTITY SearchType: importing this module adds IDENTITY to Cognee's
+closed SearchType enum and registers `IdentityRetriever` for it, or fails the
+import (`register`). It imports cognee, so configure the process first.
+docs/stage6_identity_public_search.md lists what can and cannot name IDENTITY.
 """
 
 import json
 import pickle
 import sys
+from dataclasses import fields
 
 import cognee
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -25,51 +17,26 @@ from cognee.modules.retrieval.registered_community_retrievers import (
 )
 from cognee.modules.search.types import SearchType
 
-from .retrieve import (
-    LIMIT,
-    SearchMode,
-    SearchRefused,
-    SearchScope,
-    refuse_unbuilt,
-    retrieve_settled,
-)
+from .settled import LIMIT, SearchRefused, SearchRequest, retrieve_settled
 
 NAME = "IDENTITY"
-# The enum internals `add_member` writes are those of Python 3.12's enum
-# module, and Cognee 1.6.2 is the version whose search path was inspected.
 COGNEE_VERSION = "1.6.2"
 PYTHON = (3, 12)
-CONFIG_KEYS = {"scope", "mode"}
+CONFIG_KEYS = {f.name for f in fields(SearchRequest)}
 
 
 class RegistrationError(RuntimeError):
     """IDENTITY cannot join SearchType safely in this process."""
 
 
-def parse_config(config) -> tuple[SearchScope, SearchMode]:
-    """`retriever_specific_config`: an optional `scope` and `mode`."""
-    config = dict(config or {})
-    if unknown := sorted(set(config) - CONFIG_KEYS):
-        raise SearchRefused(
-            "config_invalid",
-            f"Unknown retriever_specific_config keys {unknown}; "
-            f"IDENTITY takes {sorted(CONFIG_KEYS)}",
-        )
-    try:
-        return (
-            SearchScope(config.get("scope", SearchScope.IDENTITY)),
-            SearchMode(config.get("mode", SearchMode.SEMANTIC)),
-        )
-    except ValueError as exc:
-        raise SearchRefused("config_invalid", str(exc)) from None
-
-
 class IdentityRetriever(BaseRetriever):
     """Serves the identity-anchored facts of one dataset's served sources.
 
-    Every refusal raises in the constructor, which Cognee calls before it
-    reads anything or logs the query. Context is the result as JSON text and
-    the completion is `[result]`, so no LLM runs."""
+    Every refusal raises in the constructor, which Cognee calls after it
+    resolves the datasets and before it logs the query. Context is the result
+    as JSON text and the completion is `[result]`, so no LLM runs. Each search
+    opens the configured stores through `Publisher.configured`, with no
+    per-process cache, since tests and the CLI switch roots in one process."""
 
     supports_session_turn_preparation = False
     supports_prompt_preview = False
@@ -89,8 +56,14 @@ class IdentityRetriever(BaseRetriever):
                 "IDENTITY searches one dataset; pass datasets=[name] when the "
                 "user can read more than one",
             )
-        self.scope, self.mode = parse_config(retriever_specific_config)
-        refuse_unbuilt(self.scope, self.mode)
+        config = retriever_specific_config or {}
+        if unknown := sorted(set(config) - CONFIG_KEYS):
+            raise SearchRefused(
+                "config_invalid",
+                f"Unknown retriever_specific_config keys {unknown}; "
+                f"IDENTITY takes {sorted(CONFIG_KEYS)}",
+            )
+        self.request = SearchRequest.parse(**config)
         self.dataset, self.top_k = dataset, top_k
 
     async def get_retrieved_objects(self, query, query_batch=None):
@@ -100,9 +73,8 @@ class IdentityRetriever(BaseRetriever):
             await Publisher.configured(),
             self.dataset.id,
             query,
+            self.request,
             limit=self.top_k,
-            scope=self.scope,
-            mode=self.mode,
         )
 
     async def get_context_from_objects(
@@ -232,6 +204,35 @@ def register():
         )
     self_test(member)
     return member
+
+
+async def search_history():
+    """The queries in Cognee's search history, oldest first."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.search.models.Query import Query
+    from sqlalchemy import select
+
+    async with get_relational_engine().get_async_session() as session:
+        logged = await session.execute(
+            select(Query.query_type, Query.text).order_by(Query.created_at)
+        )
+    return [dict(query_type=t, text=q) for t, q in logged.all()]
+
+
+async def searched(dataset_id, query, request, *, all_datasets):
+    """The CLI `search`: `cognee.search` with IDENTITY, as a user calls it, on
+    the root's dataset or every dataset (`datasets=None`), and the search
+    history afterwards."""
+    result = await cognee.search(
+        query,
+        query_type=IDENTITY,
+        dataset_ids=None if all_datasets else [dataset_id],
+        top_k=LIMIT,
+        retriever_specific_config=dict(
+            scope=request.scope.value, mode=request.mode.value
+        ),
+    )
+    return dict(search_result=result, search_history=await search_history())
 
 
 IDENTITY = register()

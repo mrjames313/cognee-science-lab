@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from cognee_lab.identity.retrieve import select_seed_entities
+from cognee_lab.identity.settled import SearchRefused, SearchRequest, SearchScope
 
 
 @pytest.mark.parametrize("payload", [None, {"text": "HC"}, {"name": "wrong"}])
@@ -71,7 +72,7 @@ async def test_an_entity_no_served_source_constructs_never_seeds(query):
 def _settled(monkeypatch, outcomes):
     """retrieve_settled over a retrieve that raises or returns `outcomes` in
     turn, and the limit of each read it made."""
-    from cognee_lab.identity import retrieve as module
+    from cognee_lab.identity import settled as module
 
     reads = []
 
@@ -93,10 +94,12 @@ async def test_a_writer_during_the_read_gets_one_more_read(monkeypatch, code):
     settled, reads = _settled(
         monkeypatch, [IntentError(code, "changed"), dict(facts=["f"])]
     )
-    found = await settled(None, "d1", "q", limit=3)
+    found = await settled(None, "d1", "q", SearchRequest.parse(), limit=3)
     assert found == dict(
         mode="semantic", scope="identity", dataset_id="d1", facts=["f"]
     )
+    # Cognee's search history stores the result as str(list).
+    assert repr(found["mode"]) == "'semantic'"
     assert reads == [3, 3]
 
 
@@ -108,7 +111,7 @@ async def test_a_second_change_fails_the_search(monkeypatch, code):
         monkeypatch, [IntentError(code, "first"), IntentError(code, "second")]
     )
     with pytest.raises(IntentError, match="second"):
-        await settled(None, "d1", "q")
+        await settled(None, "d1", "q", SearchRequest.parse())
     assert len(reads) == 2
 
 
@@ -117,31 +120,28 @@ async def test_another_failure_is_not_read_again(monkeypatch):
 
     settled, reads = _settled(monkeypatch, [IntentError("ledger_format", "old")])
     with pytest.raises(IntentError, match="old"):
-        await settled(None, "d1", "q")
+        await settled(None, "d1", "q", SearchRequest.parse())
     assert len(reads) == 1
 
 
 @pytest.mark.parametrize(
-    "kwargs, code",
+    "scope, mode, code",
     [
-        (dict(scope="identity_and_unattributed"), "scope_not_built"),
-        (dict(mode="source_aware"), "mode_not_built"),
+        ("identity_and_unattributed", None, "scope_not_built"),
+        (None, "source_aware", "mode_not_built"),
+        ("everything", None, "config_invalid"),
     ],
 )
-async def test_an_unbuilt_scope_or_mode_is_refused_before_any_read(
-    monkeypatch, kwargs, code
-):
-    from cognee_lab.identity.retrieve import SearchMode, SearchRefused, SearchScope
-
-    settled, reads = _settled(monkeypatch, [])
-    kwargs = dict(
-        scope=SearchScope(kwargs.get("scope", "identity")),
-        mode=SearchMode(kwargs.get("mode", "semantic")),
-    )
+def test_a_request_refuses_what_is_not_built(scope, mode, code):
     with pytest.raises(SearchRefused) as refused:
-        await settled(None, "d1", "q", **kwargs)
+        SearchRequest.parse(scope, mode)
     assert refused.value.code == code
-    assert reads == []
+
+
+def test_a_request_defaults_to_scope_identity_and_mode_semantic():
+    request = SearchRequest.parse()
+    assert (request.scope, request.mode) == ("identity", "semantic")
+    assert request == SearchRequest.parse(SearchScope.IDENTITY, "semantic")
 
 
 def test_capability_check_sees_through_transparent_engine_handle():

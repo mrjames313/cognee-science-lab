@@ -14,28 +14,29 @@ OUTSIDE_DATASET = "outside_dataset"
 OUTSIDE_TEXT = "Aurora controller limits vibrations in the cryostat."
 
 
-async def run(args, root):
+async def added(args):
     import cognee
     from cognee.modules.data.methods import get_datasets
-    from cognee.modules.search.types import SearchType
     from cognee.modules.users.methods import get_default_user
 
-    from .environment import DATASET_NAME
-    from .publish import Publisher
+    await cognee.add(
+        OUTSIDE_TEXT, dataset_name=OUTSIDE_DATASET, skip_connection_test=True
+    )
+    user = await get_default_user()
+    return dict(
+        native_add=dict(
+            dataset=OUTSIDE_DATASET,
+            datasets=sorted(d.name for d in await get_datasets(user.id)),
+        )
+    )
 
-    publisher = await Publisher.configured()
-    args._fixture_publisher = publisher
-    if args.command == "native-add":
-        await cognee.add(
-            OUTSIDE_TEXT, dataset_name=OUTSIDE_DATASET, skip_connection_test=True
-        )
-        user = await get_default_user()
-        return dict(
-            native_add=dict(
-                dataset=OUTSIDE_DATASET,
-                datasets=sorted(d.name for d in await get_datasets(user.id)),
-            )
-        )
+
+async def searched(args):
+    import cognee
+    from cognee.modules.search.types import SearchType
+
+    from .environment import DATASET_NAME
+
     (found,) = await cognee.search(
         args.query, query_type=SearchType.CHUNKS, datasets=[DATASET_NAME], verbose=True
     )
@@ -48,3 +49,13 @@ async def run(args, root):
             ],
         )
     )
+
+
+COMMANDS = {"native-add": added, "native-search": searched}
+
+
+async def run(args, root):
+    from .publish import Publisher
+
+    args._fixture_publisher = await Publisher.configured()
+    return await COMMANDS[args.command](args)

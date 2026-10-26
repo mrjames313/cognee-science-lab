@@ -1,9 +1,8 @@
-"""The lab's bounded retriever over saved sources, and `retrieve_settled`, the
-one entry the CLI `retrieve` and the IDENTITY SearchType (search.py) share."""
+"""The lab's bounded retriever over saved sources. settled.py wraps it for the
+CLI `retrieve` and the IDENTITY SearchType."""
 
 import re
 from dataclasses import asdict
-from enum import StrEnum
 from functools import partial
 from types import SimpleNamespace
 from uuid import UUID
@@ -174,72 +173,6 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
 
 
 LIMIT = 5
-
-
-class SearchScope(StrEnum):
-    """What a search returns: identity-anchored facts only (the default), or
-    also native hits no saved source attributes, which is not built yet."""
-
-    IDENTITY = "identity"
-    IDENTITY_AND_UNATTRIBUTED = "identity_and_unattributed"
-
-
-class SearchMode(StrEnum):
-    """How facts are found: from the saved decisions (`semantic`), or by
-    source as well (`source_aware`), which is not built yet."""
-
-    SEMANTIC = "semantic"
-    SOURCE_AWARE = "source_aware"
-
-
-class SearchRefused(IntentError):
-    """A search the lab refuses before it reads anything. Through
-    `cognee.search` it fails the whole search, before Cognee logs the query."""
-
-
-NOT_BUILT = {
-    SearchScope.IDENTITY_AND_UNATTRIBUTED: (
-        "scope_not_built",
-        "Scope identity_and_unattributed is not built; search with scope identity",
-    ),
-    SearchMode.SOURCE_AWARE: (
-        "mode_not_built",
-        "Mode source_aware is not built; search with mode semantic",
-    ),
-}
-# A writer changed the ledger during the read: a source's row moved
-# (`retrieval_changed`), or a writer began on a source that retrieval was
-# failing (`stale_attempt` from RecordStore.fail). A second read sees the new
-# rows.
-UNSETTLED = {"retrieval_changed", "stale_attempt"}
-
-
-def refuse_unbuilt(scope: SearchScope, mode: SearchMode) -> None:
-    for value in (scope, mode):
-        if value in NOT_BUILT:
-            raise SearchRefused(*NOT_BUILT[value])
-
-
-async def retrieve_settled(
-    publisher,
-    dataset_id,
-    query,
-    *,
-    limit=LIMIT,
-    scope=SearchScope.IDENTITY,
-    mode=SearchMode.SEMANTIC,
-):
-    """`retrieve`, read once more if a writer changed the ledger during the
-    first read, with the scope, the mode and the dataset beside the facts.
-    A scope or mode that is not built is refused first."""
-    refuse_unbuilt(scope, mode)
-    try:
-        found = await retrieve(publisher, dataset_id, query, limit=limit)
-    except IntentError as exc:
-        if exc.code not in UNSETTLED:
-            raise
-        found = await retrieve(publisher, dataset_id, query, limit=limit)
-    return dict(mode=mode, scope=scope, dataset_id=str(dataset_id), **found)
 
 
 def words(text):

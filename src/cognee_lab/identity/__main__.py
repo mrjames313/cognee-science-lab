@@ -28,7 +28,7 @@ from .native_forget import CASES as NATIVE_CASES
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
 from .replace import TEXT_FAULT_STAGES
-from .retrieve import SearchMode, SearchScope
+from .settled import SearchMode, SearchScope
 from .withdraw import FAULT_STAGES as WITHDRAW_STAGES
 
 PUBLISH_STAGES = ("nodes", "identity_edges", "verification")
@@ -196,11 +196,13 @@ def main():
     )
     parser.add_argument(
         "--scope",
+        type=SearchScope,
         choices=list(SearchScope),
         help="retrieve and search only: what the search returns (default identity)",
     )
     parser.add_argument(
         "--mode",
+        type=SearchMode,
         choices=list(SearchMode),
         help="retrieve and search only: how facts are found (default semantic)",
     )

@@ -13,11 +13,10 @@ import pytest
 from cognee.modules.retrieval.registered_community_retrievers import (
     registered_community_retrievers,
 )
-from cognee.modules.retrieval.exceptions.exceptions import NoDataError
 from cognee.modules.search.types import SearchType
 
 from cognee_lab.identity import search
-from cognee_lab.identity.retrieve import SearchRefused
+from cognee_lab.identity.settled import SearchRefused
 
 REPO = Path(__file__).resolve().parents[1]
 DATASET = SimpleNamespace(id=uuid4(), name="stage6_isolated_fixture")
@@ -76,14 +75,8 @@ def test_an_identity_member_the_lab_did_not_add_keeps_its_retriever(monkeypatch)
 
 def test_a_lookup_that_misses_fails_the_self_test(monkeypatch):
     monkeypatch.delitem(SearchType._value2member_map_, "IDENTITY")
-    with pytest.raises(search.RegistrationError, match="'call'"):
+    with pytest.raises(search.RegistrationError, match="self-test"):
         search.register()
-
-
-def test_a_refusal_fails_the_whole_search():
-    """Cognee turns a NoDataError into one dataset's empty entry and logs
-    the search; any other exception fails the search before the log."""
-    assert not issubclass(SearchRefused, NoDataError)
 
 
 @pytest.mark.parametrize(
@@ -101,7 +94,7 @@ def test_a_refusal_fails_the_whole_search():
 )
 def test_cognee_meets_each_refusal_when_it_builds_the_retriever(kwargs, code):
     with pytest.raises(SearchRefused) as refused:
-        search.IdentityRetriever(**dict(dict(dataset=DATASET, top_k=15), **kwargs))
+        search.IdentityRetriever(**{"dataset": DATASET, "top_k": 15, **kwargs})
     assert refused.value.code == code
 
 
@@ -112,21 +105,6 @@ def test_access_control_on_is_refused(monkeypatch):
     with pytest.raises(SearchRefused) as refused:
         search.IdentityRetriever(dataset=DATASET)
     assert refused.value.code == "access_control_on"
-
-
-def test_the_config_selects_the_scope_and_the_mode():
-    retriever = search.IdentityRetriever(
-        dataset=DATASET,
-        top_k=3,
-        retriever_specific_config={"scope": "identity", "mode": "semantic"},
-        user=None,
-        only_context=False,
-    )
-    assert (retriever.scope, retriever.mode, retriever.top_k) == (
-        "identity",
-        "semantic",
-        3,
-    )
 
 
 async def test_context_is_the_result_as_json_and_the_completion_is_the_result():

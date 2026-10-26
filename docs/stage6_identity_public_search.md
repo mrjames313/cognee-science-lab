@@ -22,7 +22,7 @@ Journey S7 shows the `CHUNKS` cell of the failed insert on a `glossary-fixture` 
 
 ## What a search returns
 
-`cognee.search(query, query_type=SearchType.IDENTITY, datasets=[name])` runs the lab's `retrieve_settled` (`src/cognee_lab/identity/retrieve.py`) over the one dataset that Cognee gives the retriever. The CLI `retrieve` runs the same function, so the two return the same result:
+`cognee.search(query, query_type=SearchType.IDENTITY, datasets=[name])` runs the lab's `retrieve_settled` (`src/cognee_lab/identity/settled.py`) over the one dataset that Cognee gives the retriever. The CLI `retrieve` runs the same function, so the two return the same result:
 
 - `facts`: the identity-anchored facts of the dataset's served sources, each with its checked evidence chunks. The ranking is unchanged from the first slice: name-match seeds, else the top vector hit, the closure over accepted links, one-hop facts with own-chunk evidence and a word-overlap score.
 - `unavailable_sources`: each source or decision that the search did not serve, with its reason ("What a search lists as unavailable").
@@ -48,7 +48,7 @@ Cognee's `SearchType` is a closed enum. Import `cognee_lab.identity.search` to a
 
 The module imports `cognee`, so configure the process first. A second import, or a second call of `register()`, changes nothing.
 
-The first search in a process opens the configured stores through `Publisher.configured`. That creates the lab's ledger tables in Cognee's relational database if they are missing, as every lab CLI command does.
+Every search opens the configured stores through `Publisher.configured`, which runs `RecordStore.initialize`: it creates the lab's ledger tables in Cognee's relational database if they are missing and records the Entities that forget tombstones prove removed (it records nothing twice), as every lab CLI command does. The retriever keeps no per-process cache of the stores, since the tests and the CLI switch roots within one process.
 
 ## Scope and mode
 
@@ -71,7 +71,7 @@ A search lists what it withholds under `unavailable_sources`, as the CLI `retrie
 
 ## Refusals
 
-`IdentityRetriever` raises every refusal in its constructor, which Cognee calls before it reads anything. The exception type is `SearchRefused`, an `IntentError` with a `code`. It is not a Cognee `NoDataError`, so it fails the whole search instead of becoming one dataset's empty entry, and Cognee writes no search history row for it. The CLI prints `{"error": "SearchRefused", "code": ..., "message": ...}` and exits 1.
+`IdentityRetriever` raises every refusal in its constructor. Cognee calls it after it resolves the datasets (and, with access control on, checks each dataset's graph and data), and before it logs the query. The retriever reads no lab store before it refuses. The exception type is `SearchRefused`, an `IntentError` with a `code`. It is not a Cognee `NoDataError`, so it fails the whole search instead of becoming one dataset's empty entry, and Cognee writes no search history row for it. The CLI prints `{"error": "SearchRefused", "code": ..., "message": ...}` and exits 1.
 
 | Code | When |
 |---|---|
