@@ -1,6 +1,6 @@
 # Stage 6 entity edits: readers of a changed or retired Entity or record
 
-**Date:** 2026-10-24. **Status:** checkpoint K, implemented, reviewed in two fix rounds and verified by the assistant and its subagents on the user's Mac with loopback embeddings, on branch `stage6-entity-edits`. The final `journey all` gave 1658 PASS and 0 FAIL in 101 runs. No user-reviewed fixture root exists yet. See [Evidence](#evidence).
+**Date:** 2026-10-24. **Status:** checkpoint K, implemented, reviewed in two fix rounds and verified by the assistant and its subagents on the user's Mac with loopback embeddings, on branch `stage6-entity-edits`. The final `journey all` gave 1658 PASS and 0 FAIL in 101 runs. No user-reviewed fixture root exists yet. See [Evidence](#evidence). Step 5 S2 (2026-10-25 to 2026-10-26) added the outside deletion of the Helios Entity and journey D17 ([Outside deletion, built in step 5 S2](#outside-deletion-built-in-step-5-s2)).
 
 Checkpoint K answers one question: what happens to the readers of an Entity or a saved record that changed or went. Before it, live validation already withheld a decision whose corpus input changed in the graph, but no command drove such a change, and no reviewer could answer it. A citer of a removed record (journey D9's c02) had no reviewer path at all, a dropped record key could come back and be served to an old citation, and a source could read another source's mention UUID as a corpus object.
 
@@ -206,6 +206,8 @@ Journey D17 runs the decisions one at a time: r01 and v01 are withheld `input_re
 Native tests in `tests/test_identity_outside_deletion_native.py` cover the D17 sequence, a failed replacement's retry with Helios absent (`--fault-stage replace_verification`, then `reconcile`) and a re-add that waits for its live citer and then derives a new UUID; unit tests in `tests/test_identity_outside_deletion.py` cover each lab removal path and the refusals, and `tests/test_identity_readd_outside_deletion.py` the re-add remedy (live citers in every state, a citer forgotten or replaced, a re-add that still cites the Entity, and case 10). `tests/test_identity_dataset_forget_native.py` covers the sweep.
 
 ## Evidence
+
+**Step 5 S2 runs.** The assistant and its subagents ran `journey all` on the user's Mac on 2026-10-26 with loopback embeddings: 1775 PASS and 0 FAIL in 110 runs, D17 included. The [forget guide's evidence](stage6_identity_forget.md#evidence) lists every S2 check.
 
 **Checkpoint K runs.** The assistant and its subagents ran `.claude/skills/verify/scripts/verify.py journey all` on the user's Mac on 2026-10-24 with loopback embeddings, on branch `stage6-entity-edits`. P5 calls the embedding API and did not run. The map has 75 journey blocks, and `journey all` runs the 74 loopback blocks as 101 runs.
 
