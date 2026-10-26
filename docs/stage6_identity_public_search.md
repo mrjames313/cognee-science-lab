@@ -35,7 +35,7 @@ With `include_references=True`, the evidence lists each fact as a `triplet` refe
 
 Two behaviors are new in S1 and apply to the CLI `retrieve` too:
 
-- **Seeds come only from the searched dataset's served sources.** Cognee's `Entity_name` collection holds the Entities of every dataset in the store. Probe E5 (2026-10-26) measured an Entity of another dataset that became the seed of a query and displaced the lab's seed, so the query returned no fact. Now only a reusable Entity that a served source of the searched dataset constructs can seed. A query that names no lab Entity falls back to the top-ranked lab Entity.
+- **Seeds come only from the searched dataset's served sources.** Cognee's `Entity_name` collection holds the Entities of every dataset in the store. Probe E5 (2026-10-26) measured an Entity of another dataset that became the seed of a query and displaced the lab's seed, so the query returned no fact. Now only a reusable Entity that a served source of the searched dataset constructs can seed. A query that names no lab Entity falls back to the top-ranked reusable Entity only when a served source of the searched dataset constructs it. When another dataset's Entity ranks first, the search has no seed and returns no fact, so a query about another dataset's Entity never returns the lab's facts.
 - **One more read when a writer changes the ledger during the read.** A search reads the ledger at its start and again at its end. If a writer moved a served row between the two reads (`retrieval_changed`), or began on a source that the search was failing (`stale_attempt`), the search reads once more. A second change fails the search.
 
 ## Register IDENTITY

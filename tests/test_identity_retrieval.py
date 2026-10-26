@@ -22,7 +22,7 @@ async def test_explicit_name_beats_higher_ranked_fact_target(payload):
         for key in ["oscillations", "mention", "hc", "hc"]
     ]
     assert await select_seed_entities(
-        graph, candidates, {"oscillations", "hc"}, "What does HC limit?"
+        graph, candidates, {"mention"}, "What does HC limit?", allowed=set(nodes)
     ) == {"hc"}
     assert [call.args[0] for call in graph.get_node.await_args_list] == [
         "oscillations",
@@ -38,35 +38,48 @@ async def test_fallback_skips_stale_and_non_entity_vector_entries():
     }
     graph = SimpleNamespace(get_node=AsyncMock(side_effect=nodes.get))
     candidates = [SimpleNamespace(id=key) for key in ["missing", "chunk", "a", "b"]]
-    allowed = {"missing", "chunk", "a", "b"}
-    assert await select_seed_entities(graph, candidates, allowed, "regulation?") == {
-        "a"
-    }
+    assert await select_seed_entities(
+        graph, candidates, set(), "regulation?", allowed={"a", "b"}
+    ) == {"a"}
 
 
 async def test_no_eligible_candidate_returns_no_seed():
     graph = SimpleNamespace(get_node=AsyncMock(return_value=None))
     assert (
         await select_seed_entities(
-            graph, [SimpleNamespace(id="missing")], {"missing"}, "HC"
+            graph, [SimpleNamespace(id="missing")], set(), "HC", allowed={"missing"}
         )
         == set()
     )
 
 
-@pytest.mark.parametrize("query", ["What does Aurora controller limit?", "limits?"])
-async def test_an_entity_no_served_source_constructs_never_seeds(query):
-    """Another dataset's Entity shares Entity_name (probe E5): neither its
-    exact name nor its vector rank makes it a seed."""
+@pytest.mark.parametrize(
+    "ranked, query, seeds",
+    [
+        (["aurora", "helios"], "What does Aurora controller limit?", set()),
+        (["aurora", "helios"], "limits?", set()),
+        (["aurora", "helios"], "What does Helios controller limit?", {"helios"}),
+        (["helios", "aurora"], "limits?", {"helios"}),
+        (["mention", "helios", "aurora"], "limits?", {"helios"}),
+    ],
+)
+async def test_an_entity_no_served_source_constructs_never_seeds(ranked, query, seeds):
+    """Another dataset's Entity shares Entity_name (probe E5). It is never a
+    seed, and when it ranks first no lab Entity takes its place: a query
+    about another dataset's Entity returns no lab fact."""
     nodes = {
         "aurora": {"type": "Entity", "name": "Aurora controller"},
         "helios": {"type": "Entity", "name": "Helios controller"},
+        "mention": {"type": "Entity", "name": "The controller"},
     }
     graph = SimpleNamespace(get_node=AsyncMock(side_effect=nodes.get))
-    candidates = [SimpleNamespace(id="aurora"), SimpleNamespace(id="helios")]
-    assert await select_seed_entities(graph, candidates, {"helios"}, query) == {
-        "helios"
-    }
+    candidates = [SimpleNamespace(id=key) for key in ranked]
+    assert (
+        await select_seed_entities(
+            graph, candidates, {"mention"}, query, allowed={"helios"}
+        )
+        == seeds
+    )
 
 
 def _settled(monkeypatch, outcomes):

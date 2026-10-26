@@ -179,19 +179,21 @@ def words(text):
     return {w.rstrip("s") for w in re.findall(r"\w+", text.casefold()) if len(w) > 1}
 
 
-async def select_seed_entities(graph, candidates, allowed, query):
+async def select_seed_entities(graph, candidates, mention_ids, query, *, allowed):
     """Prefer explicit reusable names, using current graph fields, not payload shape.
 
     Native vector indexes need not expose an Entity's ``name`` in their payload.
     Resolve their IDs through the graph interface and keep vector order only as
     the fallback for queries without an explicit candidate name. Only a
-    candidate in `allowed` (a served source's reusable Entity) can seed.
+    candidate in `allowed` (a served source's Entity) can seed. The fallback
+    is the top reusable candidate, so when another dataset's Entity ranks
+    first there is no seed.
     """
     reusable, exact, seen = [], [], set()
     query_words = words(query)
     for candidate in candidates:
         entity_id = str(candidate.id)
-        if entity_id not in allowed or entity_id in seen:
+        if entity_id in mention_ids or entity_id in seen:
             continue
         seen.add(entity_id)
         node = await graph.get_node(entity_id)
@@ -199,9 +201,9 @@ async def select_seed_entities(graph, candidates, allowed, query):
             continue
         reusable.append(entity_id)
         name_words = words(node.get("name") or "")
-        if name_words and name_words <= query_words:
+        if entity_id in allowed and name_words and name_words <= query_words:
             exact.append(entity_id)
-    return set(exact or reusable[:1])
+    return set(exact or [e for e in reusable[:1] if e in allowed])
 
 
 async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200):
@@ -247,10 +249,10 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
     # matches; vector candidates remain available for natural-language queries.
     # Entity_name is shared by every dataset of the store, so another dataset's
     # Entity can rank first, but no served source reads it.
-    allowed = {
-        str(e) for source, _, _ in current for e in source.entity_constructions
-    } - mention_ids
-    seeds = await select_seed_entities(publisher.graph, candidates, allowed, query)
+    allowed = {str(e) for source, _, _ in current for e in source.entity_constructions}
+    seeds = await select_seed_entities(
+        publisher.graph, candidates, mention_ids, query, allowed=allowed
+    )
     facts, seen, work, limited, fact_limited = [], set(), 0, False, False
     for source, row, held in current:
         if work >= work_limit:
