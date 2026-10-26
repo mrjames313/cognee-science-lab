@@ -11,9 +11,12 @@ the lab's copy.
 - `dataset`: `cognee.forget(dataset=...)` on the root's dataset.
 - `prune`: `cognee.prune.prune_data()`, then `cognee.prune.prune_system()`
   with its defaults, which keep the relational database and so the ledger.
+- `reset`: the same with `prune_system(metadata=True)`, which deletes the
+  relational database and with it the lab's ledger: a full reset, not a
+  delete the lab can repair.
 """
 
-CASES = ("data", "dataset", "prune")
+CASES = ("data", "dataset", "prune", "reset")
 
 
 async def run(args, root):
@@ -40,5 +43,5 @@ async def run(args, root):
         deleted.update(dataset_id=str(source.dataset_id))
     else:
         await cognee.prune.prune_data()
-        await cognee.prune.prune_system()
+        await cognee.prune.prune_system(metadata=args.case == "reset")
     return dict(native_forget=deleted)

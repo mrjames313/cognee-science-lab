@@ -306,11 +306,12 @@ A re-add with the forgotten revision's mention UUIDs is refused as `fresh_uuid_r
 
 Step 5 S2 (2026-10-25, built by the assistant on the user's Mac with loopback embeddings). A plain `cognee.forget` or prune erases only Cognee's copy of a source. The lab's ledger row, its saved description and the lab's own graph objects stay, and nothing in the lab hears of the delete. Run `forget` on the lab source afterwards to erase the lab's copy.
 
-`native-forget --case data|dataset|prune` stands in for such a delete, as `edit-entity` stands in for an outside edit. It writes no ledger row and takes no writer reservation:
+`native-forget --case data|dataset|prune|reset` stands in for such a delete, as `edit-entity` stands in for an outside edit. It writes no ledger row and takes no writer reservation:
 
 - `data` calls `cognee.forget(data_id=..., dataset_id=...)` on the selected source's original document.
 - `dataset` calls `cognee.forget(dataset=...)` on the root's dataset.
 - `prune` calls `cognee.prune.prune_data()` and then `cognee.prune.prune_system()` with its defaults. That keeps Cognee's relational database, and so the lab's ledger.
+- `reset` calls the same with `prune_system(metadata=True)`, which deletes the relational database and the lab's ledger with it ([Reset](#reset)).
 
 `status` compares each saved source with its native copy and lists the ones that differ under `native_deleted`. It checks five facets (`native_copy.NativeCopy`): the original's Data row, the identity Data row, the original's document node, every chunk the saved description names, and the raw files of both Data items. Each delete leaves its own pattern, measured on 2026-10-25 on a `fixture` root:
 
@@ -371,6 +372,16 @@ The sweep. An Entity deleted outside the lab through Cognee's node delete (`edit
 
 A full reset is not a repair. `prune_system(metadata=True)` deletes Cognee's relational database, and the lab's tables live in it ([Reset](#reset)).
 
+## Reset
+
+`cognee.prune.prune_system(metadata=True)` deletes Cognee's relational database (`modules/data/deletion/prune_system.py`), and the lab's ledger, withholding and event tables live in it (`storage.py` uses Cognee's relational engine). The lab has no reset command and keeps nothing a repair could read: every row and every tombstone goes. Treat it as a new store. Measured on 2026-10-25 on a `fixture` root after `native-forget --case reset` (journey F27):
+
+- `status` lists no publication, no incident, no withholding and nothing under `native_deleted`.
+- `retrieve` returns no fact and lists no unavailable source.
+- `forget` is refused (`No saved publication to forget`), as are `readd` (`Re-add needs a forgotten source`) and `forget-dataset` (`The root holds no saved source, not even a tombstone; nothing to forget`).
+- `reconcile` fails inside Cognee (`DatabaseNotCreatedError`): its Data tables are gone too, and the lab reads the fixture's Data item before it looks for a row.
+- The root's files survive: the caller's text and identity files, the seed, the manifests and the result files. They still hold the old UUIDs, and the lab no longer knows which of those a forget retired, so the premise that the root files and the ledger agree (step 5 unit 6) does not hold after a reset. A new publication from them starts a new ledger with no tombstone to fence old UUIDs.
+
 ## Scope
 
 - A forget removes a dependent's decisions that cite the forgotten source and, since checkpoint J2, down every chain of saved-record citations, each decision that cites a removed record as it was ([The cascade](#the-cascade)).
@@ -413,6 +424,7 @@ A full reset is not a repair. `prune_system(metadata=True)` deletes Cognee's rel
 - Re-add follow-ups (2026-10-23): `models.Tombstone` gains `decisions_sha256`, `earlier_mention_ids`, `earlier_entity_ids`, `carrying` and `forgotten_mention_ids`; `validation.decisions_digest` and `uses_of`; `erasure_rules.differs_from_forgotten`, and `check_removed_entity_ids` reads every forgotten life; `storage.Publication.last_tombstone` and `PublicationRow.last_tombstone`, written by `complete`; `Publisher.admit_inputs` counts a re-added source's `last_tombstone`; `retirement.readd_removed` adds the reusable Entities of earlier forgotten lives that the graph no longer holds; `forget_fixture.readd` returns the report, which both drivers print.
 - Re-add follow-ups fix round 2 (2026-10-23): `decisions.roles` names a reusable Entity in `decisions_digest` by its role in each decision; `forget_fixture.describe_readd` renames a removed Entity among an open resolution's candidates too, where before the re-add kept the removed UUID and `admit_readd` refused it as `forgotten_uuid_reused`. `tests/test_identity_decisions.py` applies each single decision change to three descriptions and asserts the digest changes, and each change it must ignore and asserts it does not.
 - Re-add follow-ups fix round 1 (2026-10-23): `decisions.py` (new) holds `decisions_digest`, which now counts each group's occurrences, and `naming_keys`, moved out of `validation.py`; `Tombstone.of(..., earlier=...)` replaces `Tombstone.carrying`, and `all_mention_ids` and `all_reusable_ids` replace `forgotten_mention_ids`; `forget.py` builds the carried tombstone from the row's `last_tombstone`; `storage.begin` moves a forgotten row's tombstone to `last_tombstone` on a re-add, and `complete` writes the given tombstone and clears it; `storage.saved_tombstone`, `saved_columns` and the `ledger_format` refusal in `initialize`; `erasure_rules.readd_ids` reads every forgotten life.
+- Step 5 S2 part 2 (2026-10-25): `dataset_forget.py` (new) holds `forget-dataset`: `order`, `dry_run`, `forget_dataset`, the Data deletes (`forget_data`), the repair rule (`repaired_later`) and the orphan sweep (`orphan_name_points`, `sweep_orphans`); `__main__.py` routes it before the glossary commands on every fixture kind. `retirement.readd_removed` takes the re-added source, reads the tombstone's reusable Entities and refuses through `outside_deletion.check_readd`, whose live citers come from `outside_deletion.live_citers`; `outside_deletion.lab_removed` gains `unserved`. `native_forget` gains the `reset` case.
 
 ## History
 

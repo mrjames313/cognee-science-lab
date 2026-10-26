@@ -30,6 +30,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `forget-cascade-blocked` lists a level-2 dependent whose withdrawal failed as blocked; its removal waits.
 - `forget-single-source` forgets, re-adds and withdraws doc01 on a single-source `fixture` root, which has no two-source manifest; each command exits 0 with its one source's report.
 - `native-deleted` lists, in `status`, a source whose native copy a delete outside the lab took (`native-forget`), with the facets it misses and the `forget` that erases the lab's copy; `reconcile` refuses it and `forget` erases it (native tests in `tests/test_identity_native_deletes_native.py` cover the dataset forget, the prune and a dependent).
+- `reset` shows what is left after `prune_system(metadata=True)`, which deletes the lab's ledger with Cognee's relational database: no row and no tombstone, so nothing to repair.
 - `readd-outside-deleted` refuses a re-add whose files name an Entity deleted outside the lab while a saved source still cites or builds it, naming each such source with its dataset and state; once each is forgotten or replaced without it, the re-add builds the Entity under a derived UUID and never writes the old one.
 - `forget-dataset` forgets every source of the root's dataset, readers first, each through the lab's `forget`, then deletes item by item the Data no lab source publishes (the seed), which its dry run lists under `other_data`; it always needs the dry run's token, which covers that list, and a rerun has nothing to do.
 - `forget-dataset-repair` turns every row a native dataset forget or Cognee's default prune left behind into a tombstone (`status` lists them under `native_deleted` first), deletes a surviving Data row of the seed, and lets a re-add rebuild an absent Entity under a derived UUID.
@@ -614,6 +615,26 @@ $V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1
 $V check "$RUN" forget '[.publications[] | [.state, .revision]] == [["forgotten", 1]] and .dependents_failed == null and .forget.dependents_revised == []' 'the lab forget erases doc01'
 $V drive "$RUN" main gone -- status
 $V check "$RUN" gone '.native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'status lists nothing deleted outside the lab and no open incident'
+```
+
+**F27 a full reset leaves nothing to repair.** Proves `reset`. Guide: `docs/stage6_identity_forget.md`, "Reset". On a `fixture` root `native-forget --case reset` runs `prune_data()` and `prune_system(metadata=True)`, which deletes Cognee's relational database and the lab's ledger in it. `status` lists no publication, no incident, no withholding and nothing deleted outside the lab: no row and no tombstone remains. `retrieve` serves nothing and lists no unavailable source. `forget`, `readd` and `forget-dataset` are refused with the guide's messages, and `reconcile` fails inside Cognee with `DatabaseNotCreatedError`.
+
+```bash journey F27
+$V drive "$RUN" main fixture -- fixture
+$V drive "$RUN" main reset -- native-forget --source doc01 --case reset
+$V check "$RUN" reset '.native_forget.case == "reset"' 'Cognee reset its stores'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '.publications == [] and .recovery_events == [] and .withholdings == [] and .native_deleted == []' 'no row, no tombstone and no incident remain'
+$V drive "$RUN" main ask -- retrieve
+$V check "$RUN" ask '.facts == [] and .unavailable_sources == []' 'nothing is served and nothing is listed unavailable'
+$V drive "$RUN" main forget -- forget --source doc01 --expected-revision 1
+$V check "$RUN" forget '.error == "IntentError" and .message == "No saved publication to forget"' 'forget finds no saved publication'
+$V drive "$RUN" main readd -- readd --source doc01 --expected-revision 1
+$V check "$RUN" readd '.error == "IntentError" and .message == "Re-add needs a forgotten source"' 'readd finds no tombstone'
+$V drive "$RUN" main dataset -- forget-dataset --dry-run
+$V check "$RUN" dataset '.error == "IntentError" and (.message | startswith("The root holds no saved source"))' 'forget-dataset finds nothing to forget'
+$V drive "$RUN" main rec -- reconcile --source doc01
+$V check "$RUN" rec '.error == "DatabaseNotCreatedError"' 'reconcile fails inside Cognee, whose Data tables are gone'
 ```
 
 **F28 a re-add after an Entity is deleted outside the lab.** Proves `readd-outside-deleted`. Guide: `docs/stage6_identity_entity_edits.md`, "A re-add naming it waits for its citers". On a `glossary-fixture --chain` root, `edit-entity --case delete` deletes Helios, which doc01 and doc03 both build. doc03 is forgotten with no dependent. Its re-add is refused while doc01, `current`, still names Helios: the message names doc01's identity source, its dataset and its state and says to forget or replace it, and `details.citers` lists it. doc01 is forgotten, with no dependent since doc03 is forgotten. The user drops doc03's citations of doc01's records from `doc03_identity.json` (a re-add may not cite a forgotten source's records), and doc03's re-add publishes revision 2 with its Helios recipe under a derived UUID. The user drops doc01's corpus input of Helios from `identity.json`, since a re-add may not cite a removed Entity, and doc01's re-add publishes revision 2 the same way. No description names the old Helios UUID and no fact reaches it. The two re-adds derive two different UUIDs for the one Helios they built before (case 10 of the user's review, pre-existing: `replacement_entity_id` and `fresh_entity_id` key on the identity source).

@@ -148,7 +148,12 @@ async def dry_run(publisher, root) -> dict:
 
     rows = await publisher.records.rows()
     datasets = {r.dataset for r in rows}
-    if len(datasets) != 1:
+    if not datasets:
+        raise IntentError(
+            "source_missing",
+            "The root holds no saved source, not even a tombstone; nothing to forget",
+        )
+    if len(datasets) > 1:
         raise IntentError(
             "dataset_scope", "forget-dataset needs a root with one saved dataset"
         )
