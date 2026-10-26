@@ -201,9 +201,9 @@ def test_native_a_dependent_deleted_outside_the_lab_waits_for_its_own_forget(
     assert (
         waiting["identity_data_id"] == forgotten["sources"]["doc02"]["identity_data_id"]
     )
-    assert "chunks" in waiting["native_deleted"]
+    assert "chunks" in waiting["missing"]
     assert forgotten["dependents_failed"]["code"] == "dependent_unfinished"
-    assert forgotten["sources"]["doc02"]["missing"] == waiting["native_deleted"]
+    assert forgotten["sources"]["doc02"]["missing"] == waiting["missing"]
     second = output_of(
         command(root, "forget", "--source", "doc02", "--expected-revision", "1")
     )
@@ -218,3 +218,18 @@ def test_native_a_dependent_deleted_outside_the_lab_waits_for_its_own_forget(
     assert [p["state"] for p in status["publications"]] == ["forgotten", "forgotten"]
     assert status["native_deleted"] == []
     assert all(e["resolved_at"] for e in status["recovery_events"])
+
+
+@pytest.mark.integration
+def test_native_a_chain_root_reports_a_glossary_deleted_outside_the_lab(tmp_path):
+    root = tmp_path / "chain"
+    command(root, "glossary-fixture", "--chain")
+    command(root, "native-forget", "--case", "data", "--source", "glossary")
+    forgotten = forget_confirmed(root, "doc01")
+    assert forgotten["glossary"]["text"] is None
+    assert forgotten["sources"]["glossary"]["missing"] == [
+        "original_data",
+        "document_node",
+        "chunks",
+        "stored_files",
+    ]

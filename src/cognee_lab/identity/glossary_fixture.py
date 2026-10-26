@@ -369,7 +369,7 @@ async def snapshot(publisher, root, query):
     # deleted outside the lab, so it has no text to show.
     erased = (
         by_source[str(glossary.identity_data_id)].state == "forgotten"
-        or "native_deleted" in found["glossary"]
+        or "missing" in found["glossary"]
     )
     text = None if erased else (await read_texts(glossary))["glossary"]
     entry = hc_entry(text) if text is not None else None

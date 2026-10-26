@@ -712,7 +712,7 @@ async def finish_dependents(publisher, tombstone, rows, fault=None) -> dict:
                 operation=step.row.operation,
                 level=step.level,
                 waits_for=behind,
-                native_deleted=missing.get(step.row.source),
+                missing=missing.get(step.row.source),
             )
             for step, behind in held
         ]
