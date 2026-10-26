@@ -90,7 +90,8 @@ async def rebuild(publisher, source, change, *, expected_revision, fault_stage=N
     text change's retry may carry the removal of what a forget took away
     (erasure.write_text_change); its own dependents' ranges then wait for
     `refresh-dependents`."""
-    from .fixture import context_for, write_semantics
+    from .fixture import write_semantics
+    from .registered import context_for
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 
@@ -341,7 +342,8 @@ async def run(args, root):
     args._fixture_publisher = publisher
     sources = await current_sources(root, publisher)
     old = sources["doc01"]
-    from .fixture import context_for, expect_current
+    from .fixture import expect_current
+    from .registered import context_for
 
     await expect_current(
         publisher,

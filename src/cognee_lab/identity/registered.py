@@ -1,7 +1,31 @@
 """Generated JSON snapshots through Cognee's Data, ingestion and file interfaces."""
 
+from uuid import UUID
+
 from .models import IdentitySource
 from .validation import IntentError
+
+
+async def context_for(data_id):
+    """The context the lab writes a registered Data item's content with:
+    its user, Data row and dataset, and no pipeline run ID."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data, Dataset
+    from cognee.modules.pipelines.models import PipelineContext
+    from cognee.modules.users.methods import get_default_user
+
+    user = await get_default_user()
+    async with get_relational_engine().get_async_session() as session:
+        data = await session.get(Data, UUID(str(data_id)))
+        if data is None:
+            raise IntentError("source_missing", "Fixture Data item missing")
+        dataset = await session.get(Dataset, data.dataset_id)
+    return PipelineContext(
+        user=user,
+        data_item=data,
+        dataset=dataset,
+        pipeline_name="stage6_captured_fixture",
+    )
 
 
 async def read_registered(source):

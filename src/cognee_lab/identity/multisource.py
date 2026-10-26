@@ -65,7 +65,8 @@ async def prepare(root, *, chunked=False, dependent=False):
     import cognee
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
-    from .fixture import prepare as prepare_first, context_for, load_chunks
+    from .fixture import prepare as prepare_first, load_chunks
+    from .registered import context_for
 
     if cognee.__version__ != "1.6.2":
         raise IntentError(
@@ -215,7 +216,8 @@ async def publish_one(
     revision, `reconcile` the saved one, or `readd` a forgotten source at the
     next one. Each writes the captured facts that are missing and verifies
     them; a source without captured facts passes `semantics=False`."""
-    from .fixture import context_for, write_semantics, verify_semantics
+    from .fixture import write_semantics, verify_semantics
+    from .registered import context_for
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 
@@ -268,7 +270,8 @@ async def reconcile_selected(
     snapshot: a finished forget's outcome, or what a completed text change
     (`resume_text_change`) refreshed. `semantics` says whether a
     publication's retry has captured facts to write (`publish_one`)."""
-    from .fixture import context_for, load_chunks
+    from .fixture import load_chunks
+    from .registered import context_for
     from .forget_fixture import reconcile_forget
     from .revisions import replace_one
     from .text_changes import TextChange

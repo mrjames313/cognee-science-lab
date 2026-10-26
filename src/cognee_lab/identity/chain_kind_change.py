@@ -32,7 +32,8 @@ from functools import partial
 
 from .captured_chunks import TO_MENTION, bind_chunks, recorded_budget
 from .captured_revision import begin_revision, require_root, retire_group
-from .fixture import FIXTURES, context_for, expect_current
+from .fixture import FIXTURES, expect_current
+from .registered import context_for
 from .forget_fixture import write_revision
 from .kind_change import (
     MENTION_REF,

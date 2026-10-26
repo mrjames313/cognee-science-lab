@@ -56,7 +56,8 @@ def corrected(source):
 
 async def replace_one(publisher, source, *, expected_revision, fault_stage=None):
     """Replace any source with unchanged text through the native pipeline."""
-    from .fixture import context_for, load_chunks, verify_semantics
+    from .fixture import load_chunks, verify_semantics
+    from .registered import context_for
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
     from cognee.modules.pipelines.tasks.task import Task
 
@@ -97,9 +98,9 @@ async def finish_publication(publisher, source, *, fault_stage=None):
     Publisher.reconcile plans and the store checks). The registered
     snapshot shows `source` first, as preflight requires; a rerun finds it
     written."""
-    from .fixture import context_for, load_chunks
+    from .fixture import load_chunks
     from .multisource import publish_one
-    from .registered import write_registered
+    from .registered import context_for, write_registered
 
     ctx = await context_for(source.inputs[source.original_input_ref].data_id)
     await write_registered(source, await context_for(source.identity_data_id))

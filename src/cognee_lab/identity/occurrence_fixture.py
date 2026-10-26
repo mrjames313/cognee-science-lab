@@ -170,7 +170,7 @@ COMMANDS = {
 
 async def run(args, root):
     from .captured_chunks import recorded_budget
-    from .fixture import context_for
+    from .registered import context_for
     from .multisource import current_sources, snapshot
     from .publish import Publisher
     from .retrieve import retrieve

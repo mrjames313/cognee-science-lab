@@ -21,7 +21,7 @@ from .captured_chunks import bind_chunks
 from .chain_fixture import cite, prepare_doc03
 from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
-from .fixture import context_for, expect_current, load_chunks
+from .fixture import expect_current, load_chunks
 from .fixture import prepare as prepare_doc01
 from .forget_fixture import (
     CALLER_FILES,
@@ -35,7 +35,7 @@ from .multisource import read_sources
 from .native_copy import deleted_entry, missing_native
 from .publish import Publisher
 from .records import saved_records
-from .registered import read_registered, read_texts
+from .registered import context_for, read_registered, read_texts
 from .retrieve import retrieve, withholding_status
 from .revisions import refresh, refresh_dependents
 from .text_changes import TextChange, chunk_text, original_context, read_original

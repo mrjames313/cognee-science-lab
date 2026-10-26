@@ -227,10 +227,10 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     from types import SimpleNamespace
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
-    from .fixture import context_for, load_chunks
+    from .fixture import load_chunks
     from .erasure_rules import differs_from_forgotten
     from .multisource import publish_one
-    from .registered import read_texts
+    from .registered import context_for, read_texts
     from .retirement import readd_plan
     from .text_changes import chunk_text
 

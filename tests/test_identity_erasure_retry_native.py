@@ -110,7 +110,7 @@ root=Path(sys.argv[1]);fault=sys.argv[2]
 with fixture_environment(root):
  from cognee_lab.identity.admission import identity_map
  from cognee_lab.identity.captured_chunks import recorded_budget
- from cognee_lab.identity.fixture import context_for
+ from cognee_lab.identity.registered import context_for
  from cognee_lab.identity.forget import forget, preview
  from cognee_lab.identity.multisource import current_sources
  from cognee_lab.identity.publish import Publisher

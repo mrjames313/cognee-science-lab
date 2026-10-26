@@ -32,7 +32,7 @@ async def tagged_types(graph, run_id):
 
 async def main(root, action):
     from cognee.infrastructure.databases.graph import get_graph_engine
-    from cognee_lab.identity.fixture import context_for
+    from cognee_lab.identity.registered import context_for
     from cognee_lab.identity.models import IdentitySource
     from cognee_lab.identity.registered import stamped
 

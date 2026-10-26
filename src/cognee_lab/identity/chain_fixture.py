@@ -140,7 +140,8 @@ async def prepare_doc03(root, doc01):
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
 
-    from .fixture import context_for, load_chunks
+    from .fixture import load_chunks
+    from .registered import context_for
 
     (root / "doc03.txt").write_text(DOC03_TEXT)
     await cognee.add(

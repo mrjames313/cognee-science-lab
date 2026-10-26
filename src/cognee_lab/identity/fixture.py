@@ -7,32 +7,13 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from .environment import DATASET_NAME, read_embedding
 from .models import IdentitySource
 from .publish import Publisher
+from .registered import context_for
 from .retrieve import retrieve
 from .validation import IntentError
 
 FIXTURES = Path(__file__).resolve().parents[3] / "tests/fixtures/identity"
 SEED_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:seed-document")
 OSCILLATIONS_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:oscillations")
-
-
-async def context_for(data_id):
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data, Dataset
-    from cognee.modules.pipelines.models import PipelineContext
-    from cognee.modules.users.methods import get_default_user
-
-    user = await get_default_user()
-    async with get_relational_engine().get_async_session() as session:
-        data = await session.get(Data, UUID(str(data_id)))
-        if data is None:
-            raise IntentError("source_missing", "Fixture Data item missing")
-        dataset = await session.get(Dataset, data.dataset_id)
-    return PipelineContext(
-        user=user,
-        data_item=data,
-        dataset=dataset,
-        pipeline_name="stage6_captured_fixture",
-    )
 
 
 async def load_chunks(source, ctx, *, budget=None):

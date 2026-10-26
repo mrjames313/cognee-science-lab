@@ -77,8 +77,7 @@ async def add(
     import cognee
     from cognee.tasks.ingestion.data_item import DataItem
 
-    from .fixture import context_for
-    from .registered import stamp
+    from .registered import context_for, stamp
     from .text_changes import chunk_text
 
     await cognee.add(
@@ -140,8 +139,7 @@ async def cognify(
     from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
     from cognee.tasks.storage import add_data_points
 
-    from .fixture import context_for
-    from .registered import read_texts, stamp
+    from .registered import context_for, read_texts, stamp
     from .text_changes import chunk_text
 
     if len(sources) != 1:
@@ -208,8 +206,7 @@ async def publish_one(
     """The lab Task's work on one document, with contexts of its own: the
     identity Data's for the identity writes and the original's for the
     facts, neither carrying the run's ID."""
-    from .fixture import context_for
-    from .registered import read_texts
+    from .registered import context_for, read_texts
 
     if {str(c.id) for c in chunks} != described_chunks(source):
         raise IntentError(
