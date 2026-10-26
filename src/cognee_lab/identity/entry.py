@@ -19,13 +19,22 @@ identity layer. The lab stamps every file it manages as cognified so a plain
 for the gaps in that protection.
 """
 
-from collections.abc import Awaitable, Callable, Sequence
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from .models import ChunkInput, IdentitySource
 from .validation import IntentError
+
+if TYPE_CHECKING:
+    from cognee.modules.chunking.models import DocumentChunk
+    from cognee.modules.pipelines.models import PipelineContext
+
+    from .publish import Publisher
 
 # Cognee batches the chunks it hands each Task. One batch larger than any
 # document gives the lab Task the document's whole chunk set at once.
@@ -46,19 +55,30 @@ class Draft:
     dataset they belong to."""
 
     text: str
-    chunks: list
+    chunks: list[DocumentChunk]
     dataset_id: UUID
 
 
-@dataclass(frozen=True)
-class Semantics:
-    """How the lab Task writes and checks the semantic facts of a source:
-    `write(publisher, source, chunks, original_ctx)` and `verify(...)` with
-    the same arguments. Captured fixture facts are the only extractor until
-    step 6."""
+class Semantics(Protocol):
+    """How the lab Task writes and checks the semantic facts of a source,
+    with the original's context. Captured fixture facts are the only
+    extractor until step 6."""
 
-    write: Callable[..., Awaitable[None]]
-    verify: Callable[..., Awaitable[None]]
+    async def write(
+        self,
+        publisher: Publisher,
+        source: IdentitySource,
+        chunks: list[DocumentChunk],
+        original: PipelineContext,
+    ) -> None: ...
+
+    async def verify(
+        self,
+        publisher: Publisher,
+        source: IdentitySource,
+        chunks: list[DocumentChunk],
+        original: PipelineContext,
+    ) -> None: ...
 
 
 async def add(
@@ -160,12 +180,32 @@ async def cognify(
     failures = []
 
     async def identity_publish(chunks, ctx=None):
+        """Publish the source over its whole chunk set, with contexts of its
+        own: the identity Data's for the identity writes and the original's
+        for the facts, neither carrying the run's ID."""
         # Stamp once the native chunks are written, whatever the lab outcome:
         # a regular run writes no stamp of its own.
         await stamp(original.data_item.id, source.dataset_id)
         try:
-            await publish_one(
-                publisher, source, chunks, original, semantics, fault_stage, origin
+            if {str(c.id) for c in chunks} != described_chunks(source):
+                raise IntentError(
+                    "chunk_mapping", "The lab Task did not receive the whole chunk set"
+                )
+            row = await publisher.records.row(source)
+            method = publisher.publish if row is None else publisher.reconcile
+            await method(
+                source,
+                texts=await read_texts(source),
+                chunks={str(c.id): c for c in chunks},
+                ctx=await context_for(source.identity_data_id),
+                origin="test/fault_injection" if fault_stage else origin,
+                fault_stage=fault_stage,
+                semantic_writer=lambda: semantics.write(
+                    publisher, source, chunks, original
+                ),
+                verify_semantics=lambda: semantics.verify(
+                    publisher, source, chunks, original
+                ),
             )
         except Exception as exc:
             failures.append(exc)
@@ -198,32 +238,6 @@ async def cognify(
     if failures:
         (failure,) = failures
         raise failure
-
-
-async def publish_one(
-    publisher, source, chunks, original, semantics, fault_stage, origin
-):
-    """The lab Task's work on one document, with contexts of its own: the
-    identity Data's for the identity writes and the original's for the
-    facts, neither carrying the run's ID."""
-    from .registered import context_for, read_texts
-
-    if {str(c.id) for c in chunks} != described_chunks(source):
-        raise IntentError(
-            "chunk_mapping", "The lab Task did not receive the whole chunk set"
-        )
-    row = await publisher.records.row(source)
-    method = publisher.publish if row is None else publisher.reconcile
-    await method(
-        source,
-        texts=await read_texts(source),
-        chunks={str(c.id): c for c in chunks},
-        ctx=await context_for(source.identity_data_id),
-        origin="test/fault_injection" if fault_stage else origin,
-        fault_stage=fault_stage,
-        semantic_writer=lambda: semantics.write(publisher, source, chunks, original),
-        verify_semantics=lambda: semantics.verify(publisher, source, chunks, original),
-    )
 
 
 async def remember(

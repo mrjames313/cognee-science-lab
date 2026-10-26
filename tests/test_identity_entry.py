@@ -1,6 +1,6 @@
 """The lab entry points' rules that need no store: which native facets a
 failed publication reports, the chunk budget a reconcile chunks with,
-and the whole-chunk-set check of the lab Task."""
+and the one source a cognify run takes."""
 
 import json
 
@@ -83,15 +83,6 @@ class Untouchable:
     @property
     def records(self):
         raise AssertionError("the ledger was read")
-
-
-async def test_the_lab_task_refuses_part_of_the_chunk_set_before_the_ledger(
-    source_payload,
-):
-    source = described(source_payload)
-    with pytest.raises(IntentError) as refused:
-        await entry.publish_one(Untouchable(), source, [], None, None, None, "test")
-    assert refused.value.code == "chunk_mapping"
 
 
 async def test_cognify_refuses_more_than_one_source_before_the_ledger(

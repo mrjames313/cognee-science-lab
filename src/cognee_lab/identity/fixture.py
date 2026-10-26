@@ -190,10 +190,12 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
             raise IntentError("verify_index", "Original chunk vector missing")
 
 
-def captured_semantics():
-    from .entry import Semantics
+class CapturedSemantics:
+    """The captured fixture facts, as the lab's cognify writes and checks
+    them (`entry.Semantics`)."""
 
-    return Semantics(write_semantics, verify_semantics)
+    write = staticmethod(write_semantics)
+    verify = staticmethod(verify_semantics)
 
 
 async def expect_current(publisher, source, expected_revision, recovery):
@@ -331,7 +333,7 @@ async def create(root, args):
         original,
         describe=describe,
         identity_path=root / "identity.json",
-        semantics=captured_semantics(),
+        semantics=CapturedSemantics(),
         fault_stage=args.fault_stage,
         origin="test",
     )
@@ -478,7 +480,7 @@ async def reconcile(root, args, publisher, source):
         await entry.cognify(
             publisher,
             [source],
-            semantics=captured_semantics(),
+            semantics=CapturedSemantics(),
             fault_stage=args.fault_stage,
             origin="test",
         )
