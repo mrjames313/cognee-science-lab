@@ -350,17 +350,19 @@ class Publisher:
         )
 
     async def refuse_owned_retry(self, source):
-        """A failed replacement or forget resumes only through its own method.
+        """A failed replacement, withdrawal or forget resumes only through
+        its own method.
 
         Earlier than begin() on purpose: preflight would first refuse those
         rows with an unrelated error, since a failed replacement's registered
-        snapshot need not match its saved revision and a failed forget may
-        have deleted its Data items. A failed withdrawal passes preflight, so
-        begin() refuses it. begin() refuses the rest of the transition table
-        under the writer reservation; for publish its refusal differs from
-        this one."""
+        snapshot need not match its saved revision, a failed forget may have
+        deleted its Data items, and a failed withdrawal may already have
+        deleted and recorded Entities its saved description builds
+        (`check_no_removed_recipes`). begin() refuses the rest of the
+        transition table under the writer reservation; for publish its
+        refusal differs from this one."""
         row = await self.records.row(source)
-        if row and row.resumed_by in ("replace", "forget"):
+        if row and row.resumed_by in ("replace", "withdraw", "forget"):
             raise IntentError(*cell_for(row).otherwise)
 
     async def refuse_natively_deleted(self, source):
