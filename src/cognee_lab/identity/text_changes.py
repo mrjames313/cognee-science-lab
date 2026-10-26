@@ -239,7 +239,7 @@ class TextChange:
     async def apply(self, publisher, old, source, chunks, ctx, boundary):
         from cognee import forget
         from cognee.tasks.storage import add_data_points
-        from .registered import write_text
+        from .registered import stamp, write_text
 
         # Repeat preconditions under the durable project writer reservation.
         await reject_sole_owned_readers(publisher, old, source)
@@ -256,6 +256,7 @@ class TextChange:
             user=ctx.user,
             memory_only=True,
         )
+        await stamp(doc.data_id, old.dataset_id)
         await boundary("text_removed")
         original = await original_context(old, ctx)
         await write_text(self.text, original, doc.data_id)

@@ -70,8 +70,35 @@ async def write_registered(source, ctx):
         )
 
 
+async def stamp(data_id, dataset_id):
+    """Mark a lab-managed Data item as cognified, so a plain `cognee.cognify`
+    skips it instead of extracting it with the LLM. Ingesting changed text
+    and a per-item `cognee.forget(memory_only=True)` clear the mark, so each
+    caller of those stamps again."""
+    from cognee.modules.data.methods.publish_updated_data import mark_data_processed
+
+    await mark_data_processed(data_id, dataset_id)
+
+
+async def stamped(data_id, dataset_id) -> bool:
+    """Whether a plain `cognee.cognify` of the dataset skips the item."""
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+    from cognee.modules.pipelines.models.DataItemStatus import (
+        is_data_item_completed,
+    )
+
+    async with get_relational_engine().get_async_session() as session:
+        data = await session.get(Data, data_id)
+    status = (data.pipeline_status or {}) if data is not None else {}
+    return is_data_item_completed(
+        (status.get("cognify_pipeline") or {}).get(str(dataset_id))
+    )
+
+
 async def write_text(payload, ctx, data_id):
-    """Update one explicitly selected Data item through the native ingestion Task."""
+    """Update one explicitly selected Data item through the native ingestion
+    Task, and stamp it again: changed text clears the stamp."""
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.ingest_data import ingest_data
     from cognee.modules.ingestion.data_types import TextData
@@ -120,3 +147,4 @@ async def write_text(payload, ctx, data_id):
             "generated_source_changed",
             "Registered content metadata is inconsistent",
         )
+    await stamp(data_id, ctx.dataset.id)
