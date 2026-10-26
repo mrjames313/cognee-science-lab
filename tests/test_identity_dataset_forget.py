@@ -86,9 +86,22 @@ def test_a_fault_stage_fails_the_first_or_last_step():
     assert step_fault(None, 0, 3) is None
 
 
+def outcome(*waiting, code="dependent_unfinished"):
+    return dict(dependents_waiting=list(waiting), dependents_failed=dict(code=code))
+
+
 def test_a_repair_goes_on_past_a_dependent_a_later_step_erases():
     gone = dict(identity_data_id="b", missing=["chunks"])
     pending = dict(identity_data_id="b", missing=None)
-    assert repaired_later(dict(dependents_waiting=[gone]), {"b"})
-    assert not repaired_later(dict(dependents_waiting=[gone]), {"c"})
-    assert not repaired_later(dict(dependents_waiting=[pending]), {"b"})
+    assert repaired_later(outcome(gone), {"b"})
+    assert not repaired_later(outcome(gone), {"c"})
+    assert not repaired_later(outcome(pending), {"b"})
+
+
+def test_a_repair_stops_at_a_removal_that_raised():
+    """A removal revision write that raises leaves nothing waiting, or a
+    waiting list beside another code: neither is a repair."""
+    gone = dict(identity_data_id="b", missing=["chunks"])
+    assert not repaired_later(outcome(code="verify_survivor"), {"b"})
+    assert not repaired_later(outcome(), {"b"})
+    assert not repaired_later(outcome(gone, code="injected_failure"), {"b"})

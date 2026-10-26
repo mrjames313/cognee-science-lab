@@ -268,12 +268,15 @@ async def sweep_orphans(publisher, listed) -> list[str]:
 
 def repaired_later(outcome, later) -> bool:
     """Whether a later step erases every dependent the forget left
-    waiting: each misses its native copy, so no removal revision can be
-    written for it, and each is a later step, whose forget finishes the
-    cascade."""
-    return all(
-        w["missing"] and w["identity_data_id"] in later
-        for w in outcome["dependents_waiting"]
+    waiting: the forget failed only for waiting dependents
+    (`dependent_unfinished`), each misses its native copy, so no removal
+    revision can be written for it, and each is a later step, whose forget
+    finishes the cascade. A removal that raised is a real failure."""
+    waiting = outcome["dependents_waiting"]
+    return (
+        outcome["dependents_failed"]["code"] == "dependent_unfinished"
+        and bool(waiting)
+        and all(w["missing"] and w["identity_data_id"] in later for w in waiting)
     )
 
 
