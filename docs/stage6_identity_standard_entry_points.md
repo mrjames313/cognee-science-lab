@@ -14,6 +14,7 @@ Built on 2026-10-26 against Cognee 1.6.2 (step 5, units S3a, S3b and S4). Every 
 - **A per-item `cognee.forget(memory_only=True)`** clears that item's stamp.
 - **`cognee.update`** on its full-rebuild path cognifies the whole dataset. Stamped files still skip, but the updated file is ingested with changed text, which clears its stamp.
 - **Ingesting changed text** clears every stamp of that item. The lab's own text writes (`registered.write_text`) and its per-item forget in a text change stamp the item again at once.
+- **A hard kill inside a text change between its per-item forget and the stamp after it.** The forget has cleared the original's chunks and its stamp, and the row stays `pending`. A plain `cognee.cognify` then extracts the previous text with the LLM. Resuming the text change forgets and stamps the original again.
 - **Roots made before S3b** carry no stamp on the files their creation command registered by hand (before S3a for `fixture`), or on the files of a source re-added before S3b, until something the lab writes stamps them.
 
 The fixture environment points the LLM at a closed loopback port (`http://127.0.0.1:9/v1`), so a plain call that does reach the LLM fails at once with a connection error. It never sends the fixture's fake key to a provider.
