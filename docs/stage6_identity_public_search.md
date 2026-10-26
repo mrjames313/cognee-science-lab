@@ -8,7 +8,7 @@ Built on 2026-10-26 against Cognee 1.6.2 and Python 3.12 (step 5, unit S1). The 
 
 Only `IDENTITY` applies the ledger. Cognee's own search types read the graph, the chunk index and the triplet index as they stand, so they serve what the lab withholds: a decision withheld after an edit of its input, a failed publication's new text, and the mention labels that are never query aliases. Use `IDENTITY` for answers that the lab's saved descriptions govern.
 
-Probe E2 measured this on 2026-10-26. An Opus subagent of the assistant ran `support/s1_probes.py` on the user's Mac, with loopback embeddings and every LLM call refused unless the probe stubbed it, on `glossary-fixture --chain` roots. For the query `What does HC limit?`:
+Probe E2 measured this on 2026-10-26. An Opus subagent of the assistant ran `support/s1_probes.py` at tag `s1-probes-2026-10-26` (commit 21a74e7) on the user's Mac, with loopback embeddings and every LLM call refused unless the probe stubbed it, on `glossary-fixture --chain` roots. For the query `What does HC limit?`:
 
 | Root | `IDENTITY` | `CHUNKS` | `GRAPH_COMPLETION` (`only_context`) | `TRIPLET_COMPLETION` (`only_context`) |
 |---|---|---|---|---|
