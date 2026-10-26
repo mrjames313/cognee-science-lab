@@ -256,6 +256,7 @@ class TextChange:
             user=ctx.user,
             memory_only=True,
         )
+        # write_text stamps again; this covers a failure before it.
         await stamp(doc.data_id, old.dataset_id)
         await boundary("text_removed")
         original = await original_context(old, ctx)

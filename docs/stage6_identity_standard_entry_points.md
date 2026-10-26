@@ -38,7 +38,7 @@ With `ENABLE_BACKEND_ACCESS_CONTROL=true`, each nested Cognee call inside an ite
 
 ### A failure
 
-A failure in the lab Task is recorded in the ledger as a failed attempt with its recovery event, as before. The run still completes, so Cognee keeps the native chunks and the stamp, and the entry point then raises the same error. The CLI exits 1 and prints it with its `recovery_event_id`, exactly as the [first slice guide](stage6_identity_first_slice.md) describes.
+A failure in the lab Task is recorded in the ledger as a failed attempt with its recovery event, as before. The run still completes, so Cognee keeps the native chunks and the stamp, and the entry point then raises the same error. The CLI exits 1 and prints it with its `recovery_event_id`, exactly as the [first slice guide](stage6_identity_first_slice.md) describes. Cognee's own dataset status (`cognee.datasets.get_status`, or the run record) still shows `cognify_pipeline` completed for the run. Read the ledger (`status`) for the lab's outcome, not Cognee's run status.
 
 `reconcile` of a failed first publication runs the lab's `cognify` again. Cognee's Tasks chunk the original again with the same chunk IDs and the chunk budget the chunks record. Then the lab Task finishes the saved plan.
 

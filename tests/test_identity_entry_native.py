@@ -41,6 +41,11 @@ async def main(root, action):
     graph = await get_graph_engine()
     run_ids = await runs_of("cognify_pipeline")
     out = dict(tagged=sorted({t for r in run_ids for t in await tagged_types(graph, r)}))
+    if action == "look":
+        import cognee
+
+        status = await cognee.datasets.get_status([source.dataset_id])
+        out["dataset_status"] = str(status[str(source.dataset_id)])
     if action == "recover":
         from cognee.modules.cognify.rollback import cognify_rollback_handler
 
@@ -111,6 +116,8 @@ def test_startup_recovery_keeps_a_failed_first_publication(tmp_path):
     failed = command(root, "fixture", "--fault-stage", "identity_edges", expect=1)
     assert "recovery_event_id=" in output(failed)["message"]
     assert (root / "fixture-info.json").exists()
+    # Cognee's own run status does not show the lab's failure.
+    assert in_root(root, "look")["dataset_status"].endswith("COMPLETED")
     recovered = in_root(root, "recover")
     # The lab Task stamped the original before it published, so the
     # recovery kept the native chunks.
