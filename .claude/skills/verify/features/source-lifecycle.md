@@ -617,7 +617,7 @@ $V drive "$RUN" main gone -- status
 $V check "$RUN" gone '.native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'status lists nothing deleted outside the lab and no open incident'
 ```
 
-**F27 a full reset leaves nothing to repair.** Proves `reset`. Guide: `docs/stage6_identity_forget.md`, "Reset". On a `fixture` root `native-forget --case reset` runs `prune_data()` and `prune_system(metadata=True)`, which deletes Cognee's relational database and the lab's ledger in it. `status` lists no publication, no incident, no withholding and nothing deleted outside the lab: no row and no tombstone remains. `retrieve` serves nothing and lists no unavailable source. `forget`, `readd` and `forget-dataset` are refused with the guide's messages, and `reconcile` fails inside Cognee with `DatabaseNotCreatedError`.
+**F27 a full reset leaves nothing to repair.** Proves `reset`. Guide: `docs/stage6_identity_forget.md`, "Reset". On a `fixture` root `native-forget --case reset` runs `prune_data()` and `prune_system(metadata=True)`, which deletes Cognee's relational database and the lab's ledger in it. `status` lists no publication, no incident, no withholding and nothing deleted outside the lab: no row and no tombstone remains. `retrieve` serves nothing and lists no unavailable source. `forget`, `readd` and `forget-dataset` are refused with the guide's messages, and `reconcile` is refused (`stores_reset`) saying the stores were reset and the root must be rebuilt.
 
 ```bash journey F27
 $V drive "$RUN" main fixture -- fixture
@@ -634,7 +634,7 @@ $V check "$RUN" readd '.error == "IntentError" and .message == "Re-add needs a f
 $V drive "$RUN" main dataset -- forget-dataset --dry-run
 $V check "$RUN" dataset '.error == "IntentError" and (.message | startswith("The root holds no saved source"))' 'forget-dataset finds nothing to forget'
 $V drive "$RUN" main rec -- reconcile --source doc01
-$V check "$RUN" rec '.error == "DatabaseNotCreatedError"' 'reconcile fails inside Cognee, whose Data tables are gone'
+$V check "$RUN" rec '.error == "IntentError" and (.message | startswith("Cognee'"'"'s stores were reset")) and (.message | endswith("Rebuild the root as a new fixture"))' 'reconcile refuses a reset root and names the rebuild'
 ```
 
 **F28 a re-add after an Entity is deleted outside the lab.** Proves `readd-outside-deleted`. Guide: `docs/stage6_identity_entity_edits.md`, "A re-add naming it waits for its citers". On a `glossary-fixture --chain` root, `edit-entity --case delete` deletes Helios, which doc01 and doc03 both build. doc03 is forgotten with no dependent. Its re-add is refused while doc01, `current`, still names Helios: the message names doc01's identity source, its dataset and its state and says to forget or replace it, and `details.citers` lists it. doc01 is forgotten, with no dependent since doc03 is forgotten. The user drops doc03's citations of doc01's records from `doc03_identity.json` (a re-add may not cite a forgotten source's records), and doc03's re-add publishes revision 2 with its Helios recipe under a derived UUID. The user drops doc01's corpus input of Helios from `identity.json`, since a re-add may not cite a removed Entity, and doc01's re-add publishes revision 2 the same way. No description names the old Helios UUID and no fact reaches it. The two re-adds derive two different UUIDs for the one Helios they built before (case 10 of the user's review, pre-existing: `replacement_entity_id` and `fresh_entity_id` key on the identity source).

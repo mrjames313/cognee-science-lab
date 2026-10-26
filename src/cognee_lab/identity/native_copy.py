@@ -14,6 +14,7 @@ from uuid import UUID
 
 from .models import ChunkInput
 from .retirement import source_ids
+from .validation import IntentError
 
 
 class NativeCopy(NamedTuple):
@@ -32,6 +33,24 @@ class NativeCopy(NamedTuple):
     @property
     def missing(self) -> list[str]:
         return [facet for facet in self._fields if not getattr(self, facet)]
+
+
+async def refuse_reset():
+    """Refuse a root whose stores were reset: `prune_system(metadata=True)`
+    deletes Cognee's relational database, with the lab's ledger in it, so
+    no row is left and Cognee's own tables are gone (`get_default_user`
+    raises `DatabaseNotCreatedError`). Nothing a reconcile reads remains."""
+    from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+    from cognee.modules.users import methods
+
+    try:
+        await methods.get_default_user()
+    except DatabaseNotCreatedError:
+        raise IntentError(
+            "stores_reset",
+            "Cognee's stores were reset, which deleted the lab's ledger with "
+            "them; nothing is left to reconcile. Rebuild the root as a new fixture",
+        ) from None
 
 
 async def data_present(data_id, dataset_id):

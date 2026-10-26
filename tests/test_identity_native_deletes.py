@@ -104,3 +104,29 @@ async def test_a_forgotten_row_is_not_checked(source_payload, emptied):
 )
 def test_a_native_copy_names_each_missing_facet(copy, missing):
     assert copy.missing == missing
+
+
+async def test_reconcile_after_a_full_reset_is_refused(monkeypatch, source_payload):
+    """`prune_system(metadata=True)` deletes Cognee's relational database
+    and the ledger in it: no row is left, and Cognee's own tables are gone,
+    so reconcile refuses before it reads the fixture's Data item."""
+    from types import SimpleNamespace
+
+    from cognee.infrastructure.databases.exceptions import DatabaseNotCreatedError
+    from cognee.modules.users import methods
+
+    from cognee_lab.identity.publish import Publisher
+    from cognee_lab.identity.validation import IntentError
+
+    async def no_row(source):
+        return None
+
+    async def reset():
+        raise DatabaseNotCreatedError(log=False)
+
+    monkeypatch.setattr(methods, "get_default_user", reset)
+    publisher = SimpleNamespace(records=SimpleNamespace(row=no_row), graph=None)
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    with pytest.raises(IntentError) as refused:
+        await Publisher.refuse_natively_deleted(publisher, source)
+    assert refused.value.code == "stores_reset"

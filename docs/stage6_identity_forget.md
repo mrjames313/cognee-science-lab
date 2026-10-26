@@ -379,7 +379,7 @@ A full reset is not a repair. `prune_system(metadata=True)` deletes Cognee's rel
 - `status` lists no publication, no incident, no withholding and nothing under `native_deleted`.
 - `retrieve` returns no fact and lists no unavailable source.
 - `forget` is refused (`No saved publication to forget`), as are `readd` (`Re-add needs a forgotten source`) and `forget-dataset` (`The root holds no saved source, not even a tombstone; nothing to forget`).
-- `reconcile` fails inside Cognee (`DatabaseNotCreatedError`): its Data tables are gone too, and the lab reads the fixture's Data item before it looks for a row.
+- `reconcile` is refused (`stores_reset`): "Cognee's stores were reset, which deleted the lab's ledger with them; nothing is left to reconcile. Rebuild the root as a new fixture". With no row for the source, `Publisher.refuse_natively_deleted` asks Cognee for its default user, and Cognee's `DatabaseNotCreatedError` (its tables are gone) becomes the refusal (`native_copy.refuse_reset`). Before fix round 2 of S2 part 2 (2026-10-26) the command failed inside Cognee with that raw error.
 - The root's files survive: the caller's text and identity files, the seed, the manifests and the result files. They still hold the old UUIDs, and the lab no longer knows which of those a forget retired, so the premise that the root files and the ledger agree (step 5 unit 6) does not hold after a reset. A new publication from them starts a new ledger with no tombstone to fence old UUIDs.
 
 ## Scope

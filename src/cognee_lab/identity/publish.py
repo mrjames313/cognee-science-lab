@@ -367,10 +367,13 @@ class Publisher:
         missing facets and the saved revision, from which the CLI names the
         forget. Each
         fixture front end calls it before it reads the source's document,
-        which may be what is gone, so before `reconcile`."""
-        from .native_copy import missing_native, refusal_message
+        which may be what is gone, so before `reconcile`. With no row, it
+        refuses a root whose stores were reset (`native_copy.refuse_reset`)."""
+        from .native_copy import missing_native, refusal_message, refuse_reset
 
         row = await self.records.row(source)
+        if row is None:
+            await refuse_reset()
         if row is not None and (missing := await missing_native(self.graph, row)):
             raise IntentError(
                 "native_deleted",
