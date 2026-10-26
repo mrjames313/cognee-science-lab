@@ -2,7 +2,7 @@
 
 **Guide scope:** what the lab's entry points over Cognee's own pipeline do, which fixture uses them, and what a plain Cognee call outside them does to a lab source. For project status, read [SESSION_HANDOFF.md](SESSION_HANDOFF.md).
 
-Built on 2026-10-26 against Cognee 1.6.2 (step 5, units S3a and S3b). Every creation command and `readd` registers and publishes its documents through the entry points ("Which commands use them"). `cognee.update` has no lab entry point until unit S4, so the text edits still rebuild their chunks by hand.
+Built on 2026-10-26 against Cognee 1.6.2 (step 5, units S3a, S3b and S4). Every creation command and `readd` registers and publishes its documents through the entry points ("Which commands use them"). Since S4 every text edit goes through the lab's `update` ("The lab's update").
 
 ## Warning: a plain Cognee call bypasses the identity layer
 
@@ -20,7 +20,7 @@ The fixture environment points the LLM at a closed loopback port (`http://127.0.
 
 ## What the entry points do
 
-`src/cognee_lab/identity/entry.py` holds four functions:
+`src/cognee_lab/identity/entry.py` holds four functions for a new source (since S4 it also holds `update` and `replace_text`, "The lab's update"):
 
 - **`add`** registers the original through `cognee.add`, chunks it in memory with Cognee's chunker, asks the caller's describer for the identity description, writes the description to a file, registers that file through `cognee.add` and stamps it.
 - **`cognify`** runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over one source's original. Cognee's standard Tasks run first: `classify_documents`, `extract_chunks_from_documents` and `add_data_points`. Then one lab Task, `identity_publish`, runs once per document over the whole chunk set. It stamps the original, then publishes the description: a first publication when the source has no row, a re-add at the expected revision when its row is forgotten, else a reconcile. A source with no captured facts (the glossary, doc03) publishes with no semantic writer.
@@ -59,6 +59,44 @@ A failure in the lab Task is recorded in the ledger as a failed attempt with its
 
 `status` compares a failed first publication with Cognee's copy like any other row. The lab never rolls its own chunks back, and Cognee's startup recovery keeps them because the original is stamped. So if they are gone, something outside the lab removed them, for example a `cognee.forget(memory_only=True)` of the original or a `cognee.update` that changed its text. `status` lists the row under `native_deleted`, and `reconcile` refuses it ([forget guide](stage6_identity_forget.md#deletes-outside-the-lab)).
 
+## The lab's update
+
+A text edit changes the original document of a published source and publishes the next revision of its identity description. Since S4 every edit command goes through `entry.update`:
+
+```python
+await update(
+    publisher,
+    source,          # the current description
+    text,            # the new text of the original
+    describe_edit=describe,
+    expected_revision=1,
+    semantics=None,  # or the captured facts to rebuild
+)
+```
+
+1. `update` reads the registered text, chunks the new text in memory with the chunk budget the native chunks record, and calls `describe_edit` with an `EditDraft` (the current description, the registered text, the new text and its chunks). The describer returns the next revision and its occurrence map.
+2. `update` builds the `TextChange` and calls `replace_text`. `replace_text` runs Cognee's `run_pipeline` under the pipeline name `cognify_pipeline` over the original, with one lab Task, `identity_update`. As in `cognify`, the run passes no rollback handler and `incremental_loading=False`, and every Task declares `needs_llm=False`.
+3. The lab Task calls the publisher's `replace` with the text change and the identity Data item's context, which carries no run ID. `replace` begins the attempt, withholds the dependents' affected decisions, forgets the original's memory (`cognee.forget(memory_only=True)` on the one Data item), stamps the original again at once, registers the new text and then runs Cognee's standard Tasks (`classify_documents`, `extract_chunks_from_documents`, `add_data_points`) nested, outside any run, with the lab's own context. Then it registers the description and publishes it.
+
+Cognee rebuilds the whole document, so every chunk of the original is new. The identity revision is incremental: admission checks the occurrence map against the previous revision, and the Entities, markers and facts that the map keeps keep their IDs.
+
+**No describer, no update.** `update` refuses with `describer_missing` when `describe_edit` is None. The lab never guesses an edited description (the user's decision U-e, made by the assistant on 2026-10-26 and awaiting confirmation).
+
+**The nested Tasks write with the lab's context.** The standard Tasks inside `replace` run with a context that has no pipeline run ID, so Cognee's rollback or startup recovery of the update run never finds the rebuilt chunks. Had they carried the run's ID, a recovery could remove chunks that a completed revision cites.
+
+**Which commands use it.**
+
+| Command | Through |
+| --- | --- |
+| `edit-text` | `update`, with the captured facts (`text_fixture.RebuiltSemantics`) |
+| `remove-occurrences`, `retire-resolved-group`, `add-occurrences`, `split-group`, `combine-groups`, `reinterpret-new-entity`, `reinterpret-unresolved`, `change-kind-to-mention`, `change-kind-to-reusable` | `update`, with the captured facts |
+| `edit-glossary` | `update`, with no captured facts |
+| `reconcile` of a failed text change, and a forget's erasure retry of one | `replace_text`, with the text change the plan saved |
+
+The hand-built edit route (a lab Task in `run_tasks_base` over the identity Data item, then the in-memory chunker and a direct `add_data_points`) is gone.
+
+**A failure.** A failure in the lab Task is recorded in the ledger as a failed replacement with its recovery event. The run still completes and `update` raises the same error, so the CLI exits 1 with `recovery_event_id`, as before. The original stays stamped at every replacement stage, `text_removed` included: the memory-only forget clears the original's mark, and the lab stamps it again before the stage ends. `reconcile` runs `replace_text` again with the saved text change.
+
 ## Commands
 
 ```bash
@@ -70,6 +108,7 @@ uv run python -m cognee_lab.identity retrieve --root outputs/stage6_entry
 - `fixture` builds doc01 through `add`, then `cognify` (`remember_in_order`). Its output adds `cognify_stamps`: `original`, `identity` and `seed` are each `true`.
 - `native-cognify` is a stand-in for a plain `cognee.cognify()` outside the lab, with Cognee's defaults. It prints `native_cognify.items`, the run result of each Data item. On a `fixture` root each of the three items is `PipelineRunAlreadyCompleted`, and `retrieve` then returns the same fact as before.
 - `multi-fixture`, `chunked-fixture` and `glossary-fixture --chain` stamp every file they register too: `native-cognify` skips the five Data items of a two-source root and the seven of a chain root.
+- `edit-text --source doc01 --expected-revision 1` on a `multi-fixture` root edits doc01 through the lab's `update`. doc01 reaches revision 2, and `native-cognify` then skips all five Data items.
 - `fixture --fault-stage nodes|identity_edges|verification` fails the first publication at that stage. The command exits 1 with `recovery_event_id`. The stamps stay, so `native-cognify` still skips every item. `reconcile` restores the fact and resolves the incident with outcome `restored`.
 
 Captured decisions prove lifecycle mechanics only. They do not prove extraction or search quality.

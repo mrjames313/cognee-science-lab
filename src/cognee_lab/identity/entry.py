@@ -5,6 +5,9 @@ runs Cognee's standard Tasks under the pipeline name `cognify_pipeline`, so
 Cognee builds the document and its chunks, then one lab Task publishes the
 description once per document over the whole chunk set. `remember` is `add`
 then `cognify`; `remember_in_order` does both for each source of a root.
+`update` edits a published source's original: one lab Task under
+`cognify_pipeline` replaces the text, rebuilds the chunks with the standard
+Tasks and publishes the next revision (`replace_text`).
 
 The lab Task never writes with the pipeline's context. Its writes carry no
 pipeline run ID, so Cognee's rollback and its startup recovery of an

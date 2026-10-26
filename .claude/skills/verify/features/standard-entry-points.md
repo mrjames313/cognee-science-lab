@@ -1,8 +1,8 @@
 # Standard entry points
 
-A user builds a root with any creation command. Since step 5 S3a, `fixture` goes through the lab's `remember`: Cognee's own `cognify_pipeline` chunks doc01 with its standard Tasks, then a lab Task publishes the identity description. Since S3b, every creation command runs the lab's `add`, then its `cognify`, for each source in publication order (`remember_in_order`, which is `remember` per source), so a failed source stops the run before the next source is added, and `readd` goes through `add` and `cognify` too. The lab stamps every file it manages as cognified, so a plain `cognee.cognify` outside the lab skips them and makes no LLM call. A failed first publication keeps its chunks and its stamps, and `reconcile` finishes it.
+A user builds a root with any creation command. Since step 5 S3a, `fixture` goes through the lab's `remember`: Cognee's own `cognify_pipeline` chunks doc01 with its standard Tasks, then a lab Task publishes the identity description. Since S3b, every creation command runs the lab's `add`, then its `cognify`, for each source in publication order (`remember_in_order`, which is `remember` per source), so a failed source stops the run before the next source is added, and `readd` goes through `add` and `cognify` too. The lab stamps every file it manages as cognified, so a plain `cognee.cognify` outside the lab skips them and makes no LLM call. A failed first publication keeps its chunks and its stamps, and `reconcile` finishes it. Since S4 every text edit goes through the lab's `update`: one lab Task under `cognify_pipeline` replaces the original, rebuilds its chunks with the standard Tasks and keeps every file stamped.
 
-Guide: `docs/stage6_identity_standard_entry_points.md` ("Commands", "A failure", "Warning: a plain Cognee call bypasses the identity layer"), with `docs/stage6_identity_first_slice.md` for the published fact.
+Guide: `docs/stage6_identity_standard_entry_points.md` ("Commands", "A failure", "The lab's update", "Warning: a plain Cognee call bypasses the identity layer"), with `docs/stage6_identity_first_slice.md` for the published fact.
 
 ## Sub-features
 
@@ -11,6 +11,9 @@ Guide: `docs/stage6_identity_standard_entry_points.md` ("Commands", "A failure",
 - `entry-publish-fault` fails the first publication inside the lab Task at a publish stage. The CLI exits 1 with the recovery event, the stamps stay, and `reconcile` finishes the saved plan.
 - `entry-every-root` builds the two-source, chunked and chain roots through `add`, then `cognify`, per source in order, and stamps every file on each.
 - `entry-readd` re-adds a forgotten source through `add` and `cognify`, which stamp its files.
+- `entry-update` edits doc01's text through the lab's `update`, and every file stays stamped.
+- `entry-update-fault` fails the update at each replacement stage. The stamps stay, `text_removed` included, and `reconcile` finishes the saved text change.
+- `native-cognify-after-update` runs a plain `cognee.cognify()` after a kind change, a glossary edit and an occurrence addition, and it skips every item.
 
 ## How to get to it (user POV)
 
@@ -118,4 +121,61 @@ $V drive "$RUN" main readd -- readd --source doc01 --expected-revision 1
 $V check "$RUN" readd '[.sources.doc01.state, .sources.doc01.saved_revision, .sources.doc01.verified_revision] == ["current", 2, 2] and .sources.doc01.original_fact_present' 'doc01 is re-added at revision 2 with its fact'
 $V drive "$RUN" main native -- native-cognify
 $V check "$RUN" native '.native_cognify.items | length == 5 and ([.[]] | unique) == ["PipelineRunAlreadyCompleted"]' 'cognify skips the re-added files too'
+```
+
+**L8 a text edit through the lab's update.** Proves `entry-update`. Guide: "The lab's update". `edit-text` on doc01 of a two-source root runs one lab Task under `cognify_pipeline`. doc01 reaches revision 2 with the edited positions, doc02 stays at revision 1, and no incident is recorded. `native-cognify` then skips all five Data items, so the edited original and the new description were stamped again. `retrieve` in a new process serves the same two facts.
+
+```bash journey L8
+$V drive "$RUN" main fixture -- multi-fixture
+$V drive "$RUN" main edit -- edit-text --source doc01 --expected-revision 1
+$V check "$RUN" edit '([.sources.doc01, .sources.doc02] | map([.state, .saved_revision, .verified_revision, .registered_revision])) == [["current", 2, 2, 2], ["current", 1, 1, 1]] and .recovery_events == []' 'doc01 is current at revision 2, doc02 stays at 1, and no incident'
+$V check "$RUN" edit '.text_changes[0] | .position_shift == 48 and .retired_chunks_absent and .retired_chunk_vectors_absent and .evidence_uses_current_chunks' 'the standard Tasks rebuilt the chunks and the evidence uses them'
+FACTS=$(val edit '[.result.facts[].edge_id] | sort')
+$V drive "$RUN" main native -- native-cognify
+$V check "$RUN" native '.native_cognify.items | length == 5 and ([.[]] | unique) == ["PipelineRunAlreadyCompleted"]' 'cognify skips all five items after the update'
+$V drive "$RUN" main reopen -- retrieve
+$V check "$RUN" reopen '([.facts[].edge_id] | sort) == '"$FACTS"' and .unavailable_sources == []' 'the same facts are served after the plain cognify'
+$V check "$RUN" reopen '[.facts[].identity.occurrences | map([.start, .end])] | any(. == [[97, 111], [134, 136]])' 'doc01 is served at its edited positions'
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '([.publications[] | [.state, .revision, .verified_revision]] | sort) == [["current", 1, 1], ["current", 2, 2]] and .native_deleted == []' 'both publications are current and nothing is listed as deleted'
+```
+
+**L9 a failed update at every replacement stage.** Proves `entry-update-fault`. Guide: "The lab's update". `edit-text` fails inside the lab Task at each replacement stage. The command exits 1 with `recovery_event_id`. doc01 is failed at revision 2, verified at 1, and nothing is listed under `native_deleted`. `native-cognify` skips all five items at every stage, `text_removed` among them, where the memory-only forget has cleared the original's mark and the lab stamped it again before the stage ended. `reconcile` finishes the saved text change through the same lab Task, resolves the incident with outcome `restored`, and the items stay stamped.
+
+```bash journey L9 stages=replace_saved,withhold_dependents,replace_registered,replace_published,replace_retired,replace_verification,text_removed,text_registered,text_chunks
+$V drive "$RUN" main fixture -- multi-fixture
+$V drive "$RUN" main fail -- edit-text --source doc01 --expected-revision 1 --fault-stage "$STAGE"
+$V check "$RUN" fail '.error == "IntentError" and (.message | test("recovery_event_id=[0-9a-f-]{36}"))' 'the injected failure names a recovery event'
+EID=$(val fail '.message | capture("recovery_event_id=(?<id>[0-9a-f-]+)") | .id')
+$V drive "$RUN" main before -- status
+$V check "$RUN" before '[.publications[] | select(.state == "failed") | [.revision, .verified_revision]] == [[2, 1]] and .native_deleted == []' 'doc01 is failed at revision 2 and nothing is listed as deleted'
+$V drive "$RUN" main native -- native-cognify
+$V check "$RUN" native '.native_cognify.items | length == 5 and ([.[]] | unique) == ["PipelineRunAlreadyCompleted"]' 'every item is still stamped after the failure'
+$V drive "$RUN" main reconcile -- reconcile --source doc01
+$V check "$RUN" reconcile '[.sources.doc01, .sources.doc02] | map([.state, .saved_revision, .verified_revision, .registered_revision]) == [["current", 2, 2, 2], ["current", 1, 1, 1]]' 'reconcile completes revision 2'
+$V check "$RUN" reconcile '.recovery_events | length == 1 and (.[0] | .recovery_event_id == "'"$EID"'" and .outcome == "restored" and .resolved_at != null)' 'the same incident is restored'
+$V drive "$RUN" main after -- native-cognify
+$V check "$RUN" after '.native_cognify.items | length == 5 and ([.[]] | unique) == ["PipelineRunAlreadyCompleted"]' 'every item is stamped after the reconcile'
+```
+
+**L10 a plain cognify after the other updates.** Proves `native-cognify-after-update`. Guide: "The lab's update". On a chain root, doc01's kind change and then a glossary edit (no captured facts) each go through the lab's update, and on a chunked root an occurrence addition does. After each, `native-cognify` skips every Data item, and the facts it served before the plain call are served after it.
+
+```bash journey L10
+$V drive "$RUN" chain fixture -- glossary-fixture --chain
+$V drive "$RUN" chain kind -- change-kind-to-mention --source doc01 --expected-revision 1
+$V check "$RUN" kind '.sources.doc01 | [.state, .saved_revision, .verified_revision] == ["current", 2, 2]' 'the kind change reaches revision 2'
+$V drive "$RUN" chain native1 -- native-cognify
+$V check "$RUN" native1 '.native_cognify.items | length == 7 and ([.[]] | unique) == ["PipelineRunAlreadyCompleted"]' 'cognify skips all seven items after the kind change'
+$V drive "$RUN" chain glossary -- edit-glossary --source glossary --case cosmetic --expected-revision 1
+$V check "$RUN" glossary '.sources.glossary | [.state, .saved_revision, .verified_revision] == ["current", 2, 2]' 'the glossary edit reaches revision 2'
+FACTS=$(val glossary '[.result.facts[].edge_id] | sort')
+$V drive "$RUN" chain native2 -- native-cognify
+$V check "$RUN" native2 '.native_cognify.items | length == 7 and ([.[]] | unique) == ["PipelineRunAlreadyCompleted"]' 'cognify skips all seven items after the glossary edit'
+$V drive "$RUN" chain reopen -- retrieve
+$V check "$RUN" reopen '([.facts[].edge_id] | sort) == '"$FACTS" 'the same facts are served after the plain cognify'
+$V drive "$RUN" chunked fixture2 -- chunked-fixture
+$V drive "$RUN" chunked add -- add-occurrences --source doc01 --expected-revision 1
+$V check "$RUN" add '.sources.doc01 | [.state, .saved_revision, .verified_revision] == ["current", 2, 2]' 'the occurrence addition reaches revision 2'
+$V drive "$RUN" chunked native3 -- native-cognify
+$V check "$RUN" native3 '.native_cognify.items | length == 5 and ([.[]] | unique) == ["PipelineRunAlreadyCompleted"]' 'cognify skips all five items after the occurrence addition'
 ```
