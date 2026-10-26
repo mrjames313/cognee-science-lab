@@ -627,16 +627,19 @@ async def write_replacement(publisher, row, description, revise):
 
 async def write_text_change(publisher, row, description, revise):
     """A failed text change's retry with its saved text change, through the
-    writer and verifier that text change needs (`text_fixture.rebuild`)."""
+    lab's `replace_text` and the captured edit's writer and verifier."""
+    from .entry import replace_text
     from .text_changes import TextChange
-    from .text_fixture import rebuild
+    from .text_fixture import RebuiltSemantics
 
-    await rebuild(
+    await replace_text(
         publisher,
         description,
         TextChange.from_plan(row.plan),
         expected_revision=row.revision,
+        semantics=RebuiltSemantics(),
         fault_stage="replace_registered" if revise else None,
+        origin="test",
     )
 
 

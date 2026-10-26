@@ -21,6 +21,7 @@ from .captured_chunks import bind_chunks
 from .chain_fixture import add_doc03, cite
 from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
+from .entry import replace_text, update
 from .fixture import add_doc01, expect_current, seed_corpus
 from .forget_fixture import (
     CALLER_FILES,
@@ -38,7 +39,7 @@ from .records import saved_records
 from .registered import context_for, read_registered, read_texts
 from .retrieve import retrieve, withholding_status
 from .revisions import refresh, refresh_dependents
-from .text_changes import TextChange, chunk_text, original_context, read_original
+from .text_changes import read_original
 from .text_fixture import maintain_one
 from .validation import IntentError, text_digest
 from .withholding import document_inputs
@@ -193,74 +194,55 @@ async def change_glossary(
     fault_stage=None,
     refresh_fault=None,
 ):
-    """The glossary's text change, with no captured facts to rebuild, then
-    the refresh of its dependents' moved spans."""
-    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
-    from cognee.modules.pipelines.tasks.task import Task
-
-    generated = await context_for(intended.identity_data_id)
-    original = await original_context(intended, generated)
-    prepared = await chunk_text(change.text, original, change.chunk_budget)
-
-    async def nothing():
-        return None
-
-    async def task(items, ctx=None):
-        for item in items:
-            await publisher.replace(
-                item,
-                texts={item.original_input_ref: change.text},
-                chunks={str(c.id): c for c in prepared},
-                ctx=ctx,
-                expected_revision=expected_revision,
-                text_change=change,
-                semantic_writer=nothing,
-                verify_semantics=nothing,
-                fault_stage=fault_stage,
-                origin="test/fault_injection" if fault_stage else "test",
-            )
-        return items
-
-    async for _ in run_tasks_base(
-        [Task(task, needs_llm=False)], [intended], generated.user, generated
-    ):
-        pass
+    """Finish a failed glossary edit with the text change its plan saved
+    (`entry.replace_text`), then refresh its dependents' moved spans."""
+    await replace_text(
+        publisher,
+        intended,
+        change,
+        expected_revision=expected_revision,
+        semantics=None,
+        fault_stage=fault_stage,
+        origin="test",
+    )
     return await refresh_dependents(publisher, refresh_fault)
 
 
 async def edit(
     publisher, root, glossary, case, *, expected_revision, fault_stage, refresh_fault
 ):
+    """The glossary's text change through the lab's update, with no
+    captured facts to rebuild, then the refresh of its dependents' moved
+    spans."""
     await expect_current(
         publisher,
         glossary,
         expected_revision,
         "Reconcile the exact saved glossary edit explicitly",
     )
-    ctx = await context_for(glossary.identity_data_id)
-    before = await read_original(glossary, ctx)
-    change = TextChange(
-        previous_text=before,
-        text=CASES[case](before),
-        occurrence_map={},
-        chunk_budget=json.loads((root / INFO).read_text())["chunk_budget"],
-    )
-    chunks = await chunk_text(
-        change.text, await original_context(glossary, ctx), change.chunk_budget
-    )
-    intended = describe_glossary(glossary.dataset_id, change.text, chunks, old=glossary)
-    (root / f"glossary_revision{intended.revision}.txt").write_text(change.text)
-    (root / f"glossary_identity_revision{intended.revision}.json").write_text(
-        intended.model_dump_json(indent=2) + "\n"
-    )
-    return await change_glossary(
+    before = await read_original(glossary, await context_for(glossary.identity_data_id))
+
+    def describe(draft):
+        intended = describe_glossary(
+            glossary.dataset_id, draft.text, draft.chunks, old=draft.old
+        )
+        (root / f"glossary_revision{intended.revision}.txt").write_text(draft.text)
+        (root / f"glossary_identity_revision{intended.revision}.json").write_text(
+            intended.model_dump_json(indent=2) + "\n"
+        )
+        return intended, {}
+
+    await update(
         publisher,
-        intended,
-        change,
+        glossary,
+        CASES[case](before),
+        describe_edit=describe,
         expected_revision=expected_revision,
+        semantics=None,
         fault_stage=fault_stage,
-        refresh_fault=refresh_fault,
+        origin="test",
     )
+    return await refresh_dependents(publisher, refresh_fault)
 
 
 async def reconcile(publisher, label, selected):

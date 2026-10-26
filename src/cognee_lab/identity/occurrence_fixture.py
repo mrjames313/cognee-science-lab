@@ -169,13 +169,10 @@ COMMANDS = {
 
 
 async def run(args, root):
-    from .captured_chunks import recorded_budget
-    from .registered import context_for
     from .multisource import current_sources, snapshot
     from .publish import Publisher
     from .retrieve import retrieve
-    from .text_changes import TextChange, chunk_text, original_context, read_original
-    from .text_fixture import maintain_one
+    from .text_fixture import edit_one
 
     command = COMMANDS[args.command]
     if args.source != "doc01" or not (root / "chunked-fixture-info.json").exists():
@@ -193,26 +190,20 @@ async def run(args, root):
         args.expected_revision,
         "Reconcile the exact saved replacement explicitly",
     )
-    ctx = await context_for(old.identity_data_id)
-    before = await read_original(old, ctx)
-    change = TextChange(
-        before,
-        command.after,
-        command.occurrence_map,
-        await recorded_budget(old, publisher.graph),
-    )
-    chunks = await chunk_text(
-        command.after, await original_context(old, ctx), change.chunk_budget
-    )
-    intended = command.describe(old, before, chunks)
-    (root / f"identity_doc01_occurrence_revision{intended.revision}.json").write_text(
-        intended.model_dump_json(indent=2) + "\n"
-    )
-    (root / f"source_doc01_revision{intended.revision}.txt").write_text(command.after)
-    refresh = await maintain_one(
+
+    def describe(draft):
+        intended = command.describe(draft.old, draft.previous_text, draft.chunks)
+        (
+            root / f"identity_doc01_occurrence_revision{intended.revision}.json"
+        ).write_text(intended.model_dump_json(indent=2) + "\n")
+        (root / f"source_doc01_revision{intended.revision}.txt").write_text(draft.text)
+        return intended, command.occurrence_map
+
+    refresh = await edit_one(
         publisher,
-        intended,
-        change,
+        old,
+        command.after,
+        describe,
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,
     )

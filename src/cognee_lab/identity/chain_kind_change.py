@@ -30,7 +30,7 @@ withheld (`dependents_withheld`), from the live pass that retrieval and
 import json
 from functools import partial
 
-from .captured_chunks import TO_MENTION, bind_chunks, recorded_budget
+from .captured_chunks import TO_MENTION, bind_chunks
 from .captured_revision import begin_revision, require_root, retire_group
 from .fixture import FIXTURES, expect_current
 from .registered import context_for
@@ -44,8 +44,8 @@ from .kind_change import (
 )
 from .kind_change import describe_to_mention as to_mention
 from .models import IdentitySource
-from .text_changes import TextChange, chunk_text, original_context, read_original
-from .text_fixture import maintain_one
+from .text_changes import read_original
+from .text_fixture import edit_one
 
 TO_MENTION_MAP = {"g01": [["g01", 0], ["g01", 1]]}
 TO_REUSABLE_MAP = {**TO_MENTION_MAP, "g09": [None]}
@@ -106,20 +106,18 @@ async def change_kind(
         expected_revision,
         "Reconcile the exact saved replacement explicitly",
     )
-    ctx = await context_for(doc01.identity_data_id)
-    before = await read_original(doc01, ctx)
-    change = TextChange(
-        before, before, occurrence_map, await recorded_budget(doc01, publisher.graph)
-    )
-    chunks = await chunk_text(
-        before, await original_context(doc01, ctx), change.chunk_budget
-    )
-    intended = describe(doc01, before, chunks)
-    write_revision(root, "doc01", intended)
-    return await maintain_one(
+    before = await read_original(doc01, await context_for(doc01.identity_data_id))
+
+    def describe_kind(draft):
+        intended = describe(draft.old, draft.text, draft.chunks)
+        write_revision(root, "doc01", intended)
+        return intended, occurrence_map
+
+    return await edit_one(
         publisher,
-        intended,
-        change,
+        doc01,
+        before,
+        describe_kind,
         expected_revision=expected_revision,
         fault_stage=fault_stage,
     )

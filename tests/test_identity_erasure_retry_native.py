@@ -109,24 +109,24 @@ from cognee_lab.identity.environment import fixture_environment
 root=Path(sys.argv[1]);fault=sys.argv[2]
 with fixture_environment(root):
  from cognee_lab.identity.admission import identity_map
- from cognee_lab.identity.captured_chunks import recorded_budget
+ from cognee_lab.identity.entry import update
  from cognee_lab.identity.registered import context_for
  from cognee_lab.identity.forget import forget, preview
  from cognee_lab.identity.multisource import current_sources
  from cognee_lab.identity.publish import Publisher
- from cognee_lab.identity.text_changes import TextChange,chunk_text,original_context,read_original
- from cognee_lab.identity.text_fixture import PREFIX,describe_prefix_edit,rebuild
+ from cognee_lab.identity.text_changes import read_original
+ from cognee_lab.identity.text_fixture import PREFIX,RebuiltSemantics,describe_prefix_edit
  async def check():
   p=await Publisher.configured()
   sources=await current_sources(root,p)
   old=sources["doc02"]
-  ctx=await context_for(old.identity_data_id)
-  before=await read_original(old,ctx)
-  change=TextChange(previous_text=before,text=PREFIX+before,occurrence_map=identity_map(old),chunk_budget=await recorded_budget(old,p.graph))
-  chunks=await chunk_text(change.text,await original_context(old,ctx),change.chunk_budget)
-  intended=describe_prefix_edit(old,change.text,chunks)
+  before=await read_original(old,await context_for(old.identity_data_id))
+  described=[]
+  def describe(d):
+   described.append(describe_prefix_edit(d.old,d.text,d.chunks))
+   return described[0],identity_map(d.old)
   try:
-   await rebuild(p,intended,change,expected_revision=1,fault_stage=fault)
+   await update(p,old,PREFIX+before,describe_edit=describe,expected_revision=1,semantics=RebuiltSemantics(),fault_stage=fault)
    raise SystemExit("the injected failure did not fail the text change")
   except SystemExit: raise
   except Exception: pass
@@ -140,6 +140,7 @@ with fixture_environment(root):
   assert outcome["dependents_failed"] is None,outcome
   row=await p.records.row(old)
   assert (row.state,row.revision)==("current",2),row
+  (intended,)=described
   assert row.description.inputs[row.description.original_input_ref].text_sha256==intended.inputs[intended.original_input_ref].text_sha256
   doc01_data=doc01.inputs[doc01.original_input_ref].data_id
   assert not any(getattr(i,"data_id",None)==doc01_data for i in row.description.inputs.values()),row.description.inputs

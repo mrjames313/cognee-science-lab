@@ -6,7 +6,7 @@ from .models import ChunkInput, IdentitySource
 from .multisource import current_sources, snapshot
 from .publish import Publisher
 from .admission import identity_map
-from .text_changes import TextChange, chunk_text, original_context, read_original
+from .text_changes import TextChange, original_context, read_original
 from .validation import IntentError, text_digest
 
 PREFIX = "Revision note: Δ calibration schedule updated.\n\n"
@@ -66,90 +66,77 @@ async def verify_rebuilt_semantics(publisher, source, chunks, ctx):
         )
 
 
-async def maintain_one(
-    publisher, source, change, *, expected_revision, fault_stage=None
+class RebuiltSemantics:
+    """The captured facts of a text edit, as the lab's update writes and
+    checks them (`entry.Semantics`): the rebuilt facts and evidence, the
+    retired mentions, and, since this two-document fixture promises it, the
+    other current sources' facts."""
+
+    @staticmethod
+    async def write(publisher, source, chunks, original):
+        from .fixture import write_semantics
+
+        await write_semantics(publisher, source, chunks, original)
+
+    @staticmethod
+    async def verify(publisher, source, chunks, original):
+        from .captured_chunks import retired_mentions
+        from .fixture import load_chunks, verify_semantics
+        from .resolved_retirement import verify_retirement
+
+        await verify_rebuilt_semantics(publisher, source, chunks, original)
+        for mid in retired_mentions(source).values():
+            await verify_retirement(publisher, source, mid)
+        for row in await publisher.records.rows(source.dataset_id):
+            if row.source == str(source.identity_data_id) or row.state != "current":
+                continue
+            other = row.description
+            other_ctx = await original_context(other, original)
+            other_chunks = await load_chunks(other, other_ctx)
+            await verify_semantics(publisher, other, other_chunks, other_ctx)
+
+
+async def edit_one(
+    publisher, source, text, describe_edit, *, expected_revision, fault_stage=None
 ):
-    """Replace `source` with its text change, then refresh its dependents."""
-    await rebuild(
-        publisher,
-        source,
-        change,
-        expected_revision=expected_revision,
-        fault_stage=fault_stage,
-    )
+    """Edit `source` to `text` through the lab's update, then refresh its
+    dependents."""
+    from .entry import update
     from .revisions import refresh_dependents
 
+    await update(
+        publisher,
+        source,
+        text,
+        describe_edit=describe_edit,
+        expected_revision=expected_revision,
+        semantics=RebuiltSemantics(),
+        fault_stage=fault_stage,
+        origin="test",
+    )
     # The edit completed: refresh its dependents at once (the user decided).
     # A refresh failure is reported beside the completed edit.
     return await refresh_dependents(publisher)
 
 
-async def rebuild(publisher, source, change, *, expected_revision, fault_stage=None):
-    """Replace `source` with its text change through the native pipeline,
-    with the semantic writer and verifier the captured edit needs. A failed
-    text change's retry may carry the removal of what a forget took away
-    (erasure.write_text_change); its own dependents' ranges then wait for
-    `refresh-dependents`."""
-    from .fixture import write_semantics
-    from .registered import context_for
-    from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
-    from cognee.modules.pipelines.tasks.task import Task
+async def maintain_one(
+    publisher, source, change, *, expected_revision, fault_stage=None
+):
+    """Finish a failed text change of `source` with the change its plan
+    saved (`entry.replace_text`), then refresh its dependents."""
+    from .entry import replace_text
+    from .revisions import refresh_dependents
 
-    generated = await context_for(source.identity_data_id)
-    original = await original_context(source, generated)
-    prepared = await chunk_text(change.text, original, change.chunk_budget)
-    chunks = {str(c.id): c for c in prepared}
-
-    async def write():
-        original = await original_context(source, generated)
-        await write_semantics(publisher, source, list(chunks.values()), original)
-
-    async def verify():
-        original = await original_context(source, generated)
-        await verify_rebuilt_semantics(
-            publisher, source, list(chunks.values()), original
-        )
-        from .captured_chunks import retired_mentions
-        from .resolved_retirement import verify_retirement
-
-        for mid in retired_mentions(source).values():
-            await verify_retirement(publisher, source, mid)
-        # This two-document fixture promises survival of the independent local
-        # fact, in addition to the common publisher's identity-owner checks.
-        from .fixture import load_chunks, verify_semantics
-
-        for row in await publisher.records.rows(source.dataset_id):
-            if row.source == str(source.identity_data_id) or row.state != "current":
-                continue
-            other = row.description
-            other_ctx = await original_context(other, generated)
-            other_chunks = await load_chunks(other, other_ctx)
-            await verify_semantics(publisher, other, other_chunks, other_ctx)
-
-    async def task(items, ctx=None):
-        from .registered import read_texts
-
-        for item in items:
-            await publisher.replace(
-                item,
-                texts=await read_texts(
-                    item, known={item.original_input_ref: change.text}
-                ),
-                chunks=chunks,
-                ctx=ctx,
-                expected_revision=expected_revision,
-                text_change=change,
-                semantic_writer=write,
-                verify_semantics=verify,
-                fault_stage=fault_stage,
-                origin="test/fault_injection" if fault_stage else "test",
-            )
-        return items
-
-    async for _ in run_tasks_base(
-        [Task(task, needs_llm=False)], [source], generated.user, generated
-    ):
-        pass
+    await replace_text(
+        publisher,
+        source,
+        change,
+        expected_revision=expected_revision,
+        semantics=RebuiltSemantics(),
+        fault_stage=fault_stage,
+        origin="test",
+    )
+    return await refresh_dependents(publisher)
 
 
 def decision_method(source):
@@ -352,31 +339,26 @@ async def run(args, root):
         "Reconcile the exact saved text replacement explicitly",
     )
 
-    ctx = await context_for(old.identity_data_id)
-    before = await read_original(old, ctx)
-    from .captured_chunks import recorded_budget
-
+    before = await read_original(old, await context_for(old.identity_data_id))
     prefix = PREFIX
     if (root / "chunked-fixture-info.json").exists():
         prefix = json.loads((root / "chunked-fixture-info.json").read_text())["prefix"]
-    change = TextChange(
-        previous_text=before,
-        text=prefix + before,
-        occurrence_map=identity_map(old),
-        chunk_budget=await recorded_budget(old, publisher.graph),
-    )
-    chunks = await chunk_text(
-        change.text, await original_context(old, ctx), change.chunk_budget
-    )
-    intended = describe_prefix_edit(old, change.text, chunks, prefix=prefix)
-    (root / f"identity_doc01_text_revision{intended.revision}.json").write_text(
-        intended.model_dump_json(indent=2) + "\n"
-    )
-    (root / f"source_doc01_revision{intended.revision}.txt").write_text(change.text)
-    refresh = await maintain_one(
+
+    def describe(draft):
+        intended = describe_prefix_edit(
+            draft.old, draft.text, draft.chunks, prefix=prefix
+        )
+        (root / f"identity_doc01_text_revision{intended.revision}.json").write_text(
+            intended.model_dump_json(indent=2) + "\n"
+        )
+        (root / f"source_doc01_revision{intended.revision}.txt").write_text(draft.text)
+        return intended, identity_map(draft.old)
+
+    refresh = await edit_one(
         publisher,
-        intended,
-        change,
+        old,
+        prefix + before,
+        describe,
         expected_revision=args.expected_revision,
         fault_stage=args.fault_stage,
     )

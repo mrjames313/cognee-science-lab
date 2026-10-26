@@ -620,7 +620,7 @@ METHODS = {
             preserved_on_retry=(),
             supersedes=True,
         ),
-        Method(  # replace(); revisions.replace_one, text_fixture.maintain_one
+        Method(  # replace(); revisions.replace_one, entry.replace_text
             name="replace",
             intents=replace_intents,
             done_state="current",

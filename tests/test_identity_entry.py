@@ -201,3 +201,17 @@ async def test_the_glossary_snapshot_refuses_a_source_with_no_publication(
         await glossary_fixture.snapshot(Unpublished(), tmp_path, "query")
     assert refused.value.code == "not_published"
     assert "glossary" in str(refused.value)
+
+
+async def test_an_update_without_a_describer_is_refused(source_payload):
+    """A lab update never guesses the edited description."""
+    with pytest.raises(IntentError) as refused:
+        await entry.update(
+            None,
+            described(source_payload),
+            "An edited text.",
+            describe_edit=None,
+            expected_revision=1,
+            semantics=None,
+        )
+    assert refused.value.code == "describer_missing"
