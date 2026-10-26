@@ -28,6 +28,7 @@ from .native_forget import CASES as NATIVE_CASES
 from .occurrence_fixture import COMMANDS as OCCURRENCE_COMMANDS
 from .replace import FAULT_STAGES as REPLACE_STAGES
 from .replace import TEXT_FAULT_STAGES
+from .retrieve import SearchMode, SearchScope
 from .withdraw import FAULT_STAGES as WITHDRAW_STAGES
 
 PUBLISH_STAGES = ("nodes", "identity_edges", "verification")
@@ -46,6 +47,7 @@ COMMAND_FAULT_STAGES = {
     "edit-entity": (),
     "native-forget": (),
     "native-cognify": (),
+    "search": (),
     "refresh-dependents": (REFRESH_FAULT,),
     "withdraw": WITHDRAW_STAGES,
     "forget": FORGET_STAGES,
@@ -105,6 +107,7 @@ def main():
             "native-forget",
             "native-cognify",
             "retrieve",
+            "search",
             "status",
             "reconcile",
         ],
@@ -188,6 +191,22 @@ def main():
         "as inputs of its resolution, so doc01 has a dependent",
     )
     parser.add_argument(
+        "--scope",
+        choices=list(SearchScope),
+        help="retrieve and search only: what the search returns (default identity)",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=list(SearchMode),
+        help="retrieve and search only: how facts are found (default semantic)",
+    )
+    parser.add_argument(
+        "--all-datasets",
+        action="store_true",
+        help="search only: search every dataset the user can read (datasets=None) "
+        "instead of the root's dataset",
+    )
+    parser.add_argument(
         "--embedding",
         choices=["env", "loopback"],
         help="Embedding profile. Creation records it (default env: EMBEDDING_* from "
@@ -227,6 +246,10 @@ def main():
             f"Fault stage {args.fault_stage} is not a stage of {args.command}; "
             f"its stages are {', '.join(allowed)}"
         )
+    if (args.scope or args.mode) and args.command not in {"retrieve", "search"}:
+        parser.error("--scope and --mode apply to retrieve and search only")
+    if args.all_datasets and args.command != "search":
+        parser.error("--all-datasets applies to search only")
     if args.dependent and args.command != "multi-fixture":
         parser.error("--dependent applies to multi-fixture only")
     if (args.dry_run or args.confirm) and args.command not in {
