@@ -198,6 +198,7 @@ async def dry_run(publisher, root) -> dict:
         ]
         gone.add(step.source)
     present = await dataset_data(dataset)
+    orphans = [] if pending else await orphan_name_points(publisher)
     report = dict(
         dry_run=True,
         dataset_id=dataset,
@@ -208,6 +209,7 @@ async def dry_run(publisher, root) -> dict:
             for i in sorted(set(present) - lab_data(rows))
         ],
         removed_entities=sorted(str(e) for e in removed),
+        orphan_name_points=orphans,
         outside_dependents=[d for e in sources for d in e["outside_dependents"]],
         caller_files=sorted(
             {f for label in labels.values() for f in caller_files(root, label)}
@@ -233,6 +235,43 @@ async def forget_data(dataset_id, data_id):
     await sweep(dataset_id, data_id, locations)
 
 
+NAME_INDEX = "Entity_name"
+
+
+async def orphan_name_points(publisher) -> list[str]:
+    """Each point of the Entity name index whose node is gone: an Entity
+    deleted outside the lab (`edit-entity --case delete`, or Cognee's node
+    delete) keeps its point, which the handbook (§9) says must not outlive
+    the UUID. Retrieval seeds nothing from it, since it resolves vector
+    hits through the graph. Cognee's vector search with no limit returns
+    every point of the collection, whatever the query."""
+    vector = publisher.vector
+    if not await vector.has_collection(NAME_INDEX):
+        return []
+    points = await vector.search(NAME_INDEX, query_text="Entity", limit=None)
+    ids = sorted({str(p.id) for p in points})
+    return [i for i in ids if await publisher.graph.get_node(i) is None]
+
+
+async def sweep_orphans(publisher, listed) -> list[str]:
+    """Delete the orphaned name points the dry run listed that still have
+    no node."""
+    gone = [i for i in listed if await publisher.graph.get_node(i) is None]
+    await publisher.vector.delete_data_points(NAME_INDEX, gone)
+    return gone
+
+
+def repaired_later(outcome, later) -> bool:
+    """Whether a later step erases every dependent the forget left
+    waiting: each misses its native copy, so no removal revision can be
+    written for it, and each is a later step, whose forget finishes the
+    cascade."""
+    return all(
+        w["missing"] and w["identity_data_id"] in later
+        for w in outcome["dependents_waiting"]
+    )
+
+
 def step_fault(fault, n, count):
     """The forget fault stage for the n-th of `count` steps, if any."""
     if fault is None or fault == CLEANUP_FAULT:
@@ -244,8 +283,11 @@ def step_fault(fault, n, count):
 async def forget_dataset(publisher, root, *, confirm, fault_stage=None) -> dict:
     """Run the dry run's steps once the caller confirms its token: each
     source's forget, in order, then the deletion of the listed Data no lab
-    source publishes. Stops at a forget whose dependents' removal failed and
-    reports it beside the forgets that completed."""
+    source publishes, then the sweep of the orphaned name points it listed.
+    Stops at a forget whose dependents' removal failed and reports it
+    beside the forgets that completed, unless every dependent it left
+    waiting misses its native copy and is a later step: after a native
+    dataset forget or a prune that later forget erases it (repair)."""
     from .forget import forget
 
     report = await dry_run(publisher, root)
@@ -315,10 +357,12 @@ async def forget_dataset(publisher, root, *, confirm, fault_stage=None) -> dict:
                 dependents_waiting=outcome["dependents_waiting"],
             )
         )
-        if outcome["dependents_failed"]:
+        later = {e["identity_data_id"] for e in steps[n + 1 :]}
+        if outcome["dependents_failed"] and not repaired_later(outcome, later):
             return dict(
                 forgotten=forgotten,
                 other_data_deleted=[],
+                orphan_name_points_deleted=[],
                 dependents_failed=outcome["dependents_failed"],
             )
     if fault_stage == CLEANUP_FAULT:
@@ -333,12 +377,18 @@ async def forget_dataset(publisher, root, *, confirm, fault_stage=None) -> dict:
         await forget_data(dataset, UUID(data_id))
     if unlisted := sorted(set(await dataset_data(dataset)) - lab_data(rows)):
         raise IntentError(*IMPACT_CHANGED, details=dict(report, unlisted_data=unlisted))
+    swept = await sweep_orphans(publisher, report["orphan_name_points"])
     tombstones = {r.source: r.tombstone for r in rows}
     for entry in forgotten:
         entry["tombstone"] = tombstones[entry["identity_data_id"]].model_dump(
             mode="json"
         )
-    return dict(forgotten=forgotten, other_data_deleted=listed, dependents_failed=None)
+    return dict(
+        forgotten=forgotten,
+        other_data_deleted=listed,
+        orphan_name_points_deleted=swept,
+        dependents_failed=None,
+    )
 
 
 async def run(args, root):

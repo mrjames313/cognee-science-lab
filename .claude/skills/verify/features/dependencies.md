@@ -414,7 +414,7 @@ $V check "$RUN" dropped '.sources.doc03 | .saved_revision == 2 and (.decisions |
 $V check "$RUN" dropped '[.withheld_decisions[] | .assignment_id] == ["r01", "c01"]' 'only the r01 chain is withheld'
 ```
 
-**D17 an Entity deleted outside the lab is answered one decision at a time.** Proves `entity-delete`. Guide: entity edits, "Outside deletion". `edit-entity --case delete` deletes the Helios controller (`8b4bff50-...`) through `graph.delete_node` and writes no row, revision or incident; its `Entity_name` point stays. r01 and v01 are withheld `input_removed`, and c01 and c02 `upstream_withheld` (reason `input_changed`, as for any upstream). `reconfirm` of r01 is refused. `replace-decision --decision r01` leaves g01 unresolved without `existing_A` at revision 2, while v01, kept, still cites it and stays withheld and c01 needs doc03's own review, as in D14; Helios stays absent, so a second delete is refused. `replace-decision --decision v01` drops the variant and the Helios recipe at revision 3, and no description cites `existing_A`; doc03 is left with its own review of c01 and c02 (`replace-citation`). A retrieve for "Helios controller" never reaches Helios through its orphaned name point.
+**D17 an Entity deleted outside the lab is answered one decision at a time.** Proves `entity-delete`. Guide: entity edits, "Outside deletion". `edit-entity --case delete` deletes the Helios controller (`8b4bff50-...`) through `graph.delete_node` and writes no row, revision or incident; its `Entity_name` point stays. r01 and v01 are withheld `input_removed`, and c01 and c02 `upstream_withheld` (reason `input_changed`, as for any upstream). `reconfirm` of r01 is refused. `replace-decision --decision r01` leaves g01 unresolved without `existing_A` at revision 2, while v01, kept, still cites it and stays withheld and c01 needs doc03's own review, as in D14; Helios stays absent, so a second delete is refused. `replace-decision --decision v01` drops the variant and the Helios recipe at revision 3, and no description cites `existing_A`; doc03 is left with its own review of c01 and c02 (`replace-citation`). A retrieve for "Helios controller" never reaches Helios through its orphaned name point. The dataset dry run lists that point under `orphan_name_points`, and `forget-dataset` sweeps it (forget guide, "Repair after a delete outside the lab").
 
 ```bash journey D17
 $V drive "$RUN" main fixture -- glossary-fixture --chain
@@ -440,6 +440,14 @@ $V check "$RUN" status '[.withheld_decisions[] | [.assignment_id, .reason, .stat
 
 $V drive "$RUN" main ask -- retrieve --query "Helios controller"
 $V check "$RUN" ask '(.facts | tojson | contains("8b4bff50-907b-56b6-bc80-3b0a7018714a")) | not' 'the orphaned name point seeds nothing'
+
+$V drive "$RUN" main dry -- forget-dataset --dry-run
+$V check "$RUN" dry '.orphan_name_points == ["8b4bff50-907b-56b6-bc80-3b0a7018714a"]' 'the dataset dry run lists the orphaned name point'
+T=$(val dry '.token')
+$V drive "$RUN" main sweep -- forget-dataset --confirm "$T"
+$V check "$RUN" sweep '.orphan_name_points_deleted == ["8b4bff50-907b-56b6-bc80-3b0a7018714a"] and .dependents_failed == null' 'the dataset forget sweeps it'
+$V drive "$RUN" main dry2 -- forget-dataset --dry-run
+$V check "$RUN" dry2 '.orphan_name_points == []' 'no orphaned name point is left'
 ```
 
 ## Notes

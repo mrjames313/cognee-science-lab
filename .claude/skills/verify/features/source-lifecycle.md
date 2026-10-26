@@ -32,6 +32,7 @@ Guide: `docs/stage6_identity_forget.md`.
 - `native-deleted` lists, in `status`, a source whose native copy a delete outside the lab took (`native-forget`), with the facets it misses and the `forget` that erases the lab's copy; `reconcile` refuses it and `forget` erases it (native tests in `tests/test_identity_native_deletes_native.py` cover the dataset forget, the prune and a dependent).
 - `readd-outside-deleted` refuses a re-add whose files name an Entity deleted outside the lab while a saved source still cites or builds it, naming each such source with its dataset and state; once each is forgotten or replaced without it, the re-add builds the Entity under a derived UUID and never writes the old one.
 - `forget-dataset` forgets every source of the root's dataset, readers first, each through the lab's `forget`, then deletes item by item the Data no lab source publishes (the seed), which its dry run lists under `other_data`; it always needs the dry run's token, which covers that list, and a rerun has nothing to do.
+- `forget-dataset-repair` turns every row a native dataset forget or Cognee's default prune left behind into a tombstone (`status` lists them under `native_deleted` first), deletes a surviving Data row of the seed, and lets a re-add rebuild an absent Entity under a derived UUID.
 - `forget-dataset-crash` fails the dataset forget at an injected stage (`first:<forget stage>`, `last:<forget stage>` or `dataset_cleanup`); the old token is refused (`impact_changed`), and a new dry run and confirmation finish it, a crashed source's forget resuming through forget's own retry.
 - `forget-cascade-retire-refused` refuses a withdrawal or forget of a source that holds a removal while the cascade below it is unfinished (`cascade_unfinished`); once `forget` on the forgotten source finishes the cascade, the withdrawal goes ahead.
 
@@ -643,6 +644,64 @@ $V check "$RUN" status '([.publications[] | .description // "" | contains("'"$H"
 $V check "$RUN" status '[.publications[] | select(.description != null) | .description | fromjson | select(.revision == 2) | [.entity_constructions | to_entries[] | select(.value.name == "Helios controller") | .key]] | (map(length) == [1, 1]) and (.[0][0] != .[1][0]) and all(.[][]; . != "'"$H"'")' 'each re-add built Helios under its own derived UUID (case 10)'
 $V drive "$RUN" main ask -- retrieve --query "Helios controller"
 $V check "$RUN" ask '(.facts | tojson | contains("'"$H"'")) | not' 'no fact reaches the old Helios UUID'
+```
+
+**F23 a native dataset forget, repaired by forget-dataset.** Proves `forget-dataset-repair`. Guide: `docs/stage6_identity_forget.md`, "Repair after a delete outside the lab". On a `glossary-fixture --chain` root `native-forget --case dataset` calls `cognee.forget(dataset=...)`. `status` lists all three sources with all five facets missing. The dry run takes them in the reader order with no dependent, lists no other Data (the seed went with the dataset) and no orphaned name point. The confirmed run forgets all three; each tombstone keeps the Entities its forget found served, since nothing of them was in the graph to remove. `status` then lists nothing deleted outside the lab, and a second dry run has nothing to do. The glossary is re-added, and once the user drops doc01's corpus input of Helios from `identity.json`, doc01 too: the re-add builds Helios under a derived UUID, since Helios is absent and no saved source cites it (the user's Q2 remedy), in the same dataset (prototype, 2026-10-25: Cognee recreates the dataset under its ID).
+
+```bash journey F23
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+H=8b4bff50-907b-56b6-bc80-3b0a7018714a
+$V drive "$RUN" main native -- native-forget --case dataset
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.native_deleted[] | [.state, .revision, .missing]] == [["current", 1, ["original_data", "identity_data", "document_node", "chunks", "stored_files"]], ["current", 1, ["original_data", "identity_data", "document_node", "chunks", "stored_files"]], ["current", 1, ["original_data", "identity_data", "document_node", "chunks", "stored_files"]]]' 'status lists the three sources as deleted outside the lab'
+$V drive "$RUN" main dry -- forget-dataset --dry-run
+$V check "$RUN" dry '[.sources[] | [.label, .order]] == [["glossary", 2], ["doc01", 1], ["doc03", 0]] and all(.sources[]; .dependents == [])' 'the dry run takes the three in the reader order'
+$V check "$RUN" dry '([.other_data[].name] == []) and .orphan_name_points == [] and .pending == []' 'the dry run lists no other Data'
+T=$(val dry '.token')
+$V drive "$RUN" main go -- forget-dataset --confirm "$T"
+$V check "$RUN" go '[.forgotten[] | .label] == ["doc03", "doc01", "glossary"] and (.other_data_deleted | length) == 0 and .dependents_failed == null' 'the dataset forget repairs every row'
+$V check "$RUN" go '[.forgotten[] | select(.label == "doc01") | .tombstone.served_entity_ids | index("'"$H"'") != null] == [true]' 'the doc01 tombstone keeps Helios as found served'
+$V drive "$RUN" main after -- status
+$V check "$RUN" after '[.publications[] | [.state, .revision]] == [["forgotten", 1], ["forgotten", 1], ["forgotten", 1]] and .native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'every row is a tombstone, none is listed and no incident is open'
+$V drive "$RUN" main dry2 -- forget-dataset --dry-run
+$V check "$RUN" dry2 'all(.sources[]; .order == null) and .other_data == []' 'a second dry run has nothing to do'
+$V drive "$RUN" main rg -- readd --source glossary --expected-revision 1
+$V check "$RUN" rg '[.sources.glossary.state, .sources.glossary.saved_revision] == ["current", 2]' 'the glossary is re-added at revision 2'
+python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]) / "identity.json"; i = json.loads(p.read_text()); i["inputs"].pop("existing_A"); [r.__setitem__("input_refs", [k for k in r["input_refs"] if k != "existing_A"]) for r in [*i["mention_resolutions"].values(), *i["variant_assignments"].values()]]; p.write_text(json.dumps(i))' "$RUN/roots/main"
+$V drive "$RUN" main r1 -- readd --source doc01 --expected-revision 1
+$V check "$RUN" r1 '[.sources.doc01.state, .sources.doc01.saved_revision] == ["current", 2]' 'doc01 is re-added at revision 2'
+$V drive "$RUN" main end -- status
+$V check "$RUN" end '[.publications[] | select(.state == "current") | .description | fromjson | select(.revision == 2) | .entity_constructions | to_entries[] | select(.value.name == "Helios controller") | .key] | length == 1 and all(.[]; . != "'"$H"'")' 'doc01 builds Helios under a derived UUID'
+$V check "$RUN" end '([.publications[] | select(.state == "current") | .description | contains("'"$H"'")] | any | not) and ([.publications[] | .dataset] | unique | length) == 1' 'no description names the old UUID and the dataset ID is kept'
+```
+
+**F24 Cognee's default prune, repaired by forget-dataset.** Proves `forget-dataset-repair`. Guide: `docs/stage6_identity_forget.md`, "Repair after a delete outside the lab". `native-forget --case prune` runs `prune_data()` and `prune_system()` with its defaults, which keep the relational database. `status` lists all three sources missing `document_node`, `chunks` and `stored_files`; their Data rows survive. The dry run takes them in the reader order and lists the seed's surviving Data row under `other_data`. The confirmed run forgets all three and deletes the seed's row although its file is gone (prototype, 2026-10-25: Cognee's Data delete and the sweep accept a missing file). Then as in F23: nothing is listed, a second dry run has nothing to do, and the re-adds build Helios under a derived UUID in the same dataset.
+
+```bash journey F24
+$V drive "$RUN" main fixture -- glossary-fixture --chain
+H=8b4bff50-907b-56b6-bc80-3b0a7018714a
+$V drive "$RUN" main native -- native-forget --case prune
+$V drive "$RUN" main status -- status
+$V check "$RUN" status '[.native_deleted[] | [.state, .revision, .missing]] == [["current", 1, ["document_node", "chunks", "stored_files"]], ["current", 1, ["document_node", "chunks", "stored_files"]], ["current", 1, ["document_node", "chunks", "stored_files"]]]' 'status lists the three sources as deleted outside the lab'
+$V drive "$RUN" main dry -- forget-dataset --dry-run
+$V check "$RUN" dry '[.sources[] | [.label, .order]] == [["glossary", 2], ["doc01", 1], ["doc03", 0]] and all(.sources[]; .dependents == [])' 'the dry run takes the three in the reader order'
+$V check "$RUN" dry '([.other_data[].name] == ["seed"]) and .orphan_name_points == [] and .pending == []' 'the dry run lists the surviving Data row of the seed'
+T=$(val dry '.token')
+$V drive "$RUN" main go -- forget-dataset --confirm "$T"
+$V check "$RUN" go '[.forgotten[] | .label] == ["doc03", "doc01", "glossary"] and (.other_data_deleted | length) == 1 and .dependents_failed == null' 'the dataset forget repairs every row'
+$V check "$RUN" go '[.forgotten[] | select(.label == "doc01") | .tombstone.served_entity_ids | index("'"$H"'") != null] == [true]' 'the doc01 tombstone keeps Helios as found served'
+$V drive "$RUN" main after -- status
+$V check "$RUN" after '[.publications[] | [.state, .revision]] == [["forgotten", 1], ["forgotten", 1], ["forgotten", 1]] and .native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'every row is a tombstone, none is listed and no incident is open'
+$V drive "$RUN" main dry2 -- forget-dataset --dry-run
+$V check "$RUN" dry2 'all(.sources[]; .order == null) and .other_data == []' 'a second dry run has nothing to do'
+$V drive "$RUN" main rg -- readd --source glossary --expected-revision 1
+$V check "$RUN" rg '[.sources.glossary.state, .sources.glossary.saved_revision] == ["current", 2]' 'the glossary is re-added at revision 2'
+python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]) / "identity.json"; i = json.loads(p.read_text()); i["inputs"].pop("existing_A"); [r.__setitem__("input_refs", [k for k in r["input_refs"] if k != "existing_A"]) for r in [*i["mention_resolutions"].values(), *i["variant_assignments"].values()]]; p.write_text(json.dumps(i))' "$RUN/roots/main"
+$V drive "$RUN" main r1 -- readd --source doc01 --expected-revision 1
+$V check "$RUN" r1 '[.sources.doc01.state, .sources.doc01.saved_revision] == ["current", 2]' 'doc01 is re-added at revision 2'
+$V drive "$RUN" main end -- status
+$V check "$RUN" end '[.publications[] | select(.state == "current") | .description | fromjson | select(.revision == 2) | .entity_constructions | to_entries[] | select(.value.name == "Helios controller") | .key] | length == 1 and all(.[]; . != "'"$H"'")' 'doc01 builds Helios under a derived UUID'
+$V check "$RUN" end '([.publications[] | select(.state == "current") | .description | contains("'"$H"'")] | any | not) and ([.publications[] | .dataset] | unique | length) == 1' 'no description names the old UUID and the dataset ID is kept'
 ```
 
 **F25 forget the dataset of a live chain root.** Proves `forget-dataset`. Guide: `docs/stage6_identity_forget.md`, "Forget a dataset". `forget-dataset` without `--confirm` is refused and names the dry run. The dry run orders doc03, which cites doc01's records, before doc01, which reads the glossary, before the glossary (`order` 0, 1, 2), lists no pending row and no dependent outside the dataset, and lists the seed under `other_data`. The confirmed run forgets the three in that order with no removal revision (each source's readers are forgotten before it) and deletes the seed. Every row is `forgotten` at revision 1 with no incident, and no fact is served. A second dry run has no step and no other Data, and its confirmation does nothing. The glossary is then re-added from its files at revision 2 in the same dataset: the Dataset row and its ID survive (prototype, 2026-10-25).

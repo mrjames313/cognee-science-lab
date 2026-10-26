@@ -358,6 +358,19 @@ Step 5 S2 part 2 (2026-10-25, built by the assistant on the user's Mac with loop
 - The Dataset row stays, so a re-add after a dataset forget keeps its dataset ID (prototype on 2026-10-25: the glossary re-added at revision 2 into the same dataset, journey F25).
 - The ledger sees no new sequence: the command only composes `forget` calls.
 
+## Repair after a delete outside the lab
+
+After `cognee.forget(dataset=...)` or Cognee's default prune, `status` lists every saved source under `native_deleted`. `forget-dataset` repairs the root: its dry run lists each source as a step, with the facets its native copy misses, and its confirmed run turns each row into a tombstone. Tombstones stay. Measured on 2026-10-25 on `glossary-fixture --chain` roots (journeys F23 and F24):
+
+- After a native dataset forget the seed's Data row went with the dataset, so `other_data` is empty. After the default prune the Data rows survive without their files: `other_data` lists the seed, and its delete succeeds, since Cognee's Data delete and the sweep accept a missing file.
+- Each forget finds nothing of its source in the graph, so its plan records no Entity and its tombstone keeps every reusable Entity as found served (`served_entity_ids`). A later re-add therefore counts an absent one as deleted outside the lab, and builds it under a derived UUID once no saved source cites it (the user's Q2 remedy; `retirement.readd_removed` reads the tombstone's reusable Entities, not only the empty plan). The re-add of doc01 builds Helios and HC under new UUIDs.
+- After a native dataset forget, a re-add recreates the dataset under the same ID (inferred: Cognee derives the ID from the dataset name and its owner).
+- In the reader order no forget leaves a dependent waiting. If one did, as in a cycle, a forget whose waiting dependents all miss their native copy and are later steps does not stop the run: the later forget erases them and finishes the cascade, as a single forget's dependent does.
+
+The sweep. An Entity deleted outside the lab through Cognee's node delete (`edit-entity --case delete`) keeps its `Entity_name` point, which the handbook (§9) says must not outlive the UUID. The dry run lists each point of the name index whose node is gone under `orphan_name_points`, seed-built Entities included; the confirmed run deletes the listed points that still have no node, after the Data deletes, and returns them under `orphan_name_points_deleted`. The dry run lists none while a row is pending. Journey D17 lists and sweeps Helios's point.
+
+A full reset is not a repair. `prune_system(metadata=True)` deletes Cognee's relational database, and the lab's tables live in it ([Reset](#reset)).
+
 ## Scope
 
 - A forget removes a dependent's decisions that cite the forgotten source and, since checkpoint J2, down every chain of saved-record citations, each decision that cites a removed record as it was ([The cascade](#the-cascade)).

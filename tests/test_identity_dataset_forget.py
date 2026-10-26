@@ -1,5 +1,6 @@
 """The dataset forget's pure parts, without a store: the order readers
-come in, the rows a later step sees, and which step a fault stage fails."""
+come in, the rows a later step sees, which step a fault stage fails, and
+when a repair goes on past a waiting dependent."""
 
 import json
 from uuid import uuid4
@@ -8,6 +9,7 @@ from cognee_lab.identity.dataset_forget import (
     CLEANUP_FAULT,
     order,
     reads,
+    repaired_later,
     simulated,
     step_fault,
 )
@@ -82,3 +84,11 @@ def test_a_fault_stage_fails_the_first_or_last_step():
     ]
     assert step_fault(CLEANUP_FAULT, 0, 3) is None
     assert step_fault(None, 0, 3) is None
+
+
+def test_a_repair_goes_on_past_a_dependent_a_later_step_erases():
+    gone = dict(identity_data_id="b", missing=["chunks"])
+    pending = dict(identity_data_id="b", missing=None)
+    assert repaired_later(dict(dependents_waiting=[gone]), {"b"})
+    assert not repaired_later(dict(dependents_waiting=[gone]), {"c"})
+    assert not repaired_later(dict(dependents_waiting=[pending]), {"b"})
