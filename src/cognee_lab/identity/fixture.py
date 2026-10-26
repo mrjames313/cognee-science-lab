@@ -354,22 +354,13 @@ async def prepare(root, *, multi=False, chunk_budget=512, source_text=None, amen
         else (FIXTURES / "source.txt").read_text()
     )
     (root / "source.txt").write_text(text)
-    (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
+    publisher = await seed_corpus(root, template)
     await cognee.add(
-        [
-            DataItem(data=str(root / "seed.txt"), data_id=SEED_DATA_ID),
-            DataItem(data=str(root / "source.txt"), data_id=original_id),
-        ],
+        DataItem(data=str(root / "source.txt"), data_id=original_id),
         dataset_name=DATASET_NAME,
         skip_connection_test=True,
     )
     original_ctx = await context_for(original_id)
-    entity = borrowed_entity(template)
-    await add_data_points([entity], ctx=await context_for(SEED_DATA_ID))
-    publisher = await Publisher.configured()
-    await publisher.graph.update_node(
-        str(entity.id), {"fixture_sentinel": "preserve me"}
-    )
     chunks = await load_chunks(None, original_ctx, budget=chunk_budget)
     source = describe_doc01(
         template, original_ctx.dataset.id, text, chunks, multi=multi, amend=amend
