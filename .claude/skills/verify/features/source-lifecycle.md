@@ -667,7 +667,7 @@ $V drive "$RUN" main ask -- retrieve --query "Helios controller"
 $V check "$RUN" ask '(.facts | tojson | contains("'"$H"'")) | not' 'no fact reaches the old Helios UUID'
 ```
 
-**F23 a native dataset forget, repaired by forget-dataset.** Proves `forget-dataset-repair`. Guide: `docs/stage6_identity_forget.md`, "Repair after a delete outside the lab". On a `glossary-fixture --chain` root `native-forget --case dataset` calls `cognee.forget(dataset=...)`. `status` lists all three sources with all five facets missing. The dry run takes them in the reader order with no dependent, lists no other Data (the seed went with the dataset) and no orphaned name point. The confirmed run forgets all three; each tombstone keeps the Entities its forget found served, since nothing of them was in the graph to remove. `status` then lists nothing deleted outside the lab, and a second dry run has nothing to do. The glossary is re-added, and once the user drops doc01's corpus input of Helios from `identity.json`, doc01 too: the re-add builds Helios under a derived UUID, since Helios is absent and no saved source cites it (the user's Q2 remedy), in the same dataset (prototype, 2026-10-25: Cognee recreates the dataset under its ID).
+**F23 a native dataset forget, repaired by forget-dataset.** Proves `forget-dataset-repair`. Guide: `docs/stage6_identity_forget.md`, "Repair after a delete outside the lab". On a `glossary-fixture --chain` root `native-forget --case dataset` calls `cognee.forget(dataset=...)`. `status` lists all three sources with all five facets missing. The dry run takes them in the reader order with no dependent, lists no other Data (the seed went with the dataset) and no orphaned name point. The confirmed run forgets all three. Nothing of them was in the graph to remove, so no forget lists a removed Entity and the removal record stays empty: the delete outside the lab, not the lab, took Helios. `status` then lists nothing deleted outside the lab, and a second dry run has nothing to do. The glossary is re-added, and once the user drops doc01's corpus input of Helios from `identity.json`, doc01 too: the re-add builds Helios under a derived UUID, since Helios is absent and no saved source cites it (the user's Q2 remedy), in the same dataset (prototype, 2026-10-25: Cognee recreates the dataset under its ID).
 
 ```bash journey F23
 $V drive "$RUN" main fixture -- glossary-fixture --chain
@@ -681,9 +681,10 @@ $V check "$RUN" dry '([.other_data[].name] == []) and .orphan_name_points == [] 
 T=$(val dry '.token')
 $V drive "$RUN" main go -- forget-dataset --confirm "$T"
 $V check "$RUN" go '[.forgotten[] | .label] == ["doc03", "doc01", "glossary"] and (.other_data_deleted | length) == 0 and .dependents_failed == null' 'the dataset forget repairs every row'
-$V check "$RUN" go '[.forgotten[] | select(.label == "doc01") | .tombstone.served_entity_ids | index("'"$H"'") != null] == [true]' 'the doc01 tombstone keeps Helios as found served'
+$V check "$RUN" go '[.forgotten[] | select(.label == "doc01") | .tombstone.removed_entity_ids | index("'"$H"'")] == [null]' 'the doc01 forget lists Helios as removed by none'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '[.publications[] | [.state, .revision]] == [["forgotten", 1], ["forgotten", 1], ["forgotten", 1]] and .native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'every row is a tombstone, none is listed and no incident is open'
+$V check "$RUN" after '.removed_entities == {}' 'the removal record lists nothing, since a delete outside the lab took every Entity'
 $V drive "$RUN" main dry2 -- forget-dataset --dry-run
 $V check "$RUN" dry2 'all(.sources[]; .order == null) and .other_data == []' 'a second dry run has nothing to do'
 $V drive "$RUN" main rg -- readd --source glossary --expected-revision 1
@@ -710,9 +711,10 @@ $V check "$RUN" dry '([.other_data[].name] == ["seed"]) and .orphan_name_points 
 T=$(val dry '.token')
 $V drive "$RUN" main go -- forget-dataset --confirm "$T"
 $V check "$RUN" go '[.forgotten[] | .label] == ["doc03", "doc01", "glossary"] and (.other_data_deleted | length) == 1 and .dependents_failed == null' 'the dataset forget repairs every row'
-$V check "$RUN" go '[.forgotten[] | select(.label == "doc01") | .tombstone.served_entity_ids | index("'"$H"'") != null] == [true]' 'the doc01 tombstone keeps Helios as found served'
+$V check "$RUN" go '[.forgotten[] | select(.label == "doc01") | .tombstone.removed_entity_ids | index("'"$H"'")] == [null]' 'the doc01 forget lists Helios as removed by none'
 $V drive "$RUN" main after -- status
 $V check "$RUN" after '[.publications[] | [.state, .revision]] == [["forgotten", 1], ["forgotten", 1], ["forgotten", 1]] and .native_deleted == [] and ([.recovery_events[] | select(.resolved_at == null)] | length) == 0' 'every row is a tombstone, none is listed and no incident is open'
+$V check "$RUN" after '.removed_entities == {}' 'the removal record lists nothing, since a delete outside the lab took every Entity'
 $V drive "$RUN" main dry2 -- forget-dataset --dry-run
 $V check "$RUN" dry2 'all(.sources[]; .order == null) and .other_data == []' 'a second dry run has nothing to do'
 $V drive "$RUN" main rg -- readd --source glossary --expected-revision 1
