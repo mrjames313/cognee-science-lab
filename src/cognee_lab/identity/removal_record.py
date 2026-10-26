@@ -18,6 +18,9 @@ RemovalOperation = Literal[
 ]
 
 
+RECORD_ATTEMPTS = 5
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -57,15 +60,13 @@ class RemovalRecord:
         `dataset` and `source` name the source whose attempt removed
         them."""
         wanted = {str(e) for e in entity_ids}
-        clashed = None
+        attempts = 0
         while wanted:
             async with self.session_factory() as session:
                 statement = select(RemovedEntity.entity).where(
                     RemovedEntity.entity.in_(wanted)
                 )
                 wanted -= set((await session.execute(statement)).scalars())
-                if wanted and wanted == clashed:
-                    raise clashed_error
                 at = datetime.now(timezone.utc).isoformat()
                 session.add_all(
                     RemovedEntity(
@@ -80,10 +81,12 @@ class RemovalRecord:
                 try:
                     await session.commit()
                     return
-                except IntegrityError as error:
-                    # Only a concurrent writer's rows end the loop; an
-                    # error that leaves the same rows wanted is raised.
-                    clashed, clashed_error = set(wanted), error
+                except IntegrityError:
+                    # A concurrent writer's rows clear on the reread; an
+                    # error that keeps recurring is raised.
+                    attempts += 1
+                    if attempts == RECORD_ATTEMPTS:
+                        raise
 
     async def record_tombstone_removals(self):
         """What the tombstones prove a forget removed: each one's removed
