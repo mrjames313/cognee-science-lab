@@ -5,7 +5,8 @@ counts tests, verify journeys and git churn by the same split. The method is
 in docs/integration_design_snapshot_2026-10-23.md, "Purpose census". The
 labels are judgments from each function's docstring and callers; edit
 DEFAULT, OVERRIDE and the scenario sets when the code changes. A module
-missing from them is reported as unclassified, never guessed.
+missing from them is reported as unclassified, never guessed, and an
+override that names no function or class is reported as stale.
 
 Run from the repository root: uv run python scripts/purpose_census.py [-v]
 """
@@ -42,26 +43,35 @@ DEFAULT = {
     "models": "M", "revisions": "C.cont", "withdraw": "C.own",
     "registered": "P", "stages": "L", "native": "B", "schema": "F",
     "environment": "F", "__main__": "F", "fixture_embeddings": "F",
-    "__init__": "F",
+    "__init__": "F", "chains": "C.dep", "dependency": "C.dep",
+    "outside_deletion": "C.dep", "review": "C.dep", "erasure": "C.own",
+    "erasure_rules": "C.own", "dataset_forget": "C.own", "native_copy": "C.own",
+    "removal_record": "C.own", "records": "M", "decisions": "M", "digests": "P",
+    "entry": "B", "native_chunks": "B", "entry_update": "C.text",
 }
 SCENARIO_FIRST = {"fixture", "captured_chunks", "captured_text"}
 SCENARIO_CHANGE = {
     "multisource", "glossary_fixture", "text_fixture", "occurrence_fixture",
     "forget_fixture", "kind_change", "resolved_retirement", "reinterpretation",
     "group_regrouping", "captured_revision", "occurrence_addition",
+    "chain_fixture", "chain_kind_change", "entity_edit", "native_cognify",
+    "native_forget",
 }
 # Dotted names reach methods and nested functions, e.g. "replace.withhold".
 OVERRIDE = {
     "admission": {
         "check_input_kinds": "P", "check_corpus_inputs_exist": "P",
-        "check_absent_from_graph": "B", "entity_ids_named": "B",
-        "check_source_identity": "M",
+        "check_absent_from_graph": "B", "check_source_identity": "M",
         "check_foreign_inputs": "C.dep", "foreign_citations": "C.dep",
         "attested_inputs": "C.dep", "check_reconfirmations": "C.dep",
         "without_range": "C.dep",
-        "check_removed_entity_ids": "C.own", "replacement_entity_id": "C.own",
-        "check_readd_entity_ids": "C.own", "admit_readd": "C.own",
     },
+    "erasure_rules": {"entity_ids_named": "B"},
+    "outside_deletion": {
+        "check_readd": "C.own", "orphan_name_points": "C.own",
+        "sweep_orphans": "C.own",
+    },
+    "review": {"replaced_variant": "S.change"},
     "publish": {
         "Publisher.withheld_for": "C.dep", "Publisher.withdraw": "C.own",
         "Publisher.forget": "C.own", "Publisher.replace": "C.cont",
@@ -71,8 +81,7 @@ OVERRIDE = {
         "Publisher.admit_readd": "C.own", "Publisher.readd": "C.own",
     },
     "retrieve": {
-        "live_drift": "P", "valid_sources": "P", "is_served": "L",
-        "held_by": "C.dep", "live_held": "C.dep", "withheld_now": "C.dep",
+        "live_drift": "P", "valid_sources": "P", "withheld_now": "C.dep",
         "withholding_status": "C.dep",
     },
     "replace": {
@@ -89,7 +98,7 @@ OVERRIDE = {
     "validation": {
         "IntentError": "M", "fresh_mention_id": "M", "fresh_entity_id": "M",
         "validate_uses": "M", "Reason": "C.dep", "stronger": "C.dep",
-        "is_foreign": "C.dep", "withheld_by": "C.dep",
+        "is_foreign": "C.dep",
     },
     "models": {
         name: "P"
@@ -119,35 +128,41 @@ def module_category(stem):
 
 
 def line_labels(path, default):
+    """The label of each line, and the overrides that matched no node."""
     text = path.read_text()
     labels = [default] * (len(text.splitlines()) + 1)
     overrides = OVERRIDE.get(path.stem, {})
+    unmatched = set(overrides)
 
     def walk(nodes, prefix):
         for node in nodes:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 name = prefix + node.name
                 if name in overrides:
+                    unmatched.discard(name)
                     labels[node.lineno : node.end_lineno + 1] = [overrides[name]] * (
                         node.end_lineno - node.lineno + 1
                     )
                 walk(node.body, name + ".")
 
     walk(ast.parse(text).body, "")
-    return labels[1:]
+    return labels[1:], unmatched
 
 
 def code_census():
     lines, per_module, unclassified = collections.Counter(), {}, []
+    stale = [f"{stem}.*" for stem in OVERRIDE if not (PACKAGE / f"{stem}.py").exists()]
     for path in sorted(PACKAGE.glob("*.py")):
         default = module_category(path.stem)
         if default is None:
             unclassified.append(path.stem)
             continue
-        counts = collections.Counter(line_labels(path, default))
+        labels, unmatched = line_labels(path, default)
+        stale += sorted(f"{path.stem}.{name}" for name in unmatched)
+        counts = collections.Counter(labels)
         lines.update(counts)
         per_module[path.stem] = counts
-    return lines, per_module, unclassified
+    return lines, per_module, unclassified, stale
 
 
 def test_census():
@@ -184,7 +199,7 @@ def churn_census():
 
 
 def main():
-    lines, per_module, unclassified = code_census()
+    lines, per_module, unclassified, stale = code_census()
     core = sum(lines[c] for c in CORE)
     print(f"Code lines by purpose (core = {core}):")
     for category, meaning in CATEGORIES.items():
@@ -192,6 +207,8 @@ def main():
         print(f"  {category:8} {lines[category]:6} {share}  {meaning}")
     if unclassified:
         print("Unclassified modules:", ", ".join(unclassified))
+    if stale:
+        print("Stale overrides:", ", ".join(stale))
     print("Tests:", dict(test_census()))
     journeys, fault = journey_census()
     print("Journeys:", dict(journeys), f"of which fault or recovery: {fault}")
