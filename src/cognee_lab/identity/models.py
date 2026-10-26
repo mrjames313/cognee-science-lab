@@ -296,6 +296,16 @@ class Tombstone(Strict):
     impact_token: Digest | None
     forgotten_at: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def unread_fields(cls, data):
+        """Tombstones saved before the removal record list
+        `served_entity_ids`, which nothing reads now; a root from then
+        still opens."""
+        if isinstance(data, dict) and "served_entity_ids" in data:
+            data = {k: v for k, v in data.items() if k != "served_entity_ids"}
+        return data
+
     @classmethod
     def of(
         cls,

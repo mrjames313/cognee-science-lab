@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Literal, NamedTuple
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from sqlalchemy import Integer, String, Text, inspect, select, update
 from sqlalchemy.exc import IntegrityError
@@ -14,6 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from .erasure_rules import check_retry_chain, erasures_of
 from .models import IdentitySource, Tombstone
+from .removal_record import RemovalRecord, RemovedEntity
 from .validation import IntentError
 
 
@@ -50,20 +51,6 @@ class RecoveryEvent(Base):
     source: Mapped[str] = mapped_column(String(36))
     attempt: Mapped[str] = mapped_column(String(36))
     details: Mapped[str] = mapped_column(Text)
-
-
-class RemovedEntity(Base):
-    """An Entity UUID a lab operation removed from the graph, appended once
-    and never changed or deleted: a removed Entity UUID is never reused
-    (the user's decision of 2026-10-26). `operation` is the plan operation
-    of the attempt whose delete removed it."""
-
-    __tablename__ = "lab_identity_removed_entities"
-    entity: Mapped[str] = mapped_column(String(36), primary_key=True)
-    dataset: Mapped[str] = mapped_column(String(36))
-    source: Mapped[str] = mapped_column(String(36))
-    operation: Mapped[str] = mapped_column(String(32))
-    recorded_at: Mapped[str] = mapped_column(String(40))
 
 
 RETIRED_STATES = frozenset({"withdrawn", "forgotten"})
@@ -485,13 +472,19 @@ def saved_tombstone(text: str) -> Tombstone:
         raise IntentError(*OLD_FORGOTTEN_ROW) from None
 
 
+def ledger_tables():
+    """Every table initialize creates and checks: the ledger's, and the
+    removal record's, which keeps a Base of its own so the checker's
+    breaks, which run this file again, each get fresh ledger tables."""
+    return [*Base.metadata.sorted_tables, RemovedEntity.__table__]
+
+
 def saved_columns(connection) -> dict[str, set[str]]:
     """The columns each ledger table has in the store, which create_all
     does not add to a table made by an older version."""
     found = inspect(connection)
     return {
-        t.name: {c["name"] for c in found.get_columns(t.name)}
-        for t in Base.metadata.sorted_tables
+        t.name: {c["name"] for c in found.get_columns(t.name)} for t in ledger_tables()
     }
 
 
@@ -499,7 +492,7 @@ def encode(value) -> str:
     return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True)
 
 
-class RecordStore:
+class RecordStore(RemovalRecord):
     def __init__(self, session_factory=None):
         if session_factory is None:
             from cognee.infrastructure.databases.relational import get_relational_engine
@@ -510,66 +503,13 @@ class RecordStore:
     async def initialize(self):
         async with self.session_factory() as session:
             connection = await session.connection()
-            tables = await connection.run_sync(
-                lambda c: set(inspect(c).get_table_names())
-            )
-            await connection.run_sync(Base.metadata.create_all)
+            for table in ledger_tables():
+                await connection.run_sync(table.create, checkfirst=True)
             saved = await connection.run_sync(saved_columns)
             await session.commit()
-        if any(
-            set(t.columns.keys()) - saved[t.name] for t in Base.metadata.sorted_tables
-        ):
+        if any(set(t.columns.keys()) - saved[t.name] for t in ledger_tables()):
             raise IntentError(*OLD_LEDGER)
-        if RemovedEntity.__tablename__ not in tables:
-            await self.record_tombstone_removals()
-
-    async def record_tombstone_removals(self):
-        """Give a ledger from before the removal record what its tombstones
-        prove a forget removed: each one's removed Entities and the mention
-        Entities of every forgotten life. A replacement's retirement or a
-        withdrawal's delete that an older ledger completed is not derivable:
-        its plan is overwritten or names a candidate the graph may still
-        hold, so a re-add treats such an Entity as one no lab record
-        accounts for."""
-        for row in await self.rows():
-            for tombstone in (row.tombstone, row.last_tombstone):
-                if tombstone is None:
-                    continue
-                ids = set(tombstone.removed_entity_ids) | set(tombstone.all_mention_ids)
-                await self.record_removed(
-                    ids,
-                    dataset=row.dataset,
-                    source=row.source,
-                    operation="identity_forget",
-                )
-
-    async def removed(self) -> dict[UUID, str]:
-        """Every Entity UUID a lab operation removed, with the plan
-        operation that removed it."""
-        async with self.session_factory() as session:
-            found = (await session.execute(select(RemovedEntity))).scalars().all()
-            return {UUID(r.entity): r.operation for r in found}
-
-    async def record_removed(self, entity_ids, *, dataset, source, operation):
-        """Append each Entity UUID not yet recorded; one already recorded
-        keeps its first entry, so a retry records nothing twice. `dataset`
-        and `source` name the source whose attempt removed them."""
-        async with self.session_factory() as session:
-            known = set(
-                (await session.execute(select(RemovedEntity.entity))).scalars().all()
-            )
-            at = now()
-            session.add_all(
-                RemovedEntity(
-                    entity=str(e),
-                    dataset=str(dataset),
-                    source=str(source),
-                    operation=operation,
-                    recorded_at=at,
-                )
-                for e in sorted({str(e) for e in entity_ids} - known)
-            )
-            await session.commit()
+        await self.record_tombstone_removals()
 
     async def rows(self, dataset=None) -> list[PublicationRow]:
         async with self.session_factory() as session:
