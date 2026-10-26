@@ -2,6 +2,8 @@
 
 **Date:** 2026-10-23. **Status:** a discussion snapshot, not a decision record. The user and the assistant held the discussion on 2026-10-22 and 2026-10-23. The assistant wrote this document. **Code baseline:** `main` at `012d8a6` (Checkpoint H, dependencies). Another agent was changing identity code on branch `one-admission` at the time, so some code facts below may change.
 
+**Update, 2026-10-26.** The assistant brought sections 5, 6 and 12 up to date with `main` at `7306ce7` (step 5 S4) by reading the code on the user's Mac. Each update is a dated note beside the original text, which stays as the record of `012d8a6`. Nothing was measured again. The LLM wiki work moved to its own repository, cognee-llm-wiki, on 2026-10-25. That repository is private. The wiki material in this snapshot (sections 1, 10, 13, 16 and 17) is the record of the discussion before the move.
+
 This snapshot records the design discussion about reworking [the integration playbook](../results/cognee_knowledge_integration_playbook.md) into general integration principles. It uses a new framing of activities and procedures. The other project documents still use the older Describe, Publish, Maintain and Retrieve framing. They were deliberately left unchanged. The user and the assistant will revisit this snapshot once the current code work ends, and use the lessons from that code to shape the rewrite.
 
 Evidence labels used below:
@@ -131,10 +133,21 @@ Ownership through source references drives most of the hybrid design. The ledger
 | `lab_identity_writers` | One writer reservation per dataset (`owner`) | `storage.py`, class `Writer` |
 | `lab_identity_recovery_events` | Failure and recovery diagnostics per dataset, source and attempt | `storage.py`, class `RecoveryEvent` |
 | `lab_identity_withholdings` | One row per withheld decision and input. Key (dataset, dependent source, assignment, input key), with the edited source and revision, reason, status (`remap` or `refresh_needed`), old and new digests, and the new range of a moved span. | `withholding.py`. Added in Checkpoint H (docs, `docs/stage6_identity_dependencies.md`). |
+| `lab_identity_removed_entities` (the removal record) | Every Entity UUID a lab operation removed from the graph, appended once and never changed or deleted | `removal_record.py`. Added in step 5 S2, after this snapshot was first written (code, read on 2026-10-26). |
 
 Ledger states are `pending`, `current`, `failed`, `withdrawn` and `forgotten` (code, `storage.py`). A unit is eligible for retrieval only when its state is `current` and its revision equals its verified revision. Since Checkpoint H, eligibility also works per decision. A withholding, or a pending or failed text change of a consumed document, withholds the decisions that read it.
 
 All four tables are reachable by `prune_system(metadata=True)` (inferred from the prune code path above, not run).
+
+**Changes on `main` since `012d8a6`** (2026-10-26, code, read at `7306ce7`).
+
+- There are five integration tables now. The removal record is the fifth. Since step 5 S2 the code states the prune claim above: `prune_system(metadata=True)` deletes Cognee's relational database with the ledger in it, and the lab refuses such a root with `stores_reset` (`native_copy.refuse_reset`). Cognee's default prune keeps the relational database, and `forget-dataset` repairs a root after it (docs, `docs/SESSION_HANDOFF.md`, step 5 S2).
+- Since Checkpoint I a `forgotten` row keeps a tombstone of identifiers in its `description` column, and no new table holds it (`storage.py`).
+- Since Checkpoint J1 a decision may cite another source's decision as a saved record (`records.py`), and eligibility per decision also follows the chain of citations (`chains.live_pass`). Section 17.3 lists the three conditions.
+- Since step 5 S3a and S3b the lab registers both the original and the generated source through `entry.add`, which calls `cognee.add`, and publishes through `entry.cognify`. That runs Cognee's chunking Tasks and one lab Task under the pipeline name `cognify_pipeline`. The lab Task writes with the generated source's own context, never the run's, so the generated source is still the native owner of the overlay it writes (`entry.py` docstring). The lab stamps each file it manages as cognified, so a plain `cognee.cognify` skips it.
+- Since step 5 S4 a text edit goes through the lab's `update` (`entry_update.py`), and Cognee's standard Tasks rebuild the original's chunks (`native_chunks.build_chunks`).
+- Since step 5 S2 `status` lists a source whose native copy Cognee deleted or changed (`native_copy.natively_deleted`), and `reconcile` refuses it.
+- Whether the generated source is still registered as `txt`, `text/plain` is unchecked.
 
 ### Possible future stores (open)
 
@@ -172,6 +185,8 @@ Measured absences:
 - No vector entries for overlay edges. `resolves_to` and `has_identity_mention` exist only in the graph. Native vector search can find mention Entities by name, but reaches overlay edges only through graph expansion.
 
 **The fixture never runs `cognify`.** It chunks the originals itself with Cognee's `TextChunker`, writes the chunks with `add_data_points`, writes the corpus Entity under the `seed` Data item and writes the captured facts itself (code, `fixture.py:38-60` and setup). So every product called Cognee-owned in identity is integration code standing in for `cognify`. That is fine for lifecycle tests. No identity fixture yet shows real `cognify` output and the overlay side by side.
+
+**Note, 2026-10-26** (code, read at `7306ce7`, not measured again). The inventory above is the measurement of 2026-10-22 at `012d8a6`. The assistant did not repeat it. The paragraph on `cognify` no longer holds as written. Since step 5 S3a and S3b every creation command runs Cognee's `classify_documents`, `extract_chunks_from_documents` and `add_data_points` under `cognify_pipeline`, followed by the lab Task (`native_chunks.standard_tasks`, `entry.cognify`). Since step 5 S4 a text edit rebuilds the chunks the same way. None of these Tasks needs an LLM, and the captured facts are still written by the lab Task (`entry.semantic_hooks`). So no fixture runs Cognee's extraction or summary Tasks, and the absence of `TextSummary_text` and `Triplet_text` entries should still hold (inferred, not run). The seed still writes the corpus Entity itself (`fixture.seed_corpus`). The ledger has a fifth table, the removal record (section 5).
 
 ## 7. Identity products by column
 
@@ -398,6 +413,17 @@ These came from reading the code, not the docs. Each one should become either a 
 7. **There is no registered retriever.** Native search ignores eligibility and withholdings.
 8. **The ledger lives where `prune` reaches it.** Nothing handles a pruned store.
 
+**Status on `main` at `7306ce7`** (2026-10-26, code, read). The items above describe `012d8a6`.
+
+1. Still holds. `registered.read_registered` and `replace.py` still refuse `generated_source_changed` when the registered copy differs.
+2. Not checked again.
+3. Still holds for content. Three kinds of identifiers now outlive a revision. A forgotten row keeps a tombstone (Checkpoint I). A removed record is named with its fingerprint and the last served revision that held it (`records.RemovedRecord`, J2). The removal record keeps every Entity UUID a lab operation removed (step 5 S2).
+4. Still holds. The describers are still captured.
+5. Partly resolved. Fixtures now run Cognee's chunking Tasks under `cognify_pipeline` through the lab's `add` and `cognify` (step 5 S3a and S3b). They still run no extraction, so no fixture shows Cognee's extracted Entities beside the overlay (section 6 note).
+6. Partly resolved. `status` lists a source whose native copy Cognee deleted or changed, `reconcile` refuses it, and the user responds with `forget` or `forget-dataset` (step 5 S2). An edit of a native Entity is still caught only at read time (Checkpoint K). The lab's own `add`, `cognify` and `update` are the prompt path. A plain `cognee.cognify`, `cognee.remember` or `cognee.update` bypasses it (`entry.py` docstring).
+7. Still holds. The retrieval entry is the next task, S1 (docs, `docs/SESSION_HANDOFF.md`).
+8. Partly resolved. After Cognee's default prune, which keeps the relational database, `forget-dataset` repairs the root. `prune_system(metadata=True)` deletes the ledger, and the lab treats it as a reset and refuses the root with `stores_reset` (step 5 S2).
+
 ## 13. Decisions and open questions
 
 **Decided by the user:**
@@ -435,7 +461,7 @@ These came from reading the code, not the docs. Each one should become either a 
 
 ## 14. Purpose census (method only)
 
-This section records how to test the observation in TODO item 1, so the test can be repeated. The user asked on 2026-10-23 not to record its numbers until the code is more stable. The assistant ran it once on `012d8a6`, and the result is not recorded here.
+This section records how to test the observation in TODO item 1, so the test can be repeated. The user asked on 2026-10-23 not to record its numbers until the code is more stable. The assistant ran it once on `012d8a6`, and the result is not recorded here. On 2026-10-26 the assistant labelled the modules added since then and ran it on `main` at `7306ce7` on the user's Mac. It reported no unclassified module. The result is not recorded here.
 
 **The question.** How much of the identity integration exists because sources change after publication, and how much of that is driven by provenance?
 
@@ -473,7 +499,7 @@ CLI and environment code (`F`) and scenario fixtures (`S.first`, `S.change`) are
 - The project scheduled maintenance first, so effort partly reflects the plan.
 - Continuity rules are specific to identity, and they count as change response but not as provenance.
 - Some costs come from design choices: the two description copies, whole-document rebuilds and the fixture standing in for `cognify`.
-- A label is one person's judgment. When a module is new or renamed, the script reports it as unclassified, and someone must label it before the numbers mean anything.
+- A label is one person's judgment. When a module is new or renamed, the script reports it as unclassified, and someone must label it before the numbers mean anything. When a labelled function moves or is renamed, the script reports its override as stale.
 
 ## 15. TODO
 
@@ -481,12 +507,12 @@ CLI and environment code (`F`) and scenario fixtures (`S.first`, `S.change`) are
 2. **Compare with Cognee's default provenance** (user, 2026-10-23). List what Cognee records and does by default: source references and the deletion that follows them, `provenance_edge_evidence`, pipeline status, content-derived chunk IDs, incremental `update`'s chunk diff, and Forget's cascade. For each identity provenance mechanism, say whether Cognee already covers it, covers it partly, or does not cover it, and why identity needed its own. First pass done on 2026-10-25, in sections 16 and 17. Not done yet: the Cognee survey's citations as a table of their own.
 3. Build the mapping from each activity and procedure to the identity code, tests and journeys, as the evidence column for the rewrite. Do it after the current code work lands.
 4. Write up the per-column trade-offs in full.
-5. Work through the hierarchical wiki in more depth.
+5. Work through the hierarchical wiki in more depth. Moved on 2026-10-25 to the cognee-llm-wiki repository, with the rest of the LLM wiki work.
 6. Dig into the two-description-copies case study (section 12).
 7. Revise the playbook, the roadmap pointer and the handoff to the new framing, once the user approves edits to them.
-8. Label the modules added since `012d8a6` in `scripts/purpose_census.py`, before running the census again. The script reports these as unclassified: `chain_fixture`, `chain_kind_change`, `chains`, `decisions`, `dependency`, `digests`, `entity_edit`, `erasure`, `erasure_rules`, `records` and `review`.
-9. Run the overwrite probe in section 17. It tests whether Cognee replaces a node's properties when a second document extracts the same Entity.
-10. Bring sections 5, 6 and 12 up to date with `main`. They describe the code at `012d8a6`.
+8. Label the modules added since `012d8a6` in `scripts/purpose_census.py`, before running the census again. The script reports these as unclassified: `chain_fixture`, `chain_kind_change`, `chains`, `decisions`, `dependency`, `digests`, `entity_edit`, `erasure`, `erasure_rules`, `records` and `review`. **Done on 2026-10-26.** By then step 5 had added nine more: `dataset_forget`, `entry`, `entry_update`, `native_chunks`, `native_cognify`, `native_copy`, `native_forget`, `outside_deletion` and `removal_record`. The labels follow each module's docstring and callers. Fixtures and the stand-ins for outside writers are `S.change`: `chain_fixture`, `chain_kind_change`, `entity_edit`, `native_cognify` and `native_forget`. Dependency work is `C.dep`: `chains`, `dependency`, `outside_deletion` and `review`. Erasure and native ownership are `C.own`: `erasure`, `erasure_rules`, `dataset_forget`, `native_copy` and `removal_record`. The record registries are `M`: `records` and `decisions`. `digests` is `P`. The entry points are `B` (`entry`, `native_chunks`) and `C.text` (`entry_update`). Nine overrides named functions that had moved, and the script now reports such an override as stale.
+9. Run the overwrite probe in section 17. It tests whether Cognee replaces a node's properties when a second document extracts the same Entity. **Done on 2026-10-25**, measured in the cognee-llm-wiki repository (probe P2). A second page's description replaced the first page's, and it survived after that page was forgotten.
+10. Bring sections 5, 6 and 12 up to date with `main`. They describe the code at `012d8a6`. **Done on 2026-10-26**, as dated notes in each section against `main` at `7306ce7`.
 
 ## 16. Which operations rest on Cognee, identity or new code (2026-10-23)
 
@@ -555,7 +581,7 @@ Cognee treats the graph as a cache derived from documents. Its provenance answer
 - **Features.** Every node and edge carries source refs. Deletion follows the last owner, keeps the other refs on survivors, and converges on a retry (`provenance_delete_planner.py:96-172`). Chunk IDs come from content, so incremental `update` re-extracts only the changed regions. Cognify rollback undoes a failed run by removing its refs. Edge evidence records which data item, run and chunk asserted each edge. Read-time references, when enabled, trace an answer to the chunks used as context.
 - **Unused machinery.** The `ProvenanceEntry` ledger has `derived_from`, versions and a checksum chain. It is off by default, and no delete or update reads it.
 - **Gaps.** Nothing records what a decision read, and nothing checks currency at read time. In-graph refs exist only if the graph was empty at its first write (`markers.py:48-73`). The add-time hash is MD5, `Data.id` is random, and Entity IDs come from normalized names, so Entities from different documents merge. Incremental update falls back to a full rebuild for a custom graph model, prompt or chunker, and it never touches edge evidence. Forget is not transactional across stores and can leave Triplet and EdgeType vectors. Cached answers are invalidated on delete only. `include_references` is off by default. Without access control, a dataset argument does not confine a search (`search.py:454-470`).
-- **Ownership is shared, content is last writer (read).** The Ladybug adapter merges a node by ID and replaces its whole `properties` blob on a match (`ladybug/adapter.py:1207-1220`). It merges an edge on source, target and `relationship_name` and replaces its properties too (`adapter.py:1030-1040`). Refs are combined as a set union (`_provenance_fold_clause`, `adapter.py:89-106`). So when a second document extracts the same Entity, its description replaces the first one's. If the second document is then deleted, the node survives through the first document's ref but keeps the deleted document's description (inferred from the merge clause and `uuid5("Entity:{name}")`, not run). This is Cognee's own loss-of-support gap.
+- **Ownership is shared, content is last writer (read).** The Ladybug adapter merges a node by ID and replaces its whole `properties` blob on a match (`ladybug/adapter.py:1207-1220`). It merges an edge on source, target and `relationship_name` and replaces its properties too (`adapter.py:1030-1040`). Refs are combined as a set union (`_provenance_fold_clause`, `adapter.py:89-106`). So when a second document extracts the same Entity, its description replaces the first one's. If the second document is then deleted, the node survives through the first document's ref but keeps the deleted document's description (inferred from the merge clause and `uuid5("Entity:{name}")`, not run). This is Cognee's own loss-of-support gap. The probe of 2026-10-25 in the cognee-llm-wiki repository (P2) measured both halves (section 15, item 9).
 
 ### 17.2 Ownership and dependency
 
