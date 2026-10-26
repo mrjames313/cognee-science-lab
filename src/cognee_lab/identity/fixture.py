@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .environment import DATASET_NAME, read_embedding
+from .forget_fixture import CALLER_FILES, semantics_for
 from .models import IdentitySource
 from .publish import Publisher
 from .registered import context_for
@@ -268,15 +269,20 @@ def describe_doc01(template, dataset_id, text, chunks, *, multi=False, amend=Non
     return IdentitySource.model_validate_json(json.dumps(template))
 
 
-async def seed_corpus(root, template):
+async def seed_corpus(root):
     """Register the seed document, stamped, with the Entity doc01 borrows,
-    and return the publisher of the root's stores."""
+    and return the publisher of the root's stores. Every creation command
+    starts here."""
     import cognee
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.storage import add_data_points
 
     from .registered import stamp
 
+    if cognee.__version__ != "1.6.2":
+        raise IntentError(
+            "unsupported_version", "Fixtures require inspected Cognee 1.6.2"
+        )
     (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
     await cognee.add(
         DataItem(data=str(root / "seed.txt"), data_id=SEED_DATA_ID),
@@ -285,7 +291,7 @@ async def seed_corpus(root, template):
     )
     seed = await context_for(SEED_DATA_ID)
     await stamp(SEED_DATA_ID, seed.dataset.id)
-    entity = borrowed_entity(template)
+    entity = borrowed_entity(doc01_template())
     await add_data_points([entity], ctx=seed)
     publisher = await Publisher.configured()
     await publisher.graph.update_node(
@@ -304,74 +310,55 @@ def write_info(root, source):
     (root / "fixture-info.json").write_text(json.dumps(info, indent=2))
 
 
-async def start_doc01(root, source_text=None):
-    """doc01's captured template and original, the original's text written
-    to the root (the fixture text or `source_text`), and the publisher of
-    the root's stores once the seed corpus is registered."""
+async def add_doc01(root, *, chunk_budget=512, source_text=None, **options):
+    """Register doc01's original (the fixture text or `source_text`) and its
+    captured description (`describe_doc01` with `options`) through the
+    lab's `add`, and return the description. The describer also writes the
+    root's fixture-info.json, so a failed publication leaves it too."""
     from . import entry
 
+    files = CALLER_FILES["doc01"]
     template = doc01_template(source_text)
     original = entry.Original(
-        root / "source.txt", UUID(template["inputs"]["doc01"]["data_id"])
+        root / files.text, UUID(template["inputs"]["doc01"]["data_id"])
     )
     original.path.write_text(
         source_text
         if source_text is not None
         else (FIXTURES / "source.txt").read_text()
     )
-    return template, original, await seed_corpus(root, template)
-
-
-def doc01_describer(root, template, **options):
-    """The lab's `add` describer for doc01 (`describe_doc01` with
-    `options`), which also writes the root's fixture-info.json."""
 
     def describe(draft):
-        # Written before the publication, so a failed run leaves it too.
         source = describe_doc01(
             template, draft.dataset_id, draft.text, draft.chunks, **options
         )
         write_info(root, source)
         return source
 
-    return describe
+    return await entry.add(
+        DATASET_NAME,
+        original,
+        describe=describe,
+        identity_path=root / files.identity,
+        chunk_budget=chunk_budget,
+    )
 
 
 async def create(root, args):
-    """The doc01 root through the lab's remember: the seed corpus first,
-    then doc01 registered, described from its chunks and published in
+    """The doc01 root: the seed corpus, then doc01 added and published in
     Cognee's cognify pipeline. The CLI closes the publisher's stores."""
     from . import entry
 
-    template, original, publisher = await start_doc01(root)
+    publisher = await seed_corpus(root)
     args._fixture_publisher = publisher
-    return await entry.remember(
+    done = await entry.remember_in_order(
         publisher,
-        DATASET_NAME,
-        original,
-        describe=doc01_describer(root, template),
-        identity_path=root / "identity.json",
-        semantics=CapturedSemantics(),
-        fault_stage=args.fault_stage,
+        {"doc01": lambda _: add_doc01(root)},
+        semantics=semantics_for,
+        fault=("doc01", args.fault_stage),
         origin="test",
     )
-
-
-async def add_doc01(root, *, chunk_budget=512, source_text=None, **options):
-    """Register doc01 and its description through the lab's `add`, for a
-    root with more sources, which then publishes each one in order. Returns
-    the publisher and doc01's description (`doc01_describer`'s options)."""
-    from . import entry
-
-    template, original, publisher = await start_doc01(root, source_text)
-    source = await entry.add(
-        DATASET_NAME,
-        original,
-        describe=doc01_describer(root, template, **options),
-        identity_path=root / "identity.json",
-        chunk_budget=chunk_budget,
-    )
-    return publisher, source
+    return done["doc01"]
 
 
 async def run(args, root):
@@ -463,5 +450,8 @@ async def reconcile(root, args, publisher, source):
 
     await publisher.refuse_natively_deleted(source)
     await reconcile_publication(
-        publisher, source, semantics=CapturedSemantics(), fault_stage=args.fault_stage
+        publisher,
+        source,
+        semantics=semantics_for("doc01"),
+        fault_stage=args.fault_stage,
     )

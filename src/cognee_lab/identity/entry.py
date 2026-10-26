@@ -4,7 +4,7 @@
 runs Cognee's standard Tasks under the pipeline name `cognify_pipeline`, so
 Cognee builds the document and its chunks, then one lab Task publishes the
 description once per document over the whole chunk set. `remember` is `add`
-then `cognify`.
+then `cognify`; `remember_in_order` does both for each source of a root.
 
 The lab Task never writes with the pipeline's context. Its writes carry no
 pipeline run ID, so Cognee's rollback and its startup recovery of an
@@ -21,7 +21,7 @@ for the gaps in that protection.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -140,9 +140,21 @@ async def chunk_budget_of(source, graph, default: int) -> int:
     return default
 
 
+def semantic_hooks(semantics, publisher, source, chunks, original) -> dict:
+    """The publisher's `semantic_writer` and `verify_semantics` for
+    `semantics` over the source's chunks, with the original's context; None
+    for both when the source has no captured facts."""
+    if semantics is None:
+        return dict(semantic_writer=None, verify_semantics=None)
+    return dict(
+        semantic_writer=lambda: semantics.write(publisher, source, chunks, original),
+        verify_semantics=lambda: semantics.verify(publisher, source, chunks, original),
+    )
+
+
 async def cognify(
     publisher,
-    sources: Sequence[IdentitySource],
+    source: IdentitySource,
     *,
     semantics: Semantics | None,
     chunk_budget: int = 512,
@@ -158,10 +170,8 @@ async def cognify(
     failure is recorded in the ledger, the run still completes, and the
     failure is raised after the run.
 
-    One source per run. Cognee runs the items of one run concurrently, and
-    a root's sources publish in order: a later source cites an earlier
-    one's published decisions, and a failed source stops the ones after it.
-    A root with several sources runs `cognify` once per source."""
+    One source per run: Cognee runs the items of one run concurrently, and
+    a root's sources publish in order (`remember_in_order`)."""
     from cognee.modules.pipelines.operations.pipeline import run_pipeline
     from cognee.modules.pipelines.tasks.task import Task
     from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
@@ -170,9 +180,6 @@ async def cognify(
     from .registered import context_for, read_texts, stamp
     from .text_changes import chunk_text
 
-    if len(sources) != 1:
-        raise IntentError("one_source", "cognify takes one source per run")
-    (source,) = sources
     if await publisher.records.row(source) is not None:
         # Chunking again would hide a copy deleted outside the lab.
         await publisher.refuse_natively_deleted(source)
@@ -213,16 +220,7 @@ async def cognify(
                 ctx=await context_for(source.identity_data_id),
                 origin="test/fault_injection" if fault_stage else origin,
                 fault_stage=fault_stage,
-                semantic_writer=(
-                    None
-                    if semantics is None
-                    else lambda: semantics.write(publisher, source, chunks, original)
-                ),
-                verify_semantics=(
-                    None
-                    if semantics is None
-                    else lambda: semantics.verify(publisher, source, chunks, original)
-                ),
+                **semantic_hooks(semantics, publisher, source, chunks, original),
             )
         except Exception as exc:
             failures.append(exc)
@@ -280,10 +278,46 @@ async def remember(
     )
     await cognify(
         publisher,
-        [source],
+        source,
         semantics=semantics,
         chunk_budget=chunk_budget,
         fault_stage=fault_stage,
         origin=origin,
     )
     return source
+
+
+AddSource = Callable[[Mapping[str, IdentitySource]], Awaitable[IdentitySource]]
+
+
+async def remember_in_order(
+    publisher,
+    adds: Mapping[str, AddSource],
+    *,
+    semantics: Callable[[str], Semantics | None],
+    chunk_budget: int = 512,
+    fault: tuple[str, str] | None = None,
+    origin: str = "runtime",
+) -> dict[str, IdentitySource]:
+    """Add, then `cognify`, each source of a root in publication order, by
+    label. Each `add` registers its source and returns its description; it
+    reads only the descriptions before it, which it is given. `semantics`
+    gives a label's semantics, and `fault` a label and the stage at which
+    its publication fails.
+
+    A later source may cite an earlier one's published decisions, so a
+    failure stops the run before the next source is added: no source after
+    a failed one is registered, so none is left unstamped for a plain
+    `cognee.cognify` to extract."""
+    done: dict[str, IdentitySource] = {}
+    for label, add in adds.items():
+        done[label] = await add(dict(done))
+        await cognify(
+            publisher,
+            done[label],
+            semantics=semantics(label),
+            chunk_budget=chunk_budget,
+            fault_stage=fault[1] if fault and fault[0] == label else None,
+            origin=origin,
+        )
+    return done

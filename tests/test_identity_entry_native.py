@@ -160,3 +160,29 @@ def test_a_non_incremental_plain_cognify_ignores_the_stamps(tmp_path):
     command(root, "fixture")
     seen = in_root(root, "full-cognify")
     assert seen["cognify"] != "completed"
+
+
+@pytest.mark.integration
+def test_a_source_after_a_failed_one_is_never_registered(tmp_path):
+    """Each source is added, then published, before the next is added, so a
+    failure leaves no later original registered and unstamped."""
+    root = tmp_path / "entry"
+    command(
+        root,
+        "multi-fixture",
+        "--source",
+        "doc01",
+        "--fault-stage",
+        "identity_edges",
+        expect=1,
+    )
+    assert not (root / "source02.txt").exists()
+    assert not (root / "identity02.json").exists()
+    refused = output(command(root, "reconcile", "--source", "doc02", expect=1))
+    assert "not registered" in refused["message"]
+    reconciled = output(command(root, "reconcile", "--source", "doc01"))
+    assert [p["state"] for p in reconciled["publications"]] == ["current"]
+    seen = output(command(root, "native-cognify"))
+    assert list(seen["native_cognify"]["items"].values()) == 3 * [
+        "PipelineRunAlreadyCompleted"
+    ]

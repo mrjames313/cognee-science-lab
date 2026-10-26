@@ -21,16 +21,17 @@ from .captured_chunks import bind_chunks
 from .chain_fixture import add_doc03, cite
 from .chain_kind_change import change_kind, dependents_withheld
 from .entity_edit import edit_entity
-from .fixture import add_doc01, expect_current
+from .fixture import add_doc01, expect_current, seed_corpus
 from .forget_fixture import (
+    CALLER_FILES,
     forget_command,
     forget_dry_run,
     readd,
     semantics_for,
 )
 from .models import IdentitySource
-from .multisource import current_sources, reconcile_selected
-from .multisource import read_sources
+from .multisource import current_sources, not_published, reconcile_selected
+from .multisource import read_sources, write_manifest
 from .native_copy import deleted_entry, missing_native
 from .publish import Publisher
 from .records import saved_records
@@ -164,48 +165,23 @@ def describe_glossary(dataset_id, text, chunks, revision=1, old=None):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def prepare(root, *, chain=False):
-    """Register the glossary and doc01 and, with `chain`, doc03, which cites
-    doc01's decisions (chain_fixture.py), through the lab's `add`. Returns
-    the publisher and the descriptions in publication order."""
-    import cognee
-
+async def add_glossary(root):
+    """Register the glossary's original and its description through the
+    lab's `add`, and return the description."""
     from . import entry
 
-    if cognee.__version__ != "1.6.2":
-        raise IntentError(
-            "unsupported_version", "Glossary fixture requires inspected Cognee 1.6.2"
-        )
-    publisher, doc01 = await add_doc01(
-        root, amend=lambda payload: glossary_inputs(payload, GLOSSARY_TEXT)
-    )
-    original = entry.Original(root / "glossary.txt", GLOSSARY_DATA_ID)
+    files = CALLER_FILES["glossary"]
+    original = entry.Original(root / files.text, GLOSSARY_DATA_ID)
     original.path.write_text(GLOSSARY_TEXT)
-    glossary = await entry.add(
+    return await entry.add(
         DATASET_NAME,
         original,
         describe=lambda draft: describe_glossary(
             draft.dataset_id, draft.text, draft.chunks
         ),
-        identity_path=root / "glossary_identity.json",
+        identity_path=root / files.identity,
         chunk_budget=CHUNK_BUDGET,
     )
-    files = dict(doc01="identity.json", glossary="glossary_identity.json")
-    prepared = {"glossary": glossary, "doc01": doc01}
-    if chain:
-        files["doc03"] = "doc03_identity.json"
-        prepared["doc03"] = await add_doc03(root, doc01)
-    (root / INFO).write_text(
-        json.dumps(
-            dict(
-                dataset_id=str(doc01.dataset_id),
-                sources=files,
-                chunk_budget=CHUNK_BUDGET,
-            ),
-            indent=2,
-        )
-    )
-    return publisher, prepared
 
 
 async def change_glossary(
@@ -305,7 +281,8 @@ async def snapshot(publisher, root, query):
     by_source = {r.source: r for r in rows}
     found = {}
     for label, source in sources.items():
-        row = by_source[str(source.identity_data_id)]
+        if (row := by_source.get(str(source.identity_data_id))) is None:
+            raise not_published(label)
         if missing := await missing_native(publisher.graph, row):
             found[label] = deleted_entry(row, missing)
             continue
@@ -441,21 +418,32 @@ async def finish(publisher, root, query, **extra) -> dict:
 
 
 async def create(args, root) -> dict:
-    """Make the root and publish each source in citation order: doc03 pins
+    """Make the root: the glossary, doc01 and, with `--chain`, doc03, each
+    added and published in citation order (`entry.remember_in_order`).
+    doc01 publishes after the glossary is registered, because admission
+    reads doc01's glossary input from the registered copy; doc03 cites
     doc01's decisions as published. No current source is read first."""
     from . import entry
 
-    publisher, prepared = await prepare(root, chain=args.chain)
+    publisher = await seed_corpus(root)
     args._fixture_publisher = publisher
-    for label, source in prepared.items():
-        await entry.cognify(
-            publisher,
-            [source],
-            semantics=semantics_for(label),
-            chunk_budget=CHUNK_BUDGET,
-            fault_stage=args.fault_stage if label == args.source else None,
-            origin="test",
-        )
+    adds = dict(
+        glossary=lambda _: add_glossary(root),
+        doc01=lambda _: add_doc01(
+            root, amend=lambda payload: glossary_inputs(payload, GLOSSARY_TEXT)
+        ),
+    )
+    if args.chain:
+        adds["doc03"] = lambda done: add_doc03(root, done["doc01"])
+    await write_manifest(root, INFO, tuple(adds), chunk_budget=CHUNK_BUDGET)
+    await entry.remember_in_order(
+        publisher,
+        adds,
+        semantics=semantics_for,
+        chunk_budget=CHUNK_BUDGET,
+        fault=(args.source, args.fault_stage),
+        origin="test",
+    )
     return await finish(publisher, root, args.query)
 
 

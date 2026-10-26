@@ -88,70 +88,108 @@ def describe_doc02(first, text, chunks, *, dependent=False):
     return IdentitySource.model_validate_json(json.dumps(payload))
 
 
-async def prepare(root, *, chunked=False, dependent=False):
-    """Register doc01 and doc02 and their descriptions through the lab's
-    `add`. Returns the publisher, the descriptions in publication order and
-    the chunk budget."""
-    import cognee
-
+async def add_doc02(root, first, *, chunk_budget, dependent=False):
+    """Register doc02's original, doc01's text with one more sentence, and
+    its description (`describe_doc02`, from doc01's) through the lab's
+    `add`, and return the description."""
     from . import entry
-    from .fixture import add_doc01
+    from .forget_fixture import CALLER_FILES
 
-    if cognee.__version__ != "1.6.2":
-        raise IntentError(
-            "unsupported_version", "First fixture requires inspected Cognee 1.6.2"
-        )
-
-    budget = 9 if chunked else 512
-    text = None
-    if chunked:
-        from .fixture import FIXTURES
-
-        text = (
-            (FIXTURES / "source.txt")
-            .read_text()
-            .replace(". The controller", ", the controller")
-            .replace("; it", ", and it")
-        )
-    publisher, first = await add_doc01(
-        root, multi=True, chunk_budget=budget, source_text=text
-    )
-    original = entry.Original(root / "source02.txt", UUID(fixture_id("doc02:original")))
+    files = CALLER_FILES["doc02"]
+    original = entry.Original(root / files.text, UUID(fixture_id("doc02:original")))
     original.path.write_text(
-        (root / "source.txt").read_text().rstrip("\n")
+        (root / CALLER_FILES["doc01"].text).read_text().rstrip("\n")
         + " During startup, HC remains active.\n"
     )
-    second = await entry.add(
+    return await entry.add(
         DATASET_NAME,
         original,
         describe=lambda draft: describe_doc02(
             first, draft.text, draft.chunks, dependent=dependent
         ),
-        identity_path=root / "identity02.json",
-        chunk_budget=budget,
+        identity_path=root / files.identity,
+        chunk_budget=chunk_budget,
     )
-    info = dict(
-        dataset_id=str(first.dataset_id),
-        sources={"doc01": "identity.json", "doc02": "identity02.json"},
-        dependent=dependent,
+
+
+def chunked_text():
+    """doc01's text for a chunked root, which a budget of 9 splits."""
+    from .fixture import FIXTURES
+
+    return (
+        (FIXTURES / "source.txt")
+        .read_text()
+        .replace(". The controller", ", the controller")
+        .replace("; it", ", and it")
     )
-    (root / INFO).write_text(json.dumps(info, indent=2))
+
+
+async def write_manifest(root, name, labels, **extra):
+    """A root's manifest `name`: its dataset, each source's identity file
+    by label (`CALLER_FILES`), in publication order, and `extra`. Written
+    before the first source is added, so a source after a failed one is
+    named but has no file (`read_sources`)."""
+    from .fixture import SEED_DATA_ID
+    from .forget_fixture import CALLER_FILES
+    from .registered import context_for
+
+    seed = await context_for(SEED_DATA_ID)
+    manifest = dict(
+        dataset_id=str(seed.dataset.id),
+        sources={label: CALLER_FILES[label].identity for label in labels},
+        **extra,
+    )
+    (root / name).write_text(json.dumps(manifest, indent=2))
+
+
+async def create(root, args):
+    """A two-source root: doc01, then doc02, each added and published in
+    order (`entry.remember_in_order`)."""
+    from . import entry
+    from .fixture import add_doc01, seed_corpus
+    from .forget_fixture import semantics_for
+
+    chunked = args.command == "chunked-fixture"
+    budget = 9 if chunked else 512
+    publisher = await seed_corpus(root)
+    args._fixture_publisher = publisher
+    await write_manifest(root, INFO, ("doc01", "doc02"), dependent=args.dependent)
     if chunked:
         (root / "chunked-fixture-info.json").write_text(
             json.dumps(dict(chunk_budget=budget, prefix="Δ review: "), indent=2)
         )
-    return publisher, {"doc01": first, "doc02": second}, budget
+    sources = await entry.remember_in_order(
+        publisher,
+        {
+            "doc01": lambda _: add_doc01(
+                root,
+                multi=True,
+                chunk_budget=budget,
+                source_text=chunked_text() if chunked else None,
+            ),
+            "doc02": lambda done: add_doc02(
+                root, done["doc01"], chunk_budget=budget, dependent=args.dependent
+            ),
+        },
+        semantics=semantics_for,
+        chunk_budget=budget,
+        fault=(args.source, args.fault_stage),
+        origin="test",
+    )
+    return publisher, sources
 
 
 INFO = "multi-fixture-info.json"
 
 
 def read_sources(root, info=INFO):
-    """The identity file of each source a fixture manifest names."""
+    """The identity file of each source a fixture manifest names, but one
+    that was never added: a source after a failed one has no file."""
     manifest = json.loads((root / info).read_text())
     return {
         label: IdentitySource.model_validate_json((root / path).read_text())
         for label, path in manifest["sources"].items()
+        if (root / path).exists()
     }
 
 
@@ -205,6 +243,7 @@ async def reconcile_one(publisher, source, *, semantics, fault_stage=None):
     native pipeline: finish a failed attempt or verify a current one.
     `semantics` writes the missing captured facts and verifies them; None
     for a source without captured facts."""
+    from .entry import semantic_hooks
     from .fixture import load_chunks
     from .registered import context_for, read_texts
     from cognee.modules.pipelines.operations.run_tasks_base import run_tasks_base
@@ -223,16 +262,7 @@ async def reconcile_one(publisher, source, *, semantics, fault_stage=None):
                 ctx=ctx,
                 origin="test/fault_injection" if fault_stage else "test",
                 fault_stage=fault_stage,
-                semantic_writer=(
-                    None
-                    if semantics is None
-                    else lambda: semantics.write(publisher, item, chunks, original)
-                ),
-                verify_semantics=(
-                    None
-                    if semantics is None
-                    else lambda: semantics.verify(publisher, item, chunks, original)
-                ),
+                **semantic_hooks(semantics, publisher, item, chunks, original),
             )
         return items
 
@@ -244,9 +274,12 @@ async def reconcile_one(publisher, source, *, semantics, fault_stage=None):
 
 async def reconcile_publication(publisher, source, *, semantics, fault_stage=None):
     """Finish or verify a publication's saved revision. A failed first
-    publication finishes through the lab's cognify, as it started; any other
-    row is reconciled over the chunks Cognee holds (`reconcile_one`). The
-    caller refuses a source whose native copy is gone first."""
+    publication finishes through the lab's cognify, as it started. Any
+    other row is reconciled over the chunks Cognee holds (`reconcile_one`),
+    not through cognify: cognify writes the native chunks again before the
+    lab Task runs, so a verify would no longer prove that Cognee still holds
+    the chunks and vectors the publication wrote. The caller refuses a
+    source whose native copy is gone first."""
     from . import entry
 
     row = await publisher.records.row(source)
@@ -257,13 +290,22 @@ async def reconcile_publication(publisher, source, *, semantics, fault_stage=Non
     ):
         await entry.cognify(
             publisher,
-            [source],
+            source,
             semantics=semantics,
             fault_stage=fault_stage,
             origin="test",
         )
         return
     await reconcile_one(publisher, source, semantics=semantics, fault_stage=fault_stage)
+
+
+def not_published(label) -> IntentError:
+    """The refusal of a source that was added but has no publication: its
+    first cognify never began."""
+    return IntentError(
+        "not_published",
+        f"{label} is registered but has no publication to read or reconcile",
+    )
 
 
 async def reconcile_selected(publisher, label, selected, *, resume_text_change) -> dict:
@@ -277,6 +319,8 @@ async def reconcile_selected(publisher, label, selected, *, resume_text_change) 
 
     await publisher.refuse_natively_deleted(selected)
     row = await publisher.records.row(selected)
+    if row is None:
+        raise not_published(label)
     if (finished := await reconcile_forget(publisher, row, selected)) is not None:
         return finished
     if row.resumed_by == "replace" and row.plan.get("text_change"):
@@ -347,7 +391,8 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
     for label, source in sources.items():
         from .registered import read_registered
 
-        row = rows[str(source.identity_data_id)]
+        if (row := rows.get(str(source.identity_data_id))) is None:
+            raise not_published(label)
         if row.operation == "identity_forget":
             from .forget_fixture import forget_checks
             from .retirement import source_ids
@@ -546,31 +591,14 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
 async def run(args, root):
     refresh = {}
     if args.command in {"multi-fixture", "chunked-fixture"}:
-        from . import entry
-        from .fixture import CapturedSemantics
-
-        publisher, sources, budget = await prepare(
-            root,
-            chunked=args.command == "chunked-fixture",
-            dependent=args.dependent,
-        )
-        args._fixture_publisher = publisher
-        for label, source in sources.items():
-            await entry.cognify(
-                publisher,
-                [source],
-                semantics=CapturedSemantics(),
-                chunk_budget=budget,
-                fault_stage=args.fault_stage if label == args.source else None,
-                origin="test",
-            )
+        publisher, sources = await create(root, args)
     else:
         publisher = await Publisher.configured()
         args._fixture_publisher = publisher
         sources = await saved_or_file(publisher, fixture_files(root))
         if args.source not in sources:
             raise IntentError(
-                "source_missing", "Selected document is not in this fixture"
+                "source_missing", "Selected document is not registered in this fixture"
             )
         selected = sources[args.source]
         if args.command == "forget" and args.dry_run:

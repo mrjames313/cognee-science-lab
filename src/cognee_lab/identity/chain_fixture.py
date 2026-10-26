@@ -20,7 +20,7 @@ from .environment import DATASET_NAME
 from .digests import object_digest
 from .fixture import expect_current
 from .models import IdentitySource
-from .forget_fixture import write_revision
+from .forget_fixture import CALLER_FILES, write_revision
 from .records import citation, current_record
 from .revisions import next_revision, replace_one
 from .validation import IntentError, fresh_mention_id, text_digest
@@ -134,17 +134,19 @@ def describe_doc03(doc01: IdentitySource, chunks) -> IdentitySource:
 
 
 async def add_doc03(root, doc01):
-    """Register doc03's text and its description through the lab's `add`;
-    return the description."""
+    """Register doc03's original and its description, which cites doc01's
+    (`describe_doc03`), through the lab's `add`, and return the
+    description."""
     from . import entry
 
-    original = entry.Original(root / "doc03.txt", DOC03_DATA_ID)
+    files = CALLER_FILES["doc03"]
+    original = entry.Original(root / files.text, DOC03_DATA_ID)
     original.path.write_text(DOC03_TEXT)
     return await entry.add(
         DATASET_NAME,
         original,
         describe=lambda draft: describe_doc03(doc01, draft.chunks),
-        identity_path=root / "doc03_identity.json",
+        identity_path=root / files.identity,
     )
 
 

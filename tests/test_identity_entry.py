@@ -1,6 +1,7 @@
 """The lab entry points' rules that need no store: which native facets a
 failed publication reports, the chunk budget a reconcile chunks with,
-and the one source a cognify run takes."""
+the order a root's sources are added and published in, and the refusal of
+a source with no publication."""
 
 import json
 
@@ -79,16 +80,124 @@ async def test_reconcile_chunks_with_the_default_when_the_chunks_are_gone(
     assert await entry.chunk_budget_of(described(source_payload), Graph(), 512) == 512
 
 
-class Untouchable:
-    @property
-    def records(self):
-        raise AssertionError("the ledger was read")
+class Recorded:
+    """A stand-in for `entry.cognify` that records each source it is given
+    and fails the ones named in `failing`."""
+
+    def __init__(self, failing=()):
+        self.failing = set(failing)
+        self.cognified = []
+
+    async def __call__(self, publisher, source, *, semantics, fault_stage, **_):
+        self.cognified.append((source, semantics, fault_stage))
+        if source in self.failing:
+            raise IntentError("injected_failure", source)
 
 
-async def test_cognify_refuses_more_than_one_source_before_the_ledger(
-    source_payload,
+def adder(added, label):
+    async def add(earlier):
+        added.append((label, sorted(earlier)))
+        return label
+
+    return add
+
+
+async def test_each_source_is_added_then_published_reading_only_earlier_ones(
+    monkeypatch,
 ):
-    source = described(source_payload)
+    cognify = Recorded()
+    monkeypatch.setattr(entry, "cognify", cognify)
+    added = []
+    done = await entry.remember_in_order(
+        "publisher",
+        {label: adder(added, label) for label in ("glossary", "doc01", "doc03")},
+        semantics=lambda label: f"facts of {label}",
+        fault=("doc03", "nodes"),
+    )
+    assert added == [
+        ("glossary", []),
+        ("doc01", ["glossary"]),
+        ("doc03", ["doc01", "glossary"]),
+    ]
+    assert cognify.cognified == [
+        ("glossary", "facts of glossary", None),
+        ("doc01", "facts of doc01", None),
+        ("doc03", "facts of doc03", "nodes"),
+    ]
+    assert done == {"glossary": "glossary", "doc01": "doc01", "doc03": "doc03"}
+
+
+async def test_a_source_after_a_failed_one_is_never_registered(monkeypatch):
+    monkeypatch.setattr(entry, "cognify", Recorded(failing={"doc01"}))
+    added = []
+    with pytest.raises(IntentError) as failed:
+        await entry.remember_in_order(
+            "publisher",
+            {label: adder(added, label) for label in ("doc01", "doc02")},
+            semantics=lambda label: None,
+        )
+    assert failed.value.code == "injected_failure"
+    assert added == [("doc01", [])]
+
+
+async def test_remember_publishes_the_source_it_registered(monkeypatch, tmp_path):
+    async def add(dataset_name, original, *, describe, identity_path, chunk_budget):
+        return describe(entry.Draft(original.path.name, [], dataset_name))
+
+    cognify = Recorded()
+    monkeypatch.setattr(entry, "add", add)
+    monkeypatch.setattr(entry, "cognify", cognify)
+    source = await entry.remember(
+        "publisher",
+        "dataset",
+        entry.Original(tmp_path / "doc.txt", None),
+        describe=lambda draft: ("described", draft.text, draft.dataset_id),
+        identity_path=tmp_path / "identity.json",
+        semantics="facts",
+        fault_stage="nodes",
+    )
+    assert source == ("described", "doc.txt", "dataset")
+    assert cognify.cognified == [(source, "facts", "nodes")]
+
+
+class Ledger:
+    async def row(self, source):
+        return None
+
+    async def rows(self, dataset=None):
+        return []
+
+
+class Unpublished:
+    """A publisher whose ledger has no row and whose stores were not reset."""
+
+    records = Ledger()
+
+    async def refuse_natively_deleted(self, source):
+        return None
+
+
+async def test_reconcile_refuses_a_source_with_no_publication(source_payload):
+    from cognee_lab.identity.multisource import reconcile_selected
+
     with pytest.raises(IntentError) as refused:
-        await entry.cognify(Untouchable(), [source, source], semantics=None)
-    assert refused.value.code == "one_source"
+        await reconcile_selected(
+            Unpublished(), "doc02", described(source_payload), resume_text_change=None
+        )
+    assert refused.value.code == "not_published"
+    assert "doc02" in str(refused.value)
+
+
+async def test_the_glossary_snapshot_refuses_a_source_with_no_publication(
+    source_payload, tmp_path
+):
+    from cognee_lab.identity import glossary_fixture
+
+    (tmp_path / "glossary_identity.json").write_text(json.dumps(source_payload))
+    (tmp_path / glossary_fixture.INFO).write_text(
+        json.dumps(dict(sources=dict(glossary="glossary_identity.json")))
+    )
+    with pytest.raises(IntentError) as refused:
+        await glossary_fixture.snapshot(Unpublished(), tmp_path, "query")
+    assert refused.value.code == "not_published"
+    assert "glossary" in str(refused.value)

@@ -54,6 +54,24 @@ def semantics_for(label):
     return CapturedSemantics() if CALLER_FILES[label].facts else None
 
 
+def label_of(source) -> str:
+    """The label of one of the fixtures' sources, by its identity Data ID."""
+    from .chain_fixture import DOC03_IDENTITY_ID
+    from .fixture import doc01_template
+    from .glossary_fixture import GLOSSARY_IDENTITY_ID
+    from .multisource import fixture_id
+
+    labels = {
+        doc01_template()["identity_data_id"]: "doc01",
+        fixture_id("doc02:identity"): "doc02",
+        str(GLOSSARY_IDENTITY_ID): "glossary",
+        str(DOC03_IDENTITY_ID): "doc03",
+    }
+    if (label := labels.get(str(source.identity_data_id))) is None:
+        raise IntentError("fixture_shape", "The source is not one of the fixtures'")
+    return label
+
+
 def write_revision(root, label, intended):
     """The caller's file for a reviewed or cited revision of a source, named
     as `CALLER_FILES` names that source's revisions."""
@@ -230,7 +248,10 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     (`CALLER_FILES`): its text and identity description, which may differ
     from what was forgotten, and report whether they do. The re-add is
     admitted on the in-memory text and chunks before anything is written,
-    so a refusal leaves the stores as the forget left them."""
+    so a refusal at admission leaves the stores as the forget left them. A
+    refusal after it can follow the re-registration: `add` registers the
+    original and the description again before the lab Task admits the
+    re-add once more and checks `expected_revision` (`Publisher.readd`)."""
     from types import SimpleNamespace
 
     from . import entry
@@ -287,7 +308,7 @@ async def readd(publisher, root, label, *, expected_revision, fault_stage):
     )
     await entry.cognify(
         publisher,
-        [source],
+        source,
         semantics=semantics_for(label),
         chunk_budget=budget,
         expected_revision=expected_revision,
