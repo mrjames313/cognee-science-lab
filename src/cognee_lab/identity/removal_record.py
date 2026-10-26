@@ -9,7 +9,7 @@ from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import String, select
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # The plan operation of the attempt whose delete removed an Entity.
@@ -31,9 +31,6 @@ class RemovedEntity(Base):
     recorded_at: Mapped[str] = mapped_column(String(40))
 
 
-INSERTS = dict(sqlite=sqlite.insert, postgresql=postgresql.insert)
-
-
 class RemovalRecord:
     """The record's methods, which `RecordStore` mixes in over its
     sessions."""
@@ -49,30 +46,34 @@ class RemovalRecord:
         self, entity_ids, *, dataset, source, operation: RemovalOperation
     ):
         """Append each Entity UUID not yet recorded; one already recorded
-        keeps its first entry, also against a concurrent writer, so a retry
-        or a second fill records nothing twice. `dataset` and `source` name
-        the source whose attempt removed them."""
-        ids = sorted({str(e) for e in entity_ids})
-        if not ids:
-            return
-        at = datetime.now(timezone.utc).isoformat()
-        async with self.session_factory() as session:
-            connection = await session.connection()
-            insert = INSERTS[connection.dialect.name](RemovedEntity)
-            await session.execute(
-                insert.on_conflict_do_nothing(index_elements=["entity"]),
-                [
-                    dict(
+        keeps its first entry, so a retry or a second fill records nothing
+        twice. A concurrent writer that recorded some first fails this
+        commit, and the next pass leaves those out, so the loop ends.
+        `dataset` and `source` name the source whose attempt removed
+        them."""
+        wanted = {str(e) for e in entity_ids}
+        while wanted:
+            async with self.session_factory() as session:
+                statement = select(RemovedEntity.entity).where(
+                    RemovedEntity.entity.in_(wanted)
+                )
+                wanted -= set((await session.execute(statement)).scalars())
+                at = datetime.now(timezone.utc).isoformat()
+                session.add_all(
+                    RemovedEntity(
                         entity=e,
                         dataset=str(dataset),
                         source=str(source),
                         operation=operation,
                         recorded_at=at,
                     )
-                    for e in ids
-                ],
-            )
-            await session.commit()
+                    for e in sorted(wanted)
+                )
+                try:
+                    await session.commit()
+                    return
+                except IntegrityError:
+                    continue
 
     async def record_tombstone_removals(self):
         """What the tombstones prove a forget removed: each one's removed
