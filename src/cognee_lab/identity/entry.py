@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
@@ -143,17 +144,24 @@ async def cognify(
     publisher,
     sources: Sequence[IdentitySource],
     *,
-    semantics: Semantics,
+    semantics: Semantics | None,
     chunk_budget: int = 512,
+    expected_revision: int | None = None,
     fault_stage: str | None = None,
     origin: str = "runtime",
 ):
     """Chunk the source's original with Cognee's standard Tasks and publish
-    the source in a lab Task: a first publication when it has no row, else a
+    the source in a lab Task: a first publication when it has no row, a
+    re-add at `expected_revision` when its row is forgotten, else a
     reconcile, which finishes a failed publication or verifies a current
-    one. A lab failure is recorded in the ledger, the run still completes,
-    and the failure is raised after the run. One source per run until
-    several are tested (step 5, unit S3b)."""
+    one. `semantics` is None for a source with no captured facts. A lab
+    failure is recorded in the ledger, the run still completes, and the
+    failure is raised after the run.
+
+    One source per run. Cognee runs the items of one run concurrently, and
+    a root's sources publish in order: a later source cites an earlier
+    one's published decisions, and a failed source stops the ones after it.
+    A root with several sources runs `cognify` once per source."""
     from cognee.modules.pipelines.operations.pipeline import run_pipeline
     from cognee.modules.pipelines.tasks.task import Task
     from cognee.tasks.documents import classify_documents, extract_chunks_from_documents
@@ -192,7 +200,12 @@ async def cognify(
                     "chunk_mapping", "The lab Task did not receive the whole chunk set"
                 )
             row = await publisher.records.row(source)
-            method = publisher.publish if row is None else publisher.reconcile
+            if row is None:
+                method = publisher.publish
+            elif row.tombstone is not None:
+                method = partial(publisher.readd, expected_revision=expected_revision)
+            else:
+                method = publisher.reconcile
             await method(
                 source,
                 texts=await read_texts(source),
@@ -200,11 +213,15 @@ async def cognify(
                 ctx=await context_for(source.identity_data_id),
                 origin="test/fault_injection" if fault_stage else origin,
                 fault_stage=fault_stage,
-                semantic_writer=lambda: semantics.write(
-                    publisher, source, chunks, original
+                semantic_writer=(
+                    None
+                    if semantics is None
+                    else lambda: semantics.write(publisher, source, chunks, original)
                 ),
-                verify_semantics=lambda: semantics.verify(
-                    publisher, source, chunks, original
+                verify_semantics=(
+                    None
+                    if semantics is None
+                    else lambda: semantics.verify(publisher, source, chunks, original)
                 ),
             )
         except Exception as exc:
