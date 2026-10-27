@@ -1036,7 +1036,7 @@ The assistant's working notes, which are not committed, hold the spec, the probe
 - `uv lock --check` passed after `pyyaml` joined the dev group (checked by the assistant).
 - The probes ran on `21a74e7` (2026-10-26), with every LLM call refused unless the probe stubbed it. The lab stores were unchanged.
 
-The branch has not been pushed, so no GitHub Actions run covers it yet. No user-reviewed root for this checkpoint exists yet. The [IDENTITY search guide](stage6_identity_public_search.md#commands) and the [conformance guide](stage6_conformance_check.md#the-gate) have the commands and the expected values.
+GitHub Actions run 40447014386 on `main` at `747a4f0` passed on 2026-10-27: 699 unit tests, the occurrence check and the chain check. No user-reviewed root for this checkpoint exists yet. The [IDENTITY search guide](stage6_identity_public_search.md#commands) and the [conformance guide](stage6_conformance_check.md#the-gate) have the commands and the expected values.
 
 **Known limits**, from the probes and the reviews:
 
