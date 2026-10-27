@@ -93,6 +93,14 @@ On a `multi-fixture` root after `edit-text --source doc01`, which adds a 48 code
 
 The lab writes no graph edge from a fact to its document. Each evidence chunk is already `is_part_of` its TextDocument, which has the Data item's ID.
 
+Known limits of the source-aware result:
+
+- A fact's flat `identity` comes from the first source that supports it, as in mode `semantic`. Another document's mention occurrences appear only in its `documents` spans.
+- Within one document, the first route to a fact wins. If the search reaches a fact first through a plain Entity and later through a mention, that document lists chunk spans only.
+- `name` is read after the ledger recheck. A Data row that Cognee deletes outside the lab in that window gives `name` null.
+- Supports are kept one per document. This assumes one served source per original document. Every builder uses distinct originals, but nothing enforces it.
+- No fixture has a fact that two documents support. A store-free test drives `retrieve` with two sources for that case.
+
 ## What a search lists as unavailable
 
 A search lists what it withholds under `unavailable_sources`, as the CLI `retrieve` does:

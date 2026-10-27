@@ -2,9 +2,9 @@
 
 **Updated:** 2026-10-27 (America/Detroit).
 
-The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. Later on 2026-10-27 a text edit stopped renaming the original's document, the first part of the source-aware mode ([the history](stage6_checkpoint_history.md#step-5-document-names-kept-after-a-text-edit-2026-10-27)).
+The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. On 2026-10-27 a text edit stopped renaming the original's document, and the source-aware mode was built ([the history](stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27)).
 
-**Next task.** Build the source-aware search mode, after the user answers the result-shape questions in [Decisions that need the user](#next-task). Then build the other step-5 delivery items. [Next task](#next-task) has the detail.
+**Next task.** Build the other step-5 delivery items, starting with grouped-by-identity delivery. [Next task](#next-task) has the detail.
 
 The dated history of every checkpoint is in [the Stage 6 checkpoint history](stage6_checkpoint_history.md). This document says what is true now.
 
@@ -34,7 +34,9 @@ Runtime code is in `src/cognee_lab/identity/`, against Cognee 1.6.2 and Python 3
 
 **S4, the lab update.** Every text edit goes through `entry_update.update`, and `reconcile` of a failed text change through `entry_update.replace_text`. Both run one lab Task under `cognify_pipeline` that calls `publisher.replace` with a `TextChange`, so admission and the incremental identity revision are unchanged. Cognee's standard Tasks rebuild the original's chunks inside the text change (`native_chunks.build_chunks`). Guide: [the lab's update](stage6_identity_standard_entry_points.md#the-labs-update). History: [Step 5 S4](stage6_checkpoint_history.md#step-5-s4-the-lab-update-2026-10-26).
 
-**S1, public search and the conformance check.** Importing `search.py` adds the member `IDENTITY` to Cognee's `SearchType` and registers `IdentityRetriever`, so `cognee.search` with `IDENTITY` and one dataset returns what the CLI `retrieve` returns, with no LLM call. Both run `settled.retrieve_settled`. The import refuses any Cognee other than 1.6.2 and any Python other than 3.12. Only an Entity that a served source of the searched dataset constructs can seed a search. Only `mode` `semantic` and `scope` `identity` are built. `support/conformance_check.py` scores `IDENTITY` searches on a DOC01 root against the Stage 5.3 benchmarks and fails when a case moves from `support/conformance_baseline.json`. It is a conformance check, not a benchmark, because the describer's author had read the hidden answers. Cognee's other search types do not check eligibility, and the search guide warns about them. Guides: [IDENTITY search](stage6_identity_public_search.md) and [conformance check](stage6_conformance_check.md). History: [Step 5 S1](stage6_checkpoint_history.md#step-5-s1-the-public-retriever-2026-10-26).
+**S1, public search and the conformance check.** Importing `search.py` adds the member `IDENTITY` to Cognee's `SearchType` and registers `IdentityRetriever`, so `cognee.search` with `IDENTITY` and one dataset returns what the CLI `retrieve` returns, with no LLM call. Both run `settled.retrieve_settled`. The import refuses any Cognee other than 1.6.2 and any Python other than 3.12. Only an Entity that a served source of the searched dataset constructs can seed a search. Both modes, `semantic` and `source_aware`, are built. Only `scope` `identity` is built. `support/conformance_check.py` scores `IDENTITY` searches on a DOC01 root against the Stage 5.3 benchmarks and fails when a case moves from `support/conformance_baseline.json`. It is a conformance check, not a benchmark, because the describer's author had read the hidden answers. Cognee's other search types do not check eligibility, and the search guide warns about them. Guides: [IDENTITY search](stage6_identity_public_search.md) and [conformance check](stage6_conformance_check.md). History: [Step 5 S1](stage6_checkpoint_history.md#step-5-s1-the-public-retriever-2026-10-26).
+
+**The source-aware mode.** `mode` `source_aware` delivers the facts that the semantic search found in a second way. A fact that several served sources support keeps the evidence of each, each evidence item carries its chunk's range in the document, and a `documents` list names each supporting original by its Data ID and name with the spans of the facts it supports. `retrieve` returns the facts it found, and `retrieve_settled` delivers them through the mode's entry in `settled.DELIVERY` (`delivery.py`). The semantic result is unchanged. Nothing new is written to the graph. Guide: [source-aware results](stage6_identity_public_search.md#source-aware-results). History: [the source-aware mode](stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27).
 
 **Not built.** Automatic Describe, facts as citable records, Describe-driven corpus matching and model-quality evaluation belong to step 6. The six-step status table is in [the history](stage6_checkpoint_history.md#original-six-step-implementation-sequence).
 
@@ -42,22 +44,20 @@ Runtime code is in `src/cognee_lab/identity/`, against Cognee 1.6.2 and Python 3
 
 Step 5 continues. Work in this order.
 
-1. **The source-aware mode.** Today `mode` `source_aware` is refused `mode_not_built` (`settled.py`).
-   1. Done on 2026-10-27. A text edit or a snapshot rewrite keeps the Data row's name and the document node's name ([the history](stage6_checkpoint_history.md#step-5-document-names-kept-after-a-text-edit-2026-10-27)).
-   2. Add a document node per fact, group the results by source and return the occurrence spans. The assistant's proposal, of 2026-10-27, keeps the flat `facts` list and adds a `documents` list. Each entry names one original document by its Data ID and name, and lists the IDs of the facts it supports, with their spans. A fact supported by two documents is listed under both. A mention fact's spans are its occurrences. Any other fact's spans are its checked evidence chunk ranges, because no fact writer records where the sentence sits. It writes nothing new to the graph. The questions below need the user before the build.
-2. **The other step-5 delivery items.**
-   - Grouped delivery.
+1. **The other step-5 delivery items.**
+   - Grouped-by-identity delivery: a second side list over the same flat `facts`, one entry per resolved referent, the way `documents` is one entry per document. The user named it on 2026-10-27; "grouped delivery" in older documents means this.
    - The full set of annotation states.
    - Span-scoped variants, which the occurrence map refuses today.
    - Ranking and seeding changes, each measured against the conformance baseline. QRY05 on the fallback seed and seed crowding are the known cases.
    - Offline diagnostics that share the traversal's predicates.
    - Admission of the consumed stores that each enabled native path reads (playbook lesson G14).
-3. **Rebuild endpoint gaps.** Step 4 sent the endpoint gaps during a generated-source rebuild to step 5. Check whether S3a to S4 closed them, and record the answer.
-4. **The outside-benchmark prototype.** The user approved it on 2026-10-26 for after S1. It is the route to a real benchmark, which the conformance check is not.
+2. **Rebuild endpoint gaps.** Step 4 sent the endpoint gaps during a generated-source rebuild to step 5. Check whether S3a to S4 closed them, and record the answer.
+3. **The outside-benchmark prototype.** The user approved it on 2026-10-26 for after S1. It is the route to a real benchmark, which the conformance check is not.
 
 **Decisions already made.** These come from the user's step-5 discussion of 2026-10-25 and the S1 decisions of 2026-10-26, recorded in [the S2 history](stage6_checkpoint_history.md#step-5-s2-deletes-outside-the-lab-2026-10-25-to-2026-10-26) and [the S1 history](stage6_checkpoint_history.md#step-5-s1-the-public-retriever-2026-10-26).
 
 - The semantic mode first, then the source-aware mode.
+- The source-aware result shape, decided on 2026-10-27: a result field and no graph write (a fact-to-document graph write stays possible later work), the flat `facts` plus `documents`, a fact listed under every supporting document while the semantic mode keeps its behaviour, evidence chunk ranges as the finest span of a fact without a mention, and grouped-by-identity delivery as a separate later list.
 - The identity search returns evidence only, with no LLM answer (U2).
 - A function argument selects the scope. Identity-anchored facts are the default, and unattributed native hits are an opt-in (U3). The opt-in scope `identity_and_unattributed` stays refused `scope_not_built` until a spec builds it.
 - Cognee's other search types get a warning only, for now (U1 option (a)).
@@ -79,12 +79,6 @@ Step 5 continues. Work in this order.
 - A guard for Cognee's other search types (U1 option (b)).
 - The long-term retrieval entry. On 2026-10-25 the user called the registered `IDENTITY` search type a first step only.
 - Which outside benchmark the prototype uses. No recorded decision names one.
-- The source-aware result shape, from the proposal of 2026-10-27:
-  1. Is "a document node per fact" a result field (recommended) or a new graph write at publication? Cognee's TextDocument shares the Data item's UUID, and every evidence chunk is already `is_part_of` it.
-  2. Keep the flat `facts` and add `documents` (recommended), or return groups only? Groups only would change the conformance check's reader.
-  3. In the source-aware mode, list a fact under every document that supports it (recommended)? Today a fact found in two sources keeps only the first source's evidence. Should the semantic mode keep that behaviour for now (recommended, so the conformance baseline does not move)?
-  4. Accept evidence chunk ranges as the finest span for a fact without a mention (recommended), or make the fact writers record sentence spans now?
-  5. Is "grouped delivery" the same as grouping by source, or grouping by identity group?
 
 ## Tracked follow-ups and known limits
 
