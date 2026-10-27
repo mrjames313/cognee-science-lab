@@ -190,8 +190,9 @@ def test_evidence_names_each_fact_and_only_its_checked_chunks(search):
 
 
 def test_no_src_module_reads_the_hidden_benchmark_data():
-    """data/hidden holds the benchmark answers; only the benchmark check in
-    support/ may read them (spec review R3)."""
+    """data/hidden holds the benchmark answers; only support/conformance_check.py
+    may read them (spec review R3), so the conformance fixture's describer
+    (conformance_fixture.py) is covered too."""
     readers = [
         str(path.relative_to(REPO))
         for path in sorted((REPO / "src").rglob("*.py"))
