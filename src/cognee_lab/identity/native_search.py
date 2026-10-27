@@ -37,6 +37,8 @@ async def searched(args):
 
     from .environment import DATASET_NAME
 
+    # Every fixture root registers its sources in DATASET_NAME, so the name is
+    # the root's dataset, and native-add's dataset has another name.
     (found,) = await cognee.search(
         args.query, query_type=SearchType.CHUNKS, datasets=[DATASET_NAME], verbose=True
     )

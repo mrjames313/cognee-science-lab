@@ -7,7 +7,7 @@ docs/stage6_identity_public_search.md lists what can and cannot name IDENTITY.
 import json
 import pickle
 import sys
-from dataclasses import fields
+from dataclasses import asdict
 
 import cognee
 from cognee.modules.retrieval.base_retriever import BaseRetriever
@@ -22,7 +22,6 @@ from .settled import LIMIT, SearchRefused, SearchRequest, retrieve_settled
 NAME = "IDENTITY"
 COGNEE_VERSION = "1.6.2"
 PYTHON = (3, 12)
-CONFIG_KEYS = {f.name for f in fields(SearchRequest)}
 
 
 class RegistrationError(RuntimeError):
@@ -56,14 +55,7 @@ class IdentityRetriever(BaseRetriever):
                 "IDENTITY searches one dataset; pass datasets=[name] when the "
                 "user can read more than one",
             )
-        config = retriever_specific_config or {}
-        if unknown := sorted(set(config) - CONFIG_KEYS):
-            raise SearchRefused(
-                "config_invalid",
-                f"Unknown retriever_specific_config keys {unknown}; "
-                f"IDENTITY takes {sorted(CONFIG_KEYS)}",
-            )
-        self.request = SearchRequest.parse(**config)
+        self.request = SearchRequest.from_config(retriever_specific_config)
         self.dataset, self.top_k = dataset, top_k
 
     async def get_retrieved_objects(self, query, query_batch=None):
@@ -256,9 +248,7 @@ async def searched(dataset_id, query, request, *, all_datasets):
         query_type=IDENTITY,
         dataset_ids=None if all_datasets else [dataset_id],
         top_k=LIMIT,
-        retriever_specific_config=dict(
-            scope=request.scope.value, mode=request.mode.value
-        ),
+        retriever_specific_config=asdict(request),
     )
     return dict(search_result=result, search_history=await search_history())
 

@@ -2,7 +2,7 @@
 and the IDENTITY SearchType (search.py) share. Importing this module changes
 nothing in Cognee."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import StrEnum
 
 from .retrieve import LIMIT, retrieve
@@ -49,26 +49,42 @@ UNSETTLED = {"retrieval_changed", "stale_attempt"}
 
 @dataclass(frozen=True)
 class SearchRequest:
-    """A scope and a mode that are built. Make one with `parse`."""
+    """A scope and a mode that are built. Constructing one with a value that
+    neither enum knows is `config_invalid`; with a value not built yet, it is
+    refused with that value's code."""
 
-    scope: SearchScope
-    mode: SearchMode
+    scope: SearchScope = SearchScope.IDENTITY
+    mode: SearchMode = SearchMode.SEMANTIC
+
+    def __post_init__(self):
+        try:
+            object.__setattr__(self, "scope", SearchScope(self.scope))
+            object.__setattr__(self, "mode", SearchMode(self.mode))
+        except ValueError as exc:
+            raise SearchRefused("config_invalid", str(exc)) from None
+        for value in (self.scope, self.mode):
+            if value in NOT_BUILT:
+                raise SearchRefused(*NOT_BUILT[value])
 
     @classmethod
     def parse(cls, scope=None, mode=None) -> "SearchRequest":
-        """None takes the default. A value neither enum knows is
-        `config_invalid`; a value not built yet is refused with its code."""
-        try:
-            request = cls(
-                SearchScope.IDENTITY if scope is None else SearchScope(scope),
-                SearchMode.SEMANTIC if mode is None else SearchMode(mode),
+        """None takes the default."""
+        given = dict(scope=scope, mode=mode)
+        return cls(**{key: value for key, value in given.items() if value is not None})
+
+    @classmethod
+    def from_config(cls, config) -> "SearchRequest":
+        """A request from `retriever_specific_config`, which takes only the
+        request's fields."""
+        config = config or {}
+        known = {f.name for f in fields(cls)}
+        if unknown := sorted(set(config) - known):
+            raise SearchRefused(
+                "config_invalid",
+                f"Unknown retriever_specific_config keys {unknown}; "
+                f"IDENTITY takes {sorted(known)}",
             )
-        except ValueError as exc:
-            raise SearchRefused("config_invalid", str(exc)) from None
-        for value in (request.scope, request.mode):
-            if value in NOT_BUILT:
-                raise SearchRefused(*NOT_BUILT[value])
-        return request
+        return cls.parse(**config)
 
 
 async def retrieve_settled(publisher, dataset_id, query, request, *, limit=LIMIT):

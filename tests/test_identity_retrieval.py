@@ -146,9 +146,24 @@ async def test_another_failure_is_not_read_again(monkeypatch):
     ],
 )
 def test_a_request_refuses_what_is_not_built(scope, mode, code):
+    """However it is made: parsed from CLI values, from a search's
+    retriever_specific_config, or constructed directly."""
+    given = {k: v for k, v in dict(scope=scope, mode=mode).items() if v is not None}
+    for make in (
+        lambda: SearchRequest.parse(scope, mode),
+        lambda: SearchRequest.from_config(given),
+        lambda: SearchRequest(**given),
+    ):
+        with pytest.raises(SearchRefused) as refused:
+            make()
+        assert refused.value.code == code
+
+
+def test_a_config_key_that_is_not_a_request_field_is_invalid():
     with pytest.raises(SearchRefused) as refused:
-        SearchRequest.parse(scope, mode)
-    assert refused.value.code == code
+        SearchRequest.from_config(dict(scope="identity", top_k=3))
+    assert refused.value.code == "config_invalid"
+    assert SearchRequest.from_config(None) == SearchRequest()
 
 
 def test_a_request_defaults_to_scope_identity_and_mode_semantic():
