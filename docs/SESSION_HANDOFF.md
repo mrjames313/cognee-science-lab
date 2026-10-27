@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-27 (America/Detroit).
 
-The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. On 2026-10-27 a text edit stopped renaming the original's document, and the source-aware mode was built ([the history](stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27)).
+The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. On 2026-10-27 a text edit stopped renaming the original's document, and the source-aware mode was built and merged. GitHub Actions passed on `e804b35` ([the history](stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27)).
 
 **Next task.** Build the other step-5 delivery items, starting with grouped-by-identity delivery. [Next task](#next-task) has the detail.
 
