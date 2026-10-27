@@ -122,7 +122,12 @@ async def stamped(data_id, dataset_id) -> bool:
 
 async def write_text(payload, ctx, data_id):
     """Update one explicitly selected Data item through the native ingestion
-    Task, and stamp it again: changed text clears the stamp."""
+    Task, and stamp it again: changed text clears the stamp. The item keeps
+    its name: the payload goes in as an upload of the item's own file name,
+    because Cognee names a plain string `text_<md5>` and renames on update."""
+    from io import BytesIO
+    from types import SimpleNamespace
+
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.ingest_data import ingest_data
     from cognee.modules.ingestion.data_types import TextData
@@ -138,9 +143,12 @@ async def write_text(payload, ctx, data_id):
     # from the previous caller's file URI. This includes original fixture text.
     if external and isinstance(external.get("_cognee"), dict):
         external["_cognee"].pop("source_uri", None)
+    upload = SimpleNamespace(
+        file=BytesIO(payload.encode("utf-8")), filename=f"{old.name}.{old.extension}"
+    )
     items = await ingest_data(
         DataItem(
-            data=payload,
+            data=upload,
             data_id=data_id,
             label=old.label,
             external_metadata=external,

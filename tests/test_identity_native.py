@@ -32,6 +32,43 @@ def command(root, operation, *args, expect=0):
     return result
 
 
+def document_names(root):
+    """Each Data row's name and its graph node's name, keyed by Data ID, read
+    in a new process because Cognee caches its config at import."""
+    script = r"""
+import asyncio, sys
+from pathlib import Path
+from cognee_lab.identity.environment import fixture_environment
+with fixture_environment(Path(sys.argv[1])):
+    import json
+    from sqlalchemy import select
+    from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee.infrastructure.databases.relational import get_relational_engine
+    from cognee.modules.data.models import Data
+
+    async def read():
+        async with get_relational_engine().get_async_session() as session:
+            rows = (await session.execute(select(Data))).scalars().all()
+        graph = await get_graph_engine()
+        names = {}
+        for row in rows:
+            node = await graph.get_node(str(row.id))
+            names[str(row.id)] = [row.name, node["name"] if node else None]
+        print(json.dumps(names))
+
+    asyncio.run(read())
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(root)],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        timeout=150,
+    )
+    assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
+    return json.loads(result.stdout.splitlines()[-1])
+
+
 def doc_facts(baseline, doc):
     """The baseline's facts of one document. Fails when it has none, so a
     later absence check cannot pass on an empty result."""

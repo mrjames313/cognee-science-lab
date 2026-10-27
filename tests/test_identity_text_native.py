@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from test_identity_native import command
+from test_identity_native import command, document_names
 from cognee_lab.identity.text_fixture import PREFIX
 
 
@@ -79,6 +79,9 @@ def test_native_text_edit_replaces_chunks_evidence_and_reconciles(tmp_path):
     command(root, "multi-fixture")
     before = json.loads((root / "multisource_result.json").read_text())
     baseline_text = (root / "source.txt").read_text()
+    names = document_names(root)
+    assert names[before["sources"]["doc01"]["identity_data_id"]][0] == "identity"
+    assert "source" in {data_name for data_name, _ in names.values()}
     stale = command(root, "edit-text", "--expected-revision", "0", expect=1)
     assert "Saved revision changed" in stale.stdout
     command(root, "edit-text", "--expected-revision", "1")
@@ -86,6 +89,7 @@ def test_native_text_edit_replaces_chunks_evidence_and_reconciles(tmp_path):
     assert after["text_changes"]
     check_text_result(before, after)
     assert after["recovery_events"] == []
+    assert document_names(root) == names
     assert (
         root / "source.txt"
     ).read_text() == baseline_text  # immutable fixture baseline
