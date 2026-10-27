@@ -124,10 +124,15 @@ async def write_text(payload, ctx, data_id):
     """Update one explicitly selected Data item through the native ingestion
     Task, and stamp it again: changed text clears the stamp. The item keeps
     its name: the payload goes in as an upload of the item's own file name,
-    because Cognee names a plain string `text_<md5>` and renames on update."""
+    because Cognee names a plain string `text_<md5>` and renames on update.
+    The name rides on the stream, not on `filename`, because Cognee turns a
+    `filename` into a `source_uri` that points at a file that does not exist.
+    Changed text leaves the previous derived text file, which Cognee does not
+    queue for removal, so it is removed here once no row references it."""
     from io import BytesIO
     from types import SimpleNamespace
 
+    from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.tasks.ingestion.data_item import DataItem
     from cognee.tasks.ingestion.ingest_data import ingest_data
     from cognee.modules.ingestion.data_types import TextData
@@ -143,9 +148,10 @@ async def write_text(payload, ctx, data_id):
     # from the previous caller's file URI. This includes original fixture text.
     if external and isinstance(external.get("_cognee"), dict):
         external["_cognee"].pop("source_uri", None)
-    upload = SimpleNamespace(
-        file=BytesIO(payload.encode("utf-8")), filename=f"{old.name}.{old.extension}"
-    )
+    stream = BytesIO(payload.encode("utf-8"))
+    stream.name = f"{old.name}.{old.extension}"
+    upload = SimpleNamespace(file=stream, filename=None)
+    previous_raw = old.raw_data_location
     items = await ingest_data(
         DataItem(
             data=upload,
@@ -179,4 +185,6 @@ async def write_text(payload, ctx, data_id):
             "generated_source_changed",
             "Registered content metadata is inconsistent",
         )
+    if previous_raw != ctx.data_item.raw_data_location:
+        await get_relational_engine().remove_data_file_if_unreferenced(previous_raw)
     await stamp(data_id, ctx.dataset.id)

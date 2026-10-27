@@ -32,32 +32,18 @@ def command(root, operation, *args, expect=0):
     return result
 
 
-def document_names(root):
-    """Each Data row's name and its graph node's name, keyed by Data ID, read
-    in a new process because Cognee caches its config at import."""
-    script = r"""
-import asyncio, sys
-from pathlib import Path
-from cognee_lab.identity.environment import fixture_environment
-with fixture_environment(Path(sys.argv[1])):
-    import json
-    from sqlalchemy import select
-    from cognee.infrastructure.databases.graph import get_graph_engine
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data
-
-    async def read():
-        async with get_relational_engine().get_async_session() as session:
-            rows = (await session.execute(select(Data))).scalars().all()
-        graph = await get_graph_engine()
-        names = {}
-        for row in rows:
-            node = await graph.get_node(str(row.id))
-            names[str(row.id)] = [row.name, node["name"] if node else None]
-        print(json.dumps(names))
-
-    asyncio.run(read())
-"""
+def read_stores(root, body):
+    """Run `body` in a new process inside the fixture's environment, because
+    Cognee caches its config at import. `body` defines `async def read()` that
+    returns a JSON-able value."""
+    script = (
+        "import asyncio, json, sys\n"
+        "from pathlib import Path\n"
+        "from cognee_lab.identity.environment import fixture_environment\n"
+        "with fixture_environment(Path(sys.argv[1])):\n"
+        + "".join(f"    {line}\n" for line in body.strip().splitlines())
+        + "    print(json.dumps(asyncio.run(read())))\n"
+    )
     result = subprocess.run(
         [sys.executable, "-c", script, str(root)],
         cwd=REPO,
@@ -67,6 +53,74 @@ with fixture_environment(Path(sys.argv[1])):
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
     return json.loads(result.stdout.splitlines()[-1])
+
+
+def document_names(root):
+    """Each Data row's name and its graph node's name, keyed by Data ID."""
+    return read_stores(
+        root,
+        """
+from sqlalchemy import select
+from cognee.infrastructure.databases.graph import get_graph_engine
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.models import Data
+
+async def read():
+    async with get_relational_engine().get_async_session() as session:
+        rows = (await session.execute(select(Data))).scalars().all()
+    graph = await get_graph_engine()
+    names = {}
+    for row in rows:
+        node = await graph.get_node(str(row.id))
+        names[str(row.id)] = {
+            "data": row.name,
+            "node": node["name"] if node else None,
+        }
+    return names
+""",
+    )
+
+
+def external_metadata(root):
+    """Each Data row's external metadata, keyed by Data ID."""
+    return read_stores(
+        root,
+        """
+from sqlalchemy import select
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.models import Data
+
+async def read():
+    async with get_relational_engine().get_async_session() as session:
+        rows = (await session.execute(select(Data))).scalars().all()
+    return {str(row.id): row.external_metadata for row in rows}
+""",
+    )
+
+
+def unreferenced_files(root):
+    """The stored files under the fixture's data root that no Data row names as
+    its raw or original location."""
+    return read_stores(
+        root,
+        """
+from sqlalchemy import select
+from cognee.infrastructure.databases.relational import get_relational_engine
+from cognee.modules.data.models import Data
+
+async def read():
+    async with get_relational_engine().get_async_session() as session:
+        rows = (await session.execute(select(Data))).scalars().all()
+    named = {
+        str(location).removeprefix("file://")
+        for row in rows
+        for location in (row.raw_data_location, row.original_data_location)
+        if location
+    }
+    stored = {str(p) for p in (Path(sys.argv[1]) / "data").rglob("*") if p.is_file()}
+    return sorted(stored - named)
+""",
+    )
 
 
 def doc_facts(baseline, doc):
