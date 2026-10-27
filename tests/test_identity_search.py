@@ -17,8 +17,18 @@ from cognee.modules.retrieval.registered_community_retrievers import (
 )
 from cognee.modules.search.types import SearchType
 
-from cognee_lab.identity import search
 from cognee_lab.identity.settled import SearchRefused
+
+
+@pytest.fixture(scope="module")
+def search():
+    """Imported here and not at module level: a registration that refuses
+    this Cognee or Python fails these tests, not the collection of the
+    whole unit suite."""
+    from cognee_lab.identity import search
+
+    return search
+
 
 REPO = Path(__file__).resolve().parents[1]
 DATASET = SimpleNamespace(id=uuid4(), name="stage6_isolated_fixture")
@@ -44,7 +54,7 @@ RESULT = dict(
 )
 
 
-def test_importing_search_adds_identity_beside_the_built_in_types():
+def test_importing_search_adds_identity_beside_the_built_in_types(search):
     assert search.register() is search.IDENTITY
     assert SearchType["IDENTITY"] is SearchType("IDENTITY") is SearchType.IDENTITY
     assert SearchType._member_names_.count("IDENTITY") == 1
@@ -52,7 +62,7 @@ def test_importing_search_adds_identity_beside_the_built_in_types():
     assert registered_community_retrievers[search.IDENTITY] is search.IdentityRetriever
 
 
-def test_another_cognee_version_fails_registration(monkeypatch):
+def test_another_cognee_version_fails_registration(search, monkeypatch):
     import cognee
 
     monkeypatch.setattr(cognee, "__version__", "1.7.0")
@@ -60,13 +70,15 @@ def test_another_cognee_version_fails_registration(monkeypatch):
         search.register()
 
 
-def test_another_python_fails_registration(monkeypatch):
+def test_another_python_fails_registration(search, monkeypatch):
     monkeypatch.setattr(sys, "version_info", (3, 13, 0, "final", 0))
     with pytest.raises(search.RegistrationError, match="found Python 3.13"):
         search.register()
 
 
-def test_an_identity_member_the_lab_did_not_add_keeps_its_retriever(monkeypatch):
+def test_an_identity_member_the_lab_did_not_add_keeps_its_retriever(
+    search, monkeypatch
+):
     """Cognee's registry silently replaces the retriever of an existing
     member, so a member IDENTITY with no lab retriever is refused."""
     monkeypatch.delitem(registered_community_retrievers, search.IDENTITY)
@@ -75,14 +87,14 @@ def test_an_identity_member_the_lab_did_not_add_keeps_its_retriever(monkeypatch)
     assert search.IDENTITY not in registered_community_retrievers
 
 
-def test_a_lookup_that_misses_fails_the_self_test(monkeypatch):
+def test_a_lookup_that_misses_fails_the_self_test(search, monkeypatch):
     monkeypatch.delitem(SearchType._value2member_map_, "IDENTITY")
     with pytest.raises(search.RegistrationError, match="self-test"):
         search.register()
     assert registered_community_retrievers[search.IDENTITY] is search.IdentityRetriever
 
 
-def test_a_reload_registers_the_reloaded_retriever():
+def test_a_reload_registers_the_reloaded_retriever(search):
     member = search.IDENTITY
     importlib.reload(search)
     assert search.IDENTITY is member is SearchType.IDENTITY
@@ -90,7 +102,7 @@ def test_a_reload_registers_the_reloaded_retriever():
 
 
 @pytest.fixture
-def without_identity():
+def without_identity(search):
     """SearchType and the retriever registry as Cognee ships them, with the
     lab's member and registry entry put back afterwards."""
     member = SearchType._member_map_["IDENTITY"]
@@ -108,7 +120,7 @@ def without_identity():
 
 
 def test_a_failed_self_test_leaves_search_type_as_it_found_it(
-    monkeypatch, without_identity
+    search, monkeypatch, without_identity
 ):
     def refuse(_):
         raise pickle.PicklingError("refused")
@@ -139,13 +151,13 @@ def test_a_failed_self_test_leaves_search_type_as_it_found_it(
         (dict(retriever_specific_config={"top_k": 3}), "config_invalid"),
     ],
 )
-def test_cognee_meets_each_refusal_when_it_builds_the_retriever(kwargs, code):
+def test_cognee_meets_each_refusal_when_it_builds_the_retriever(search, kwargs, code):
     with pytest.raises(SearchRefused) as refused:
         search.IdentityRetriever(**{"dataset": DATASET, "top_k": 15, **kwargs})
     assert refused.value.code == code
 
 
-def test_access_control_on_is_refused(monkeypatch):
+def test_access_control_on_is_refused(search, monkeypatch):
     import cognee.context_global_variables as variables
 
     monkeypatch.setattr(variables, "backend_access_control_enabled", lambda: True)
@@ -154,7 +166,7 @@ def test_access_control_on_is_refused(monkeypatch):
     assert refused.value.code == "access_control_on"
 
 
-async def test_context_is_the_result_as_json_and_the_completion_is_the_result():
+async def test_context_is_the_result_as_json_and_the_completion_is_the_result(search):
     retriever = search.IdentityRetriever(dataset=DATASET)
     context = await retriever.get_context_from_objects(retrieved_objects=RESULT)
     assert isinstance(context, str) and json.loads(context) == RESULT
@@ -163,7 +175,7 @@ async def test_context_is_the_result_as_json_and_the_completion_is_the_result():
     ) == [RESULT]
 
 
-def test_evidence_names_each_fact_and_only_its_checked_chunks():
+def test_evidence_names_each_fact_and_only_its_checked_chunks(search):
     """No graph_edge reference: Cognee would add the edge sidecar's chunks of
     every document, served or not."""
     retriever = search.IdentityRetriever(dataset=DATASET)
