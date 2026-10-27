@@ -123,12 +123,8 @@ async def stamped(data_id, dataset_id) -> bool:
 async def write_text(payload, ctx, data_id):
     """Update one explicitly selected Data item through the native ingestion
     Task, and stamp it again: changed text clears the stamp. The item keeps
-    its name: the payload goes in as an upload of the item's own file name,
-    because Cognee names a plain string `text_<md5>` and renames on update.
-    The name rides on the stream, not on `filename`, because Cognee turns a
-    `filename` into a `source_uri` that points at a file that does not exist.
-    Changed text leaves the previous derived text file, which Cognee does not
-    queue for removal, so it is removed here once no row references it."""
+    its name by ingesting an upload of its file name. The previous derived
+    text, which Cognee leaves behind, is removed."""
     from io import BytesIO
     from types import SimpleNamespace
 
@@ -143,15 +139,15 @@ async def write_text(payload, ctx, data_id):
     node_set = old.node_set
     if isinstance(node_set, str):
         node_set = json.loads(node_set)
-    external = deepcopy(old.external_metadata) if old.external_metadata else None
-    # The replacement is now managed from saved intent, rather than reloaded
-    # from the previous caller's file URI. This includes original fixture text.
-    if external and isinstance(external.get("_cognee"), dict):
-        external["_cognee"].pop("source_uri", None)
-    stream = BytesIO(payload.encode("utf-8"))
-    stream.name = f"{old.name}.{old.extension}"
-    upload = SimpleNamespace(file=stream, filename=None)
-    previous_raw = old.raw_data_location
+    external = deepcopy(old.external_metadata or {})
+    # The explicit None records that the text has no reload source, and stops
+    # Cognee from deriving one from the upload's file name, which names no
+    # file that exists.
+    external.setdefault("_cognee", {})["source_uri"] = None
+    upload = SimpleNamespace(
+        file=BytesIO(payload.encode("utf-8")), filename=f"{old.name}.{old.extension}"
+    )
+    previous_raw, original = old.raw_data_location, old.original_data_location
     items = await ingest_data(
         DataItem(
             data=upload,
@@ -169,6 +165,8 @@ async def write_text(payload, ctx, data_id):
         ),
         ctx=ctx,
     )
+    if previous_raw != original:
+        await get_relational_engine().remove_data_file_if_unreferenced(previous_raw)
     if len(items) != 1 or items[0].id != data_id:
         raise IntentError(
             "generated_source_changed",
@@ -185,6 +183,4 @@ async def write_text(payload, ctx, data_id):
             "generated_source_changed",
             "Registered content metadata is inconsistent",
         )
-    if previous_raw != ctx.data_item.raw_data_location:
-        await get_relational_engine().remove_data_file_if_unreferenced(previous_raw)
     await stamp(data_id, ctx.dataset.id)

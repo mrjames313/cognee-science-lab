@@ -81,8 +81,9 @@ async def read():
     )
 
 
-def external_metadata(root):
-    """Each Data row's external metadata, keyed by Data ID."""
+def data_rows(root):
+    """Each Data row's external metadata and original location, keyed by Data
+    ID."""
     return read_stores(
         root,
         """
@@ -93,14 +94,21 @@ from cognee.modules.data.models import Data
 async def read():
     async with get_relational_engine().get_async_session() as session:
         rows = (await session.execute(select(Data))).scalars().all()
-    return {str(row.id): row.external_metadata for row in rows}
+    return {
+        str(row.id): {
+            "external": row.external_metadata,
+            "original": row.original_data_location,
+        }
+        for row in rows
+    }
 """,
     )
 
 
-def unreferenced_files(root):
-    """The stored files under the fixture's data root that no Data row names as
-    its raw or original location."""
+def stored_files(root):
+    """The files under the fixture's data root, and those that no Data row
+    names as its raw or original location. A test checks that `stored` is not
+    empty, so an empty `unreferenced` cannot pass on a missing data root."""
     return read_stores(
         root,
         """
@@ -118,7 +126,7 @@ async def read():
         if location
     }
     stored = {str(p) for p in (Path(sys.argv[1]) / "data").rglob("*") if p.is_file()}
-    return sorted(stored - named)
+    return {"stored": sorted(stored), "unreferenced": sorted(stored - named)}
 """,
     )
 

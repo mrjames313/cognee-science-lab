@@ -7,8 +7,8 @@ import pytest
 from test_identity_native import (
     command,
     document_names,
-    external_metadata,
-    unreferenced_files,
+    data_rows,
+    stored_files,
 )
 from cognee_lab.identity.text_fixture import PREFIX
 
@@ -78,6 +78,12 @@ def check_text_result(before, after):
     assert after["result"]["unavailable_sources"] == []
 
 
+def assert_no_unreferenced_files(root):
+    files = stored_files(root)
+    assert files["stored"]
+    assert files["unreferenced"] == []
+
+
 @pytest.mark.integration
 def test_native_text_edit_replaces_chunks_evidence_and_reconciles(tmp_path):
     root = tmp_path / "text_revision"
@@ -101,7 +107,7 @@ def test_native_text_edit_replaces_chunks_evidence_and_reconciles(tmp_path):
         assert names[originals[label]] == {"data": name, "node": name}
     assert names[identities["doc01"]]["data"] == "identity"
     assert names[identities["doc02"]]["data"] == "identity02"
-    assert unreferenced_files(root) == []
+    assert_no_unreferenced_files(root)
     stale = command(root, "edit-text", "--expected-revision", "0", expect=1)
     assert "Saved revision changed" in stale.stdout
     command(root, "edit-text", "--expected-revision", "1")
@@ -110,11 +116,12 @@ def test_native_text_edit_replaces_chunks_evidence_and_reconciles(tmp_path):
     check_text_result(before, after)
     assert after["recovery_events"] == []
     assert document_names(root) == names
-    metadata = external_metadata(root)
+    rows = data_rows(root)
     for data_id in (originals["doc01"], identities["doc01"]):
-        cognee = (metadata[data_id] or {}).get("_cognee") or {}
-        assert "source_uri" not in cognee
-    assert unreferenced_files(root) == []
+        meta = rows[data_id]["external"]
+        assert ((meta or {}).get("_cognee") or {}).get("source_uri") is None
+        assert rows[data_id]["original"].endswith(".txt")
+    assert_no_unreferenced_files(root)
     assert (
         root / "source.txt"
     ).read_text() == baseline_text  # immutable fixture baseline
@@ -123,7 +130,7 @@ def test_native_text_edit_replaces_chunks_evidence_and_reconciles(tmp_path):
     repeated = json.loads((root / "multisource_result.json").read_text())
     check_text_result(before, repeated)
     assert repeated["result"]["facts"] == after["result"]["facts"]
-    assert unreferenced_files(root) == []
+    assert_no_unreferenced_files(root)
     # Native original-chunk ownership now points at the new chunks, so subsequent
     # identity withdrawal preserves the rebuilt fact/markers/evidence.
     command(root, "withdraw", "--source", "doc01")
