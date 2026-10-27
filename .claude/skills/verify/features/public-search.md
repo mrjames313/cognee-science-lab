@@ -2,7 +2,7 @@
 
 A user searches a root through Cognee's own `cognee.search` with the lab's `IDENTITY` search type. Since step 5 S1 the CLI `search` registers `IDENTITY` (`cognee_lab.identity.search`) and calls `cognee.search` as a user would. The search returns what the CLI `retrieve` returns, lists the same unavailable sources and withheld decisions, makes no LLM call and is logged in Cognee's search history as `IDENTITY`.
 
-Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types serve withheld and failed state", "What a search returns", "Scope and mode", "What a search lists as unavailable", "Refusals", "Commands", "The conformance check").
+Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types serve withheld and failed state", "What a search returns", "Scope and mode", "What a search lists as unavailable", "Refusals", "Commands"). Journey B1: `docs/stage6_conformance_check.md`.
 
 ## Sub-features
 
@@ -148,7 +148,7 @@ $V check "$RUN" search '.search_result[0].facts == [] and [.search_result[0].una
 - `search_history` holds every query Cognee logged in the root, so a check on its length counts the run's earlier searches too. A refused search logs none.
 - A refusal prints `.error == "SearchRefused"` and its `.code`, and exits 1.
 
-**B1 the conformance check.** Proves `conformance-check`. Guide: "The conformance check". `conformance-fixture` publishes DOC01 at revision 1, verified at 1, with no incident, and its describer gives 23 reusable Entities, 12 variant assignments, 11 reference groups with 11 accepted resolutions, 29 facts and 10 chunks ("The describer"). `search --query "Helios-1 major radius"` serves first the fact stated by `Helios-1 has a major radius of 1.35 m`, inferred from the sentence rule and the word-overlap ranking ("What a search returns"). The conformance check on the root reports no regression and no improvement against the committed baseline, and 0 repeated edge IDs, attribution violations and leakage violations ("The baseline", "The gate").
+**B1 the conformance check.** Proves `conformance-check`. Guide: `docs/stage6_conformance_check.md`. `conformance-fixture` publishes DOC01 at revision 1, verified at 1, with no incident, and its describer gives 23 reusable Entities, 12 variant assignments, 11 reference groups with 11 accepted resolutions, 29 facts and 10 chunks ("The describer"). `search --query "Helios-1 major radius"` serves first the fact stated by `Helios-1 has a major radius of 1.35 m`, inferred from the sentence rule and the word-overlap ranking (the search guide, "What a search returns"). The conformance check on the root reports no regression and no improvement against the committed baseline, and 0 repeated edge IDs, attribution violations and leakage violations ("The baseline", "The gate").
 
 ```bash journey B1
 $V drive "$RUN" main fixture -- conformance-fixture

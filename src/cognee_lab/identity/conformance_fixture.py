@@ -6,8 +6,8 @@ The describer reads only DOC01's text and its native chunks. Its rules and
 its table were written by an author who had read the answers that
 `support/conformance_check.py` scores, so that check measures retrieval over
 a fixed description. It is a conformance check, not an evaluation of
-Describe. docs/stage6_identity_public_search.md ("The conformance check")
-states the rules.
+Describe. docs/stage6_conformance_check.md ("The describer") states the
+rules.
 """
 
 import json

@@ -2,39 +2,9 @@
 
 It scores `cognee.search` with the lab's IDENTITY search type against the
 Stage 5.3 traversal and query-resolution benchmarks and the Helios manifest
-in data/hidden. It is the only reader of data/hidden: the fixture's describer
-(src/cognee_lab/identity/conformance_fixture.py) reads DOC01 alone. Its rules
-were written by an author who had read these answers, so a pass means the
-search serves the fixture's description as the benchmarks expect, not that
-Describe found it.
-
-Each measure is a set of cases. A case passes, fails, or is unobserved (the
-search shows nothing that decides it):
-
-- fact recall: for each manifest fact DOC01 states, the query "<subject>
-  <predicate>" returns, within the default top 5, a fact whose text holds the
-  object or the value with its unit.
-- closure symmetry: for each traversal identity case, every member's name as
-  the query returns the same nonempty set of facts.
-- mentions: TRV07 and TRV08 at their chunk coordinates, and the manifest's
-  DOC01 entity resolutions, served (or not) under their referent.
-- negative controls: AFRL never brings in the Aurora Reconstruction Suite or
-  the reverse, TRV08 and each manifest hard negative never served under the
-  wrong referent, and QRY05 resolves nothing.
-- query resolution: QRY01 and QRY02 resolve to their group; QRY03 and QRY04
-  (an accepted gap) only never resolve to a wrong group.
-
-Over every result it also counts repeated edge IDs, facts attributed to
-anything but DOC01's own chunks and fact endpoints that are not Entities
-(helper, source-context or mention leakage). These counts must stay 0.
-Logical duplicates (one fact through two members of an identity group) are
-reported, not gated.
-
-The check compares the cases with support/conformance_baseline.json and exits
-1 when a case does worse than there (passed, then unobserved, then failed),
-a case appears or disappears, or a gated count grows.
-`--write-baseline` writes the baseline from this run; every failing case
-then needs its reason in KNOWN_GAPS.
+in data/hidden, and it is the only reader of data/hidden.
+docs/stage6_conformance_check.md states the describer, the measures, the
+baseline and the gate.
 
     uv run python support/conformance_check.py [--root DIR] [--json]
     uv run python support/conformance_check.py --write-baseline
