@@ -10,6 +10,7 @@ from .forget_fixture import CALLER_FILES, semantics_for
 from .models import IdentitySource
 from .publish import Publisher
 from .registered import context_for
+from .delivery import semantic
 from .retrieve import retrieve
 from .settled import SearchRequest, retrieve_settled
 from .validation import IntentError
@@ -481,7 +482,7 @@ async def run(args, root):
         )
     if args.command == "reconcile":
         await reconcile(root, args, publisher, source)
-    answer = await retrieve(publisher, dataset_id, args.query)
+    answer = semantic(await retrieve(publisher, dataset_id, args.query))
     if not any(
         f["relationship"] == "limits"
         and f["target_id"] == str(OSCILLATIONS_ID)

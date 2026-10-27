@@ -4,10 +4,10 @@ nothing in Cognee."""
 
 from dataclasses import dataclass, fields
 from enum import StrEnum
-from functools import partial
 
-from .delivery import semantic, source_aware
-from .retrieve import LIMIT, retrieve
+from .delivery import LIMIT, documents_of, semantic, source_aware
+from .native_copy import dataset_data
+from .retrieve import retrieve
 from .validation import IntentError
 
 
@@ -20,15 +20,29 @@ class SearchScope(StrEnum):
 
 
 class SearchMode(StrEnum):
-    """How facts are found: from the saved decisions (`semantic`), or by
-    source as well (`source_aware`): each fact with every supporting
-    document's evidence and chunk ranges, and the facts by document."""
+    """How the facts found from the saved decisions are delivered: each with
+    the evidence of the first source that supports it (`semantic`), or each
+    with every supporting document's evidence and chunk ranges, and the
+    facts by document (`source_aware`)."""
 
     SEMANTIC = "semantic"
     SOURCE_AWARE = "source_aware"
 
 
-DELIVERY = {SearchMode.SEMANTIC: semantic, SearchMode.SOURCE_AWARE: source_aware}
+async def delivered_semantic(found, dataset_id, limit):
+    return semantic(found, limit)
+
+
+async def delivered_source_aware(found, dataset_id, limit):
+    """With the Data names of the documents that support the returned facts."""
+    names = await dataset_data(dataset_id, documents_of(found, limit))
+    return source_aware(found, names, limit)
+
+
+DELIVERY = {
+    SearchMode.SEMANTIC: delivered_semantic,
+    SearchMode.SOURCE_AWARE: delivered_source_aware,
+}
 
 
 class SearchRefused(IntentError):
@@ -91,24 +105,17 @@ class SearchRequest:
 
 async def retrieve_settled(publisher, dataset_id, query, request, *, limit=LIMIT):
     """`retrieve`, read once more if a writer changed the ledger during the
-    first read, with the scope, the mode and the dataset beside the facts."""
-    read = partial(
-        retrieve,
-        publisher,
-        dataset_id,
-        query,
-        limit=limit,
-        deliver=DELIVERY[request.mode],
-    )
+    first read, delivered by the request's mode, with the scope, the mode
+    and the dataset before the facts."""
     try:
-        found = await read()
+        found = await retrieve(publisher, dataset_id, query)
     except IntentError as exc:
         if exc.code not in UNSETTLED:
             raise
-        found = await read()
+        found = await retrieve(publisher, dataset_id, query)
     return dict(
         mode=request.mode.value,
         scope=request.scope.value,
         dataset_id=str(dataset_id),
-        **found,
+        **await DELIVERY[request.mode](found, dataset_id, limit),
     )

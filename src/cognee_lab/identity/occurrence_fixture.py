@@ -171,6 +171,7 @@ COMMANDS = {
 async def run(args, root):
     from .multisource import current_sources, snapshot
     from .publish import Publisher
+    from .delivery import semantic
     from .retrieve import retrieve
     from .text_fixture import edit_one, record_revision
 
@@ -217,7 +218,7 @@ async def run(args, root):
     if command.queries:
         dataset = sources["doc01"].dataset_id
         result["queries"] = {
-            name: dict(query=text, **await retrieve(publisher, dataset, text))
+            name: dict(query=text, **semantic(await retrieve(publisher, dataset, text)))
             for name, text in command.queries.items()
         }
     if command.inspect is not None:

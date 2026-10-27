@@ -12,6 +12,7 @@ from .models import IdentitySource
 from .multisource import current_sources, fixture_id, snapshot
 from .publish import Publisher
 from .records import apply_reconfirm
+from .delivery import semantic
 from .retrieve import retrieve
 from .validation import IntentError, cited_inputs, fresh_entity_id
 from .withholding import pending_moves
@@ -237,8 +238,10 @@ async def run(args, root):
     )
     sources = await current_sources(root, publisher)
     result = await snapshot(publisher, sources, args.query)
-    result["corrected_entity_result"] = await retrieve(
-        publisher, intended.dataset_id, "What does Revised controller limit?"
+    result["corrected_entity_result"] = semantic(
+        await retrieve(
+            publisher, intended.dataset_id, "What does Revised controller limit?"
+        )
     )
     (root / "revision_result.json").write_text(json.dumps(result, indent=2))
     return result

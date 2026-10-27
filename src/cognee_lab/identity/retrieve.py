@@ -1,5 +1,6 @@
 """The lab's bounded retriever over saved sources. settled.py wraps it for the
-CLI `retrieve` and the IDENTITY SearchType."""
+CLI `retrieve` and the IDENTITY SearchType and delivers it by search mode;
+the fixture commands deliver it with `delivery.semantic`."""
 
 import re
 from dataclasses import asdict
@@ -8,10 +9,9 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from .chains import live_pass
-from .delivery import Evidence, Fact, Support, semantic
+from .delivery import Evidence, Fact, Found, Mention, Support
 from .models import Accepted, ChunkInput
 from .native import edge_metadata, fact_neighborhood
-from .native_copy import dataset_data
 from .publish import contributions, identity_edges
 from .validation import IntentError, Reason, validate_inputs
 from .withholding import (
@@ -174,9 +174,6 @@ async def valid_sources(publisher, dataset_id, rows, withheld):
     return valid, unavailable
 
 
-LIMIT = 5
-
-
 def words(text):
     return {w.rstrip("s") for w in re.findall(r"\w+", text.casefold()) if len(w) > 1}
 
@@ -209,14 +206,15 @@ async def select_seed_entities(graph, candidates, query, *, skip, allowed):
     return set(exact or [e for e in reusable[:1] if e in allowed])
 
 
-async def retrieve(
-    publisher, dataset_id, query, *, limit=LIMIT, work_limit=200, deliver=semantic
-):
-    """Rank actual facts, with document-context variant expansion and local mentions.
+GUIDE = "Accepted links identify the scoped referent; ownership and provenance do not establish scientific support."
+
+
+async def retrieve(publisher, dataset_id, query, *, work_limit=200) -> Found:
+    """Find actual facts, with document-context variant expansion and local mentions.
 
     This intentionally bounded first slice scans saved source descriptions. Full
-    graph traversal and arbitrary external facts are later work. `deliver`
-    (delivery.py) turns the facts found into the result's fact fields.
+    graph traversal and arbitrary external facts are later work. A delivery
+    (delivery.py) ranks the facts found and turns them into a result.
     """
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from cognee.modules.engine.utils import generate_edge_object_id
@@ -235,14 +233,16 @@ async def retrieve(
         for g in row.description.mention_groups.values()
     }
     if not await publisher.vector.has_collection("Entity_name"):
-        return dict(
-            **deliver([], limit),
-            identity_expansion_limited=False,
-            identity_work=0,
-            fact_candidates_limited=False,
-            seed_entity_ids=[],
-            unavailable_sources=unavailable,
-            identity_guide="Accepted links identify the scoped referent; ownership and provenance do not establish scientific support.",
+        return Found(
+            facts=(),
+            report=dict(
+                identity_expansion_limited=False,
+                identity_work=0,
+                fact_candidates_limited=False,
+                seed_entity_ids=[],
+                unavailable_sources=unavailable,
+                identity_guide=GUIDE,
+            ),
         )
     candidates = await publisher.vector.search(
         "Entity_name",
@@ -259,7 +259,6 @@ async def retrieve(
     seeds = await select_seed_entities(
         publisher.graph, candidates, query, skip=mention_ids, allowed=allowed
     )
-    names = await dataset_data(dataset_id)
     found: dict[str, Fact] = {}
     work, limited, fact_limited = 0, False, False
     for source, row, held in current:
@@ -391,9 +390,11 @@ async def retrieve(
                         )
                     )
                 known = found.get(str(edge_id))
-                if not checked or (known and document_id in known.supports):
+                if not checked or (
+                    known and any(s.document_id == document_id for s in known.supports)
+                ):
                     continue
-                identity = None
+                mention = None
                 if subject in mentions:
                     group, decision, key = mentions[subject]
                     # At least one supporting chunk must cover an occurrence.
@@ -406,34 +407,34 @@ async def retrieve(
                     # A captured fact can span a marker chunk and a continuation
                     # chunk. Keep its checked native-owned evidence together;
                     # continuation evidence does not create a mention marker.
-                    identity = dict(
-                        state="accepted",
+                    mention = Mention(
                         target_entity_id=str(decision.target_entity_id),
-                        occurrences=[o.model_dump() for o in group.occurrences],
-                        identity_data_id=str(source.identity_data_id),
+                        occurrences=tuple(group.occurrences),
                         assignment_id=key,
                     )
+                support = Support(
+                    document_id=document_id,
+                    identity_data_id=str(source.identity_data_id),
+                    evidence=tuple(checked),
+                    mention=mention,
+                )
                 if known is None:
                     target = await publisher.graph.get_node(str(b))
                     text = (
                         props.get("edge_text")
                         or f'{relation} {(target or {}).get("name", "")}'
                     )
-                    known = found[str(edge_id)] = Fact(
+                    found[str(edge_id)] = Fact(
                         edge_id=str(edge_id),
                         source_id=str(a),
                         target_id=str(b),
                         relationship=relation,
                         text=text,
                         score=len(words(query) & words(text)),
+                        first=support,
                     )
-                known.supports[document_id] = Support(
-                    document_id=document_id,
-                    name=names.get(document_id),
-                    identity_data_id=str(source.identity_data_id),
-                    evidence=checked,
-                    identity=identity,
-                )
+                else:
+                    found[str(edge_id)] = known.supported(support)
     # Recheck ledger and withholdings to avoid delivering a source superseded,
     # or a decision withheld, during this read.
     rows_after = await publisher.records.rows(dataset_id)
@@ -449,12 +450,14 @@ async def retrieve(
         raise IntentError(
             "retrieval_changed", "Publication changed during retrieval; retry query"
         )
-    return dict(
-        **deliver(list(found.values()), limit),
-        identity_expansion_limited=limited,
-        identity_work=work,
-        fact_candidates_limited=fact_limited,
-        seed_entity_ids=sorted(seeds),
-        unavailable_sources=unavailable,
-        identity_guide="Accepted links identify the scoped referent; ownership and provenance do not establish scientific support.",
+    return Found(
+        facts=tuple(found.values()),
+        report=dict(
+            identity_expansion_limited=limited,
+            identity_work=work,
+            fact_candidates_limited=fact_limited,
+            seed_entity_ids=sorted(seeds),
+            unavailable_sources=unavailable,
+            identity_guide=GUIDE,
+        ),
     )

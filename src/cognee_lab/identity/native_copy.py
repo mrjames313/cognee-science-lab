@@ -64,16 +64,18 @@ async def data_present(data_id, dataset_id):
     return data is not None and data.dataset_id == dataset_id
 
 
-async def dataset_data(dataset_id) -> dict[str, str]:
-    """Each Data item of the dataset, by ID, with its name."""
+async def dataset_data(dataset_id, ids=None) -> dict[str, str]:
+    """Each Data item of the dataset, or only those in `ids`, by ID, with its
+    name."""
     from sqlalchemy import select
     from cognee.infrastructure.databases.relational import get_relational_engine
     from cognee.modules.data.models import Data
 
+    query = select(Data.id, Data.name).where(Data.dataset_id == UUID(str(dataset_id)))
+    if ids is not None:
+        query = query.where(Data.id.in_([UUID(str(i)) for i in ids]))
     async with get_relational_engine().get_async_session() as session:
-        found = await session.execute(
-            select(Data.id, Data.name).where(Data.dataset_id == UUID(str(dataset_id)))
-        )
+        found = await session.execute(query)
     return {str(i): name for i, name in found}
 
 

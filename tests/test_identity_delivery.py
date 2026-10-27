@@ -6,15 +6,24 @@ document."""
 from cognee_lab.identity.delivery import (
     Evidence,
     Fact,
+    Found,
+    Mention,
     Support,
+    documents_of,
     semantic,
     source_aware,
 )
+from cognee_lab.identity.models import Occurrence
 
 OCCURRENCES = [
     dict(start=49, end=63, text="The controller"),
     dict(start=86, end=88, text="it"),
 ]
+MENTION = Mention(
+    target_entity_id="hc",
+    occurrences=tuple(Occurrence(**o) for o in OCCURRENCES),
+    assignment_id="r01",
+)
 IDENTITY = dict(
     state="accepted",
     target_entity_id="hc",
@@ -22,6 +31,7 @@ IDENTITY = dict(
     identity_data_id="id-a",
     assignment_id="r01",
 )
+REPORT = dict(identity_work=1, unavailable_sources=[])
 
 
 def chunk(name, index, start, end):
@@ -30,17 +40,16 @@ def chunk(name, index, start, end):
     )
 
 
-def support(document, evidence, identity=None):
+def support(document, evidence, mention=None):
     return Support(
         document_id=document,
-        name=f"name {document}",
         identity_data_id=f"id-{document}",
-        evidence=evidence,
-        identity=identity,
+        evidence=tuple(evidence),
+        mention=mention,
     )
 
 
-def fact(edge, score, *supports):
+def fact(edge, score, first, *more):
     return Fact(
         edge_id=edge,
         source_id=f"{edge}-subject",
@@ -48,8 +57,17 @@ def fact(edge, score, *supports):
         relationship="limits",
         text=f"{edge} limits oscillations",
         score=score,
-        supports={s.document_id: s for s in supports},
+        first=first,
+        more=more,
     )
+
+
+def found(*facts):
+    return Found(facts=facts, report=REPORT)
+
+
+def names(found, limit=5):
+    return {d: f"name {d}" for d in documents_of(found, limit)}
 
 
 def cited(document, name, index, start=None, end=None):
@@ -67,21 +85,22 @@ def two_documents():
     return fact(
         "e1",
         1,
-        support("a", [chunk("a0", 0, 0, 145), chunk("a1", 1, 145, 300)], IDENTITY),
+        support("a", [chunk("a0", 0, 0, 145), chunk("a1", 1, 145, 300)], MENTION),
         support("b", [chunk("b0", 0, 0, 158), chunk("b0", 0, 0, 158)]),
     )
 
 
 def test_a_fact_two_documents_support_is_listed_under_both():
-    found = source_aware([two_documents()], 5)
-    (entry,) = found["facts"]
+    both = found(two_documents())
+    result = source_aware(both, names(both), 5)
+    (entry,) = result["facts"]
     assert entry["evidence"] == [
         cited("a", "a0", 0, 0, 145),
         cited("a", "a1", 1, 145, 300),
         cited("b", "b0", 0, 0, 158),
     ]
     assert entry["identity"] == IDENTITY
-    assert found["documents"] == [
+    assert result["documents"] == [
         dict(
             document_id="a",
             name="name a",
@@ -112,10 +131,11 @@ def test_a_fact_two_documents_support_is_listed_under_both():
             ],
         ),
     ]
+    assert {k: result[k] for k in REPORT} == REPORT
 
 
 def test_semantic_keeps_the_first_supporting_source_and_no_ranges():
-    assert semantic([two_documents()], 5) == dict(
+    assert semantic(found(two_documents()), 5) == dict(
         facts=[
             dict(
                 edge_id="e1",
@@ -127,19 +147,20 @@ def test_semantic_keeps_the_first_supporting_source_and_no_ranges():
                 score=1,
                 identity=IDENTITY,
             )
-        ]
+        ],
+        **REPORT,
     )
 
 
 def test_semantic_keeps_evidence_rows_as_read():
     plain = fact("e1", 0, support("b", [chunk("b0", 0, 0, 9), chunk("b0", 0, 0, 9)]))
-    (entry,) = semantic([plain], 5)["facts"]
+    (entry,) = semantic(found(plain), 5)["facts"]
     assert entry["evidence"] == [cited("b", "b0", 0)] * 2
     assert "identity" not in entry
 
 
 def test_limit_picks_the_top_facts_and_documents_follow_them():
-    facts = [
+    facts = found(
         fact("e3", 1, support("c", [chunk("c0", 0, 0, 10)])),
         fact("e2", 3, support("b", [chunk("b0", 0, 0, 10)])),
         fact("e4", 0, support("d", [chunk("d0", 0, 0, 10)])),
@@ -149,16 +170,22 @@ def test_limit_picks_the_top_facts_and_documents_follow_them():
             support("c", [chunk("c1", 1, 10, 20)]),
             support("a", [chunk("a0", 0, 0, 10)]),
         ),
-    ]
-    found = source_aware(facts, 3)
-    assert [f["edge_id"] for f in found["facts"]] == ["e2", "e1", "e3"]
+    )
+    assert documents_of(facts, 3) == {"a", "b", "c"}
+    result = source_aware(facts, names(facts, 3), 3)
+    assert [f["edge_id"] for f in result["facts"]] == ["e2", "e1", "e3"]
     assert [
-        (d["document_id"], [f["edge_id"] for f in d["facts"]])
-        for d in found["documents"]
-    ] == [("b", ["e2"]), ("a", ["e1"]), ("c", ["e1", "e3"])]
+        (d["document_id"], d["name"], [f["edge_id"] for f in d["facts"]])
+        for d in result["documents"]
+    ] == [
+        ("b", "name b", ["e2"]),
+        ("a", "name a", ["e1"]),
+        ("c", "name c", ["e1", "e3"]),
+    ]
     assert [f["edge_id"] for f in semantic(facts, 3)["facts"]] == ["e2", "e1", "e3"]
 
 
 def test_nothing_found_is_no_fact_and_no_document():
-    assert source_aware([], 5) == dict(facts=[], documents=[])
-    assert semantic([], 5) == dict(facts=[])
+    assert documents_of(found(), 5) == set()
+    assert source_aware(found(), {}, 5) == dict(facts=[], documents=[], **REPORT)
+    assert semantic(found(), 5) == dict(facts=[], **REPORT)

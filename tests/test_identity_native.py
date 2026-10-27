@@ -175,12 +175,13 @@ from cognee_lab.identity.environment import fixture_environment
 root=Path(sys.argv[1])
 with fixture_environment(root):
  from cognee_lab.identity.publish import Publisher
+ from cognee_lab.identity.delivery import semantic
  from cognee_lab.identity.retrieve import retrieve
  async def check():
   p=await Publisher.configured()
   await p.graph.update_node('8b4bff50-907b-56b6-bc80-3b0a7018714a',{'description':'changed input'})
   dataset=UUID(json.loads((root/'fixture-info.json').read_text())['dataset_id'])
-  answer=await retrieve(p,dataset,'What does HC limit?')
+  answer=semantic(await retrieve(p,dataset,'What does HC limit?'))
   assert answer['facts']==[]
   # Both decisions read the changed field: each is withheld, the source is not.
   assert [(u['assignment_id'],u['reason']) for u in answer['unavailable_sources']]==[('r01','input_changed'),('v01','input_changed')]

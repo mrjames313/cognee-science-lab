@@ -7,6 +7,7 @@ from .environment import DATASET_NAME
 from .models import IdentitySource
 from .native import edge_metadata
 from .publish import Publisher, contributions
+from .delivery import semantic
 from .retrieve import retrieve
 from .validation import IntentError, text_digest
 
@@ -365,7 +366,7 @@ async def snapshot(publisher, sources, query="What does HC limit?"):
     )
     rows = {r.source: r for r in await publisher.records.rows(first.dataset_id)}
     result = dict(
-        result=await retrieve(publisher, first.dataset_id, query),
+        result=semantic(await retrieve(publisher, first.dataset_id, query)),
         sources={},
         shared_variant=dict(
             present=shared is not None,
@@ -645,7 +646,7 @@ async def run(args, root):
         sources = await saved_or_file(publisher, fixture_files(root))
     if len(sources) == 1:
         result = dict(
-            result=await retrieve(publisher, selected.dataset_id, args.query),
+            result=semantic(await retrieve(publisher, selected.dataset_id, args.query)),
             publications=[
                 row.record()
                 for row in await publisher.records.rows(selected.dataset_id)

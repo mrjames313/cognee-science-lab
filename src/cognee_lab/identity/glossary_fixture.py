@@ -37,6 +37,7 @@ from .native_copy import deleted_entry, missing_native
 from .publish import Publisher
 from .records import saved_records
 from .registered import context_for, read_registered, read_texts
+from .delivery import semantic
 from .retrieve import retrieve, withholding_status
 from .revisions import refresh
 from .text_changes import read_original
@@ -353,8 +354,10 @@ async def snapshot(publisher, root, query):
         **await withholding_status(
             publisher, [r for r in rows if r.dataset == str(dataset)]
         ),
-        result=await retrieve(publisher, dataset, query),
-        helios=await retrieve(publisher, dataset, "What does Helios controller limit?"),
+        result=semantic(await retrieve(publisher, dataset, query)),
+        helios=semantic(
+            await retrieve(publisher, dataset, "What does Helios controller limit?")
+        ),
         recovery_events=await publisher.records.events(dataset),
     )
 
