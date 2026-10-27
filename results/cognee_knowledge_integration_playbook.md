@@ -531,3 +531,12 @@ The assistant's subagents ran the evidence on the user's Mac from 2026-10-26 wit
 | The payload form decides what the host derives: name, origin, storage key and loader. | P, M | See lesson G33. | See lesson G33. |
 
 The finding adds register lesson G33. The assistant's subagents ran the evidence on the user's Mac on 2026-10-27 with loopback embeddings, on `37da230`. The unit suite gave 699 passed, the integration suite 120 passed, and journeys R1, R2, E1 to E4 and F1 to F20 gave 0 FAIL. The [checkpoint history](../docs/stage6_checkpoint_history.md#step-5-document-names-kept-after-a-text-edit-2026-10-27) has the counts.
+
+## The source-aware mode — 2026-10-27
+
+| Finding | Activities | Identity process/evidence | Transfer to measurements and other overlays |
+|---|---|---|---|
+| Find each fact once, then let the delivery mode decide what the caller sees. A second mode then cannot change the first one's result. | R | `retrieve` collects one record per fact with a support per document, and the pure functions in `delivery.py` turn it into either mode's result. The semantic result stayed byte-identical over 240 reads on 12 roots. The first build chose the mode by a default argument, so seven callers picked semantic without naming it, and the semantic path read Data names it never used. The quality review found both. | When an overlay adds a richer view of the same results, such as a measurement's provenance view beside its value view, keep one finder and put each view in a pure function over its output. Pin the old view byte for byte before you add the new one, and keep the store reads that only the new view needs out of the old path. |
+| Derive provenance from links the host already keeps before you write new ones. | R | Cognee's TextDocument shares its Data item's UUID, and every evidence chunk is `is_part_of` it, so the result names each fact's document without a graph write. The user kept a graph write as possible later work, for readers outside the lab. | Before you store a record-to-source link, check whether the host's own evidence or containment records already reach the source. A derived link cannot go stale when the source is edited or erased. |
+
+The assistant and its subagents ran the evidence on the user's Mac on 2026-10-27 with loopback embeddings. The [checkpoint history](../docs/stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27) has the counts.

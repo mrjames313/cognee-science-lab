@@ -94,6 +94,8 @@ On 2026-10-25 the user decided that the step-4 follow-ups stay documented limits
 - Every search runs `RecordStore.initialize`, because the retriever keeps no per-process cache. [S1 limit 7]
 - A search with access control on is refused `access_control_on`, because the ledger lives in the one shared relational database. [S1 limit 8]
 
+- One integration test failed once in 5 runs of `-n 8 --dist worksteal` on 2026-10-27, and it passed when rerun alone. The assistant lost its name. pytest printed its `FAILED` line, but the assistant's capture kept only the last lines. If it recurs, record the name and the traceback, and rerun it under `-n 8` to see whether it is parallel-only. [source-aware checkpoint]
+
 **Entry points and the lab update.**
 
 - When every chunk of a source is gone, `cognify` chunks again at the default budget of 512. A partial chunk loss gives a misleading message. [S3a limit 2]
@@ -238,7 +240,7 @@ The user agreed this routine on 2026-10-21. `CLAUDE.md` holds the same steps.
 5. **`verify.py journey all` once per checkpoint**, before the merge to `main`.
 6. **The integration suite**, `uv run pytest -q -m integration -n 8 --dist worksteal`, only on a local machine. Run the focused native tests for the changed path first. On 2026-10-27 the whole suite took 9 to 10 minutes with 8 workers and about 46 minutes in one process.
 
-**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The feature map has 102 journey blocks. `journey all` runs the 101 loopback blocks as 140 runs, 4 at a time by default (`--jobs N`). Journey P5 calls the NVIDIA embedding API, so it runs only with `--include-env`. The last full run, on `cdbb6bf`, gave 2022 PASS rows and 0 FAIL rows. `.claude/skills/verify/SKILL.md` gives the commands and the proof rules. If a `lab_store` check fails under parallel runs, rerun with `--jobs 1`.
+**Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The feature map has 103 journey blocks. `journey all` runs the 102 loopback blocks as 141 runs, 4 at a time by default (`--jobs N`). Journey P5 calls the NVIDIA embedding API, so it runs only with `--include-env`. The last full run, on the `source-aware-mode` branch on 2026-10-27, gave 2032 PASS rows and 0 FAIL rows in 141 runs. `.claude/skills/verify/SKILL.md` gives the commands and the proof rules. If a `lab_store` check fails under parallel runs, rerun with `--jobs 1`.
 
 **Identity-ledger check.** It runs every sequence of real `RecordStore` calls up to depth 5, with two sources and two writers. `PINNED` in `tests/test_identity_ledger_check.py` holds 9205 nodes and 9050 sequences. `--mutants` runs the scratch breaks in `support/ledger_mutants.py`. `.claude/skills/identity-ledger/SKILL.md` says when to run it.
 

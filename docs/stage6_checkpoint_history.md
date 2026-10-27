@@ -1070,6 +1070,43 @@ No GitHub Actions run and no `journey all` run, because this is not a checkpoint
 2. A root built before this change keeps the `text_<md5>` names of its earlier edits.
 3. The first add of an item still stores the caller's file as the original. Nothing changed there.
 
+### Step 5, the source-aware mode, 2026-10-27
+
+This is a checkpoint. Branch `source-aware-mode`, rebased onto the integration-speed commits `5af8c19` and `b3427c2`.
+
+**Decisions.** On 2026-10-27 the assistant proposed the result shape with five questions, and the user decided them the same day:
+
+1. The link from a fact to its document is a result field. Nothing new is written to the graph. A fact-to-document graph write, so that readers outside the lab see it, stays possible later work.
+2. The flat `facts` list stays, and a `documents` list is added beside it.
+3. The source-aware mode lists a fact under every document that supports it. The semantic mode keeps the evidence of the first source only, so the conformance baseline does not move.
+4. Evidence chunk ranges are the finest span of a fact without a mention.
+5. "Grouped delivery" is renamed grouped-by-identity delivery. It stays open, to be built as a second side list over the same flat `facts`.
+
+**What was built.** `retrieve` collects each fact once, with one support per served original document, and returns the facts it found. `retrieve_settled` delivers them through the mode's entry in `settled.DELIVERY`. The pure functions are in `delivery.py`. `semantic` gives the old result. `source_aware` gives the evidence union with chunk ranges, and the `documents` list with each document's Data ID, name and spans. It reads Data names once, only for the returned documents. The seven other callers of `retrieve` call `semantic` themselves. The Data-name reader moved from `dataset_forget.py` to `native_copy.py`. Journey S8 drives the mode. Guide: [source-aware results](stage6_identity_public_search.md#source-aware-results).
+
+**Process.** An Opus delegate built the mode and an Opus delegate ran the fix round, each in its own worktree. Two independent reviews ran on the first build and one on the fix round. None found a blocking defect. The fix round moved the name reader, lifted the mode choice out of `retrieve`, typed the records, added mention facts' chunk spans and added a store-free test that drives `retrieve` with two sources supporting one fact. The assistant dismissed three review items with reasons. A document is placed by its best fact's rank, which is deterministic and matches the guide. Two sources sharing one original cannot happen with today's builders, so a docstring notes it. Filling Cognee's `document_name` reference field is deferred.
+
+**Evidence.** The assistant and its subagents ran these on the user's Mac with loopback embeddings on 2026-10-27:
+
+- The semantic `retrieve_settled` output stayed byte-identical over 240 reads on 12 roots, before and after the fix round. The fixture commands' result files matched in structure.
+- `uv run pytest -q -m 'not integration'`: 707 passed.
+- `uv run python support/conformance_check.py`: 0 regressions and 0 improvements.
+- `verify.py journey all`: 2032 PASS rows and 0 FAIL rows in 141 runs, with P5 skipped.
+- `uv run pytest -q -m integration -n 8 --dist worksteal`: 121 passed in 551 s and in 531 s. In an earlier run, 1 test failed and 120 passed in 599 s. The failing test passed when rerun alone, and its name was not captured. Two more runs gave 121 passed in 546 s and in 548 s. So 4 of 5 parallel runs on this branch passed, and the integration-speed delegate's 9 runs had no failure. The failure is a tracked follow-up.
+
+**Known limits.** The search guide lists five. The main ones are these. A fact's flat `identity` comes from its first support. `name` can be null if Cognee deletes the Data row outside the lab during the read. No fixture has a fact that two documents support, so a store-free test covers that case.
+
+### Integration suite on 8 workers, 2026-10-27
+
+The user asked why the integration suite had grown to about 46 minutes. Its per-test time had held at 21 to 24 s since 29 tests, and the suite now has 120 to 121. An Opus delegate measured where the time goes and tried three changes, cheapest first. Commits `5af8c19` and `b3427c2`.
+
+- **Baseline.** One serial run took 2755 s. 96% of the time was in 610 CLI subprocesses. The CLI time split as 38% `import cognee`, 45% the operation, 14% interpreter exit and start, and 4% Python and lab imports. The fixture-building commands took 27% of the total.
+- **pytest-xdist, adopted.** `-n 8 --dist worksteal` ran the suite in 546 s and 599 s, with 120 passed each time. On a 34-test subset in three interleaved rounds, worksteal at 8 workers was fastest in each round, with a median of 182 s. The medians were 262 s for 4 workers, 221 s for 6 and 220 s for 8. CPU on the 4 performance and 6 efficiency cores limits the result. Outside load from other agents moved full runs between 531 and 665 s.
+- **A copied template root, rejected.** A copied root still reads its template's files. Its relational, graph and vector stores hold the template's absolute paths.
+- **Cheaper CLI start, rejected.** The import cost is inside Cognee's own `__init__`. Cutting it would mean patching Cognee or not driving the real CLI.
+
+CI still runs the unit command without `-n`. The review found two more items, both fixed. The lock file's revision had dropped to 3 and is back at 5, as commit `821d572` set. And `support/host_native_launcher.py` must run without `-n`, because its patch does not reach xdist workers. The measurement files are in the main checkout's untracked `outputs/integration_speed_20261027/`.
+
 ## Next task and the overnight decisions, as of 2026-10-26
 
 Step 5 continues with the source-aware mode and the delivery items. The user decided on 2026-10-25 to build the semantic mode first and the source-aware mode next, and on 2026-10-26 that seeding and ranking improvements are later work, measured against the S1 conformance baseline.
