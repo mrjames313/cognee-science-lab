@@ -22,7 +22,7 @@ Read [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md) first. It gives the curr
 
 The user agreed this routine on 2026-10-21.
 
-1. On every commit, run `uv run pytest -q -m 'not integration'`. CI runs the same command on every push, then the occurrence check and the chain check at their default bounds (the unit suite covers only small worlds).
+1. On every commit, run `uv run pytest -q -m 'not integration'`. On every push, CI's `unit` job runs the same command and then the occurrence check, and its `chains` job runs the chain check beside it, both at their default bounds (the unit suite covers only small worlds).
 2. For a change that touches `RecordStore` or its callers, run `uv run python support/ledger_check.py`. Read `.claude/skills/identity-ledger/SKILL.md` first. For a change to `src/cognee_lab/identity/admission.py`, run `uv run python support/occurrence_check.py` and `uv run python support/occurrence_check.py --mutants`. For a change to `admission.py`, `records.py`, `chains.py` (the citation rules, the live pass and the withholding closure), `withholding.py` (the record reader) or `erasure.py`, also run `uv run python support/chain_check.py` and `uv run python support/chain_check.py --mutants`.
 3. For a change to retrieval (`retrieve.py`, `settled.py`, `search.py`), to `conformance_fixture.py` or to the fact writers in `fixture.py`, run `uv run python support/conformance_check.py` and journey B1. Read `docs/stage6_conformance_check.md` first. It fails when a case moves from `support/conformance_baseline.json` in either direction. It is a local check and a journey, not part of CI.
 4. For each feature change, run the changed feature's journeys with `.claude/skills/verify/scripts/verify.py journey <ID>`. The feature files in `.claude/skills/verify/features/` list the journeys. Read `.claude/skills/verify/SKILL.md` first.
@@ -45,7 +45,8 @@ Follow [.agents/playbooks/landing-on-main.md](.agents/playbooks/landing-on-main.
 
 ## Update the docs after each checkpoint
 
-- `docs/SESSION_HANDOFF.md`: baseline, status, evidence and next task.
+- `docs/SESSION_HANDOFF.md`: current state, next task and tracked follow-ups. Keep it a short resume document.
+- `docs/stage6_checkpoint_history.md`: a dated section for the checkpoint, with its decisions, process, evidence and known limits.
 - `ROADMAP.md`: "Last revised", "Progress at a glance" and a dated revision entry.
 - The fixture guide for the checkpoint under `docs/`.
 - `results/cognee_knowledge_integration_playbook.md`: a dated evidence section. Add a lesson to the register only if it transfers to other integrations.
