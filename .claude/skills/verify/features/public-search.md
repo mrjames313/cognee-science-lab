@@ -10,8 +10,9 @@ Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types
 - `search-failed` lists a failed first publication as unavailable with its incident, and serves its fact again after `reconcile`.
 - `search-withheld` lists the decisions a glossary edit withholds, as `status` lists them.
 - `search-native-deleted` fails a source deleted outside the lab on the first search, with a `retrieval_validation` incident, and keeps serving the other source.
-- `search-refusals` refuses a scope or mode that is not built with `SearchRefused`, and a refused search writes no history row and changes no publication.
+- `search-refusals` refuses a scope that is not built with `SearchRefused`, and a refused search writes no history row and changes no publication.
 - `search-dataset-required` refuses `datasets=None` once the user can read a second dataset (`native-add`, a plain `cognee.add`), and searches the root's dataset when it is named.
+- `search-source-aware` (mode `source_aware`) lists each returned fact under each document that supports it, with the document's name and spans, and gives each evidence chunk its range in the document. After `edit-text` the spans follow the new text and the document keeps its name.
 - `native-search-unguarded` shows that a plain `cognee.search` with `SearchType.CHUNKS` (`native-search`) serves the text of a failed publication, which `IDENTITY` withholds.
 - `conformance-check` builds DOC01 through the lab's `add` and `cognify` (`conformance-fixture`) and runs `support/conformance_check.py` on the root, which scores `IDENTITY` searches against the Stage 5.3 benchmarks and fails when a case moves from its committed baseline in either direction. It is a conformance check, not an evaluation of Describe.
 
@@ -95,14 +96,12 @@ $V drive "$RUN" main again -- search
 $V check "$RUN" again '[.search_result[0].unavailable_sources[] | [.identity_data_id, .reason, .recovery_event_id]] == [["'"$DOC02"'", "publication_failed", "'"$EID"'"]] and (.search_result[0].facts | length) == 1' 'a later search lists the failed publication with the same incident'
 ```
 
-**S5 refusals write nothing.** Proves `search-refusals`. Guide: "Refusals". On a `fixture` root `search --scope identity_and_unattributed` exits 1 with `SearchRefused` and code `scope_not_built`, and `search --mode source_aware` with code `mode_not_built`. `retrieve --scope identity_and_unattributed` is refused the same way. `search --scope identity --mode semantic` then serves the accepted fact, and its `search_history` lists that one query: the refused searches logged nothing. `status` lists the publication current at revision 1 with no incident.
+**S5 refusals write nothing.** Proves `search-refusals`. Guide: "Refusals". On a `fixture` root `search --scope identity_and_unattributed` exits 1 with `SearchRefused` and code `scope_not_built`. `retrieve --scope identity_and_unattributed` is refused the same way. `search --scope identity --mode semantic` then serves the accepted fact, and its `search_history` lists that one query: the refused searches logged nothing. `status` lists the publication current at revision 1 with no incident.
 
 ```bash journey S5
 $V drive "$RUN" main fixture -- fixture
 $V drive "$RUN" main scope -- search --scope identity_and_unattributed
 $V check "$RUN" scope '.error == "SearchRefused" and .code == "scope_not_built"' 'scope identity_and_unattributed is refused'
-$V drive "$RUN" main mode -- search --mode source_aware
-$V check "$RUN" mode '.error == "SearchRefused" and .code == "mode_not_built"' 'mode source_aware is refused'
 $V drive "$RUN" main retrieve -- retrieve --scope identity_and_unattributed
 $V check "$RUN" retrieve '.error == "SearchRefused" and .code == "scope_not_built"' 'retrieve refuses the same scope'
 $V drive "$RUN" main search -- search --scope identity --mode semantic
@@ -140,6 +139,26 @@ $V drive "$RUN" main native -- native-search
 $V check "$RUN" native 'any(.native_search.chunks[]; .text | contains("ECRH: electron cyclotron resonance heating."))' 'plain CHUNKS serves the unpublished glossary text'
 $V drive "$RUN" main search -- search
 $V check "$RUN" search '.search_result[0].facts == [] and [.search_result[0].unavailable_sources[] | [.assignment_id, .reason, .recovery_event_id]] == [[null, "publication_failed", "'"$EID"'"], ["r01", "input_changed", null], ["v01", "input_changed", null]]' 'IDENTITY serves nothing of the failed glossary or of what reads it'
+```
+
+**S8 source-aware results by document.** Proves `search-source-aware`. Guide: "Source-aware results". On a `multi-fixture` root `search --mode source_aware` returns the two `it limits oscillations` facts and two documents, `source` (doc01) and `source02` (doc02). Each document lists the one fact whose evidence it holds, and its spans are the occurrences `The controller` at [49,63) and `it` at [86,88). Each evidence item has a range whose length is its chunk text's length. `retrieve --mode source_aware` in a new process returns the same result, and a semantic `search` has no `documents`. After `edit-text --source doc01`, which adds a 48 code point prefix, `source` keeps its name and its spans move to [97,111) and [134,136). `source02` is unchanged.
+
+```bash journey S8
+$V drive "$RUN" main fixture -- multi-fixture
+$V drive "$RUN" main search -- search --mode source_aware
+$V check "$RUN" search '.search_result[0] | .mode == "source_aware" and (.facts | length) == 2 and ([.documents[].name] | sort) == ["source", "source02"]' 'two facts under the documents source and source02'
+$V check "$RUN" search '.search_result[0] | ([.facts[] | {key: .edge_id, value: [.evidence[].data_id] | unique}] | from_entries) as $own | all(.documents[]; .document_id as $d | [.facts[].edge_id] as $e | ($e | length) == 1 and $own[$e[0]] == [$d])' 'each document lists the one fact whose evidence it holds'
+$V check "$RUN" search '[.search_result[0].documents[].facts[].spans | map([.kind, .start, .end, .text])] == [[["occurrence", 49, 63, "The controller"], ["occurrence", 86, 88, "it"]], [["occurrence", 49, 63, "The controller"], ["occurrence", 86, 88, "it"]]]' 'both documents span The controller and it'
+$V check "$RUN" search 'all(.search_result[0].facts[].evidence[]; (.end - .start) == (.text | length))' 'each evidence range is as long as its chunk text'
+$V drive "$RUN" main retrieve -- retrieve --mode source_aware
+RET=$(val retrieve 'tojson')
+$V check "$RUN" search '.search_result == [('"$(jq -n --arg s "$RET" '$s')"' | fromjson)]' 'search returns exactly what retrieve returns'
+$V drive "$RUN" main semantic -- search
+$V check "$RUN" semantic '.search_result[0] | .mode == "semantic" and (has("documents") | not) and all(.facts[].evidence[]; has("start") | not)' 'the semantic search has no documents and no ranges'
+$V drive "$RUN" main edit -- edit-text --source doc01 --expected-revision 1
+$V drive "$RUN" main edited -- search --mode source_aware
+$V check "$RUN" edited '.search_result[0].documents | map({key: .name, value: [.facts[].spans[] | [.start, .end, .text]]}) | from_entries == {"source": [[97, 111, "The controller"], [134, 136, "it"]], "source02": [[49, 63, "The controller"], [86, 88, "it"]]}' 'source keeps its name and its spans follow the edit'
+$V check "$RUN" edited 'all(.search_result[0].facts[].evidence[]; (.end - .start) == (.text | length))' 'each evidence range still holds its chunk text'
 ```
 
 ## Gotchas
