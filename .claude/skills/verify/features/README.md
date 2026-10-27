@@ -2,7 +2,7 @@
 
 This directory is the maintained source for verifying the user-facing behavior of the Stage 6 identity CLI. Read this index before you drive anything. Then use the matching feature file as the recipe.
 
-Every journey names its guide under `docs/` and takes each expected value from that guide or from `docs/SESSION_HANDOFF.md`. A journey that disagrees with the code reports a failure. Do not weaken a journey to make it pass.
+Every journey names its guide under `docs/` and takes each expected value from that guide, from `docs/SESSION_HANDOFF.md` or from `docs/stage6_checkpoint_history.md`. A journey that disagrees with the code reports a failure. Do not weaken a journey to make it pass.
 
 ## Baseline preconditions
 
@@ -23,7 +23,7 @@ Each feature file lists its sub-features and holds one bold-led paragraph per jo
 - **env.** The `env` token marks a journey that calls the embedding API.
 - **ID letters.** `P` is publication and retrieval, `W` is withdrawal, `R` is revision, `E` is text edits, `O` is occurrence changes, `G` is group regrouping, `I` is changed interpretation, `K` is kind change, `F` is forget and re-add, `D` is dependencies, `L` is the standard entry points, `S` is public search and `B` is the conformance check (the Stage 5.3 benchmark). The `B` journeys live in the public search file. The `E` journeys live in the revision file, and the `I` and `K` journeys live in the reinterpretation file.
 - **Fault journeys.** A fault journey lives with the feature that it breaks.
-- **Cited values.** Every expected value comes from a guide under `docs/` or from `docs/SESSION_HANDOFF.md`. An inference from a guide says so in the paragraph.
+- **Cited values.** Every expected value comes from a guide under `docs/`, from `docs/SESSION_HANDOFF.md` or from `docs/stage6_checkpoint_history.md`. An inference from a guide says so in the paragraph.
 - **Non-vacuous checks.** A check on a field requires the field to exist. Use `length > 0`, a type test or `!= null` where a missing field would otherwise pass.
 
 ## Driving conventions
@@ -67,7 +67,7 @@ These are current refusals or gaps. They are not journeys. Do not write a journe
 
 - Mixed removal and addition has one captured case, `revise-occurrences`. Commands do not locate arbitrary phrases or infer an occurrence map (`docs/stage6_identity_mixed_occurrences.md`).
 - Changed interpretation and representation-kind changes work only as the four captured commands `reinterpret-new-entity`, `reinterpret-unresolved`, `change-kind-to-mention` and `change-kind-to-reusable`. Other kind changes, other changed interpretations, a corpus-scoped variant change in a text edit and a retargeted continuing group in a text edit stay refused (`docs/stage6_identity_reinterpretation.md`).
-- An edit that would affect a dependent saved identity source is refused before it changes anything. Automatic reconsideration of that source does not exist (`docs/stage6_identity_text_changes.md`).
+- An edit that drops a reusable recipe only the edited source owns, while another source reads that Entity as a corpus object, is refused before it changes anything (`reject_sole_owned_readers`). Any other edit of a document that a source reads withholds that source's affected decisions for review. Automatic reconsideration does not exist (`docs/stage6_identity_dependencies.md`).
 - Arbitrary text edits are not supported. `edit-text` applies only the captured prefix insertion, and the removal, retirement, addition, split and combination commands apply only their captured edits (`docs/stage6_identity_group_split.md` for the last two).
 - Identity withdrawal is not a Forget. It keeps the original Data, its facts, markers and evidence; `forget` removes them (`docs/stage6_identity_forget.md`). Erasure is logical: soft-deleted vector bytes and free database pages stay until the stores compact them.
 - A root made before embedding profiles opens only for `status` and `retrieve`. Do not use one as a verification root.

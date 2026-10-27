@@ -5,7 +5,7 @@ description: Drive the cognee-science-lab Stage 6 identity CLI (`python -m cogne
 
 # Verify the Stage 6 identity CLI
 
-> **Status: proven 2026-10-20 on Cognee 1.6.2.** The feature map in `features/` holds the journey blocks. Run counts and the paths each run exercised are in `docs/SESSION_HANDOFF.md`, subsection "Verification skill".
+> **Status: proven 2026-10-20 on Cognee 1.6.2.** The feature map in `features/` holds the journey blocks. Run counts and the paths each run exercised are in `docs/stage6_checkpoint_history.md`, subsection "Verification skill".
 
 ## What a user touches
 

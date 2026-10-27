@@ -2,7 +2,7 @@
 
 A user changes which text spans belong to doc01's mention groups on a `chunked-fixture` root. `remove-occurrences` drops an occurrence and retires an empty unresolved group. `retire-resolved-group` retires a resolved group with its local fact. `add-occurrences` adds an occurrence to a continuing group and publishes a new local group. `revise-occurrences` removes, keeps and adds occurrences in one edit. Each command guards on the saved revision, rebuilds doc01 from the captured replacement text, and leaves doc02 at revision 1. An interrupted run withholds doc01 until `reconcile` finishes it.
 
-Guides: `docs/stage6_identity_occurrence_removal.md`, `docs/stage6_identity_resolved_retirement.md`, `docs/stage6_identity_occurrence_addition.md`, `docs/stage6_identity_mixed_occurrences.md`. The state after a user's Mac run is in `docs/SESSION_HANDOFF.md`, "Results verified on the user's Mac".
+Guides: `docs/stage6_identity_occurrence_removal.md`, `docs/stage6_identity_resolved_retirement.md`, `docs/stage6_identity_occurrence_addition.md`, `docs/stage6_identity_mixed_occurrences.md`. The state after a user's Mac run is in `docs/stage6_checkpoint_history.md`, "Results verified on the user's Mac".
 
 ## Sub-features
 

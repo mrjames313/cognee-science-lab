@@ -2,7 +2,7 @@
 
 A user creates an isolated fixture root with `fixture`, `multi-fixture` or `chunked-fixture`. The CLI publishes captured identity decisions through the real graph, vector and relational stores. The user then retrieves facts, reconciles, and reads status, each in a new process. A failed first publication hides its source until `reconcile` restores it.
 
-Guides: `docs/stage6_identity_first_slice.md` (single and two-source fixtures, failure visibility), `docs/stage6_identity_multichunk.md` (the chunked fixture), `docs/SESSION_HANDOFF.md` ("Resolved: the repository `.env`..." for the `env` profile).
+Guides: `docs/stage6_identity_first_slice.md` (single and two-source fixtures, failure visibility), `docs/stage6_identity_multichunk.md` (the chunked fixture), `docs/stage6_checkpoint_history.md` ("Resolved: the repository `.env`..." for the `env` profile).
 
 ## Sub-features
 
@@ -139,7 +139,7 @@ $V drive "$RUN" main after -- status
 $V check "$RUN" after '.publications | length == 1 and .[0].state == "current"' 'the publication is current'
 ```
 
-**P5 env profile. This journey calls the embedding API named in `.env` and costs a few API calls.** Proves `profile-env`. It runs `chunked-fixture`, `add-occurrences`, `reconcile` and `retrieve` with `--embedding env`. Guide: `docs/SESSION_HANDOFF.md`, "Evidence after the fix". The handoff records the marker `nvidia/nemotron-3-embed-1b` with 2048 dimensions for this `.env`. A different `.env` model makes the marker check fail, and that is a real mismatch to report. The journey never prints or records a `.env` value. The probe scans the root and the evidence for the API key and writes only a yes or no.
+**P5 env profile. This journey calls the embedding API named in `.env` and costs a few API calls.** Proves `profile-env`. It runs `chunked-fixture`, `add-occurrences`, `reconcile` and `retrieve` with `--embedding env`. Guide: `docs/stage6_checkpoint_history.md`, "Evidence after the fix". The handoff records the marker `nvidia/nemotron-3-embed-1b` with 2048 dimensions for this `.env`. A different `.env` model makes the marker check fail, and that is a real mismatch to report. The journey never prints or records a `.env` value. The probe scans the root and the evidence for the API key and writes only a yes or no.
 
 ```bash journey P5 env
 $V drive "$RUN" main fixture -- chunked-fixture --embedding env

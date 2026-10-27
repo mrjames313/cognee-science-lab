@@ -552,7 +552,7 @@ Develop relevant tests alongside M0–M4. The complete inventory is not a prereq
 
 The build order was accepted on 2026-10-17. Implementation completed M3 on 2026-10-25. These are implementation steps within Stage 6. They do not correspond to the roadmap's subsection numbers 6.1–6.6.
 
-Develop sequence tests with each step. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) records the delivered baseline and independently reviewed Mac results.
+Develop sequence tests with each step. [The checkpoint history](../docs/stage6_checkpoint_history.md) records the delivered baseline and independently reviewed Mac results.
 
 | Milestone / accepted step | Concrete output and current boundary |
 |---|---|
@@ -566,7 +566,7 @@ Develop sequence tests with each step. [SESSION_HANDOFF.md](../docs/SESSION_HAND
 
 ### Step 4 / M3: closing summary, 2026-10-25
 
-On 2026-10-25 the user declared step 4 done, once the cleanups branch `stage6-cleanups`, `journey all` and the closing docs land. The remaining tracked follow-ups stay documented limits by the same decision. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md#cleanups-and-step-4-close-2026-10-25) has the cleanups, the real-embedding runs and the follow-up list.
+On 2026-10-25 the user declared step 4 done, once the cleanups branch `stage6-cleanups`, `journey all` and the closing docs land. The remaining tracked follow-ups stay documented limits by the same decision. [stage6_checkpoint_history.md](../docs/stage6_checkpoint_history.md#cleanups-and-step-4-close-2026-10-25) has the cleanups, the real-embedding runs and the follow-up list.
 
 The assistant and its subagents ran the evidence below on the user's Mac with loopback embeddings, except where a row says otherwise. Section 12 has each checkpoint.
 
@@ -806,7 +806,7 @@ The user independently reproduced ordinary Mac addition, reopened retrieval, hea
 
 ### Later checkpoints, 2026-10-21 to 2026-10-25
 
-These entries are brief. [SESSION_HANDOFF.md](../docs/SESSION_HANDOFF.md) has each checkpoint's rules, decisions and full evidence, and each links its fixture guide. Unless an entry says otherwise, the assistant and its subagents ran the evidence on the user's Mac with loopback embeddings.
+These entries are brief. [The checkpoint history](../docs/stage6_checkpoint_history.md) has each checkpoint's rules, decisions and full evidence, and each links its fixture guide. Unless an entry says otherwise, the assistant and its subagents ran the evidence on the user's Mac with loopback embeddings.
 
 - **Group split and combination, 2026-10-21.** A captured split of g01 into fresh g04 and g05, and their combination into fresh g06, with facts generated again from the fresh groups. The review added the fresh-ID rule: a fresh group's UUID includes the new revision. `journey all` gave 695 PASS and 0 FAIL in 34 runs.
 - **General occurrence map, Checkpoints A and B, 2026-10-21.** The user approved one map from old occurrences to new places, with one set of rules, to replace three admission modes. A proved the rules against an independent oracle on 540,045 small worlds. B switched every text change to `admit` and deleted the old modes. `journey all` gave 695 PASS and 0 FAIL in 34 runs.

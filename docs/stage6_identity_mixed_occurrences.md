@@ -4,7 +4,7 @@
 
 One edit to doc01 removes an occurrence, keeps an occurrence and adds an occurrence in the same group, and retires another group. Before the general occurrence map, each admission mode admitted only one kind of change, so this edit had no admission path. The general map admits it with no change to admission code. The case is captured fixture input: a reviewer wrote the map and the description; the process does not infer them.
 
-The user approved the case on 2026-10-21. The rules it relies on are in "General occurrence map, approved 2026-10-21" in the [session handoff](SESSION_HANDOFF.md).
+The user approved the case on 2026-10-21. The rules it relies on are in "General occurrence map, approved 2026-10-21" in the [checkpoint history](stage6_checkpoint_history.md#general-occurrence-map-approved-2026-10-21).
 
 ## Captured edit
 

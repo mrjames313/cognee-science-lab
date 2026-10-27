@@ -18,7 +18,7 @@ The captured semantic adapter preserves the original `it limits oscillations` fa
 
 ## Admission and recovery intent
 
-**Superseded on 2026-10-21.** The general occurrence map replaced the separate admission modes. The command now saves `TextChange.occurrence_map`, and `admit` in `src/cognee_lab/identity/admission.py` applies one rule set to every edit. See "General occurrence map, approved 2026-10-21" in [the session handoff](SESSION_HANDOFF.md). This edit's map is `{"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}`, and the result field `occurrence_continuity` is now `occurrence_map`. The text below records this checkpoint as it was built.
+**Superseded on 2026-10-21.** The general occurrence map replaced the separate admission modes. The command now saves `TextChange.occurrence_map`, and `admit` in `src/cognee_lab/identity/admission.py` applies one rule set to every edit. See "General occurrence map, approved 2026-10-21" in [the checkpoint history](stage6_checkpoint_history.md#general-occurrence-map-approved-2026-10-21). This edit's map is `{"g01": [["g01", 0], ["g01", 1]], "g02": [["g02", 0]]}`, and the result field `occurrence_continuity` is now `occurrence_map`. The text below records this checkpoint as it was built.
 
 `TextChange.occurrence_continuity` maps each **old group key** to an ordered list of indices in that group's **new occurrence array**. The list has one entry for every old occurrence, in old order. For this edit:
 

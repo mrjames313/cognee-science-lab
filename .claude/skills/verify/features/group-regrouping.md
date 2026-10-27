@@ -2,7 +2,7 @@
 
 A user splits one of doc01's mention groups on a `chunked-fixture` root, then combines the two halves again. `split-group` replaces doc01 with a text where the old group g01 divides into two fresh groups: g04 (`the controller`) and g05 (`it`). The old group retires with its Entity, markers, resolution and local fact. Both fresh groups resolve to the same reusable controller. The fact `it limits oscillations` is regenerated for g05 from the current chunks, not transferred. `combine-groups` then runs on the same root at revision 2 and replaces doc01 with a text where both halves share one paragraph. g04 and g05 retire and a fresh group g06 holds both occurrences. The fact is regenerated again for g06, and g01 is never brought back. Each command guards on the saved revision, rebuilds doc01 from the captured replacement text, and leaves doc02 at revision 1. An interrupted run withholds doc01 until `reconcile` finishes it.
 
-Guide: `docs/stage6_identity_group_split.md` covers both commands. The reviewed case is in `docs/SESSION_HANDOFF.md`, "Remaining step-4 work".
+Guide: `docs/stage6_identity_group_split.md` covers both commands. The reviewed case is in `docs/stage6_checkpoint_history.md`, "Group split and combination, completed 2026-10-21".
 
 ## Sub-features
 

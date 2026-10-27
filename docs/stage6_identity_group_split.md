@@ -45,7 +45,7 @@ The paragraph grouping and the resolutions are reviewed inputs. The process does
 
 ## Admission and recovery intent
 
-**Superseded on 2026-10-21.** The general occurrence map replaced the separate admission modes. The command now saves `TextChange.occurrence_map`, and `admit` in `src/cognee_lab/identity/admission.py` applies one rule set to every edit. See "General occurrence map, approved 2026-10-21" in [the session handoff](SESSION_HANDOFF.md). The split and combination maps below are unchanged as general maps. The general rules drop "at least one group must retire" and "in order", and the result field `occurrence_regrouping` is now `occurrence_map`. The text below records this checkpoint as it was built.
+**Superseded on 2026-10-21.** The general occurrence map replaced the separate admission modes. The command now saves `TextChange.occurrence_map`, and `admit` in `src/cognee_lab/identity/admission.py` applies one rule set to every edit. See "General occurrence map, approved 2026-10-21" in [the checkpoint history](stage6_checkpoint_history.md#general-occurrence-map-approved-2026-10-21). The split and combination maps below are unchanged as general maps. The general rules drop "at least one group must retire" and "in order", and the result field `occurrence_regrouping` is now `occurrence_map`. The text below records this checkpoint as it was built.
 
 `TextChange.occurrence_regrouping` maps each **old group key** to a list of `[new group key, new occurrence index]` pairs. The list has one pair for each old occurrence, in old order. The split map is:
 
@@ -170,7 +170,7 @@ The assistant's subagents ran these checks on the user's Mac on 2026-10-21, with
 - Verify journeys G1 (32 PASS rows), G2 (20), G3 (36) and G4 (21), with 0 FAIL rows. `.claude/skills/verify/features/group-regrouping.md` holds them.
 - Verify journeys O5 (27 PASS rows), O6 `replace_published` (17) and O6 `text_chunks` (17), with 0 FAIL rows. These recheck the addition after the fresh-ID change.
 
-A `/pstack:thermos` review with two reviewers found the fresh-ID gap (medium severity, not reachable through the current commands) and duplicated code. The branch fixes all findings. [SESSION_HANDOFF.md](SESSION_HANDOFF.md) records the full `journey all` result for this checkpoint.
+A `/pstack:thermos` review with two reviewers found the fresh-ID gap (medium severity, not reachable through the current commands) and duplicated code. The branch fixes all findings. [The checkpoint history](stage6_checkpoint_history.md#verification-skill) records the full `journey all` result for this checkpoint.
 
 ## Remaining work
 

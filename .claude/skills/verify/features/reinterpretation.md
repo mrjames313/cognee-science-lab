@@ -2,7 +2,7 @@
 
 A user changes what a mention in doc01 means, or changes how doc01 represents HC, on a `chunked-fixture` root. `reinterpret-new-entity` and `reinterpret-unresolved` edit the text so that g01's mention changes its referent. g01 retires and a fresh group takes the new meaning, g07 with a new reusable Backup controller or g08 with no referent at all. The fact `it limits oscillations` is generated again from the fresh group. `change-kind` leaves the text unchanged. `change-kind-to-mention` drops doc01's HC declaration and its HC variant v01 and makes HC a document-local mention group g09 that resolves to the Helios controller. `change-kind-to-reusable` then retires g09, declares HC again, reads doc02's existing HC Entity through a corpus input and names it in a new variant v02. Each command guards on the saved revision, rebuilds doc01, and leaves doc02 at revision 1. An interrupted run withholds doc01 until `reconcile` finishes it. The kind changes are the first runs of a `TextChange` whose before and after texts are equal.
 
-Guide: `docs/stage6_identity_reinterpretation.md`. The approved cases are in `docs/SESSION_HANDOFF.md`, "One admission for every replacement, 2026-10-22".
+Guide: `docs/stage6_identity_reinterpretation.md`. The approved cases are in `docs/stage6_checkpoint_history.md`, "One admission for every replacement, 2026-10-22".
 
 ## Sub-features
 

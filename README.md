@@ -10,7 +10,7 @@ See the writeups in the `results/` directory for summaries of the current findin
 
 ## Continuing this project
 
-**Start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).** It records the delivered code baseline, implementation and Mac-verification status, code map, original six-step sequence, remaining work and next task. [ROADMAP.md](ROADMAP.md) is the stage overview. Dated investigation/checkpoint writeups retain their historical evidence boundaries.
+**Start with [docs/SESSION_HANDOFF.md](docs/SESSION_HANDOFF.md).** It records the current state, the next task, the tracked follow-ups, the code map, the commands and the working routine. [docs/stage6_checkpoint_history.md](docs/stage6_checkpoint_history.md) holds the dated Stage 6 checkpoint history. [ROADMAP.md](ROADMAP.md) is the stage overview. Dated investigation/checkpoint writeups retain their historical evidence boundaries.
 
 ## Stages
 
