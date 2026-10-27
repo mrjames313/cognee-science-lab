@@ -93,12 +93,12 @@ def _settled(monkeypatch, outcomes):
 
     reads = []
 
-    async def fake(publisher, dataset_id, query, *, limit):
+    async def fake(publisher, dataset_id, query, *, limit, deliver):
         reads.append(limit)
         outcome = outcomes[len(reads) - 1]
         if isinstance(outcome, Exception):
             raise outcome
-        return outcome
+        return outcome(deliver) if callable(outcome) else outcome
 
     monkeypatch.setattr(module, "retrieve", fake)
     return module.retrieve_settled, reads
@@ -118,6 +118,18 @@ async def test_a_writer_during_the_read_gets_one_more_read(monkeypatch, code):
     # Cognee's search history stores the result as str(list).
     assert repr(found["mode"]) == "'semantic'"
     assert reads == [3, 3]
+
+
+@pytest.mark.parametrize(
+    "mode, keys", [("semantic", {"facts"}), ("source_aware", {"facts", "documents"})]
+)
+async def test_the_mode_decides_how_the_found_facts_are_delivered(
+    monkeypatch, mode, keys
+):
+    settled, _ = _settled(monkeypatch, [lambda deliver: deliver([], 5)])
+    found = await settled(None, "d1", "q", SearchRequest.parse(mode=mode))
+    assert found["mode"] == mode
+    assert set(found) - {"mode", "scope", "dataset_id"} == keys
 
 
 @pytest.mark.parametrize("code", ["retrieval_changed", "stale_attempt"])
@@ -145,7 +157,7 @@ async def test_another_failure_is_not_read_again(monkeypatch):
     "scope, mode, code",
     [
         ("identity_and_unattributed", None, "scope_not_built"),
-        (None, "source_aware", "mode_not_built"),
+        (None, "everything", "config_invalid"),
         ("everything", None, "config_invalid"),
     ],
 )

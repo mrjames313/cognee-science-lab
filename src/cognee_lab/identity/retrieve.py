@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from .chains import live_pass
+from .dataset_forget import dataset_data
 from .delivery import Evidence, Fact, Support, semantic
 from .models import Accepted, ChunkInput
 from .native import edge_metadata, fact_neighborhood
@@ -258,6 +259,7 @@ async def retrieve(
     seeds = await select_seed_entities(
         publisher.graph, candidates, query, skip=mention_ids, allowed=allowed
     )
+    names = await dataset_data(dataset_id)
     found: dict[str, Fact] = {}
     work, limited, fact_limited = 0, False, False
     for source, row, held in current:
@@ -427,6 +429,7 @@ async def retrieve(
                     )
                 known.supports[document_id] = Support(
                     document_id=document_id,
+                    name=names.get(document_id),
                     identity_data_id=str(source.identity_data_id),
                     evidence=checked,
                     identity=identity,

@@ -4,7 +4,9 @@ nothing in Cognee."""
 
 from dataclasses import dataclass, fields
 from enum import StrEnum
+from functools import partial
 
+from .delivery import semantic, source_aware
 from .retrieve import LIMIT, retrieve
 from .validation import IntentError
 
@@ -19,10 +21,14 @@ class SearchScope(StrEnum):
 
 class SearchMode(StrEnum):
     """How facts are found: from the saved decisions (`semantic`), or by
-    source as well (`source_aware`), which is not built yet."""
+    source as well (`source_aware`): each fact with every supporting
+    document's evidence and chunk ranges, and the facts by document."""
 
     SEMANTIC = "semantic"
     SOURCE_AWARE = "source_aware"
+
+
+DELIVERY = {SearchMode.SEMANTIC: semantic, SearchMode.SOURCE_AWARE: source_aware}
 
 
 class SearchRefused(IntentError):
@@ -34,10 +40,6 @@ NOT_BUILT = {
     SearchScope.IDENTITY_AND_UNATTRIBUTED: (
         "scope_not_built",
         "Scope identity_and_unattributed is not built; search with scope identity",
-    ),
-    SearchMode.SOURCE_AWARE: (
-        "mode_not_built",
-        "Mode source_aware is not built; search with mode semantic",
     ),
 }
 # A writer changed the ledger during the read: a source's row moved
@@ -90,12 +92,20 @@ class SearchRequest:
 async def retrieve_settled(publisher, dataset_id, query, request, *, limit=LIMIT):
     """`retrieve`, read once more if a writer changed the ledger during the
     first read, with the scope, the mode and the dataset beside the facts."""
+    read = partial(
+        retrieve,
+        publisher,
+        dataset_id,
+        query,
+        limit=limit,
+        deliver=DELIVERY[request.mode],
+    )
     try:
-        found = await retrieve(publisher, dataset_id, query, limit=limit)
+        found = await read()
     except IntentError as exc:
         if exc.code not in UNSETTLED:
             raise
-        found = await retrieve(publisher, dataset_id, query, limit=limit)
+        found = await read()
     return dict(
         mode=request.mode.value,
         scope=request.scope.value,

@@ -1,6 +1,7 @@
 """The facts `retrieve` found and how a search mode delivers them. `retrieve`
 collects each fact once, with one Support per served original document
-that supports it; `semantic` turns that into the result's `facts`."""
+that supports it; `semantic` and `source_aware` turn that into the result's
+`facts`, and `source_aware` adds `documents`."""
 
 from dataclasses import dataclass, field
 
@@ -16,6 +17,14 @@ class Evidence:
     start: int
     end: int
 
+    def cited(self, document_id) -> dict:
+        return dict(
+            data_id=document_id,
+            chunk_id=self.chunk_id,
+            chunk_index=self.chunk_index,
+            text=self.text,
+        )
+
 
 @dataclass(frozen=True)
 class Support:
@@ -24,6 +33,7 @@ class Support:
     mention group covers the fact."""
 
     document_id: str
+    name: str | None
     identity_data_id: str
     evidence: list[Evidence]
     identity: dict | None = None
@@ -42,27 +52,23 @@ class Fact:
     score: int
     supports: dict[str, Support] = field(default_factory=dict)
 
-    def entry(self, supports):
+    @property
+    def first(self) -> Support:
+        return next(iter(self.supports.values()))
+
+    def entry(self, evidence: list[dict]) -> dict:
+        """The result's fact, with the identity record of the first support."""
         entry = dict(
             edge_id=self.edge_id,
             source_id=self.source_id,
             target_id=self.target_id,
             relationship=self.relationship,
             text=self.text,
-            evidence=[
-                dict(
-                    data_id=support.document_id,
-                    chunk_id=e.chunk_id,
-                    chunk_index=e.chunk_index,
-                    text=e.text,
-                )
-                for support in supports
-                for e in support.evidence
-            ],
+            evidence=evidence,
             score=self.score,
         )
-        if supports[0].identity is not None:
-            entry["identity"] = supports[0].identity
+        if self.first.identity is not None:
+            entry["identity"] = self.first.identity
         return entry
 
 
@@ -73,5 +79,59 @@ def ranked(facts: list[Fact], limit: int) -> list[Fact]:
 def semantic(facts: list[Fact], limit: int) -> dict:
     """Each fact with the evidence of the first source that supports it."""
     return dict(
-        facts=[f.entry(list(f.supports.values())[:1]) for f in ranked(facts, limit)]
+        facts=[
+            f.entry([e.cited(f.first.document_id) for e in f.first.evidence])
+            for f in ranked(facts, limit)
+        ]
+    )
+
+
+def spans(support: Support) -> list[dict]:
+    """The occurrences of the covering mention group, else each evidence
+    chunk's range: no fact writer records where a sentence sits in a chunk."""
+    if support.identity is not None:
+        return [dict(kind="occurrence", **o) for o in support.identity["occurrences"]]
+    chunks = {
+        e.chunk_id: dict(
+            kind="evidence_chunk", chunk_id=e.chunk_id, start=e.start, end=e.end
+        )
+        for e in support.evidence
+    }
+    return list(chunks.values())
+
+
+def union(fact: Fact) -> list[dict]:
+    """The evidence of every support, once per (data_id, chunk_id), with its
+    chunk range."""
+    found = {}
+    for support in fact.supports.values():
+        for e in support.evidence:
+            found.setdefault(
+                (support.document_id, e.chunk_id),
+                dict(e.cited(support.document_id), start=e.start, end=e.end),
+            )
+    return list(found.values())
+
+
+def source_aware(facts: list[Fact], limit: int) -> dict:
+    """Each fact with the evidence of every document that supports it, and
+    `documents`: the returned facts by supporting document, a document
+    placed by its best fact, then by document_id."""
+    top = ranked(facts, limit)
+    documents = {}
+    for fact in top:
+        for document_id, support in sorted(fact.supports.items()):
+            document = documents.setdefault(
+                document_id,
+                dict(
+                    document_id=document_id,
+                    name=support.name,
+                    identity_data_id=support.identity_data_id,
+                    facts=[],
+                ),
+            )
+            document["facts"].append(dict(edge_id=fact.edge_id, spans=spans(support)))
+    return dict(
+        facts=[f.entry(union(f)) for f in top],
+        documents=list(documents.values()),
     )

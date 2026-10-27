@@ -143,7 +143,7 @@ def test_a_failed_self_test_leaves_search_type_as_it_found_it(
             dict(retriever_specific_config={"scope": "identity_and_unattributed"}),
             "scope_not_built",
         ),
-        (dict(retriever_specific_config={"mode": "source_aware"}), "mode_not_built"),
+        (dict(retriever_specific_config={"mode": "everything"}), "config_invalid"),
         (dict(retriever_specific_config={"scope": "everything"}), "config_invalid"),
         (dict(retriever_specific_config={"top_k": 3}), "config_invalid"),
     ],
