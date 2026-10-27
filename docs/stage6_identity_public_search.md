@@ -66,7 +66,7 @@ A search takes a scope and a mode in `retriever_specific_config`, or as `--scope
 
 Mode `source_aware` finds facts as `semantic` does. It has the same refusals, seeds, eligibility, evidence checks, ledger recheck and `unavailable_sources`. The semantic result does not change. The source-aware result differs in three ways:
 
-- **Every supporting document.** A fact that several served sources support is one entry in `facts`. Its `evidence` holds the checked chunks of each of those sources, once per `data_id` and `chunk_id`. Each source admits evidence only from its own original document. In mode `semantic` such a fact keeps the evidence of the first source that supports it.
+- **Every supporting document.** A fact that several served sources support is one entry in `facts`. Its `evidence` holds the checked chunks of each of those sources, in the order the search found the sources, once per `data_id` and `chunk_id`. Each source admits evidence only from its own original document. In mode `semantic` such a fact keeps the evidence of the first source that supports it.
 - **Chunk ranges.** Each evidence item also has `start` and `end`, the chunk's range in its document in code points. The range comes from the source's saved chunk input, which the lab checks after every text change. It is never found by a search for the text.
 - **`documents`.** One entry for each original document that supports a returned fact. `limit` picks the top facts first, and `documents` comes only from those facts. A document is placed by the first fact in `facts` that it supports, then by `document_id`. Its facts keep their order in `facts`.
 
@@ -76,14 +76,20 @@ Mode `source_aware` finds facts as `semantic` does. It has the same refusals, se
   "name": "<the Data row's name>",
   "identity_data_id": "<the served source whose original this document is>",
   "facts": [
-    {"edge_id": "<a fact in facts>", "spans": [{"kind": "occurrence", "start": 97, "end": 111, "text": "The controller"}]}
+    {
+      "edge_id": "<a fact in facts>",
+      "spans": [
+        {"kind": "occurrence", "start": 97, "end": 111, "text": "The controller"},
+        {"kind": "evidence_chunk", "chunk_id": "<an evidence chunk>", "start": 0, "end": 158}
+      ]
+    }
   ]
 }
 ```
 
-A fact's spans in a document are the occurrences of that source's mention group when the group covers the fact (`kind` `occurrence`, with `start`, `end` and `text`). Otherwise there is one span for each evidence chunk from that document (`kind` `evidence_chunk`, with `chunk_id`, `start` and `end`). No fact writer records where a fact's sentence sits inside its chunk, so a chunk range is the finest span of a fact without a mention.
+A fact's spans in a document are first the occurrences of that source's mention group, when the group covers the fact (`kind` `occurrence`, with `start`, `end` and `text`). Then there is one span for each evidence chunk from that document (`kind` `evidence_chunk`, with `chunk_id`, `start` and `end`). A fact without a mention has only its chunk spans. No fact writer records where a fact's sentence sits inside its chunk, so a chunk range is the finest span of a fact without a mention.
 
-On a `multi-fixture` root after `edit-text --source doc01`, which adds a 48 code point prefix, `search --mode source_aware` returned two documents. `source` (doc01) lists its fact with the spans `The controller` at [97,111) and `it` at [134,136), and its evidence chunk has the range [0,158). `source02` (doc02) keeps [49,63) and [86,88) and the range [0,145). On the conformance root, plain facts list `evidence_chunk` spans. Journey S8 checks the multi-fixture values.
+On a `multi-fixture` root after `edit-text --source doc01`, which adds a 48 code point prefix, `search --mode source_aware` returned two documents. `source` (doc01) lists its fact with the spans `The controller` at [97,111), `it` at [134,136) and its evidence chunk at [0,158). `source02` (doc02) keeps [49,63), [86,88) and [0,145). On the conformance root, plain facts list `evidence_chunk` spans. Journey S8 checks the multi-fixture values.
 
 The lab writes no graph edge from a fact to its document. Each evidence chunk is already `is_part_of` its TextDocument, which has the Data item's ID.
 

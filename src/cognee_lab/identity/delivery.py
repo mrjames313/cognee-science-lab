@@ -131,20 +131,20 @@ def semantic(found: Found, limit: int = LIMIT) -> dict:
 
 
 def spans(support: Support) -> list[dict]:
-    """The occurrences of the covering mention group, else each evidence
+    """The occurrences of the covering mention group, then each evidence
     chunk's range: no fact writer records where a sentence sits in a chunk."""
-    if support.mention is not None:
-        return [
-            dict(kind="occurrence", **o.model_dump())
-            for o in support.mention.occurrences
-        ]
+    occurrences = (
+        [dict(kind="occurrence", **o.model_dump()) for o in support.mention.occurrences]
+        if support.mention is not None
+        else []
+    )
     chunks = {
         e.chunk_id: dict(
             kind="evidence_chunk", chunk_id=e.chunk_id, start=e.start, end=e.end
         )
         for e in support.evidence
     }
-    return list(chunks.values())
+    return occurrences + list(chunks.values())
 
 
 def union(fact: Fact) -> list[dict]:

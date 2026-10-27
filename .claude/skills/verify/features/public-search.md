@@ -141,14 +141,14 @@ $V drive "$RUN" main search -- search
 $V check "$RUN" search '.search_result[0].facts == [] and [.search_result[0].unavailable_sources[] | [.assignment_id, .reason, .recovery_event_id]] == [[null, "publication_failed", "'"$EID"'"], ["r01", "input_changed", null], ["v01", "input_changed", null]]' 'IDENTITY serves nothing of the failed glossary or of what reads it'
 ```
 
-**S8 source-aware results by document.** Proves `search-source-aware`. Guide: "Source-aware results". On a `multi-fixture` root `search --mode source_aware` returns the two `it limits oscillations` facts and two documents, `source` (doc01) and `source02` (doc02). Each document lists the one fact whose evidence it holds, and its spans are the occurrences `The controller` at [49,63) and `it` at [86,88). Each evidence item has a range whose length is its chunk text's length. `retrieve --mode source_aware` in a new process returns the same result, and a semantic `search` has no `documents`. After `edit-text --source doc01`, which adds a 48 code point prefix, `source` keeps its name and its spans move to [97,111) and [134,136). `source02` is unchanged.
+**S8 source-aware results by document.** Proves `search-source-aware`. Guide: "Source-aware results". On a `multi-fixture` root `search --mode source_aware` returns the two `it limits oscillations` facts and two documents, `source` (doc01) and `source02` (doc02). Each document lists the one fact whose evidence it holds, and its spans are the occurrences `The controller` at [49,63) and `it` at [86,88), then its evidence chunk: [0,110) in `source` and [0,145) in `source02`. Each evidence item has a range whose length is its chunk text's length. `retrieve --mode source_aware` in a new process returns the same result, and a semantic `search` has no `documents`. After `edit-text --source doc01`, which adds a 48 code point prefix, `source` keeps its name, its occurrences move to [97,111) and [134,136) and its evidence chunk becomes [0,158). `source02` is unchanged.
 
 ```bash journey S8
 $V drive "$RUN" main fixture -- multi-fixture
 $V drive "$RUN" main search -- search --mode source_aware
 $V check "$RUN" search '.search_result[0] | .mode == "source_aware" and (.facts | length) == 2 and ([.documents[].name] | sort) == ["source", "source02"]' 'two facts under the documents source and source02'
 $V check "$RUN" search '.search_result[0] | ([.facts[] | {key: .edge_id, value: [.evidence[].data_id] | unique}] | from_entries) as $own | all(.documents[]; .document_id as $d | [.facts[].edge_id] as $e | ($e | length) == 1 and $own[$e[0]] == [$d])' 'each document lists the one fact whose evidence it holds'
-$V check "$RUN" search '[.search_result[0].documents[].facts[].spans | map([.kind, .start, .end, .text])] == [[["occurrence", 49, 63, "The controller"], ["occurrence", 86, 88, "it"]], [["occurrence", 49, 63, "The controller"], ["occurrence", 86, 88, "it"]]]' 'both documents span The controller and it'
+$V check "$RUN" search '.search_result[0].documents | map({key: .name, value: [.facts[].spans[] | [.kind, .start, .end, .text]]}) | from_entries == {"source": [["occurrence", 49, 63, "The controller"], ["occurrence", 86, 88, "it"], ["evidence_chunk", 0, 110, null]], "source02": [["occurrence", 49, 63, "The controller"], ["occurrence", 86, 88, "it"], ["evidence_chunk", 0, 145, null]]}' 'both documents span The controller, it and their evidence chunk'
 $V check "$RUN" search 'all(.search_result[0].facts[].evidence[]; (.end - .start) == (.text | length))' 'each evidence range is as long as its chunk text'
 $V drive "$RUN" main retrieve -- retrieve --mode source_aware
 RET=$(val retrieve 'tojson')
@@ -157,7 +157,7 @@ $V drive "$RUN" main semantic -- search
 $V check "$RUN" semantic '.search_result[0] | .mode == "semantic" and (has("documents") | not) and all(.facts[].evidence[]; has("start") | not)' 'the semantic search has no documents and no ranges'
 $V drive "$RUN" main edit -- edit-text --source doc01 --expected-revision 1
 $V drive "$RUN" main edited -- search --mode source_aware
-$V check "$RUN" edited '.search_result[0].documents | map({key: .name, value: [.facts[].spans[] | [.start, .end, .text]]}) | from_entries == {"source": [[97, 111, "The controller"], [134, 136, "it"]], "source02": [[49, 63, "The controller"], [86, 88, "it"]]}' 'source keeps its name and its spans follow the edit'
+$V check "$RUN" edited '.search_result[0].documents | map({key: .name, value: [.facts[].spans[] | [.start, .end, .text]]}) | from_entries == {"source": [[97, 111, "The controller"], [134, 136, "it"], [0, 158, null]], "source02": [[49, 63, "The controller"], [86, 88, "it"], [0, 145, null]]}' 'source keeps its name and its spans follow the edit'
 $V check "$RUN" edited 'all(.search_result[0].facts[].evidence[]; (.end - .start) == (.text | length))' 'each evidence range still holds its chunk text'
 ```
 

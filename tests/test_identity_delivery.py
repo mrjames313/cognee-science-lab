@@ -113,6 +113,8 @@ def test_a_fact_two_documents_support_is_listed_under_both():
                             kind="occurrence", start=49, end=63, text="The controller"
                         ),
                         dict(kind="occurrence", start=86, end=88, text="it"),
+                        dict(kind="evidence_chunk", chunk_id="a0", start=0, end=145),
+                        dict(kind="evidence_chunk", chunk_id="a1", start=145, end=300),
                     ],
                 )
             ],

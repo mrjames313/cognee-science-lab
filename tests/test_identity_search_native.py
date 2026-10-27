@@ -209,8 +209,12 @@ def by_document(found, texts):
                 assert text[e["start"] : e["end"]] == e["text"]
         for fact in document["facts"]:
             for span in fact["spans"]:
+                held = text[span["start"] : span["end"]]
                 if span["kind"] == "occurrence":
-                    assert text[span["start"] : span["end"]] == span["text"]
+                    assert held == span["text"]
+                else:
+                    key = (document["document_id"], span["chunk_id"])
+                    assert held == evidence[key]["text"]
         listed[document["name"]] = [
             [[s["kind"], s["start"], s["end"]] for s in f["spans"]]
             for f in document["facts"]
@@ -229,6 +233,8 @@ def test_a_source_aware_search_lists_each_supporting_document(tmp_path):
     direct = found["direct"]
     assert direct["mode"] == "source_aware"
     assert found["named"] == [direct]
+    # Without its ranges each source-aware fact is the semantic fact only
+    # while each fact has one supporting document, as on this root.
     assert [
         dict(
             f,
@@ -248,10 +254,16 @@ def test_a_source_aware_search_lists_each_supporting_document(tmp_path):
         "source02": (root / "source02.txt").read_text(),
     }
     mention = [["occurrence", 49, 63], ["occurrence", 86, 88]]
-    assert by_document(direct, texts) == {"source": [mention], "source02": [mention]}
+    assert by_document(direct, texts) == {
+        "source": [mention + [["evidence_chunk", 0, 110]]],
+        "source02": [mention + [["evidence_chunk", 0, 145]]],
+    }
 
     command(root, "edit-text", "--expected-revision", "1")
     edited = in_root(root, "source_aware")["direct"]
     texts["source"] = (root / "source_doc01_revision2.txt").read_text()
     shifted = [[k, start + len(PREFIX), end + len(PREFIX)] for k, start, end in mention]
-    assert by_document(edited, texts) == {"source": [shifted], "source02": [mention]}
+    assert by_document(edited, texts) == {
+        "source": [shifted + [["evidence_chunk", 0, 110 + len(PREFIX)]]],
+        "source02": [mention + [["evidence_chunk", 0, 145]]],
+    }
