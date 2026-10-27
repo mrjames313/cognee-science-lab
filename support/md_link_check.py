@@ -1,9 +1,10 @@
 """Check that every relative Markdown link and anchor in the repository resolves.
 
 Reads each Markdown file that git tracks, skips fenced code blocks and inline
-code, and checks each relative link target: the file or directory must exist,
-and a #anchor must match a heading slug in the target file, computed the way
-GitHub computes it. External links (http, https, mailto) are not fetched.
+code, and checks each relative link target. The file or directory must be one
+git sees, compared case-sensitively as GitHub does, so an ignored path such as
+.audit/ or a wrong-case name fails even on macOS. A #anchor must match a heading
+slug in the target file, computed the way GitHub computes it. External links (http, https, mailto) are not fetched.
 
     uv run python support/md_link_check.py
     uv run python support/md_link_check.py docs/SESSION_HANDOFF.md ROADMAP.md
@@ -19,7 +20,9 @@ from pathlib import Path
 from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parent.parent
-LINK = re.compile(r"(?<!!)\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
+LINK = re.compile(
+    r"(?<!!)\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)"
+)
 IMAGE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 FENCE = re.compile(r"^\s*(```|~~~)")
 INLINE_CODE = re.compile(r"(`+)(?:(?!\1).)+?\1")
@@ -67,19 +70,46 @@ def broken_links(path: Path):
             if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I):
                 continue
             file_part, _, anchor = target.partition("#")
-            resolved = (path.parent / unquote(file_part)).resolve() if file_part else path
-            if not resolved.exists():
+            resolved = (
+                (path.parent / unquote(file_part)).resolve() if file_part else path
+            )
+            if not resolved.is_relative_to(ROOT) or (
+                resolved != ROOT and str(resolved.relative_to(ROOT)) not in repo_paths()
+            ):
                 yield number, target, "missing file"
-            elif anchor and resolved.suffix == ".md" and unquote(anchor) not in anchors(resolved):
+            elif (
+                anchor
+                and resolved.suffix == ".md"
+                and unquote(anchor) not in anchors(resolved)
+            ):
                 yield number, target, "missing anchor"
 
 
+def git_files(*pattern: str) -> list[str]:
+    return subprocess.run(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", *pattern],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+
+@cache
+def repo_paths() -> frozenset[str]:
+    """Every file git sees, and every directory above one."""
+    paths = set()
+    for name in git_files():
+        if (ROOT / name).exists():
+            paths.add(name)
+            paths.update(
+                str(parent) for parent in Path(name).parents if str(parent) != "."
+            )
+    return frozenset(paths)
+
+
 def tracked_markdown() -> list[Path]:
-    out = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "*.md"],
-        cwd=ROOT, capture_output=True, text=True, check=True,
-    ).stdout
-    return [ROOT / name for name in out.splitlines() if (ROOT / name).exists()]
+    return [ROOT / name for name in git_files("*.md") if (ROOT / name).exists()]
 
 
 def main(argv: list[str]) -> int:
@@ -96,7 +126,9 @@ def main(argv: list[str]) -> int:
     if problems:
         print(f"FAIL: {problems} broken of {links} links in {len(files)} files")
         return 1
-    print(f"PASS: {links} links in {len(files)} files resolve (external links not fetched)")
+    print(
+        f"PASS: {links} links in {len(files)} files resolve (external links not fetched)"
+    )
     return 0
 
 

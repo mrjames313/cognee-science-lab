@@ -16,6 +16,8 @@ jobs:
       - run: uv run pytest -q -m 'not integration'
       # The unit suite runs the occurrence check on small worlds only; this is the default bound.
       - run: uv run python support/occurrence_check.py
+      # Relative links and anchors in tracked Markdown, compared case-sensitively.
+      - run: uv run python support/md_link_check.py
 
   # Its own job so it runs beside the unit suite; it alone took over 20 minutes on a runner.
   chains:

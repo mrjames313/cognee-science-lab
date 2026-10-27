@@ -799,7 +799,7 @@ Entries below retain the decisions and evidence status at their stated date. The
 
 ## Revision record — 2026-10-27 (docs pass)
 
-- Rewrote `docs/SESSION_HANDOFF.md` as a short resume document: the current state, the next task with the decisions made and those that need the user, one grouped list of tracked follow-ups, the code map, the commands, the verification routine and how the work is run.
+- Rewrote `docs/SESSION_HANDOFF.md` as a short resume document. It now holds the current state, the next task with the decisions made and those that need the user, one grouped list of tracked follow-ups, the code map, the commands, the verification routine and how the work is run.
 - Moved the handoff's dated checkpoint history verbatim into `docs/stage6_checkpoint_history.md` and pointed every inbound link and section reference at it.
 - Shortened the Stage 6 row of "Progress at a glance" to the current state and a pointer to the history, and noted in the 5.4.4 row that the user replaced the B Task-transform with lab entry points on 2026-10-25.
 - Added `support/md_link_check.py`, which checks that every relative Markdown link and anchor resolves. No code under `src/` changed. On `main` at `4e7a33b` the unit suite gave 699 passed, run by the assistant on the user's Mac.

@@ -65,7 +65,14 @@ Step 5 continues. Work in this order.
 - The conformance corpus is DOC01 only, and the check runs as journey B1 and a local command, not in CI. QRY03 and QRY04 are an accepted gap, gated only on resolving no wrong group.
 - A search over several datasets is refused `dataset_required` unless it covers exactly one lab dataset.
 - No Cognee patch. The lab has its own entry points, and native deletes stay unwrapped and detected.
-- The seven overnight decisions, confirmed on 2026-10-26: no rollback handler under `cognify_pipeline`, the stamp right after native chunking, the native LLM extractor waits for step 6, the lab `cognify` handles lab sources only, a lab `update` with no describer is refused, HTTP routes are out of scope, and the broad S2 re-add refusal of live citers stays ([the decisions](stage6_checkpoint_history.md#next-task-and-the-overnight-decisions-as-of-2026-10-26)).
+- The seven overnight decisions, confirmed on 2026-10-26 ([the decisions](stage6_checkpoint_history.md#next-task-and-the-overnight-decisions-as-of-2026-10-26)):
+  1. No rollback handler under `cognify_pipeline`.
+  2. The stamp comes right after native chunking.
+  3. The native LLM extractor waits for step 6.
+  4. The lab `cognify` handles lab sources only.
+  5. A lab `update` with no describer is refused.
+  6. HTTP routes are out of scope.
+  7. The broad S2 refusal of a re-add with live citers stays.
 
 **Decisions that need the user.**
 
@@ -231,7 +238,7 @@ The user agreed this routine on 2026-10-21. `CLAUDE.md` holds the same steps.
 3. **The conformance check for retrieval changes.** For `retrieve.py`, `settled.py`, `search.py`, `conformance_fixture.py` or the fact writers in `fixture.py`, run `uv run python support/conformance_check.py` and journey B1. A case that moves in either direction fails the check. It is local, not in CI.
 4. **The changed feature's journeys.** Run `.claude/skills/verify/scripts/verify.py journey <ID>` for each journey in the changed feature's file under `.claude/skills/verify/features/`.
 5. **`verify.py journey all` once per checkpoint**, before the merge to `main`.
-6. **The integration suite**, `uv run pytest -q -m integration`, only on a local machine. It takes about 10 minutes.
+6. **The integration suite**, `uv run pytest -q -m integration`, only on a local machine. Run the focused native tests for the changed path first. The whole suite took about 42 minutes on 2026-10-26.
 
 **Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The feature map has 102 journey blocks. `journey all` runs the 101 loopback blocks as 140 runs, 4 at a time by default (`--jobs N`). Journey P5 calls the NVIDIA embedding API, so it runs only with `--include-env`. The last full run, on `cdbb6bf`, gave 2022 PASS rows and 0 FAIL rows. `.claude/skills/verify/SKILL.md` gives the commands and the proof rules. If a `lab_store` check fails under parallel runs, rerun with `--jobs 1`.
 
@@ -250,7 +257,14 @@ Each step-5 checkpoint followed this routine, which the user agreed:
 5. `/pstack:thermos` runs a bug review and a quality review. Fix rounds follow until neither finds anything blocking. Each bug fix comes with a test that failed first.
 6. `verify.py journey all` passes on the final head.
 7. The branch merges into `main` with `git merge --ff-only`. Push `main` and check that GitHub Actions passes (the user's standing rule since 2026-10-27).
-8. Update the checkpoint docs: this handoff, [ROADMAP.md](../ROADMAP.md), the checkpoint's guide under `docs/`, a dated section in [the integration playbook](../results/cognee_knowledge_integration_playbook.md), and a dated section in [the checkpoint history](stage6_checkpoint_history.md). Keep dated history. Say who ran each result and where: the user, or the assistant on the user's Mac. Keep apart tests run here, the user's own runs and untested design.
+8. Update the checkpoint docs, then run `uv run python support/md_link_check.py`:
+   - this handoff;
+   - [ROADMAP.md](../ROADMAP.md);
+   - the checkpoint's guide under `docs/`;
+   - a dated section in [the integration playbook](../results/cognee_knowledge_integration_playbook.md);
+   - a dated section in [the checkpoint history](stage6_checkpoint_history.md).
+
+   Keep dated history. Say who ran each result and where: the user, or the assistant on the user's Mac. Keep apart tests run here, the user's own runs and untested design.
 
 The user's model and escalation rules for subagents live in the user's private configuration, not in this repository. Follow them as the session gives them.
 
@@ -267,4 +281,4 @@ The user works in auto mode. A user auto-mode rule allows deletion under `output
 - Use configured Cognee interfaces and backend-neutral relational operations. Ladybug, LanceDB and SQLite are the tested fixture profile, and no vendor-specific code is authorized. Every fixture root keeps its stores inside the root. The `loopback` profile calls no external API.
 - Pending and failed sources are withheld, and independent valid sources survive. Recovery is explicitly selected forward completion of saved intent, not rollback or automatic retry. Native readers that ignore the ledger can see intermediate graph state. A hard crash can leave a writer reservation. Do not clear it casually or claim general restart recovery.
 - Prefer programmatic validation, publication and traversal. Capture where rules or model judgment are needed. Captured fixture decisions establish lifecycle mechanics, not extraction quality, search quality or scientific support.
-- A/B staging, incremental chunk reuse, comprehensive semantic replay, automatic orchestration, all-alias Triplet text and universal scope or ontology frameworks are deferred. Do not enable a diagnostic Triplet, cache or optional native stage without admitting its lifecycle and consumed-store behavior.
+- A/B staging, incremental chunk reuse, comprehensive semantic replay and archives, automatic orchestration, all-alias Triplet text and universal scope or ontology frameworks are deferred. Size, density and token-overhead tooling is future evaluation work. Do not enable a diagnostic Triplet, cache or optional native stage without admitting its lifecycle and consumed-store behavior.

@@ -51,4 +51,6 @@ Follow [.agents/playbooks/landing-on-main.md](.agents/playbooks/landing-on-main.
 - The fixture guide for the checkpoint under `docs/`.
 - `results/cognee_knowledge_integration_playbook.md`: a dated evidence section. Add a lesson to the register only if it transfers to other integrations.
 
+Then run `uv run python support/md_link_check.py`. CI runs it too.
+
 Keep dated history. Say who ran each result and where: the user, or the assistant on the user's Mac.
