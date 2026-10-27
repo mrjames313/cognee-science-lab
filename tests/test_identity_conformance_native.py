@@ -9,10 +9,16 @@ import pytest
 from test_identity_native import command
 
 
-@pytest.mark.integration
-def test_conformance_fixture_publishes_doc01_and_serves_its_facts(tmp_path):
-    root = tmp_path / "root"
+@pytest.fixture(scope="module")
+def root(tmp_path_factory):
+    """One conformance root for the module: both tests only read it."""
+    root = tmp_path_factory.mktemp("conformance") / "root"
     command(root, "conformance-fixture")
+    return root
+
+
+@pytest.mark.integration
+def test_conformance_fixture_publishes_doc01_and_serves_its_facts(root):
     created = json.loads((root / "result.json").read_text())
     assert created["publications"] == [
         dict(state="current", revision=1, verified_revision=1)
@@ -35,9 +41,7 @@ def test_conformance_fixture_publishes_doc01_and_serves_its_facts(tmp_path):
 
 
 @pytest.mark.integration
-def test_a_reference_group_serves_its_fact_under_its_referent(tmp_path):
-    root = tmp_path / "root"
-    command(root, "conformance-fixture")
+def test_a_reference_group_serves_its_fact_under_its_referent(root):
     answer = json.loads(
         command(root, "retrieve", "--query", "Vertical Control System").stdout
     )
