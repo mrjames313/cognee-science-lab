@@ -1,22 +1,25 @@
 """The conformance check's scoring and gate, without a root: value and word
-matching, the regression rule and the committed baseline. Running the check
-itself takes a conformance root (journey B1)."""
+matching, the ratchet against the baseline and the baseline it writes.
+Running the check itself takes a conformance root (journey B1)."""
 
 import json
 
 import conformance_check as check
+from conformance_check import Outcome
 
 COUNTS = dict.fromkeys((*check.GATED_COUNTS, "logical_duplicates"), 0)
+PASSED, UNOBSERVED, FAILED = Outcome.PASSED, Outcome.UNOBSERVED, Outcome.FAILED
+
+
+def run(**cases):
+    return {c: dict(metric="m", outcome=o) for c, o in cases.items()}
 
 
 def baseline(**cases):
     return dict(
-        cases={c: dict(metric="m", passed=p) for c, p in cases.items()}, counts=COUNTS
+        cases={c: dict(metric="m", outcome=o.value) for c, o in cases.items()},
+        counts=COUNTS,
     )
-
-
-def run(**cases):
-    return {c: dict(metric="m", passed=p) for c, p in cases.items()}
 
 
 def test_a_value_matches_with_its_unit_and_any_written_precision():
@@ -33,19 +36,22 @@ def test_an_object_matches_its_words_whatever_the_punctuation():
     assert check.words("field") not in check.words("high-fields")
 
 
-def test_a_case_doing_worse_than_its_baseline_is_a_regression():
+def test_a_case_that_moves_either_way_is_reported():
     regressions, improvements = check.compare(
-        run(a=None, b=False, c=True, d=False),
+        run(a=UNOBSERVED, b=FAILED, c=PASSED, d=FAILED),
         COUNTS,
-        baseline(a=True, b=None, c=None, d=False),
+        baseline(a=PASSED, b=UNOBSERVED, c=UNOBSERVED, d=FAILED),
     )
-    assert [r.split(":")[0] for r in regressions] == ["a", "b"]
-    assert improvements == ["c"]
+    assert regressions == [
+        "a: passed on the baseline, now unobserved",
+        "b: unobserved on the baseline, now failed",
+    ]
+    assert improvements == ["c: unobserved on the baseline, now passed"]
 
 
 def test_a_missing_case_a_new_case_and_a_grown_count_are_regressions():
     counts = dict(COUNTS, leakage_violations=1, logical_duplicates=9)
-    regressions, _ = check.compare(run(b=True), counts, baseline(a=True))
+    regressions, _ = check.compare(run(b=PASSED), counts, baseline(a=PASSED))
     assert regressions == [
         "a: missing from this run",
         "b: new case, not on the baseline",
@@ -53,11 +59,37 @@ def test_a_missing_case_a_new_case_and_a_grown_count_are_regressions():
     ]
 
 
-def test_the_baseline_explains_every_case_that_does_not_pass():
+def test_a_written_baseline_keeps_each_gap_and_only_on_cases_that_do_not_pass():
+    old = baseline(a=FAILED, b=PASSED)
+    old["cases"]["a"]["gap"] = "why a fails"
+    written, problems = check.baseline_of(run(a=UNOBSERVED, b=PASSED), COUNTS, old)
+    assert problems == []
+    assert written["cases"] == dict(
+        a=dict(metric="m", outcome="unobserved", gap="why a fails"),
+        b=dict(metric="m", outcome="passed"),
+    )
+
+
+def test_a_baseline_with_a_missing_or_stale_gap_or_a_gated_count_is_refused():
+    old = baseline(a=FAILED)
+    old["cases"]["a"]["gap"] = "why a fails"
+    counts = dict(COUNTS, repeated_edge_ids=2)
+    _, problems = check.baseline_of(run(a=PASSED, b=FAILED), counts, old)
+    assert problems == [
+        "a passes; delete its gap from the baseline",
+        "b is failed; record its gap in the baseline",
+        "repeated_edge_ids is 2; a gated count must be 0",
+    ]
+
+
+def test_the_committed_baseline_is_one_the_check_would_write():
+    """Every case that does not pass has its gap, no case that passes has
+    one, and every gated count is 0."""
     recorded = json.loads(check.BASELINE.read_text())
-    gaps = {
-        c: v["gap"] for c, v in recorded["cases"].items() if v["passed"] is not True
+    cases = {
+        c: dict(metric=v["metric"], outcome=Outcome(v["outcome"]))
+        for c, v in recorded["cases"].items()
     }
-    assert gaps and gaps == {c: check.KNOWN_GAPS[c] for c in gaps}
-    assert set(check.KNOWN_GAPS) == set(gaps)
-    assert all(recorded["counts"][name] == 0 for name in check.GATED_COUNTS)
+    written, problems = check.baseline_of(cases, recorded["counts"], recorded)
+    assert problems == []
+    assert written == recorded

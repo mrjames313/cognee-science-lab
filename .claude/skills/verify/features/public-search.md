@@ -148,7 +148,7 @@ $V check "$RUN" search '.search_result[0].facts == [] and [.search_result[0].una
 - `search_history` holds every query Cognee logged in the root, so a check on its length counts the run's earlier searches too. A refused search logs none.
 - A refusal prints `.error == "SearchRefused"` and its `.code`, and exits 1.
 
-**B1 the conformance check.** Proves `conformance-check`. Guide: `docs/stage6_conformance_check.md`. `conformance-fixture` publishes DOC01 at revision 1, verified at 1, with no incident, and its describer gives 23 reusable Entities, 12 variant assignments, 11 reference groups with 11 accepted resolutions, 29 facts and 10 chunks ("The describer"). `search --query "Helios-1 major radius"` serves first the fact stated by `Helios-1 has a major radius of 1.35 m`, inferred from the sentence rule and the word-overlap ranking (the search guide, "What a search returns"). The conformance check on the root reports no regression and no improvement against the committed baseline, and 0 repeated edge IDs, attribution violations and leakage violations ("The baseline", "The gate").
+**B1 the conformance check.** Proves `conformance-check`. Guide: `docs/stage6_conformance_check.md`. `conformance-fixture` publishes DOC01 at revision 1, verified at 1, with no incident, and its describer gives 23 reusable Entities, 12 variant assignments, 11 reference groups with 11 accepted resolutions, 29 facts and 10 chunks ("The describer"). `search --query "Helios-1 major radius"` serves first the fact stated by `Helios-1 has a major radius of 1.35 m`, inferred from the sentence rule and the word-overlap ranking (the search guide, "What a search returns"). The conformance check on the root exits 0: no case moved from the committed baseline in either direction and no gated count grew ("The gate"). The check owns that rule, so the journey checks only its exit status.
 
 ```bash journey B1
 $V drive "$RUN" main fixture -- conformance-fixture
@@ -157,7 +157,5 @@ $V check "$RUN" fixture '.description == {"reusable_entities": 23, "variant_assi
 $V drive "$RUN" main radius -- search --query "Helios-1 major radius"
 $V check "$RUN" radius '.search_result[0].facts[0].text | startswith("Helios-1 has a major radius of 1.35 m")' 'search serves the stated radius first'
 $V script "$RUN" gate -- support/conformance_check.py --root "$RUN/roots/main" --json
-$V check "$RUN" gate '.regressions == [] and .improvements == []' 'no case does worse or better than the committed baseline'
-$V check "$RUN" gate '.counts | .repeated_edge_ids == 0 and .attribution_violations == 0 and .leakage_violations == 0' 'no repeated edge ID, no attribution outside DOC01, no fact endpoint that is not an Entity'
-$V check "$RUN" gate '(.cases | length) > 0 and .leaking_node_types == []' 'the check scored its cases and saw only Entity endpoints'
+$V check "$RUN" gate '$exit == "0"' 'the conformance check passes against the committed baseline'
 ```

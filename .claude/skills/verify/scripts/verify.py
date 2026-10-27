@@ -341,6 +341,17 @@ def record_command(run, label, root, command, shown, timeout):
     raise SystemExit(0 if status == "0" else 1)
 
 
+def step_exit(run, evidence):
+    """The exit status that steps.tsv records for the step that wrote
+    `evidence`, which `check` binds to `$exit`."""
+    number = evidence.name.split("-", 1)[0]
+    with open(run / "evidence" / "steps.tsv", newline="") as handle:
+        for row in csv.reader(handle, delimiter="\t"):
+            if row[0] == number:
+                return row[3]
+    return ""
+
+
 def check(args):
     run = run_dir(args.run)
     target = latest_json(run, args.label)
@@ -357,7 +368,9 @@ def check(args):
         )
         raise SystemExit(1)
     result = subprocess.run(
-        ["jq", "-e", args.filter, str(target)], capture_output=True, text=True
+        ["jq", "-e", "--arg", "exit", step_exit(run, target), args.filter, str(target)],
+        capture_output=True,
+        text=True,
     )
     verdict = "PASS" if result.returncode == 0 else "FAIL"
     log_assertion(run, verdict, target.name, args.filter, args.description or "")

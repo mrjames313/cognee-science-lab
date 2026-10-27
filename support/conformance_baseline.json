@@ -2,238 +2,204 @@
   "cases": {
     "ER001": {
       "metric": "mentions",
-      "passed": null,
+      "outcome": "unobserved",
       "gap": "the section-1 group of 'the machine' has no fact: neither of its sentences names a second Entity or a quantity with a unit"
     },
     "ER002": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER002:not:Edge Density Controller": {
       "metric": "negative_controls",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER003": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER004": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER005": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER005:not:Vertical Control System": {
       "metric": "negative_controls",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER006": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER007": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER007:not:Aurora Fusion Research Laboratory": {
       "metric": "negative_controls",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER008": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "ER009": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "TRV05_AFRL:AFRL:not:aurora reconstruction suite": {
       "metric": "negative_controls",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "TRV05_AFRL:aurora fusion research laboratory:not:aurora reconstruction suite": {
       "metric": "negative_controls",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "TRV05_AFRL:aurora reconstruction suite:not:aurora fusion research laboratory": {
       "metric": "negative_controls",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "TRV07_CONTROLLER_VCS": {
       "metric": "mentions",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "TRV08_CONTROLLER_UNRESOLVED": {
       "metric": "mentions",
-      "passed": null,
+      "outcome": "unobserved",
       "gap": "the case's coordinates (chunk 2, second 'the controller') follow DOC01 v1's Stage-5 chunking; chunk 2 of DOC01 v2 holds one occurrence. The manifest's ER005 hard negative stands in for it"
     },
     "TRV08_CONTROLLER_UNRESOLVED:not:vertical control system": {
       "metric": "negative_controls",
-      "passed": null,
+      "outcome": "unobserved",
       "gap": "the case's coordinates (chunk 2, second 'the controller') follow DOC01 v1's Stage-5 chunking; chunk 2 of DOC01 v2 holds one occurrence. The manifest's ER005 hard negative stands in for it"
     },
     "closure:TRV01_NBI": {
       "metric": "closure_symmetry",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "closure:TRV02_ECH": {
       "metric": "closure_symmetry",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "closure:TRV03_VCS": {
       "metric": "closure_symmetry",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "closure:TRV04_EDC": {
       "metric": "closure_symmetry",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "closure:TRV05_AFRL": {
       "metric": "closure_symmetry",
-      "passed": null,
+      "outcome": "unobserved",
       "gap": "no fact has an AFRL-group subject (AFRL is named only as the target of a Helios-1 fact), so there is nothing to compare"
     },
     "closure:TRV06_HELIOS1": {
       "metric": "closure_symmetry",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "query:QRY01": {
       "metric": "query_resolution",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "query:QRY02": {
       "metric": "query_resolution",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "query:QRY03": {
       "metric": "query_resolution",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "query:QRY04": {
       "metric": "query_resolution",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "query:QRY05": {
       "metric": "negative_controls",
-      "passed": false,
+      "outcome": "failed",
       "gap": "retrieval limit: with no name match the search seeds the top Entity_name vector hit, so the ambiguous query resolves to an arbitrary group. Seeding is later work, measured against this baseline"
     },
     "recall:F001": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F002": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F003": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F004": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F005": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F006": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F007": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F008": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "no sentence that states deuterium names a reusable Entity, so the sentence rule writes no fact"
     },
     "recall:F009": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:F010": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "DOC01 never states 'spatial magnetic measurements' (the words are matched literally), and the MPA's only fact is RCM -> MPA"
     },
     "recall:F011": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "the two-color interferometer is a lowercase common noun in DOC01; no name rule makes it a reusable Entity, so no fact has it as subject and the query has no seed"
     },
     "recall:F012": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "Thomson scattering is a lowercase common noun in DOC01; no name rule makes it a reusable Entity, so no fact has it as subject and the query has no seed"
     },
     "recall:F013": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "the edge reflectometer is a lowercase common noun in DOC01; no name rule makes it a reusable Entity, so no fact has it as subject and the query has no seed"
     },
     "recall:F014": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "the suite's use: the sentence names only the subject's identity group; the sentence rule states a fact only with a second Entity or a quantity"
     },
     "recall:F015": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "the EDC's gas feedback: the sentence names only the subject's identity group; the sentence rule states a fact only with a second Entity or a quantity; its words also differ from the manifest object"
     },
     "recall:F016": {
       "metric": "fact_recall",
-      "passed": false,
+      "outcome": "failed",
       "gap": "the pulse length is stated only in a table row that names no Entity"
     },
     "recall:T001": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     },
     "recall:T003": {
       "metric": "fact_recall",
-      "passed": true,
-      "gap": null
+      "outcome": "passed"
     }
   },
   "counts": {

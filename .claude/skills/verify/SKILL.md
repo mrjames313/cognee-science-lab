@@ -39,7 +39,7 @@ $V new-run NAME                      # prints outputs/verify/<UTC stamp>-NAME
 $V doctor [RUN]                      # read-only health check, JSON, exit 1 on a failing gate
 $V drive RUN ROOT LABEL -- CMD ARGS  # runs: uv run python -m cognee_lab.identity CMD ARGS --root RUN/roots/ROOT
 $V script RUN LABEL -- support/X.py ARGS  # runs a support/ script (the conformance check) as a step
-$V check RUN LABEL 'JQ' 'what it proves'   # jq -e over that step's JSON, logged PASS/FAIL
+$V check RUN LABEL 'JQ' 'what it proves'   # jq -e over that step's JSON, logged PASS/FAIL; $exit is the step's exit status
 $V val RUN LABEL 'JQ'                # prints jq -r over that step's JSON, for a later check
 $V probe RUN ROOT LABEL              # records marker, data files, vector widths and a key-leak scan as a step
 $V cleanup RUN                       # deletes RUN/roots (stores), keeps RUN/evidence, guards the lab store

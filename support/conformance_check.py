@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 from datetime import datetime, timezone
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -29,44 +30,23 @@ RECALL_TOP_K = 5
 CLOSURE_TOP_K = 100
 GATED_COUNTS = ("repeated_edge_ids", "attribution_violations", "leakage_violations")
 
-# Why each case that fails on the baseline fails. A known retrieval limit is
-# recorded here, never tuned away in this check.
-UNNAMED = (
-    "is a lowercase common noun in DOC01; no name rule makes it a reusable "
-    "Entity, so no fact has it as subject and the query has no seed"
-)
-ONE_GROUP = (
-    "the sentence names only the subject's identity group; the sentence rule "
-    "states a fact only with a second Entity or a quantity"
-)
-TRV08_COORDINATES = (
-    "the case's coordinates (chunk 2, second 'the controller') follow DOC01 "
-    "v1's Stage-5 chunking; chunk 2 of DOC01 v2 holds one occurrence. The "
-    "manifest's ER005 hard negative stands in for it"
-)
-KNOWN_GAPS = {
-    "recall:F008": "no sentence that states deuterium names a reusable Entity, "
-    "so the sentence rule writes no fact",
-    "recall:F010": "DOC01 never states 'spatial magnetic measurements' (the "
-    "words are matched literally), and the MPA's only fact is RCM -> MPA",
-    "recall:F011": f"the two-color interferometer {UNNAMED}",
-    "recall:F012": f"Thomson scattering {UNNAMED}",
-    "recall:F013": f"the edge reflectometer {UNNAMED}",
-    "recall:F014": f"the suite's use: {ONE_GROUP}",
-    "recall:F015": f"the EDC's gas feedback: {ONE_GROUP}; its words also differ "
-    "from the manifest object",
-    "recall:F016": "the pulse length is stated only in a table row that names "
-    "no Entity",
-    "closure:TRV05_AFRL": "no fact has an AFRL-group subject (AFRL is named only "
-    "as the target of a Helios-1 fact), so there is nothing to compare",
-    "TRV08_CONTROLLER_UNRESOLVED": TRV08_COORDINATES,
-    "TRV08_CONTROLLER_UNRESOLVED:not:vertical control system": TRV08_COORDINATES,
-    "ER001": "the section-1 group of 'the machine' has no fact: neither of its "
-    "sentences names a second Entity or a quantity with a unit",
-    "query:QRY05": "retrieval limit: with no name match the search seeds the top "
-    "Entity_name vector hit, so the ambiguous query resolves to an arbitrary "
-    "group. Seeding is later work, measured against this baseline",
-}
+
+class Outcome(StrEnum):
+    """A case's outcome, worst first: a case that passes outranks an
+    unobserved one (the search showed nothing that decides it), which
+    outranks a failure."""
+
+    FAILED = "failed"
+    UNOBSERVED = "unobserved"
+    PASSED = "passed"
+
+    @property
+    def rank(self) -> int:
+        return list(Outcome).index(self)
+
+    @classmethod
+    def of(cls, passed: bool) -> "Outcome":
+        return cls.PASSED if passed else cls.FAILED
 
 
 def load(name):
@@ -148,8 +128,13 @@ class Check:
         await self.inspect(result)
         return result
 
-    def case(self, case_id, metric, passed, **detail):
-        self.cases[case_id] = dict(metric=metric, passed=passed, detail=detail)
+    def case(self, case_id, metric, outcome: Outcome, **detail):
+        self.cases[case_id] = dict(metric=metric, outcome=outcome, detail=detail)
+
+    def control(self, subject, wrong, outcome: Outcome, **detail):
+        """A negative control: `subject` is never served or resolved under
+        the `wrong` referent."""
+        self.case(f"{subject}:not:{wrong}", "negative_controls", outcome, **detail)
 
     async def inspect(self, result):
         """The counts every result adds to: repeated edge IDs, attribution
@@ -214,7 +199,7 @@ class Check:
             self.case(
                 f"recall:{fact['id']}",
                 "fact_recall",
-                bool(hits),
+                Outcome.of(bool(hits)),
                 query=query,
                 subject_matched=any(
                     self.fixture.group.get(f["source_id"]) in subjects for f in hits
@@ -235,15 +220,15 @@ class Check:
                 )
             edge_sets = {tuple(s["edges"]) for s in seen.values()}
             if not all(s["present"] for s in seen.values()):
-                passed = False
+                outcome = Outcome.FAILED
             elif edge_sets == {()}:
-                passed = None
+                outcome = Outcome.UNOBSERVED
             else:
-                passed = len(edge_sets) == 1
+                outcome = Outcome.of(len(edge_sets) == 1)
             self.case(
                 f"closure:{case['id']}",
                 "closure_symmetry",
-                passed,
+                outcome,
                 members={
                     m: dict(
                         present=s["present"], facts=len(s["edges"]), groups=s["groups"]
@@ -277,30 +262,48 @@ class Check:
             self.case(
                 case_id,
                 "mentions",
-                (len(group) == 1 and served == group) if served else None,
+                (
+                    Outcome.of(len(group) == 1 and served == group)
+                    if served
+                    else Outcome.UNOBSERVED
+                ),
                 expected=expected,
                 served=sorted(fixture.label(g) for g in served),
             )
         if wrong is not None:
             groups = fixture.groups_named([wrong])
             served = await self.served_under(span, wrong)
-            observed = expected is None or self.cases[case_id]["passed"] is not None
-            self.case(
-                f"{case_id}:not:{wrong}",
-                "negative_controls",
-                (not served & groups) if observed or served else None,
+            observed = (
+                expected is None
+                or self.cases[case_id]["outcome"] is not Outcome.UNOBSERVED
+            )
+            self.control(
+                case_id,
+                wrong,
+                (
+                    Outcome.of(not served & groups)
+                    if observed or served
+                    else Outcome.UNOBSERVED
+                ),
                 served=sorted(fixture.label(g) for g in served),
             )
 
     async def mentions(self, traversal, manifest):
         text = self.fixture.text
         cases = traversal["mention_cases"]
-        # An unresolved mention case must not take the referent its resolved
-        # neighbours at the same surface take (TRV08 against TRV07's VCS).
-        resolved = [c["expected_canonical"] for c in cases if c["expected_canonical"]]
+
+        def place(case):
+            return case["source_chunk_index"], case["surface_text"].casefold()
+
+        # An unresolved mention case must not take the referent of the
+        # resolved case at the same surface in the same chunk (TRV08 against
+        # TRV07's VCS).
+        referents = {
+            place(c): c["expected_canonical"] for c in cases if c["expected_canonical"]
+        }
         for case in cases:
             expected = case["expected_canonical"]
-            wrong = None if expected else resolved[0]
+            wrong = None if expected else referents.get(place(case))
             start, end = self.fixture.chunks[case["source_chunk_index"]]
             surface = case["surface_text"].casefold()
             at = [
@@ -312,18 +315,18 @@ class Check:
                     f"chunk {case['source_chunk_index']} of the fixture holds "
                     f"{len(at)} occurrence(s) of {case['surface_text']!r}"
                 )
-                self.case(case["id"], "mentions", None, reason=reason)
+                self.case(case["id"], "mentions", Outcome.UNOBSERVED, reason=reason)
                 if wrong:
-                    self.case(
-                        f"{case['id']}:not:{wrong}",
-                        "negative_controls",
-                        None,
-                        reason=reason,
-                    )
+                    self.control(case["id"], wrong, Outcome.UNOBSERVED, reason=reason)
                 continue
             at = at[case["occurrence_index"]]
             if not expected:
-                self.case(case["id"], "mentions", None, reason="nothing to serve")
+                self.case(
+                    case["id"],
+                    "mentions",
+                    Outcome.UNOBSERVED,
+                    reason="nothing to serve",
+                )
             await self.mention(case["id"], (at, at + len(surface)), expected, wrong)
         for er in manifest["entity_resolution_ground_truth"]:
             if er["document"] != "DOC01":
@@ -332,7 +335,12 @@ class Check:
             at = text.find(context)
             inner = context.casefold().find(er["mention"].casefold())
             if at < 0 or inner < 0:
-                self.case(er["id"], "mentions", None, reason="context not in DOC01")
+                self.case(
+                    er["id"],
+                    "mentions",
+                    Outcome.UNOBSERVED,
+                    reason="context not in DOC01",
+                )
                 continue
             span = (at + inner, at + inner + len(er["mention"]))
             target = manifest["entities"][er["resolve_to"]]["canonical_name"]
@@ -352,16 +360,18 @@ class Check:
                 members = fixture.groups_named([m["name"] for m in case["members"]])
                 for member in case["members"]:
                     result = await self.query(member["name"], CLOSURE_TOP_K)
-                    self.case(
-                        f"{case['id']}:{member['name']}:not:{excluded}",
-                        "negative_controls",
-                        bool(groups) and not fixture.resolved(result) & groups,
+                    self.control(
+                        f"{case['id']}:{member['name']}",
+                        excluded,
+                        Outcome.of(
+                            bool(groups) and not fixture.resolved(result) & groups
+                        ),
                     )
                 result = await self.query(excluded, CLOSURE_TOP_K)
-                self.case(
-                    f"{case['id']}:{excluded}:not:{case['canonical']}",
-                    "negative_controls",
-                    bool(groups) and not fixture.resolved(result) & members,
+                self.control(
+                    f"{case['id']}:{excluded}",
+                    case["canonical"],
+                    Outcome.of(bool(groups) and not fixture.resolved(result) & members),
                 )
 
     async def query_resolution(self, queries):
@@ -381,7 +391,7 @@ class Check:
             self.case(
                 f"query:{case['id']}",
                 metric,
-                passed,
+                Outcome.of(passed),
                 resolved=sorted(fixture.label(g) for g in resolved),
             )
 
@@ -426,7 +436,7 @@ async def measure(root):
 
 
 def make_root(root):
-    subprocess.run(
+    made = subprocess.run(
         [
             sys.executable,
             "-m",
@@ -438,46 +448,81 @@ def make_root(root):
             "loopback",
         ],
         cwd=REPO,
-        check=True,
         capture_output=True,
         text=True,
     )
+    if made.returncode != 0:
+        tail = "\n".join(
+            (made.stdout.strip().splitlines()[-1:] or [])
+            + made.stderr.strip().splitlines()[-40:]
+        )
+        raise SystemExit(
+            f"conformance-fixture exited {made.returncode} for {root}:\n{tail}"
+        )
 
 
 def metrics(cases):
     table = {}
     for case in cases.values():
         row = table.setdefault(case["metric"], dict(passed=0, failed=0, unobserved=0))
-        row[{True: "passed", False: "failed", None: "unobserved"}[case["passed"]]] += 1
+        row[case["outcome"].value] += 1
     return table
 
 
-# A case that passes outranks an unobserved one, which outranks a failure.
-RANK = {True: 2, None: 1, False: 0}
-
-
 def compare(cases, counts, baseline):
+    """How this run moved from `baseline`: regressions (a case that does
+    worse, appears or disappears, or a gated count that grew) and
+    improvements. Either one fails the check."""
+    recorded = {c: v for c, v in baseline["cases"].items() if "outcome" in v}
     regressions, improvements = [], []
-    for case_id, then in baseline["cases"].items():
+    for case_id, then in recorded.items():
         now = cases.get(case_id)
         if now is None:
             regressions.append(f"{case_id}: missing from this run")
-        elif RANK[now["passed"]] < RANK[then["passed"]]:
-            regressions.append(
-                f"{case_id}: {then['passed']} on the baseline, now {now['passed']}"
-            )
-        elif RANK[now["passed"]] > RANK[then["passed"]]:
-            improvements.append(case_id)
+            continue
+        was, outcome = Outcome(then["outcome"]), now["outcome"]
+        moved = f"{case_id}: {was} on the baseline, now {outcome}"
+        if outcome.rank < was.rank:
+            regressions.append(moved)
+        elif outcome.rank > was.rank:
+            improvements.append(moved)
     regressions += [
         f"{case_id}: new case, not on the baseline"
-        for case_id in sorted(set(cases) - set(baseline["cases"]))
+        for case_id in sorted(set(cases) - set(recorded))
     ]
     regressions += [
-        f"{name}: {counts[name]} (baseline {baseline['counts'][name]})"
+        f"{name}: {counts[name]} (baseline {baseline['counts'].get(name, 0)})"
         for name in GATED_COUNTS
-        if counts[name] > baseline["counts"][name]
+        if counts[name] > baseline["counts"].get(name, 0)
     ]
     return regressions, improvements
+
+
+def baseline_of(cases, counts, old):
+    """The baseline for this run, each case that does not pass with its gap
+    (the reason it does not pass) carried from `old`, and the problems that
+    refuse it: a case that does not pass with no gap, a gap on a case that
+    passes, and a gated count that is not 0. The baseline file is the only
+    record of the gaps; edit a gap there, then write the baseline again."""
+    written, problems = {}, []
+    for case_id, case in sorted(cases.items()):
+        outcome = case["outcome"]
+        gap = old["cases"].get(case_id, {}).get("gap")
+        entry = dict(metric=case["metric"], outcome=outcome.value)
+        if outcome is Outcome.PASSED:
+            if gap:
+                problems.append(f"{case_id} passes; delete its gap from the baseline")
+        elif gap:
+            entry["gap"] = gap
+        else:
+            problems.append(f"{case_id} is {outcome}; record its gap in the baseline")
+        written[case_id] = entry
+    problems += [
+        f"{name} is {counts[name]}; a gated count must be 0"
+        for name in GATED_COUNTS
+        if counts[name]
+    ]
+    return dict(cases=written, counts=counts), problems
 
 
 def report_lines(report):
@@ -490,16 +535,8 @@ def report_lines(report):
     for name, value in report["counts"].items():
         gate = "gated, must be 0" if name in GATED_COUNTS else "reported only"
         lines.append(f"{name}: {value} ({gate})")
-    gaps = {
-        case_id: case
-        for case_id, case in report["cases"].items()
-        if case["passed"] is not True
-    }
-    lines.append(f"known gaps and unobserved cases: {len(gaps)}")
-    for case_id, case in sorted(gaps.items()):
-        lines.append(
-            f"  {case_id} [{case['passed']}]: {KNOWN_GAPS.get(case_id, 'NO REASON RECORDED')}"
-        )
+    lines.append(f"cases that do not pass: {len(report['gaps'])}")
+    lines += [f"  {g['case']} [{g['outcome']}]: {g['gap']}" for g in report["gaps"]]
     for title in ("regressions", "improvements"):
         lines.append(f"{title}: {len(report[title])}")
         lines += [f"  {item}" for item in report[title]]
@@ -517,12 +554,15 @@ def main():
     parser.add_argument(
         "--write-baseline",
         action="store_true",
-        help="write support/conformance_baseline.json from this run",
+        help="write support/conformance_baseline.json from a new root, keeping "
+        "each gap it records",
     )
     parser.add_argument(
         "--json", action="store_true", help="print the report as JSON only"
     )
     args = parser.parse_args()
+    if args.write_baseline and args.root:
+        parser.error("--write-baseline searches a root it makes; drop --root")
     root = (
         args.root
         or RUNS / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") / "root"
@@ -536,29 +576,24 @@ def main():
     with fixture_environment(root):
         check, leaking = asyncio.run(measure(root))
     counts = check.counts
-    if args.write_baseline:
-        unexplained = sorted(
-            c
-            for c, case in check.cases.items()
-            if case["passed"] is not True and c not in KNOWN_GAPS
-        )
-        if unexplained:
-            parser.error(f"record a reason in KNOWN_GAPS for {unexplained}")
-        baseline = dict(
-            cases={
-                c: dict(
-                    metric=case["metric"], passed=case["passed"], gap=KNOWN_GAPS.get(c)
-                )
-                for c, case in sorted(check.cases.items())
-            },
-            counts=counts,
-        )
-        BASELINE.write_text(json.dumps(baseline, indent=2) + "\n")
-    if not BASELINE.exists():
-        parser.error(f"{BASELINE.name} is missing; write it with --write-baseline")
-    regressions, improvements = compare(
-        check.cases, counts, json.loads(BASELINE.read_text())
+    old = (
+        json.loads(BASELINE.read_text())
+        if BASELINE.exists()
+        else dict(cases={}, counts={})
     )
+    if args.write_baseline:
+        regressions, improvements = compare(check.cases, counts, old)
+        print(f"moved from {BASELINE.name}:", file=sys.stderr)
+        for item in regressions + improvements or ["nothing"]:
+            print(f"  {item}", file=sys.stderr)
+        old, problems = baseline_of(check.cases, counts, old)
+        if problems:
+            parser.error(f"{BASELINE.name} not written: " + "; ".join(problems))
+        BASELINE.write_text(json.dumps(old, indent=2) + "\n")
+        print(f"wrote {BASELINE.name}", file=sys.stderr)
+    if not old["cases"]:
+        parser.error(f"{BASELINE.name} is missing; write it with --write-baseline")
+    regressions, improvements = compare(check.cases, counts, old)
     report = dict(
         root=str(root),
         searches=check.searches,
@@ -566,6 +601,15 @@ def main():
         counts=counts,
         leaking_node_types=leaking,
         cases=check.cases,
+        gaps=[
+            dict(
+                case=case_id,
+                outcome=case["outcome"],
+                gap=old["cases"].get(case_id, {}).get("gap", "NO GAP RECORDED"),
+            )
+            for case_id, case in sorted(check.cases.items())
+            if case["outcome"] is not Outcome.PASSED
+        ],
         regressions=regressions,
         improvements=improvements,
     )
@@ -573,7 +617,9 @@ def main():
         print(json.dumps(report, indent=2))
     else:
         print("\n".join(report_lines(report)))
-    raise SystemExit(1 if regressions else 0)
+    if improvements:
+        print("baseline is stale, rerun with --write-baseline", file=sys.stderr)
+    raise SystemExit(1 if regressions or improvements else 0)
 
 
 if __name__ == "__main__":
