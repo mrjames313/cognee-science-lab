@@ -237,7 +237,7 @@ The user agreed this routine on 2026-10-21. `CLAUDE.md` holds the same steps.
 
 **Identity-ledger check.** It runs every sequence of real `RecordStore` calls up to depth 5, with two sources and two writers. `PINNED` in `tests/test_identity_ledger_check.py` holds 9205 nodes and 9050 sequences. `--mutants` runs the scratch breaks in `support/ledger_mutants.py`. `.claude/skills/identity-ledger/SKILL.md` says when to run it.
 
-**Land a branch** with [the landing playbook](../.agents/playbooks/landing-on-main.md). Work on a branch off `main`, review it with `/pstack:thermos`, run the unit suite (and `journey all` at a checkpoint), and merge with `git merge --ff-only`. Do not open a pull request. Push `main` only when the user asks. After the merge, remove the worktree and delete the branch as `CLAUDE.md` describes.
+**Land a branch** with [the landing playbook](../.agents/playbooks/landing-on-main.md). Work on a branch off `main`, review it with `/pstack:thermos`, run the unit suite (and `journey all` at a checkpoint), and merge with `git merge --ff-only`. Do not open a pull request. Push `main` after each checkpoint merges, and check CI. After the merge, remove the worktree and delete the branch as `CLAUDE.md` describes.
 
 ## How the work is run
 
@@ -249,7 +249,7 @@ Each step-5 checkpoint followed this routine, which the user agreed:
 4. A subagent builds the checkpoint on its own branch.
 5. `/pstack:thermos` runs a bug review and a quality review. Fix rounds follow until neither finds anything blocking. Each bug fix comes with a test that failed first.
 6. `verify.py journey all` passes on the final head.
-7. The branch merges into `main` with `git merge --ff-only`. When the user asks, push `main` and check that GitHub Actions passes.
+7. The branch merges into `main` with `git merge --ff-only`. Push `main` and check that GitHub Actions passes (the user's standing rule since 2026-10-27).
 8. Update the checkpoint docs: this handoff, [ROADMAP.md](../ROADMAP.md), the checkpoint's guide under `docs/`, a dated section in [the integration playbook](../results/cognee_knowledge_integration_playbook.md), and a dated section in [the checkpoint history](stage6_checkpoint_history.md). Keep dated history. Say who ran each result and where: the user, or the assistant on the user's Mac. Keep apart tests run here, the user's own runs and untested design.
 
 The user's model and escalation rules for subagents live in the user's private configuration, not in this repository. Follow them as the session gives them.

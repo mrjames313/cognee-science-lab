@@ -37,7 +37,7 @@ Follow [.agents/playbooks/landing-on-main.md](.agents/playbooks/landing-on-main.
 2. Review the branch with `/pstack:thermos`. Fix each finding, or dismiss it with a reason.
 3. Run the unit tests on the branch. At a checkpoint, also run `verify.py journey all`.
 4. Merge with `git merge --ff-only <branch>`. Do not open a pull request.
-5. Push `main` only when the user asks.
+5. After each checkpoint merges, push `main` and check that GitHub Actions passes. The user decided this on 2026-10-27. Push at other times only when the user asks.
 6. After the merge, remove the branch's worktree with `git worktree remove <path>` and delete the branch with `git branch -d <branch>`. Do the same for a harness `worktree-agent-*` branch whose commits are on `main`. Never pass `--force` or `-D`.
    - The harness locks an agent's worktree with the reason `claude agent <name> (pid ...)`. Once that agent has finished and `git status` in the worktree is clean, run `git worktree unlock <path>` first. The user approved this on 2026-10-25: a merged worktree has nothing to keep.
    - The main checkout may sit on another branch, so `git branch -d` can refuse a branch merged into `main` but not into HEAD. Run `git branch -u main <branch>` first.
