@@ -185,3 +185,70 @@ def test_capability_check_sees_through_transparent_engine_handle():
             return Supported
 
     require_graph_methods(SupportedHandle(), ["remove_node_source_refs"])
+
+
+@pytest.mark.parametrize("writer_completes", [False, True])
+async def test_a_writer_between_the_read_and_the_fail_gets_a_second_read(
+    monkeypatch, source_payload, writer_completes
+):
+    """Spec review R5 through a real RecordStore: retrieval reads a current
+    row, finds its own input failed, and a writer begins on the source
+    before RecordStore.fail runs. The fail raises stale_attempt and records
+    nothing, and the second read serves the rows the writer left."""
+    import json
+
+    from test_identity_storage import PUBLISH_INTENT, memory_store
+
+    from cognee_lab.identity import retrieve as module
+    from cognee_lab.identity.models import IdentitySource
+    from cognee_lab.identity.settled import retrieve_settled
+    from cognee_lab.identity.validation import IntentError
+
+    source = IdentitySource.model_validate_json(json.dumps(source_payload))
+    store = memory_store()
+    await store.initialize()
+    await store.complete(
+        source, await store.begin(source, expected_revision=0, plan={})
+    )
+    publisher = SimpleNamespace(
+        records=store,
+        withholdings=SimpleNamespace(rows=AsyncMock(return_value=[])),
+        vector=SimpleNamespace(has_collection=AsyncMock(return_value=False)),
+    )
+    writers = []
+
+    async def drift(publisher, source, reader):
+        if writers:
+            return {}
+        writers.append(
+            await store.begin(
+                source,
+                expected_revision=1,
+                plan=dict(PUBLISH_INTENT),
+                method="reconcile",
+            )
+        )
+        if writer_completes:
+            await store.complete(source, writers[0])
+        raise IntentError("source_missing", "own chunks are gone")
+
+    monkeypatch.setattr(module, "live_drift", drift)
+    found = await retrieve_settled(
+        publisher, source.dataset_id, "q", SearchRequest.parse()
+    )
+    (row,) = await store.rows(source.dataset_id)
+    assert await store.events(source.dataset_id) == []
+    assert row.attempt == writers[0]
+    if writer_completes:
+        assert row.state == "current"
+        assert found["unavailable_sources"] == []
+    else:
+        assert row.state == "pending"
+        assert found["unavailable_sources"] == [
+            dict(
+                identity_data_id=str(source.identity_data_id),
+                assignment_id=None,
+                reason="publication_pending",
+                recovery_event_id=None,
+            )
+        ]
