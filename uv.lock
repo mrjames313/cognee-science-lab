@@ -733,6 +733,7 @@ dev = [
     { name = "jsonschema" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -749,6 +750,7 @@ dev = [
     { name = "jsonschema", specifier = ">=4,<5" },
     { name = "pytest", specifier = ">=8,<10" },
     { name = "pytest-asyncio", specifier = ">=0.24,<2" },
+    { name = "pyyaml", specifier = ">=6,<7" },
 ]
 
 [[package]]
