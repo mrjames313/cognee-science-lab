@@ -12,18 +12,24 @@ states the rules.
 
 import json
 import re
+from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from . import entry
+from .captured_chunks import bind_chunks
 from .environment import DATASET_NAME, read_embedding
 from .fixture import (
+    ChunkFact,
     FactTarget,
     check_chunk_vectors,
     check_fact_edge,
     require_inspected_cognee,
+    write_chunk_facts,
 )
 from .models import Accepted, IdentitySource
+from .publish import Publisher
 from .validation import IntentError, fresh_mention_id, map_chunks, text_digest
 
 DOC01 = (
@@ -36,6 +42,9 @@ IDENTITY_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:conformance:doc01:identity")
 RELATION = "stated_with"
 RULES = "rules"
 READING = "reading"
+# The commands a conformance-fixture root takes: its description has no
+# captured fixture edits, so it is created, read and searched only.
+COMMANDS = frozenset({"conformance-fixture", "status", "retrieve", "search"})
 
 ABBREVIATION = re.compile(r"((?:[A-Za-z][\w-]*\s+){1,6})\(([A-Z]{2,5})\)")
 TITLE_NAME = re.compile(r"\b[A-Z][\w-]*(?:\s+[A-Z][\w-]*)+")
@@ -44,7 +53,8 @@ QUOTED = re.compile(r"“([^”]+?)[,.]?”")
 QUANTITY = re.compile(
     r"(?<![\w.])\d+(?:\.\d+)?(?:[–-]\d+(?:\.\d+)?)?(?:%|\s(?:m|s|T|MW|kHz|MA)\b)"
 )
-SENTENCE_END = re.compile(r"[.!?]”?(?=\s+[A-Z“])")
+# A sentence ends at its punctuation; the whitespace after it is consumed.
+SENTENCE_END = re.compile(r"[.!?]”?(\s+)(?=[A-Z“])")
 TABLE_RULE = re.compile(r"^\|[-:| ]+\|$")
 
 
@@ -221,8 +231,6 @@ def locate(text, surface, passage) -> tuple[int, int]:
 
 def describe(text, chunks, dataset_id) -> IdentitySource:
     """DOC01's description from its text and native chunks alone."""
-    from .captured_chunks import bind_chunks
-
     names, variants = reusable_names(text)
     constructions = {
         str(entity_id(n)): dict(name=n, description="A reusable name in DOC01.")
@@ -315,70 +323,108 @@ def sentences(text):
             continue
         start = 0
         for end in SENTENCE_END.finditer(line):
-            yield offset + start, offset + end.end()
-            start = end.end() + len(line[end.end() :]) - len(line[end.end() :].lstrip())
+            yield offset + start, offset + end.start(1)
+            start = end.end()
         yield offset + start, offset + len(line.rstrip())
+
+
+def identity_groups(source) -> dict[UUID, UUID]:
+    """Each reusable Entity, and each mention group with an accepted
+    resolution, to one representative of its identity group: variants join
+    groups, and a mention joins its referent's."""
+    mentions = {g.entity_id for g in source.mention_groups.values()}
+    parent = {e: e for e in source.entity_constructions if e not in mentions}
+
+    def root(e):
+        while parent[e] != e:
+            e = parent[e]
+        return e
+
+    for variant in source.variant_assignments.values():
+        parent[root(variant.source_entity_id)] = root(variant.target_entity_id)
+    groups = {e: root(e) for e in parent}
+    for decision in source.mention_resolutions.values():
+        if isinstance(decision, Accepted):
+            mention = source.mention_groups[decision.group_ref].entity_id
+            groups[mention] = groups[decision.target_entity_id]
+    return groups
+
+
+class SpanKind(Enum):
+    """What a named span of DOC01 is: a reusable Entity's name, an
+    occurrence of a reference group, or a quantity with a unit."""
+
+    ENTITY = "entity"
+    MENTION = "mention"
+    QUANTITY = "quantity"
+
+
+class Span(NamedTuple):
+    start: int
+    end: int
+    kind: SpanKind
+    target: FactTarget
+
+
+def named_spans(source, text) -> list[Span]:
+    """The named spans of DOC01, in text order, with no overlap. Names match
+    whole words, abbreviations by case; a longer span wins an overlap."""
+    mentions = {g.entity_id for g in source.mention_groups.values()}
+    found = []
+    for entity, recipe in source.entity_constructions.items():
+        if entity in mentions:
+            continue
+        target = FactTarget(entity, recipe.name, recipe.description)
+        flags = 0 if recipe.name == recipe.name.upper() else re.IGNORECASE
+        pattern = rf"(?<![\w-]){re.escape(recipe.name)}(?![\w-])"
+        found += [
+            Span(m.start(), m.end(), SpanKind.ENTITY, target)
+            for m in re.finditer(pattern, text, flags)
+        ]
+    for group in source.mention_groups.values():
+        recipe = source.entity_constructions[group.entity_id]
+        target = FactTarget(group.entity_id, recipe.name, recipe.description)
+        found += [
+            Span(o.start, o.end, SpanKind.MENTION, target) for o in group.occurrences
+        ]
+    for match in QUANTITY.finditer(text):
+        name = " ".join(match.group(0).split())
+        quantity = uuid5(NAMESPACE_URL, f"cognee-lab:conformance:quantity:{name}")
+        target = FactTarget(quantity, name, "A quantity stated in DOC01.")
+        found.append(Span(match.start(), match.end(), SpanKind.QUANTITY, target))
+    spans, cursor = [], -1
+    for span in sorted(found, key=lambda s: (s.start, -s.end)):
+        if span.start >= cursor:
+            spans.append(span)
+            cursor = span.end
+    return spans
 
 
 def facts_of(source, text) -> list[Fact]:
     """The sentence rule: in each sentence the first named reusable Entity or
     reference group is the subject, stated with each other named Entity
     outside its identity group and each quantity. A subject and target pair
-    keeps its first sentence. Names match whole words, abbreviations by
-    case; a longer name wins an overlap."""
-    mentions = {g.entity_id: g for g in source.mention_groups.values()}
-    group = {e: e for e in source.entity_constructions if e not in mentions}
-
-    def root(e):
-        while group[e] != e:
-            e = group[e]
-        return e
-
-    for variant in source.variant_assignments.values():
-        group[root(variant.source_entity_id)] = root(variant.target_entity_id)
-    for decision in source.mention_resolutions.values():
-        if isinstance(decision, Accepted):
-            entity = source.mention_groups[decision.group_ref].entity_id
-            group[entity] = decision.target_entity_id
-    found = []
-    for entity, recipe in source.entity_constructions.items():
-        if entity in mentions:
-            continue
-        flags = 0 if recipe.name == recipe.name.upper() else re.IGNORECASE
-        pattern = rf"(?<![\w-]){re.escape(recipe.name)}(?![\w-])"
-        for match in re.finditer(pattern, text, flags):
-            found.append((match.start(), match.end(), entity))
-    for entity, mention in mentions.items():
-        found += [(o.start, o.end, entity) for o in mention.occurrences]
-    for match in QUANTITY.finditer(text):
-        name = " ".join(match.group(0).split())
-        quantity = uuid5(NAMESPACE_URL, f"cognee-lab:conformance:quantity:{name}")
-        found.append(
-            (
-                match.start(),
-                match.end(),
-                FactTarget(quantity, name, "A quantity stated in DOC01."),
-            )
-        )
-    named, cursor = [], -1
-    for start, end, item in sorted(found, key=lambda f: (f[0], -f[1])):
-        if start >= cursor:
-            named.append((start, end, item))
-            cursor = end
+    keeps its first sentence."""
+    groups = identity_groups(source)
+    spans = named_spans(source, text)
     facts, seen = [], set()
     for start, end in sentences(text):
-        inside = [item for s, e, item in named if start <= s and e <= end]
-        subject = next((i for i in inside if isinstance(i, UUID)), None)
+        inside = [s for s in spans if start <= s.start and s.end <= end]
+        subject = next(
+            (s.target.id for s in inside if s.kind is not SpanKind.QUANTITY), None
+        )
         if subject is None:
             continue
-        groups_seen, targets = {root(subject)}, []
-        for item in inside:
-            if isinstance(item, FactTarget):
-                targets.append(item)
-            elif item not in mentions and root(item) not in groups_seen:
-                groups_seen.add(root(item))
-                recipe = source.entity_constructions[item]
-                targets.append(FactTarget(item, recipe.name, recipe.description))
+        groups_seen, targets = {groups[subject]}, []
+        for span in inside:
+            if span.kind is SpanKind.QUANTITY:
+                targets.append(span.target)
+            elif (
+                span.kind is SpanKind.ENTITY
+                and groups[span.target.id] not in groups_seen
+            ):
+                groups_seen.add(groups[span.target.id])
+                targets.append(span.target)
         for target in targets:
             if (subject, target.id) not in seen:
                 seen.add((subject, target.id))
@@ -410,8 +456,6 @@ async def write_facts(publisher, source, chunks, ctx):
     from cognee.modules.provenance.edge_evidence.persistence import (
         flush_context_provenance,
     )
-
-    from .fixture import ChunkFact, write_chunk_facts
 
     owned = {c.id: [] for c in chunks}
     for fact, selected in fact_evidence(source, chunks):
@@ -465,9 +509,6 @@ async def run(args, root):
     """`conformance-fixture`: register DOC01 and its description through the
     lab's `add`, then publish it and its stated facts through `cognify`."""
     import cognee
-
-    from . import entry
-    from .publish import Publisher
 
     require_inspected_cognee()
     original = entry.Original(root / DOC01.name, ORIGINAL_DATA_ID)

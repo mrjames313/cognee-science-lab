@@ -91,6 +91,16 @@ def test_references_resolve_to_reusable_names(source):
     assert all(g.chunk_refs for g in source.mention_groups.values())
 
 
+def test_variants_and_resolved_mentions_share_an_identity_group(source):
+    groups = conformance.identity_groups(source)
+    by_name = {r.name: groups[e] for e, r in source.entity_constructions.items()}
+    assert by_name["AFRL"] == by_name["Aurora Fusion Research Laboratory"]
+    assert by_name["The controller; It"] == by_name["VCS"]
+    assert by_name["Vertical Control System"] == by_name["VCS"]
+    assert by_name["Aurora; The suite; It"] == by_name["Aurora Reconstruction Suite"]
+    assert by_name["Aurora Reconstruction Suite"] != by_name["AFRL"]
+
+
 def test_a_passage_must_occur_once():
     with pytest.raises(IntentError) as refused:
         conformance.locate(TEXT, "It", "It")

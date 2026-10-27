@@ -122,7 +122,8 @@ class Fixture:
     """The conformance root's saved description, by name and identity group."""
 
     def __init__(self, root):
-        from cognee_lab.identity.models import Accepted, IdentitySource
+        from cognee_lab.identity.conformance_fixture import identity_groups
+        from cognee_lab.identity.models import IdentitySource
 
         self.source = IdentitySource.model_validate_json(
             (root / "identity.json").read_text()
@@ -138,24 +139,7 @@ class Fixture:
         self.chunks = [(i.start, i.end) for i in chunks]
         self.chunk_ids = {str(i.chunk_id) for i in chunks}
         self.mentions = {str(g.entity_id) for g in source.mention_groups.values()}
-        parent = {
-            str(e): str(e)
-            for e in source.entity_constructions
-            if str(e) not in self.mentions
-        }
-
-        def root_of(e):
-            while parent[e] != e:
-                e = parent[e]
-            return e
-
-        for v in source.variant_assignments.values():
-            parent[root_of(str(v.source_entity_id))] = root_of(str(v.target_entity_id))
-        self.group = {e: root_of(e) for e in parent}
-        for d in source.mention_resolutions.values():
-            if isinstance(d, Accepted):
-                mention = str(source.mention_groups[d.group_ref].entity_id)
-                self.group[mention] = self.group[str(d.target_entity_id)]
+        self.group = {str(e): str(g) for e, g in identity_groups(source).items()}
         self.names = {
             str(e): r.name
             for e, r in source.entity_constructions.items()

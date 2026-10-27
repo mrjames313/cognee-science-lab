@@ -16,6 +16,7 @@ from .environment import (
     read_fixture,
 )
 from .chain_fixture import CITATIONS
+from .conformance_fixture import COMMANDS as CONFORMANCE_COMMANDS
 from .dataset_forget import FAULT_STAGES as DATASET_FORGET_STAGES
 from .entity_edit import ENTITY_CASES
 from .forget import FAULT_STAGES as FORGET_STAGES
@@ -56,11 +57,6 @@ COMMAND_FAULT_STAGES = {
     "forget": FORGET_STAGES,
     "forget-dataset": DATASET_FORGET_STAGES,
 }
-# The commands a conformance-fixture root takes: its description has no
-# captured fixture edits, so it is created, read and searched only.
-CONFORMANCE_COMMANDS = frozenset(
-    {"conformance-fixture", "status", "retrieve", "search"}
-)
 REVISION_COMMANDS = {
     "revise",
     "edit-text",
