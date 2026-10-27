@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from .chains import live_pass
+from .delivery import Evidence, Fact, Support, semantic
 from .models import Accepted, ChunkInput
 from .native import edge_metadata, fact_neighborhood
 from .publish import contributions, identity_edges
@@ -207,11 +208,14 @@ async def select_seed_entities(graph, candidates, query, *, skip, allowed):
     return set(exact or [e for e in reusable[:1] if e in allowed])
 
 
-async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200):
+async def retrieve(
+    publisher, dataset_id, query, *, limit=LIMIT, work_limit=200, deliver=semantic
+):
     """Rank actual facts, with document-context variant expansion and local mentions.
 
     This intentionally bounded first slice scans saved source descriptions. Full
-    graph traversal and arbitrary external facts are later work.
+    graph traversal and arbitrary external facts are later work. `deliver`
+    (delivery.py) turns the facts found into the result's fact fields.
     """
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
     from cognee.modules.engine.utils import generate_edge_object_id
@@ -231,7 +235,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
     }
     if not await publisher.vector.has_collection("Entity_name"):
         return dict(
-            facts=[],
+            **deliver([], limit),
             identity_expansion_limited=False,
             identity_work=0,
             fact_candidates_limited=False,
@@ -254,7 +258,8 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
     seeds = await select_seed_entities(
         publisher.graph, candidates, query, skip=mention_ids, allowed=allowed
     )
-    facts, seen, work, limited, fact_limited = [], set(), 0, False, False
+    found: dict[str, Fact] = {}
+    work, limited, fact_limited = 0, False, False
     for source, row, held in current:
         if work >= work_limit:
             limited = True
@@ -314,6 +319,11 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
                         eligible.update((a, b))
                         changed = True
         mentions = {}
+        chunk_inputs = {
+            str(i.chunk_id): i
+            for i in source.inputs.values()
+            if isinstance(i, ChunkInput)
+        }
         for key, decision in source.mention_resolutions.items():
             if work >= work_limit:
                 limited = True
@@ -354,11 +364,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
                 for e in own_evidence:
                     # Old evidence rows are not a version authority. Only the
                     # checked current chunk mapping and native fact owner admit it.
-                    if str(e.chunk_id) not in {
-                        str(i.chunk_id)
-                        for i in source.inputs.values()
-                        if isinstance(i, ChunkInput)
-                    }:
+                    if str(e.chunk_id) not in chunk_inputs:
                         continue
                     chunk = await publisher.graph.get_node(str(e.chunk_id))
                     fact = await edge_metadata(publisher.graph, a, b, relation)
@@ -372,31 +378,20 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
                         or e.chunk_index != chunk.get("chunk_index")
                     ):
                         continue
+                    declared = chunk_inputs[str(e.chunk_id)]
                     checked.append(
-                        dict(
-                            data_id=document_id,
+                        Evidence(
                             chunk_id=str(e.chunk_id),
                             chunk_index=e.chunk_index,
                             text=chunk.get("text", ""),
+                            start=declared.start,
+                            end=declared.end,
                         )
                     )
-                if not checked or str(edge_id) in seen:
+                known = found.get(str(edge_id))
+                if not checked or (known and document_id in known.supports):
                     continue
-                target = await publisher.graph.get_node(str(b))
-                text = (
-                    props.get("edge_text")
-                    or f'{relation} {(target or {}).get("name", "")}'
-                )
-                score = len(words(query) & words(text))
-                entry = dict(
-                    edge_id=str(edge_id),
-                    source_id=str(a),
-                    target_id=str(b),
-                    relationship=relation,
-                    text=text,
-                    evidence=checked,
-                    score=score,
-                )
+                identity = None
                 if subject in mentions:
                     group, decision, key = mentions[subject]
                     # At least one supporting chunk must cover an occurrence.
@@ -404,20 +399,38 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
                     allowed_chunks = {
                         str(source.inputs[k].chunk_id) for k in group.chunk_refs
                     }
-                    if not any(e["chunk_id"] in allowed_chunks for e in checked):
+                    if not any(e.chunk_id in allowed_chunks for e in checked):
                         continue
                     # A captured fact can span a marker chunk and a continuation
                     # chunk. Keep its checked native-owned evidence together;
                     # continuation evidence does not create a mention marker.
-                    entry["identity"] = dict(
+                    identity = dict(
                         state="accepted",
                         target_entity_id=str(decision.target_entity_id),
                         occurrences=[o.model_dump() for o in group.occurrences],
                         identity_data_id=str(source.identity_data_id),
                         assignment_id=key,
                     )
-                facts.append(entry)
-                seen.add(str(edge_id))
+                if known is None:
+                    target = await publisher.graph.get_node(str(b))
+                    text = (
+                        props.get("edge_text")
+                        or f'{relation} {(target or {}).get("name", "")}'
+                    )
+                    known = found[str(edge_id)] = Fact(
+                        edge_id=str(edge_id),
+                        source_id=str(a),
+                        target_id=str(b),
+                        relationship=relation,
+                        text=text,
+                        score=len(words(query) & words(text)),
+                    )
+                known.supports[document_id] = Support(
+                    document_id=document_id,
+                    identity_data_id=str(source.identity_data_id),
+                    evidence=checked,
+                    identity=identity,
+                )
     # Recheck ledger and withholdings to avoid delivering a source superseded,
     # or a decision withheld, during this read.
     rows_after = await publisher.records.rows(dataset_id)
@@ -433,9 +446,8 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
         raise IntentError(
             "retrieval_changed", "Publication changed during retrieval; retry query"
         )
-    facts.sort(key=lambda x: (-x["score"], x["edge_id"]))
     return dict(
-        facts=facts[:limit],
+        **deliver(list(found.values()), limit),
         identity_expansion_limited=limited,
         identity_work=work,
         fact_candidates_limited=fact_limited,
