@@ -92,7 +92,7 @@ The CLI `retrieve` refuses `scope_not_built` and `mode_not_built` the same way.
 - **`cognee.recall`.** Its query router never picks `IDENTITY`. `recall(query_type=SearchType.IDENTITY)` bypasses the router and returns one entry whose `raw` is the result (probe E1).
 - **Pinned versions.** Nothing in Cognee's dependency range (`cognee>=1.6,<1.7`) pins the enum internals that `add_member` writes. The import refuses any Cognee other than 1.6.2 and any Python other than 3.12.
 - **Seed crowding.** The search takes the top 10 `Entity_name` hits and then drops every Entity that no served source constructs. A store with many Entities in other datasets can push every lab Entity out of the top 10. The query would then return no fact (inferred from the code, not measured).
-- **Document names after an edit.** A text edit writes the original through Cognee's ingestion with a text payload, which renames its Data row, and so its document node, from the file name (for example `glossary`) to `text_<md5 of the text>`. This has held since the text changes of 2026-10-19 (`registered.write_text`) and is not caused by S4. Native search contexts show the new name. The IDENTITY result never uses document names.
+- **Document names after an edit.** From 2026-10-27 a text edit keeps the original's Data row name and document node name, for example `glossary`. A root built before then keeps the `text_<md5 of the text>` name that its earlier edits wrote. The IDENTITY result never uses document names.
 
 ## Commands
 

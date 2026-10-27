@@ -2,9 +2,9 @@
 
 **Updated:** 2026-10-27 (America/Detroit).
 
-The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. `main` was at `4e7a33b` before this docs pass.
+The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. Later on 2026-10-27 a text edit stopped renaming the original's document, the first part of the source-aware mode ([the history](stage6_checkpoint_history.md#step-5-document-names-kept-after-a-text-edit-2026-10-27)).
 
-**Next task.** Build the source-aware search mode, starting with the real document name after a text edit. Then build the other step-5 delivery items. [Next task](#next-task) has the detail.
+**Next task.** Build the source-aware search mode, after the user answers the result-shape questions in [Decisions that need the user](#next-task). Then build the other step-5 delivery items. [Next task](#next-task) has the detail.
 
 The dated history of every checkpoint is in [the Stage 6 checkpoint history](stage6_checkpoint_history.md). This document says what is true now.
 
@@ -43,8 +43,8 @@ Runtime code is in `src/cognee_lab/identity/`, against Cognee 1.6.2 and Python 3
 Step 5 continues. Work in this order.
 
 1. **The source-aware mode.** Today `mode` `source_aware` is refused `mode_not_built` (`settled.py`).
-   1. Fix the document name first. A text edit renames the original's Data row and document node from its file name to `text_<md5 of the text>`, because `registered.write_text` ingests a string. Ingest a named file path instead. This has held since the text changes of 2026-10-19 ([S1 known limit 1](stage6_checkpoint_history.md#step-5-s1-the-public-retriever-2026-10-26)).
-   2. Add a document node per fact, group the results by source and return the occurrence spans.
+   1. Done on 2026-10-27. A text edit or a snapshot rewrite keeps the Data row's name and the document node's name ([the history](stage6_checkpoint_history.md#step-5-document-names-kept-after-a-text-edit-2026-10-27)).
+   2. Add a document node per fact, group the results by source and return the occurrence spans. The assistant's proposal, of 2026-10-27, keeps the flat `facts` list and adds a `documents` list. Each entry names one original document by its Data ID and name, and lists the IDs of the facts it supports, with their spans. A fact supported by two documents is listed under both. A mention fact's spans are its occurrences. Any other fact's spans are its checked evidence chunk ranges, because no fact writer records where the sentence sits. It writes nothing new to the graph. The questions below need the user before the build.
 2. **The other step-5 delivery items.**
    - Grouped delivery.
    - The full set of annotation states.
@@ -79,7 +79,12 @@ Step 5 continues. Work in this order.
 - A guard for Cognee's other search types (U1 option (b)).
 - The long-term retrieval entry. On 2026-10-25 the user called the registered `IDENTITY` search type a first step only.
 - Which outside benchmark the prototype uses. No recorded decision names one.
-- Any question that the source-aware spec or its review raises about the result shape.
+- The source-aware result shape, from the proposal of 2026-10-27:
+  1. Is "a document node per fact" a result field (recommended) or a new graph write at publication? Cognee's TextDocument shares the Data item's UUID, and every evidence chunk is already `is_part_of` it.
+  2. Keep the flat `facts` and add `documents` (recommended), or return groups only? Groups only would change the conformance check's reader.
+  3. In the source-aware mode, list a fact under every document that supports it (recommended)? Today a fact found in two sources keeps only the first source's evidence. Should the semantic mode keep that behaviour for now (recommended, so the conformance baseline does not move)?
+  4. Accept evidence chunk ranges as the finest span for a fact without a mention (recommended), or make the fact writers record sentence spans now?
+  5. Is "grouped delivery" the same as grouping by source, or grouping by identity group?
 
 ## Tracked follow-ups and known limits
 
@@ -87,7 +92,6 @@ On 2026-10-25 the user decided that the step-4 follow-ups stay documented limits
 
 **Search and conformance.**
 
-- A text edit renames the original to `text_<md5>`. The next task fixes it. [S1 limit 1]
 - Seed crowding. Other datasets' Entities can push every lab Entity out of the top 10 `Entity_name` hits, so a query returns no fact. Inferred from the code, not measured. [S1 limit 2]
 - Cognee's other search types serve withheld and failed state. A guard needs the user's decision. [S1 limit 3]
 - TRV08 and its negative control stay unobserved, because their coordinates follow DOC01 v1's chunking. [S1 limit 4]

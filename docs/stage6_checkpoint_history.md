@@ -1034,7 +1034,7 @@ GitHub Actions run 40447014386 on `main` at `747a4f0` passed on 2026-10-27: 699 
 
 **Known limits**, from the probes and the reviews:
 
-1. A text edit renames the original's Data row and document node from its file name (for example `glossary`) to `text_<md5 of the text>`, because `registered.write_text` ingests a string. This has held since the text changes of 2026-10-19 (`81027ca`, `08d9e98`) and predates S4. The `IDENTITY` result never uses document names, but native search contexts show the new name, and the source-aware mode needs the real one. The fix is to ingest a named file path.
+1. A text edit renames the original's Data row and document node from its file name (for example `glossary`) to `text_<md5 of the text>`, because `registered.write_text` ingests a string. This has held since the text changes of 2026-10-19 (`81027ca`, `08d9e98`) and predates S4. The `IDENTITY` result never uses document names, but native search contexts show the new name, and the source-aware mode needs the real one. The fix is to ingest a named file path. Closed on 2026-10-27, see [the next section](#step-5-document-names-kept-after-a-text-edit-2026-10-27).
 2. Seed crowding. The search takes the top 10 `Entity_name` hits and then drops every Entity that no served source constructs. A store with many Entities in other datasets can push every lab Entity out of the top 10, and the query then returns no fact. This is inferred from the code, not measured.
 3. Cognee's other search types serve withheld and failed state. S1 only warns (U1 option (a)), with probe E2's counts and journey S7. A guard for them (U1 option (b)) needs a decision.
 4. The coordinates of TRV08 and its negative control follow DOC01 v1's chunking, so both stay unobserved. The manifest's ER005 hard negative stands in for them.
@@ -1042,6 +1042,33 @@ GitHub Actions run 40447014386 on `main` at `747a4f0` passed on 2026-10-27: 699 
 6. The conformance check is not a benchmark. A true benchmark needs a describer that never saw the answers (step 6) or an outside benchmark.
 7. Every search runs `RecordStore.initialize` through `Publisher.configured`, which checks the lab's tables and fills the removal record from the tombstones. The retriever keeps no per-process cache, since tests and the CLI switch roots within one process.
 8. Access control is refused (`access_control_on`), because the lab's ledger lives in the one shared relational database.
+
+### Step 5, document names kept after a text edit, 2026-10-27
+
+This is the first part of the source-aware mode. It closes S1 known limit 1. Branch `source-aware-doc-name`, commits `0c8f0ca`, `1c9790d` and `37da230`.
+
+**Decision.** `registered.write_text` ingests the new text as an upload object whose file name is the Data row's own name and extension, instead of as a plain string. Cognee names a plain string `text_<md5>`, and its update branch writes `Data.name` on every ingest, so every text edit and every identity-snapshot rewrite renamed the Data row and the TextDocument node. Cognee's upload route stores the bytes at `<data root>/<md5>/<name>.<ext>` and keeps the name. The user asked for the work on 2026-10-27 and left the design to the assistant. The assistant chose it after a prototype on a loopback root showed the old and the new names.
+
+**What the reviews changed.** Two independent reviews and two re-reviews ran over the branch.
+
+- An upload's file name makes Cognee write a `_cognee.source_uri` that points at a file under the process's working directory, which does not exist. `write_text` now writes an explicit `source_uri` of `None`, which Cognee keeps. On `main` the key was removed. Both first-round reviewers found this.
+- The upload route stores the original and the derived text as two files. Cognee removes the replaced original but not the replaced derived text, so each changed rewrite left the previous revision's text on disk, and `forget` could not see it. `write_text` now removes the previous derived text once no Data row references it. This also removes the one file per item that `main` left after the first rewrite. In the scenario `multi-fixture`, `revise`, `edit-text`, `forget --source doc01`, the bug reviewer counted 2 unreferenced files on `main` and 3 on the first commit. The final branch leaves 0.
+- Carrying the name on the stream instead of on the file name dropped the stored file's suffix, so Cognee chose the loader from the content. The final commit uses the file name again.
+
+**Evidence.** The assistant's subagents ran these on the user's Mac with loopback embeddings, on `37da230`:
+
+- `uv run pytest -q -m 'not integration'`: 699 passed.
+- `uv run pytest -q -m integration`: 120 passed, in 41 minutes.
+- Journeys R1, R2, E1 to E4 and F1 to F20: 0 FAIL in each.
+- `test_native_text_edit_replaces_chunks_evidence_and_reconciles` now checks the names by Data ID before and after the edit, the absent source URI, the stored original's suffix and that no stored file is unreferenced. The assistant's subagents showed that each check fails without its fix.
+
+No GitHub Actions run and no `journey all` run, because this is not a checkpoint close. The source-aware mode is.
+
+**Known limits.**
+
+1. A crash after Cognee commits the new text and before `write_text` removes the previous derived text leaves that file. A retry reads the new location and cannot find the old one. Cognee leaves the same window for the originals it replaces.
+2. A root built before this change keeps the `text_<md5>` names of its earlier edits.
+3. The first add of an item still stores the caller's file as the original. Nothing changed there.
 
 ## Next task and the overnight decisions, as of 2026-10-26
 
