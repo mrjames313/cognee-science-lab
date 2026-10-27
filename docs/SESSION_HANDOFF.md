@@ -242,7 +242,7 @@ The user agreed this routine on 2026-10-21. `CLAUDE.md` holds the same steps.
 3. **The conformance check for retrieval changes.** For `retrieve.py`, `settled.py`, `search.py`, `conformance_fixture.py` or the fact writers in `fixture.py`, run `uv run python support/conformance_check.py` and journey B1. A case that moves in either direction fails the check. It is local, not in CI.
 4. **The changed feature's journeys.** Run `.claude/skills/verify/scripts/verify.py journey <ID>` for each journey in the changed feature's file under `.claude/skills/verify/features/`.
 5. **`verify.py journey all` once per checkpoint**, before the merge to `main`.
-6. **The integration suite**, `uv run pytest -q -m integration`, only on a local machine. Run the focused native tests for the changed path first. The whole suite took about 42 minutes on 2026-10-26.
+6. **The integration suite**, `uv run pytest -q -m integration -n 8 --dist worksteal`, only on a local machine. Run the focused native tests for the changed path first. On 2026-10-27 the whole suite took 9 to 10 minutes with 8 workers and about 46 minutes in one process.
 
 **Verify journeys.** The journeys drive the CLI through real Cognee stores in fresh roots under `outputs/verify/`. The feature map has 102 journey blocks. `journey all` runs the 101 loopback blocks as 140 runs, 4 at a time by default (`--jobs N`). Journey P5 calls the NVIDIA embedding API, so it runs only with `--include-env`. The last full run, on `cdbb6bf`, gave 2022 PASS rows and 0 FAIL rows. `.claude/skills/verify/SKILL.md` gives the commands and the proof rules. If a `lab_store` check fails under parallel runs, rerun with `--jobs 1`.
 

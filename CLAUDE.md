@@ -27,7 +27,7 @@ The user agreed this routine on 2026-10-21.
 3. For a change to retrieval (`retrieve.py`, `settled.py`, `search.py`), to `conformance_fixture.py` or to the fact writers in `fixture.py`, run `uv run python support/conformance_check.py` and journey B1. Read `docs/stage6_conformance_check.md` first. It fails when a case moves from `support/conformance_baseline.json` in either direction. It is a local check and a journey, not part of CI.
 4. For each feature change, run the changed feature's journeys with `.claude/skills/verify/scripts/verify.py journey <ID>`. The feature files in `.claude/skills/verify/features/` list the journeys. Read `.claude/skills/verify/SKILL.md` first.
 5. Once per checkpoint, before the merge to `main`, run `.claude/skills/verify/scripts/verify.py journey all`.
-6. Run the integration suite, `uv run pytest -q -m integration`, only on a local machine. It takes about 10 minutes.
+6. Run the integration suite, `uv run pytest -q -m integration -n 8 --dist worksteal`, only on a local machine. It took 9 to 10 minutes on 2026-10-27 with 8 workers, and about 46 minutes without `-n`.
 
 ## Land a change
 
