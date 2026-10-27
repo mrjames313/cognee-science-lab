@@ -22,7 +22,7 @@ async def test_explicit_name_beats_higher_ranked_fact_target(payload):
         for key in ["oscillations", "mention", "hc", "hc"]
     ]
     assert await select_seed_entities(
-        graph, candidates, {"mention"}, "What does HC limit?", allowed=set(nodes)
+        graph, candidates, "What does HC limit?", skip={"mention"}, allowed=set(nodes)
     ) == {"hc"}
     assert [call.args[0] for call in graph.get_node.await_args_list] == [
         "oscillations",
@@ -39,7 +39,7 @@ async def test_fallback_skips_stale_and_non_entity_vector_entries():
     graph = SimpleNamespace(get_node=AsyncMock(side_effect=nodes.get))
     candidates = [SimpleNamespace(id=key) for key in ["missing", "chunk", "a", "b"]]
     assert await select_seed_entities(
-        graph, candidates, set(), "regulation?", allowed={"a", "b"}
+        graph, candidates, "regulation?", skip=set(), allowed={"a", "b"}
     ) == {"a"}
 
 
@@ -47,7 +47,11 @@ async def test_no_eligible_candidate_returns_no_seed():
     graph = SimpleNamespace(get_node=AsyncMock(return_value=None))
     assert (
         await select_seed_entities(
-            graph, [SimpleNamespace(id="missing")], set(), "HC", allowed={"missing"}
+            graph,
+            [SimpleNamespace(id="missing")],
+            "HC",
+            skip=set(),
+            allowed={"missing"},
         )
         == set()
     )
@@ -76,7 +80,7 @@ async def test_an_entity_no_served_source_constructs_never_seeds(ranked, query, 
     candidates = [SimpleNamespace(id=key) for key in ranked]
     assert (
         await select_seed_entities(
-            graph, candidates, {"mention"}, query, allowed={"helios"}
+            graph, candidates, query, skip={"mention"}, allowed={"helios"}
         )
         == seeds
     )
@@ -215,8 +219,8 @@ async def test_a_writer_between_the_read_and_the_fail_gets_a_second_read(
     from test_identity_storage import PUBLISH_INTENT, memory_store
 
     from cognee_lab.identity import retrieve as module
+    from cognee_lab.identity import settled
     from cognee_lab.identity.models import IdentitySource
-    from cognee_lab.identity.settled import retrieve_settled
     from cognee_lab.identity.validation import IntentError
 
     source = IdentitySource.model_validate_json(json.dumps(source_payload))
@@ -247,10 +251,21 @@ async def test_a_writer_between_the_read_and_the_fail_gets_a_second_read(
             await store.complete(source, writers[0])
         raise IntentError("source_missing", "own chunks are gone")
 
+    refusals = []
+
+    async def read(*args, **kwargs):
+        try:
+            return await module.retrieve(*args, **kwargs)
+        except IntentError as exc:
+            refusals.append(exc.code)
+            raise
+
     monkeypatch.setattr(module, "live_drift", drift)
-    found = await retrieve_settled(
+    monkeypatch.setattr(settled, "retrieve", read)
+    found = await settled.retrieve_settled(
         publisher, source.dataset_id, "q", SearchRequest.parse()
     )
+    assert refusals == ["stale_attempt"]
     (row,) = await store.rows(source.dataset_id)
     assert await store.events(source.dataset_id) == []
     assert row.attempt == writers[0]

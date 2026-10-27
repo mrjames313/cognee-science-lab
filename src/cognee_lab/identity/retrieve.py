@@ -179,7 +179,7 @@ def words(text):
     return {w.rstrip("s") for w in re.findall(r"\w+", text.casefold()) if len(w) > 1}
 
 
-async def select_seed_entities(graph, candidates, mention_ids, query, *, allowed):
+async def select_seed_entities(graph, candidates, query, *, skip, allowed):
     """Prefer explicit reusable names, using current graph fields, not payload shape.
 
     Native vector indexes need not expose an Entity's ``name`` in their payload.
@@ -187,13 +187,14 @@ async def select_seed_entities(graph, candidates, mention_ids, query, *, allowed
     the fallback for queries without an explicit candidate name. Only a
     candidate in `allowed` (a served source's Entity) can seed. The fallback
     is the top reusable candidate, so when another dataset's Entity ranks
-    first there is no seed.
+    first there is no seed. A candidate in `skip` (a local mention label) is
+    never one.
     """
     reusable, exact, seen = [], [], set()
     query_words = words(query)
     for candidate in candidates:
         entity_id = str(candidate.id)
-        if entity_id in mention_ids or entity_id in seen:
+        if entity_id in skip or entity_id in seen:
             continue
         seen.add(entity_id)
         node = await graph.get_node(entity_id)
@@ -251,7 +252,7 @@ async def retrieve(publisher, dataset_id, query, *, limit=LIMIT, work_limit=200)
     # Entity can rank first, but no served source reads it.
     allowed = {str(e) for source, _, _ in current for e in source.entity_constructions}
     seeds = await select_seed_entities(
-        publisher.graph, candidates, mention_ids, query, allowed=allowed
+        publisher.graph, candidates, query, skip=mention_ids, allowed=allowed
     )
     facts, seen, work, limited, fact_limited = [], set(), 0, False, False
     for source, row, held in current:

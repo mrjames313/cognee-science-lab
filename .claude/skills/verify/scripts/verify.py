@@ -35,6 +35,7 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 
 from cognee_lab.identity.environment import (
+    COGNEE_VERSION,
     CREATION_COMMANDS,
     MARKER,
     read_embedding,
@@ -46,7 +47,6 @@ RUNS = REPO / "outputs" / "verify"
 SCRIPT = Path(__file__).resolve().relative_to(REPO)
 FEATURES = Path(__file__).resolve().parents[1] / "features"
 CLI = [sys.executable, "-m", "cognee_lab.identity"]
-EXPECTED_COGNEE = "1.6.2"
 TOKENIZER_PATCH = REPO / "patches" / "cognee-1.6.2-openai-compatible-tokenizer.patch"
 LAB_SYSTEM = REPO / ".cognee_system"
 LAB_DATA = REPO / ".cognee_data"
@@ -197,7 +197,7 @@ def health(run_arg=None):
         info["cognee_version"] = package_version("cognee")
     except Exception as exc:  # report, don't crash the doctor
         info["cognee_version"] = f"not installed: {exc}"
-    gates["cognee_is_1_6_2"] = info["cognee_version"] == EXPECTED_COGNEE
+    gates["cognee_is_1_6_2"] = info["cognee_version"] == COGNEE_VERSION
     gates["jq_available"] = shutil.which("jq") is not None
     gates["cli_parses"] = (
         subprocess.run(CLI + ["--help"], capture_output=True, cwd=REPO).returncode == 0
@@ -286,7 +286,12 @@ def drive(args):
         str(root.relative_to(REPO)),
     ]
     record_command(
-        run, args.label, args.root, CLI + cli_args + ["--root", str(root)], shown, args
+        run,
+        args.label,
+        args.root,
+        CLI + cli_args + ["--root", str(root)],
+        shown,
+        args.timeout,
     )
 
 
@@ -299,10 +304,12 @@ def script(args):
     if not script_args or not re.fullmatch(r"support/\w+\.py", script_args[0]):
         fail("give a support/ script after --, e.g. -- support/conformance_check.py")
     shown = ["uv run python", *script_args]
-    record_command(run, args.label, "-", [sys.executable, *script_args], shown, args)
+    record_command(
+        run, args.label, "-", [sys.executable, *script_args], shown, args.timeout
+    )
 
 
-def record_command(run, label, root, command, shown, args):
+def record_command(run, label, root, command, shown, timeout):
     """Run `command`, keep its .cmd, .stdout, .stderr and JSON as the next step
     and exit with its status."""
     n, stem = next_stem(run, label)
@@ -312,7 +319,7 @@ def record_command(run, label, root, command, shown, args):
         command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     try:
-        stdout, stderr = proc.communicate(timeout=args.timeout)
+        stdout, stderr = proc.communicate(timeout=timeout)
         status = str(proc.returncode)
     except subprocess.TimeoutExpired:
         proc.kill()  # only the process this helper started

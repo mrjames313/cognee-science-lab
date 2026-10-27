@@ -17,7 +17,12 @@ from typing import NamedTuple
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .environment import DATASET_NAME, read_embedding
-from .fixture import FactTarget, check_chunk_vectors, check_fact_edge
+from .fixture import (
+    FactTarget,
+    check_chunk_vectors,
+    check_fact_edge,
+    require_inspected_cognee,
+)
 from .models import Accepted, IdentitySource
 from .validation import IntentError, fresh_mention_id, map_chunks, text_digest
 
@@ -464,10 +469,7 @@ async def run(args, root):
     from . import entry
     from .publish import Publisher
 
-    if cognee.__version__ != "1.6.2":
-        raise IntentError(
-            "unsupported_version", "Fixtures require inspected Cognee 1.6.2"
-        )
+    require_inspected_cognee()
     original = entry.Original(root / DOC01.name, ORIGINAL_DATA_ID)
     text = DOC01.read_text()
     original.path.write_text(text)

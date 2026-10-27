@@ -4,6 +4,7 @@ This module imports no cognee: fixture_environment must run before Cognee's
 import loads an env file.
 """
 
+import inspect
 import json
 import os
 from contextlib import ExitStack, contextmanager
@@ -17,6 +18,9 @@ from .fixture_embeddings import FixtureEmbeddings
 FIXTURE_ENV = Path(__file__).with_name("fixture.env")
 MARKER = "stage6-fixture.json"
 MARKER_KIND = "stage6-isolated-fixture"
+# The one Cognee version whose internals the lab inspected. The fixtures, the
+# IDENTITY member and the verify doctor refuse any other.
+COGNEE_VERSION = "1.6.2"
 # The one dataset every fixture root registers its Data items in.
 DATASET_NAME = "stage6_isolated_fixture"
 CREATION_COMMANDS = frozenset(
@@ -227,3 +231,15 @@ def fixture_environment(root: Path):
         )
         (root / "relational").mkdir(parents=True, exist_ok=True)
         yield
+
+
+async def close_stores(*engines) -> None:
+    """Close a root's graph and vector engines. A process that owns a root's
+    stores closes them before interpreter teardown and never relies on
+    finalizer order for durability."""
+    for engine in engines:
+        close = getattr(engine, "close", None)
+        if close is not None:
+            closing = close()
+            if inspect.isawaitable(closing):
+                await closing

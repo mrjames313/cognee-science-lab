@@ -3,13 +3,13 @@
 import argparse
 import asyncio
 import json
-import inspect
 from contextlib import ExitStack
 from pathlib import Path
 
 from .environment import (
     CREATION_COMMANDS,
     MARKER,
+    close_stores,
     create_root,
     fixture_environment,
     read_embedding,
@@ -344,14 +344,7 @@ def main():
             finally:
                 publisher = getattr(args, "_fixture_publisher", None)
                 if publisher is not None:
-                    # This CLI owns the isolated stores. Close before interpreter
-                    # teardown; never rely on object-finalizer order for durability.
-                    for engine in (publisher.vector, publisher.graph):
-                        close = getattr(engine, "close", None)
-                        if close is not None:
-                            closing = close()
-                            if inspect.isawaitable(closing):
-                                await closing
+                    await close_stores(publisher.vector, publisher.graph)
 
         try:
             result = asyncio.run(execute())

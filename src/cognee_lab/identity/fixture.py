@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import NamedTuple
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from .environment import DATASET_NAME, read_embedding
+from .environment import COGNEE_VERSION, DATASET_NAME, read_embedding
 from .forget_fixture import CALLER_FILES, semantics_for
 from .models import IdentitySource
 from .publish import Publisher
@@ -38,6 +38,19 @@ class ChunkFact(NamedTuple):
     target: FactTarget
     relation: str
     text: str
+
+
+def require_inspected_cognee():
+    """Refuse a Cognee other than the one whose internals the fixtures write
+    through (`unsupported_version`)."""
+    import cognee
+
+    if cognee.__version__ != COGNEE_VERSION:
+        raise IntentError(
+            "unsupported_version",
+            f"Fixtures require inspected Cognee {COGNEE_VERSION}, "
+            f"found {cognee.__version__}",
+        )
 
 
 async def load_chunks(source, ctx):
@@ -334,10 +347,7 @@ async def seed_corpus(root):
 
     from .registered import stamp
 
-    if cognee.__version__ != "1.6.2":
-        raise IntentError(
-            "unsupported_version", "Fixtures require inspected Cognee 1.6.2"
-        )
+    require_inspected_cognee()
     (root / "seed.txt").write_text("Helios controller regulates plasma heating.\n")
     await cognee.add(
         DataItem(data=str(root / "seed.txt"), data_id=SEED_DATA_ID),
@@ -419,10 +429,7 @@ async def create(root, args):
 async def run(args, root):
     import cognee
 
-    if cognee.__version__ != "1.6.2":
-        raise IntentError(
-            "unsupported_version", "First fixture requires inspected Cognee 1.6.2"
-        )
+    require_inspected_cognee()
     if args.command == "fixture":
         source = await create(root, args)
         publisher = args._fixture_publisher

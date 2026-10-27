@@ -17,10 +17,10 @@ from cognee.modules.retrieval.registered_community_retrievers import (
 )
 from cognee.modules.search.types import SearchType
 
+from .environment import COGNEE_VERSION
 from .settled import LIMIT, SearchRefused, SearchRequest, retrieve_settled
 
 NAME = "IDENTITY"
-COGNEE_VERSION = "1.6.2"
 PYTHON = (3, 12)
 
 
@@ -127,10 +127,15 @@ def add_member(enum_cls, name):
     member._value_ = name
     member._sort_order_ = len(enum_cls._member_names_)
     member.__objclass__ = enum_cls
-    type.__setattr__(enum_cls, name, member)
-    enum_cls._member_map_[name] = member
-    enum_cls._value2member_map_[name] = member
-    enum_cls._member_names_.append(name)
+    return restore_member(enum_cls, member)
+
+
+def restore_member(enum_cls, member):
+    """Put `member`, made by `add_member`, back after `remove_member`."""
+    type.__setattr__(enum_cls, member.name, member)
+    enum_cls._member_map_[member.name] = member
+    enum_cls._value2member_map_[member.value] = member
+    enum_cls._member_names_.append(member.name)
     return member
 
 

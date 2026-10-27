@@ -112,10 +112,7 @@ def without_identity(search):
     if "IDENTITY" in SearchType._member_map_:
         registered_community_retrievers.pop(SearchType._member_map_["IDENTITY"], None)
         search.remove_member(SearchType, "IDENTITY")
-    type.__setattr__(SearchType, "IDENTITY", member)
-    SearchType._member_map_["IDENTITY"] = member
-    SearchType._value2member_map_["IDENTITY"] = member
-    SearchType._member_names_.append("IDENTITY")
+    search.restore_member(SearchType, member)
     registered_community_retrievers[member] = retriever
 
 

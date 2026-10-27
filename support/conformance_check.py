@@ -42,7 +42,6 @@ then needs its reason in KNOWN_GAPS.
 
 import argparse
 import asyncio
-import inspect
 import json
 import re
 import subprocess
@@ -438,7 +437,7 @@ async def measure(root):
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector import get_vector_engine_async
 
-    from cognee_lab.identity.environment import DATASET_NAME
+    from cognee_lab.identity.environment import DATASET_NAME, close_stores
     from cognee_lab.identity.search import IDENTITY
 
     graph = await get_graph_engine()
@@ -468,13 +467,7 @@ async def measure(root):
             load("stage5_query_resolution_benchmark_v0.1.yaml")
         )
     finally:
-        # The process owns the root's stores; close them before teardown.
-        for engine in (await get_vector_engine_async(), graph):
-            close = getattr(engine, "close", None)
-            if close is not None:
-                closing = close()
-                if inspect.isawaitable(closing):
-                    await closing
+        await close_stores(await get_vector_engine_async(), graph)
     return check, sorted({str(t) for t in types.values() if t != "Entity"})
 
 
