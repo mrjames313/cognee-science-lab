@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import NamedTuple
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from .environment import DATASET_NAME, read_embedding
@@ -16,6 +17,27 @@ from .validation import IntentError
 FIXTURES = Path(__file__).resolve().parents[3] / "tests/fixtures/identity"
 SEED_DATA_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:seed-document")
 OSCILLATIONS_ID = uuid5(NAMESPACE_URL, "cognee-lab:stage6:oscillations")
+
+
+class FactTarget(NamedTuple):
+    """The Entity a fact points at, as it is created when missing."""
+
+    id: UUID
+    name: str
+    description: str
+
+
+OSCILLATIONS = FactTarget(OSCILLATIONS_ID, "oscillations", "Plasma oscillations.")
+
+
+class ChunkFact(NamedTuple):
+    """A fact one chunk of the original owns: `subject_id` -`relation`->
+    `target`, with its text."""
+
+    subject_id: UUID
+    target: FactTarget
+    relation: str
+    text: str
 
 
 async def load_chunks(source, ctx):
@@ -75,13 +97,20 @@ async def write_semantics(publisher, source, chunks, ctx):
         for chunk in selected:
             if await fact_written(publisher, source, chunk, group, ctx):
                 continue
-            await write_fact_chunk(publisher, source, chunk, group, ctx, fact_text=text)
+            await write_chunk_facts(
+                publisher,
+                source,
+                chunk,
+                ctx,
+                [ChunkFact(group.entity_id, OSCILLATIONS, "limits", text)],
+            )
     await flush_context_provenance(ctx)
 
 
-async def write_fact_chunk(
-    publisher, source, chunk, group, ctx, *, fact_text="it limits oscillations"
-):
+async def write_chunk_facts(publisher, source, chunk, ctx, facts):
+    """Write `facts` (ChunkFacts) owned by `chunk` of the original, with their
+    native evidence, in one write per kind: Ladybug grows with each write
+    transaction until it checkpoints. A missing target Entity is created."""
     from cognee.infrastructure.databases.provenance import make_chunk_source_ref_key
     from cognee.modules.engine.models import Entity
     from cognee.modules.graph.utils import ensure_default_edge_properties
@@ -90,39 +119,47 @@ async def write_fact_chunk(
     from cognee.tasks.storage.index_graph_edges import index_graph_edges
 
     ref = make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, chunk.id)
-    target = await publisher.graph.get_node(str(OSCILLATIONS_ID))
-    if target is None:
-        node = Entity(
-            id=OSCILLATIONS_ID, name="oscillations", description="Plasma oscillations."
-        )
-        await publisher.graph.add_nodes([node], source_ref_key=ref)
-        await index_data_points([node], vector_engine=publisher.vector)
-    elif target.get("type") != "Entity":
-        raise IntentError("incompatible_type", "Fact endpoint is not an Entity")
-    else:
+    targets = {str(f.target.id): f.target for f in facts}
+    subjects = list(dict.fromkeys(str(f.subject_id) for f in facts))
+    created, reused = [], []
+    for target_id, target in targets.items():
+        node = await publisher.graph.get_node(target_id)
+        if node is None:
+            created.append(
+                Entity(id=target.id, name=target.name, description=target.description)
+            )
+        elif node.get("type") != "Entity":
+            raise IntentError("incompatible_type", "Fact endpoint is not an Entity")
+        else:
+            reused.append(target_id)
+    if created:
+        await publisher.graph.add_nodes(created, source_ref_key=ref)
+        await index_data_points(created, vector_engine=publisher.vector)
+    if reused:
         # Reusing an endpoint must retain it for this original chunk too.
         # Owning the incident fact alone does not protect the endpoint from
         # another document's removal and the resulting cascade.
-        await publisher.graph.attach_node_source_refs([str(OSCILLATIONS_ID)], [ref])
-    await publisher.graph.attach_node_source_refs([str(group.entity_id)], [ref])
-    edge = (
-        str(group.entity_id),
-        str(OSCILLATIONS_ID),
-        "limits",
-        {"edge_text": fact_text},
+        await publisher.graph.attach_node_source_refs(reused, [ref])
+    await publisher.graph.attach_node_source_refs(subjects, [ref])
+    edges = ensure_default_edge_properties(
+        [
+            (str(f.subject_id), str(f.target.id), f.relation, {"edge_text": f.text})
+            for f in facts
+        ]
     )
-    edges = ensure_default_edge_properties([edge])
     await publisher.graph.add_edges(edges, source_ref_key=ref)
     await index_graph_edges(edges, vector_engine=publisher.vector)
     contained = ensure_default_edge_properties(
         [
-            (str(chunk.id), str(group.entity_id), "contains", {}),
-            (str(chunk.id), str(OSCILLATIONS_ID), "contains", {}),
+            (str(chunk.id), endpoint, "contains", {})
+            for endpoint in dict.fromkeys(
+                e for f in facts for e in (str(f.subject_id), str(f.target.id))
+            )
         ]
     )
     await publisher.graph.add_edges(contained, source_ref_key=ref)
     # Use native per-chunk production/evidence buffering, including exact IDs.
-    chunk._produced_edge_identities = [(edge[0], edge[1], edge[2])]
+    chunk._produced_edge_identities = [(e[0], e[1], e[2]) for e in edges]
     chunk._provenance_edges = edges
     await capture_graph_provenance([chunk], [*edges, *contained], ctx)
 
@@ -135,6 +172,26 @@ async def verify_semantics(publisher, source, chunks, ctx):
 
 
 async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
+    from .captured_chunks import fact_chunks, fixture_mention_id
+
+    await check_fact_edge(
+        publisher,
+        source,
+        ctx,
+        subject_id=fixture_mention_id(source, group_key),
+        target_id=OSCILLATIONS_ID,
+        relation="limits",
+        expected=fact_chunks(source, chunks, group_key=group_key, fact_text=fact_text),
+    )
+    await check_chunk_vectors(publisher, chunks)
+
+
+async def check_fact_edge(
+    publisher, source, ctx, *, subject_id, target_id, relation, expected
+):
+    """The fact edge is owned by exactly the `expected` chunks of the
+    original, each with its native evidence row; with no expected chunk, the
+    edge is gone."""
     from cognee.infrastructure.databases.provenance import (
         EdgeIdentity,
         make_chunk_source_ref_key,
@@ -143,14 +200,8 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
     from cognee.modules.engine.utils import generate_edge_object_id
     from cognee.modules.provenance.edge_evidence.lookup import get_edge_evidence_records
 
-    from .captured_chunks import fixture_mention_id
-
-    mid = str(fixture_mention_id(source, group_key))
-    identity = EdgeIdentity(mid, str(OSCILLATIONS_ID), "limits")
+    identity = EdgeIdentity(str(subject_id), str(target_id), relation)
     metadata = (await publisher.graph.get_edge_delete_data([identity])).get(identity)
-    from .captured_chunks import fact_chunks
-
-    expected = fact_chunks(source, chunks, group_key=group_key, fact_text=fact_text)
     refs = {
         make_chunk_source_ref_key(source.dataset_id, ctx.data_item.id, c.id)
         for c in expected
@@ -173,7 +224,7 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
         raise IntentError(
             "semantic_retirement", "Retired captured fact remains in graph"
         )
-    eid = UUID(generate_edge_object_id(mid, str(OSCILLATIONS_ID), "limits"))
+    eid = UUID(generate_edge_object_id(str(subject_id), str(target_id), relation))
     evidence = await get_edge_evidence_records(
         [eid], source.dataset_id, per_edge_limit=100, total_limit=100
     )
@@ -184,6 +235,9 @@ async def verify_fact(publisher, source, chunks, ctx, *, group_key, fact_text):
         raise IntentError(
             "evidence_missing", "Native original evidence missing; explicitly rebuild"
         )
+
+
+async def check_chunk_vectors(publisher, chunks):
     for chunk in chunks:
         if not await publisher.vector.retrieve("DocumentChunk_text", [str(chunk.id)]):
             raise IntentError("verify_index", "Original chunk vector missing")

@@ -50,11 +50,17 @@ COMMAND_FAULT_STAGES = {
     "native-add": (),
     "native-search": (),
     "search": (),
+    "conformance-fixture": (),
     "refresh-dependents": (REFRESH_FAULT,),
     "withdraw": WITHDRAW_STAGES,
     "forget": FORGET_STAGES,
     "forget-dataset": DATASET_FORGET_STAGES,
 }
+# The commands a conformance-fixture root takes: its description has no
+# captured fixture edits, so it is created, read and searched only.
+CONFORMANCE_COMMANDS = frozenset(
+    {"conformance-fixture", "status", "retrieve", "search"}
+)
 REVISION_COMMANDS = {
     "revise",
     "edit-text",
@@ -98,6 +104,7 @@ def main():
             "fixture",
             "multi-fixture",
             "chunked-fixture",
+            "conformance-fixture",
             "revise",
             "edit-text",
             *OCCURRENCE_COMMANDS,
@@ -279,6 +286,11 @@ def main():
         elif error := _reopen_error(args, root):
             parser.error(error)
         kind = args.command if creating else read_fixture(root)
+        if kind == "conformance-fixture" and args.command not in CONFORMANCE_COMMANDS:
+            parser.error(
+                "A conformance-fixture root takes "
+                f"{', '.join(sorted(CONFORMANCE_COMMANDS - {kind}))} only"
+            )
         if kind is None and args.command in {
             "reconcile",
             "forget",
@@ -295,6 +307,8 @@ def main():
     with environment:
         if args.command == "forget-dataset":
             from .dataset_forget import run
+        elif args.command == "conformance-fixture":
+            from .conformance_fixture import run
         elif args.command in GLOSSARY_COMMANDS or (
             args.command in GLOSSARY_SHARED and kind == "glossary-fixture"
         ):

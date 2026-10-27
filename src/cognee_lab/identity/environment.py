@@ -20,7 +20,13 @@ MARKER_KIND = "stage6-isolated-fixture"
 # The one dataset every fixture root registers its Data items in.
 DATASET_NAME = "stage6_isolated_fixture"
 CREATION_COMMANDS = frozenset(
-    {"fixture", "multi-fixture", "chunked-fixture", "glossary-fixture"}
+    {
+        "fixture",
+        "multi-fixture",
+        "chunked-fixture",
+        "glossary-fixture",
+        "conformance-fixture",
+    }
 )
 _MALFORMED = "Root marker embedding record is malformed"
 
