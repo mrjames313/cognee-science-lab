@@ -127,4 +127,4 @@ Cleanup refuses while any identity CLI is still running against the run. It copi
 - Mac runs exit cleanly. The handoff records a Linux host where ordinary CLI teardown exceeded 300 s after printing correct JSON. If `drive` shows `timeout` with `json=yes`, report it as that teardown issue. Do not report it as a functional pass or fail.
 - Doctor prints each root's marker record, which includes the embedding model name and dimension count. Those are not secrets. It never prints other `.env` values.
 - Journey `P5` proves the `env` profile only for the `.env` that the handoff names (`nvidia/nemotron-3-embed-1b`, 2048 dimensions). A different `.env` fails its marker check by design. Report that as a mismatch.
-- Native pytest (`uv run pytest -q -m integration`) takes minutes per sequence and uses `support/host_native_launcher.py` only on that Linux host. It is not part of this skill.
+- Native pytest (`uv run pytest -q -m integration`) takes minutes per sequence and uses `support/host_native_launcher.py` only on that Linux host, without `-n`, because the launcher's patch does not reach pytest-xdist workers. It is not part of this skill.

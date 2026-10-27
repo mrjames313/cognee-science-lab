@@ -1,4 +1,6 @@
-"""Host-only launcher: skip native extension teardown after CLI explicit close."""
+"""Host-only launcher: skip native extension teardown after CLI explicit close.
+It patches `subprocess.run` in this process only, so run it without `-n`:
+pytest-xdist workers are new interpreters that never see the patch."""
 
 import subprocess
 import sys
