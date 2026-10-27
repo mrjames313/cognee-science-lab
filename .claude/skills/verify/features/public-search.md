@@ -2,7 +2,7 @@
 
 A user searches a root through Cognee's own `cognee.search` with the lab's `IDENTITY` search type. Since step 5 S1 the CLI `search` registers `IDENTITY` (`cognee_lab.identity.search`) and calls `cognee.search` as a user would. The search returns what the CLI `retrieve` returns, lists the same unavailable sources and withheld decisions, makes no LLM call and is logged in Cognee's search history as `IDENTITY`.
 
-Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types serve withheld and failed state", "What a search returns", "Scope and mode", "What a search lists as unavailable", "Refusals", "Commands").
+Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types serve withheld and failed state", "What a search returns", "Scope and mode", "What a search lists as unavailable", "Refusals", "Commands", "The conformance check").
 
 ## Sub-features
 
@@ -13,6 +13,7 @@ Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types
 - `search-refusals` refuses a scope or mode that is not built with `SearchRefused`, and a refused search writes no history row and changes no publication.
 - `search-dataset-required` refuses `datasets=None` once the user can read a second dataset (`native-add`, a plain `cognee.add`), and searches the root's dataset when it is named.
 - `native-search-unguarded` shows that a plain `cognee.search` with `SearchType.CHUNKS` (`native-search`) serves the text of a failed publication, which `IDENTITY` withholds.
+- `conformance-check` builds DOC01 through the lab's `add` and `cognify` (`conformance-fixture`) and runs `support/conformance_check.py` on the root, which scores `IDENTITY` searches against the Stage 5.3 benchmarks and fails on a regression against its committed baseline. It is a conformance check, not an evaluation of Describe.
 
 ## How to get to it (user POV)
 
@@ -20,6 +21,7 @@ Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types
 - Add `--all-datasets` to `search` to search every dataset (`datasets=None`).
 - Add `--scope` or `--mode` to `search` or `retrieve`.
 - Run `native-add` for a second dataset outside the lab, and `native-search` for a plain `cognee.search` with `SearchType.CHUNKS`.
+- Run `conformance-fixture --root <new dir> --embedding loopback`, then `uv run python support/conformance_check.py --root <that dir>`.
 
 ## Driving it with verify.py
 
@@ -145,3 +147,17 @@ $V check "$RUN" search '.search_result[0].facts == [] and [.search_result[0].una
 - `search` prints `search_result`, the list `cognee.search` returns, so read facts at `.search_result[0].facts`. `retrieve` prints the result itself.
 - `search_history` holds every query Cognee logged in the root, so a check on its length counts the run's earlier searches too. A refused search logs none.
 - A refusal prints `.error == "SearchRefused"` and its `.code`, and exits 1.
+
+**B1 the conformance check.** Proves `conformance-check`. Guide: "The conformance check". `conformance-fixture` publishes DOC01 at revision 1, verified at 1, with no incident, and its describer gives 23 reusable Entities, 12 variant assignments, 11 reference groups with 11 accepted resolutions, 29 facts and 10 chunks ("The describer"). `search --query "Helios-1 major radius"` serves first the fact stated by `Helios-1 has a major radius of 1.35 m`, inferred from the sentence rule and the word-overlap ranking ("What a search returns"). The conformance check on the root reports no regression and no improvement against the committed baseline, and 0 repeated edge IDs, attribution violations and leakage violations ("The baseline", "The gate").
+
+```bash journey B1
+$V drive "$RUN" main fixture -- conformance-fixture
+$V check "$RUN" fixture '.publications == [{"state": "current", "revision": 1, "verified_revision": 1}] and .recovery_events == []' 'DOC01 is published at revision 1 with no incident'
+$V check "$RUN" fixture '.description == {"reusable_entities": 23, "variant_assignments": 12, "mention_groups": 11, "accepted_resolutions": 11, "facts": 29, "chunks": 10}' 'the describer gives the names, variants, reference groups and facts the guide lists'
+$V drive "$RUN" main radius -- search --query "Helios-1 major radius"
+$V check "$RUN" radius '.search_result[0].facts[0].text | startswith("Helios-1 has a major radius of 1.35 m")' 'search serves the stated radius first'
+$V script "$RUN" gate -- support/conformance_check.py --root "$RUN/roots/main" --json
+$V check "$RUN" gate '.regressions == [] and .improvements == []' 'no case does worse or better than the committed baseline'
+$V check "$RUN" gate '.counts | .repeated_edge_ids == 0 and .attribution_violations == 0 and .leakage_violations == 0' 'no repeated edge ID, no attribution outside DOC01, no fact endpoint that is not an Entity'
+$V check "$RUN" gate '(.cases | length) > 0 and .leaking_node_types == []' 'the check scored its cases and saw only Entity endpoints'
+```

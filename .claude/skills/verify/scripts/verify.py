@@ -279,19 +279,34 @@ def drive(args):
         # The CLI default is env, which calls the embedding API. Verify offline unless asked.
         cli_args = [*cli_args, "--embedding", "loopback"]
     root = run / "roots" / args.root
-    command = CLI + cli_args + ["--root", str(root)]
-    n, stem = next_stem(run, args.label)
-    stem.with_suffix(".cmd").write_text(
-        " ".join(
-            [
-                "uv run python -m cognee_lab.identity",
-                *cli_args,
-                "--root",
-                str(root.relative_to(REPO)),
-            ]
-        )
-        + "\n"
+    shown = [
+        "uv run python -m cognee_lab.identity",
+        *cli_args,
+        "--root",
+        str(root.relative_to(REPO)),
+    ]
+    record_command(
+        run, args.label, args.root, CLI + cli_args + ["--root", str(root)], shown, args
     )
+
+
+def script(args):
+    """Run a support/ script, such as the conformance check, as a step."""
+    run = run_dir(args.run)
+    script_args = (
+        args.script_args[1:] if args.script_args[:1] == ["--"] else args.script_args
+    )
+    if not script_args or not re.fullmatch(r"support/\w+\.py", script_args[0]):
+        fail("give a support/ script after --, e.g. -- support/conformance_check.py")
+    shown = ["uv run python", *script_args]
+    record_command(run, args.label, "-", [sys.executable, *script_args], shown, args)
+
+
+def record_command(run, label, root, command, shown, args):
+    """Run `command`, keep its .cmd, .stdout, .stderr and JSON as the next step
+    and exit with its status."""
+    n, stem = next_stem(run, label)
+    stem.with_suffix(".cmd").write_text(" ".join(shown) + "\n")
     started = time.monotonic()
     proc = subprocess.Popen(
         command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -309,9 +324,9 @@ def drive(args):
     payload = extract_json(stdout)
     if payload is not None:
         stem.with_suffix(".json").write_text(json.dumps(payload, indent=2) + "\n")
-    record_step(run, n, args.label, args.root, status, seconds, payload is not None)
+    record_step(run, n, label, root, status, seconds, payload is not None)
     print(
-        f"step {n:02d} {args.label}: exit={status} {seconds}s "
+        f"step {n:02d} {label}: exit={status} {seconds}s "
         f"json={'yes' if payload is not None else 'NO'} -> {stem.relative_to(REPO)}.*"
     )
     if payload is not None and "error" in payload:
@@ -638,6 +653,13 @@ def main():
     p.add_argument("--timeout", type=int, default=600)
     p.add_argument("cli_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=drive)
+
+    p = sub.add_parser("script", help="run a support/ script as a step of RUN")
+    p.add_argument("run")
+    p.add_argument("label", help="evidence file label, e.g. gate")
+    p.add_argument("--timeout", type=int, default=600)
+    p.add_argument("script_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=script)
 
     p = sub.add_parser("check", help="jq -e assertion over a step's JSON, logged")
     p.add_argument("run")
