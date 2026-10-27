@@ -131,6 +131,17 @@ class Check:
     def case(self, case_id, metric, outcome: Outcome, **detail):
         self.cases[case_id] = dict(metric=metric, outcome=outcome, detail=detail)
 
+    def resolves(self, query, own, result):
+        """The search for `query` resolves one of its `own` groups, so the
+        negative controls on the same search are not vacuous."""
+        resolved = self.fixture.resolved(result)
+        self.case(
+            f"{query}:resolves",
+            "query_resolution",
+            Outcome.of(bool(own & resolved)),
+            resolved=sorted(self.fixture.label(g) for g in resolved),
+        )
+
     def control(self, subject, wrong, outcome: Outcome, **detail):
         """A negative control: `subject` is never served or resolved under
         the `wrong` referent."""
@@ -192,18 +203,20 @@ class Check:
                 def holds(text):
                     return holds_value(text, fact["unit"], low, high)
 
-            hits = [f for f in result["facts"] if holds(f["text"])]
             subjects = self.fixture.groups_named(
                 manifest_names(manifest, fact["subject"])
             )
+            hits = [
+                f
+                for f in result["facts"]
+                if holds(f["text"])
+                and self.fixture.group.get(f["source_id"]) in subjects
+            ]
             self.case(
                 f"recall:{fact['id']}",
                 "fact_recall",
                 Outcome.of(bool(hits)),
                 query=query,
-                subject_matched=any(
-                    self.fixture.group.get(f["source_id"]) in subjects for f in hits
-                ),
             )
 
     async def closure(self, traversal):
@@ -360,6 +373,7 @@ class Check:
                 members = fixture.groups_named([m["name"] for m in case["members"]])
                 for member in case["members"]:
                     result = await self.query(member["name"], CLOSURE_TOP_K)
+                    self.resolves(f"{case['id']}:{member['name']}", members, result)
                     self.control(
                         f"{case['id']}:{member['name']}",
                         excluded,
@@ -368,6 +382,7 @@ class Check:
                         ),
                     )
                 result = await self.query(excluded, CLOSURE_TOP_K)
+                self.resolves(f"{case['id']}:{excluded}", groups, result)
                 self.control(
                     f"{case['id']}:{excluded}",
                     case["canonical"],

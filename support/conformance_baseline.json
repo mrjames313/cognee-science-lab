@@ -53,12 +53,24 @@
       "metric": "negative_controls",
       "outcome": "passed"
     },
+    "TRV05_AFRL:AFRL:resolves": {
+      "metric": "query_resolution",
+      "outcome": "passed"
+    },
     "TRV05_AFRL:aurora fusion research laboratory:not:aurora reconstruction suite": {
       "metric": "negative_controls",
       "outcome": "passed"
     },
+    "TRV05_AFRL:aurora fusion research laboratory:resolves": {
+      "metric": "query_resolution",
+      "outcome": "passed"
+    },
     "TRV05_AFRL:aurora reconstruction suite:not:aurora fusion research laboratory": {
       "metric": "negative_controls",
+      "outcome": "passed"
+    },
+    "TRV05_AFRL:aurora reconstruction suite:resolves": {
+      "metric": "query_resolution",
       "outcome": "passed"
     },
     "TRV07_CONTROLLER_VCS": {

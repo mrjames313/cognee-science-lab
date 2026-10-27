@@ -28,17 +28,17 @@ A case passes, fails, or is unobserved when no search result decides it.
 
 | Measure | Cases |
 |---|---|
-| `fact_recall` | Each manifest fact that DOC01 states (F001 to F016, T001, T003). The query `<subject> <predicate>` returns, in the default top 5, a fact whose text holds the object's words or the value with its unit. |
+| `fact_recall` | Each manifest fact that DOC01 states (F001 to F016, T001, T003). The query `<subject> <predicate>` returns, in the default top 5, a fact whose subject is in the identity group of the manifest's subject and whose text holds the object's words or the value with its unit. |
 | `closure_symmetry` | Each traversal identity case (TRV01 to TRV06). Every member's name as the query returns the same nonempty set of facts, with top 100. |
 | `mentions` | TRV07 and TRV08 at their chunk coordinates, and the manifest's DOC01 resolutions ER001 to ER009. A mention-anchored fact covering the span is served under the expected referent. |
 | `negative_controls` | AFRL never resolves the Aurora Reconstruction Suite and the reverse, TRV08 is never served under the Vertical Control System, the referent of TRV07, the resolved case at the same surface in the same chunk, each hard negative of ER002, ER005 and ER007 is never served under the wrong referent, and QRY05 resolves nothing. |
-| `query_resolution` | QRY01 and QRY02 resolve to their group. QRY03 and QRY04 are an accepted gap: they pass when they resolve no wrong group. |
+| `query_resolution` | QRY01 and QRY02 resolve to their group. QRY03 and QRY04 are an accepted gap: they pass when they resolve no wrong group. Each search of a TRV05 negative control resolves its own group: `AFRL` and `aurora fusion research laboratory` the AFRL group, `aurora reconstruction suite` the suite's. Without these cases the AFRL controls would pass on a search that resolves nothing. |
 
 Over every result the check also counts repeated edge IDs, evidence or identity records outside DOC01's own chunks and source, and fact endpoints that are not Entities, or a mention as a target, or a mention subject with no identity record. These three counts must stay 0. It reports logical duplicates, the same fact through two members of one identity group, and does not gate them.
 
 ## The baseline
 
-`support/conformance_baseline.json` holds every case with its measure and its outcome (`passed`, `unobserved` or `failed`), the counts, and for each case that does not pass its `gap`, the reason it does not pass. The baseline is the only record of the gaps. The check made 54 searches and took about 15 s with the fixture. Measured on 2026-10-26:
+`support/conformance_baseline.json` holds every case with its measure and its outcome (`passed`, `unobserved` or `failed`), the counts, and for each case that does not pass its `gap`, the reason it does not pass. The baseline is the only record of the gaps. The check made 54 searches and took about 15 s with the fixture. Measured on 2026-10-26, with the three TRV05 resolution cases added later that day in review fix round 2 (all three pass; the other cases did not move):
 
 | Measure | Passed | Failed | Unobserved |
 |---|---:|---:|---:|
@@ -46,7 +46,7 @@ Over every result the check also counts repeated edge IDs, evidence or identity 
 | `closure_symmetry` | 5 | 0 | 1 |
 | `mentions` | 9 | 0 | 2 |
 | `negative_controls` | 6 | 1 | 1 |
-| `query_resolution` | 4 | 0 | 0 |
+| `query_resolution` | 7 | 0 | 0 |
 
 Repeated edge IDs, attribution violations and leakage violations were 0. Logical duplicates were 7, for example `8 MW` stated with both `neutral beam injection` and `Neutral Beam Injection System` in one result.
 
@@ -63,7 +63,7 @@ What the passes do not show:
 
 ## The gate
 
-The check owns the ratchet. It exits 1 when a case does worse than on the baseline (passed, then unobserved, then failed), when a case appears or disappears, when a gated count grows, and when a case does better than on the baseline. On an improvement it prints `baseline is stale, rerun with --write-baseline`. Journey B1 checks only the exit status. On 2026-10-26 a scratch break that turned off variant expansion in `retrieve.py` made the check fail seven cases: five closures, F009 and T003.
+The check owns the ratchet. It exits 1 when a case does worse than on the baseline (passed, then unobserved, then failed), when a case appears or disappears, when a gated count grows, and when a case does better than on the baseline. On an improvement it prints `baseline is stale, rerun with --write-baseline`. Journey B1 checks only the exit status. On 2026-10-26 a scratch break that turned off variant expansion in `retrieve.py` made the check fail seven cases: five closures, F009 and T003. In fix round 2, also on the user's Mac, a scratch break that kept the two AFRL names from seeding failed the two AFRL resolution cases and closure TRV05, while the three AFRL negative controls still passed.
 
 `--write-baseline` makes a new root (it refuses `--root`), prints how the run moved from the old baseline, and then writes the new baseline, carrying each gap from the old one. It refuses, and writes nothing, when a case that does not pass has no gap, when a case that passes still has one, or when a gated count is not 0. To record a gap, or delete one, edit the `gap` of that case in the baseline and run `--write-baseline` again. For a case that is new to the baseline, add an entry that holds only its `gap`.
 
