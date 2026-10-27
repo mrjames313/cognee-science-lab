@@ -13,7 +13,7 @@ Guide: `docs/stage6_identity_public_search.md` ("Warning: the other search types
 - `search-refusals` refuses a scope or mode that is not built with `SearchRefused`, and a refused search writes no history row and changes no publication.
 - `search-dataset-required` refuses `datasets=None` once the user can read a second dataset (`native-add`, a plain `cognee.add`), and searches the root's dataset when it is named.
 - `native-search-unguarded` shows that a plain `cognee.search` with `SearchType.CHUNKS` (`native-search`) serves the text of a failed publication, which `IDENTITY` withholds.
-- `conformance-check` builds DOC01 through the lab's `add` and `cognify` (`conformance-fixture`) and runs `support/conformance_check.py` on the root, which scores `IDENTITY` searches against the Stage 5.3 benchmarks and fails on a regression against its committed baseline. It is a conformance check, not an evaluation of Describe.
+- `conformance-check` builds DOC01 through the lab's `add` and `cognify` (`conformance-fixture`) and runs `support/conformance_check.py` on the root, which scores `IDENTITY` searches against the Stage 5.3 benchmarks and fails when a case moves from its committed baseline in either direction. It is a conformance check, not an evaluation of Describe.
 
 ## How to get to it (user POV)
 
