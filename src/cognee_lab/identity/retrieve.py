@@ -8,10 +8,10 @@ from types import SimpleNamespace
 from uuid import UUID
 
 from .chains import live_pass
-from .dataset_forget import dataset_data
 from .delivery import Evidence, Fact, Support, semantic
 from .models import Accepted, ChunkInput
 from .native import edge_metadata, fact_neighborhood
+from .native_copy import dataset_data
 from .publish import contributions, identity_edges
 from .validation import IntentError, Reason, validate_inputs
 from .withholding import (

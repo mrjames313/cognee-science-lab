@@ -28,6 +28,7 @@ from .digests import object_digest
 from .erasure import RESIDUE, impact, remaining, unfinished
 from .forget import FAULT_STAGES as FORGET_FAULTS
 from .forget import IMPACT_CHANGED, delete_data, plan_for, stored_files
+from .native_copy import dataset_data
 from .outside_deletion import orphan_name_points, sweep_orphans
 from .retirement import removed_entities, source_ids
 from .validation import IntentError
@@ -102,19 +103,6 @@ def as_forgotten(row):
 def simulated(rows, gone) -> list:
     """The rows as they will be once the rows in `gone` are forgotten."""
     return [as_forgotten(r) if r.source in gone else r for r in rows]
-
-
-async def dataset_data(dataset_id) -> dict[str, str]:
-    """Each Data item of the dataset, by ID, with its name."""
-    from sqlalchemy import select
-    from cognee.infrastructure.databases.relational import get_relational_engine
-    from cognee.modules.data.models import Data
-
-    async with get_relational_engine().get_async_session() as session:
-        found = await session.execute(
-            select(Data.id, Data.name).where(Data.dataset_id == UUID(str(dataset_id)))
-        )
-    return {str(i): name for i, name in found}
 
 
 def lab_data(rows) -> set[str]:
