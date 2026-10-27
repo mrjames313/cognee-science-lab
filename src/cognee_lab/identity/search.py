@@ -142,6 +142,23 @@ def add_member(enum_cls, name):
     return member
 
 
+def remove_member(enum_cls, name):
+    """Undo `add_member`."""
+    enum_cls._member_map_.pop(name)
+    enum_cls._value2member_map_.pop(name, None)
+    enum_cls._member_names_.remove(name)
+    type.__delattr__(enum_cls, name)
+
+
+def is_lab_retriever(retriever):
+    """`IdentityRetriever`, or the class an earlier import of this module made
+    before a reload."""
+    return (
+        getattr(retriever, "__module__", None),
+        getattr(retriever, "__qualname__", None),
+    ) == (__name__, IdentityRetriever.__qualname__)
+
+
 def self_test(member):
     """The uses of IDENTITY that `cognee.search` and its results rely on."""
     from cognee.modules.search.models.SearchResultPayload import SearchResultPayload
@@ -180,9 +197,10 @@ def self_test(member):
 
 def register():
     """Add IDENTITY to SearchType and register `IdentityRetriever` for it.
-    Idempotent. Refuses another Cognee or Python version, and an IDENTITY
-    member it did not add, since registering a retriever under an existing
-    member silently replaces that member's retriever."""
+    Idempotent, and safe across a reload of this module. Refuses another
+    Cognee or Python version, and an IDENTITY member it did not add, since
+    registering a retriever under an existing member silently replaces that
+    member's retriever. A failed self-test undoes what this call changed."""
     if cognee.__version__ != COGNEE_VERSION:
         raise RegistrationError(
             f"IDENTITY was built against cognee {COGNEE_VERSION}, "
@@ -194,15 +212,25 @@ def register():
             f"found Python {sys.version_info[0]}.{sys.version_info[1]}"
         )
     member = SearchType._member_map_.get(NAME)
-    if member is None:
+    added = member is None
+    if added:
         member = add_member(SearchType, NAME)
-        use_retriever(member, IdentityRetriever)
-    elif registered_community_retrievers.get(member) is not IdentityRetriever:
+    previous = registered_community_retrievers.get(member)
+    if not added and not is_lab_retriever(previous):
         raise RegistrationError(
             f"SearchType already has {NAME}, which the lab did not add; "
             "registering would replace its retriever"
         )
-    self_test(member)
+    use_retriever(member, IdentityRetriever)
+    try:
+        self_test(member)
+    except RegistrationError:
+        if added:
+            del registered_community_retrievers[member]
+            remove_member(SearchType, NAME)
+        else:
+            registered_community_retrievers[member] = previous
+        raise
     return member
 
 

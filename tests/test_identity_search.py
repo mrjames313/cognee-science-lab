@@ -2,7 +2,9 @@
 retriever's refusals and what it hands back to Cognee. The search through
 real stores is in test_identity_search_native.py."""
 
+import importlib
 import json
+import pickle
 import re
 import sys
 from pathlib import Path
@@ -77,6 +79,51 @@ def test_a_lookup_that_misses_fails_the_self_test(monkeypatch):
     monkeypatch.delitem(SearchType._value2member_map_, "IDENTITY")
     with pytest.raises(search.RegistrationError, match="self-test"):
         search.register()
+    assert registered_community_retrievers[search.IDENTITY] is search.IdentityRetriever
+
+
+def test_a_reload_registers_the_reloaded_retriever():
+    member = search.IDENTITY
+    importlib.reload(search)
+    assert search.IDENTITY is member is SearchType.IDENTITY
+    assert registered_community_retrievers[member] is search.IdentityRetriever
+
+
+@pytest.fixture
+def without_identity():
+    """SearchType and the retriever registry as Cognee ships them, with the
+    lab's member and registry entry put back afterwards."""
+    member = SearchType._member_map_["IDENTITY"]
+    retriever = registered_community_retrievers.pop(member)
+    search.remove_member(SearchType, "IDENTITY")
+    yield
+    if "IDENTITY" in SearchType._member_map_:
+        registered_community_retrievers.pop(SearchType._member_map_["IDENTITY"], None)
+        search.remove_member(SearchType, "IDENTITY")
+    type.__setattr__(SearchType, "IDENTITY", member)
+    SearchType._member_map_["IDENTITY"] = member
+    SearchType._value2member_map_["IDENTITY"] = member
+    SearchType._member_names_.append("IDENTITY")
+    registered_community_retrievers[member] = retriever
+
+
+def test_a_failed_self_test_leaves_search_type_as_it_found_it(
+    monkeypatch, without_identity
+):
+    def refuse(_):
+        raise pickle.PicklingError("refused")
+
+    monkeypatch.setattr(search.pickle, "dumps", refuse)
+    with pytest.raises(search.RegistrationError, match="pickle"):
+        search.register()
+    assert "IDENTITY" not in SearchType.__members__
+    assert "IDENTITY" not in SearchType._value2member_map_
+    assert not hasattr(SearchType, "IDENTITY")
+    assert not {m for m in registered_community_retrievers if m == "IDENTITY"}
+    monkeypatch.undo()
+    added = search.register()
+    assert SearchType["IDENTITY"] is added
+    assert registered_community_retrievers[added] is search.IdentityRetriever
 
 
 @pytest.mark.parametrize(

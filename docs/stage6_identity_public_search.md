@@ -46,7 +46,7 @@ Cognee's `SearchType` is a closed enum. Import `cognee_lab.identity.search` to a
 - `SearchType` already has an `IDENTITY` member that the lab did not add. Cognee replaces the retriever of an existing member without a warning, so the lab never registers over one.
 - A self-test fails. It checks the lookups by name, by value and by attribute, iteration, pickling, a `SearchResultPayload` built with the member and from its value, and the registry entry.
 
-The module imports `cognee`, so configure the process first. A second import, or a second call of `register()`, changes nothing.
+When the self-test fails, the import removes the member and the registry entry that it added, so `SearchType` is as it was. The module imports `cognee`, so configure the process first. A second import, or a second call of `register()`, changes nothing. A reload of the module (`importlib.reload`) keeps the member and registers the reloaded `IdentityRetriever`: the import recognises its own earlier class by module and name.
 
 Every search opens the configured stores through `Publisher.configured`, which runs `RecordStore.initialize`: it creates the lab's ledger tables in Cognee's relational database if they are missing and records the Entities that forget tombstones prove removed (it records nothing twice), as every lab CLI command does. The retriever keeps no per-process cache of the stores, since the tests and the CLI switch roots within one process.
 
