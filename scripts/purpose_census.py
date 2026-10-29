@@ -29,7 +29,7 @@ CATEGORIES = {
     "C.text": "change: native rebuild for a new text",
     "L": "ledger and crash recovery",
     "B": "publish: compile, write and verify one revision's overlay",
-    "Q": "retrieval probe",
+    "Q": "retrieval and the public IDENTITY search",
     "M": "record model and self-consistency",
     "F": "CLI, environment, schema export",
     "S.first": "scenario fixtures: first publication",
@@ -127,9 +127,12 @@ TESTS = {
         "test_identity_chunks_native",
         "test_conformance_check", "test_identity_conformance",
         "test_identity_conformance_native", "test_identity_delivery",
-        "test_identity_search", "test_identity_search_native",
+        "test_identity_search",
     ),
-    "mixed": ("test_identity_entry", "test_identity_entry_native"),
+    "mixed": (
+        "test_identity_entry", "test_identity_entry_native",
+        "test_identity_search_native",
+    ),
     "change": (
         "test_identity_additions", "test_identity_additions_native",
         "test_identity_cascade", "test_identity_chain_kind_change",
