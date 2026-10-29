@@ -1,10 +1,12 @@
 # Session handoff
 
-**Updated:** 2026-10-27 (America/Detroit).
+**Updated:** 2026-10-29 (America/Detroit).
 
-The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. On 2026-10-27 a text edit stopped renaming the original's document, and the source-aware mode was built and merged. GitHub Actions passed on `e804b35` ([the history](stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27)).
+The project is in Stage 6, implementation step 5 / M4. Step 4 / M3 closed on 2026-10-25. Step 5's checkpoints S2, S3a, S3b, S4 and S1 merged into `main` on 2026-10-26, and GitHub Actions passed on the S1 docs commit `747a4f0` on 2026-10-27. On 2026-10-27 a text edit stopped renaming the original's document, and the source-aware mode was built and merged. GitHub Actions passed on `e804b35` ([the history](stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27)). The record of that pass, `fdda56e`, was pushed on 2026-10-29, and GitHub Actions passed on it (run 40923453227, `unit` and `chains`).
 
 **Next task.** Build the other step-5 delivery items, starting with grouped-by-identity delivery. [Next task](#next-task) has the detail.
+
+**Paused on 2026-10-29.** The user paused step 5 for a short detour after the source-aware checkpoint. Nothing is in flight. `main` is pushed, no other branch or worktree exists, and grouped-by-identity delivery has no spec or code yet. To resume, run [the resume commands](#resume-and-verification-commands), then start [Next task](#next-task) item 1 with a proposal for the user. The assistant's local notes in `.audit/` are not committed. `.audit/step5-source-aware-spec.md` holds the source-aware proposal and the user's decisions, which this document and [the history](stage6_checkpoint_history.md#step-5-the-source-aware-mode-2026-10-27) also record.
 
 The dated history of every checkpoint is in [the Stage 6 checkpoint history](stage6_checkpoint_history.md). This document says what is true now.
 
@@ -213,7 +215,7 @@ uv run python -c "import cognee; print(cognee.__version__)"
 uv run pytest -q -m 'not integration'
 ```
 
-The Cognee version must be **1.6.2**. If it differs, check compatibility again before you call it the tested profile. On `main` at `4e7a33b` the unit suite gives 699 passed. [The history](stage6_checkpoint_history.md#counts-and-timings-recorded-in-the-handoff-until-2026-10-26) keeps the earlier counts.
+The Cognee version must be **1.6.2**. If it differs, check compatibility again before you call it the tested profile. On `main` at `e804b35` the unit suite gave 707 passed on 2026-10-27, run by the assistant on the user's Mac. [The history](stage6_checkpoint_history.md#counts-and-timings-recorded-in-the-handoff-until-2026-10-26) keeps the earlier counts.
 
 A happy path in a **new** root:
 

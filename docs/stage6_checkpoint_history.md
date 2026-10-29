@@ -1094,7 +1094,7 @@ This is a checkpoint. Branch `source-aware-mode`, rebased onto the integration-s
 - `verify.py journey all`: 2032 PASS rows and 0 FAIL rows in 141 runs, with P5 skipped.
 - `uv run pytest -q -m integration -n 8 --dist worksteal`: 121 passed in 551 s and in 531 s. In an earlier run, 1 test failed and 120 passed in 599 s. The failing test passed when rerun alone, and its name was not captured. Two more runs gave 121 passed in 546 s and in 548 s. So 4 of 5 parallel runs on this branch passed, and the integration-speed delegate's 9 runs had no failure. The failure is a tracked follow-up.
 
-GitHub Actions run 40573037239 on `main` at `e804b35` passed on 2026-10-27: the `unit` job (707 unit tests and the occurrence check) and the `chains` job.
+GitHub Actions run 40573037239 on `main` at `e804b35` passed on 2026-10-27: the `unit` job (707 unit tests and the occurrence check) and the `chains` job. The commit that records this pass, `fdda56e`, changes only documents. It was pushed on 2026-10-29, and run 40923453227 passed on it.
 
 **Known limits.** The search guide lists five. The main ones are these. A fact's flat `identity` comes from its first support. `name` can be null if Cognee deletes the Data row outside the lab during the read. No fixture has a fact that two documents support, so a store-free test covers that case.
 
