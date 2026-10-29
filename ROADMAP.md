@@ -797,6 +797,11 @@ Step 5 owns the standard entry points, dataset Forget, endpoint gaps during a re
 
 Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
 
+## Revision record — 2026-10-29 (minimal identity framework)
+
+- Added `docs/minimal_identity_framework.md`, a stand-alone design for a minimal identity framework on Cognee for a fresh build elsewhere, at the user's request. It proposes ledger-only identity with query-time expansion and an anchor-owned graph overlay as the upgrade. Drafted by the assistant with subagents on the user's Mac, reviewed in five rounds.
+- Labelled the step-5 search modules in `scripts/purpose_census.py`. The census reports 11,121 core lines, 58.3% of them change response, on 2026-10-29.
+
 ## Revision record — 2026-10-29 (pause)
 
 - Recorded the user's pause of step 5 for a short detour, with nothing in flight and `main` pushed at `fdda56e`, where GitHub Actions passed (run 40923453227). The session handoff says how to resume.
