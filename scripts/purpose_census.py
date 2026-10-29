@@ -49,10 +49,13 @@ MODULES = {
     "C.text": ("text_changes", "entry_update"),
     "L": ("storage", "stages"),
     "B": ("publish", "native", "entry", "native_chunks"),
-    "Q": ("retrieve",),
+    "Q": ("retrieve", "delivery", "settled", "search"),
     "M": ("models", "records", "decisions"),
     "F": ("schema", "environment", "__main__", "fixture_embeddings", "__init__"),
-    "S.first": ("fixture", "captured_chunks", "captured_text"),
+    "S.first": (
+        "fixture", "captured_chunks", "captured_text", "conformance_fixture",
+        "native_search",
+    ),
     "S.change": (
         "multisource", "glossary_fixture", "text_fixture", "occurrence_fixture",
         "forget_fixture", "kind_change", "resolved_retirement", "reinterpretation",
@@ -122,6 +125,9 @@ TESTS = {
         "test_identity_records", "test_identity_retrieval",
         "test_identity_ledger_check", "test_identity_chunks",
         "test_identity_chunks_native",
+        "test_conformance_check", "test_identity_conformance",
+        "test_identity_conformance_native", "test_identity_delivery",
+        "test_identity_search", "test_identity_search_native",
     ),
     "mixed": ("test_identity_entry", "test_identity_entry_native"),
     "change": (
@@ -151,7 +157,7 @@ TESTS = {
 }
 JOURNEY_FEATURES = {
     "first": ("publication-and-retrieval",),
-    "mixed": ("standard-entry-points",),
+    "mixed": ("standard-entry-points", "public-search"),
     "change": (
         "dependencies", "group-regrouping", "multi-source-withdrawal",
         "occurrence-changes", "reinterpretation", "revision-and-text-edits",
