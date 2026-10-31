@@ -799,8 +799,8 @@ Entries below retain the decisions and evidence status at their stated date. The
 
 ## Revision record — 2026-10-31 (minimal identity framework, alignment experiment)
 
-- Ran the alignment experiment of open question 7 on the user's Mac, at the user's request, with real extraction (Claude Haiku 5.5, 106 LLM calls). Results in `results/minimal_identity_alignment_experiment.md`, harness `scripts/align_experiment.py`, run with `uv run --with anthropic` so the lab's dependencies are unchanged.
-- The framework now aligns by exact and lexical rules instead of vector similarity, and the spelling hint is optional and off by default, both pending the user's acceptance. Edits always take Cognee's full rebuild.
+- Ran the alignment experiment of open question 7 on the user's Mac, at the user's request, with real extraction (Claude Haiku 5.5, 106 LLM calls). Results in `results/minimal_identity_alignment_experiment.md`, harness `scripts/align_experiment.py`, run with `uv run --with anthropic==2.3.0` so the lab's dependencies are unchanged.
+- The framework now aligns by exact and lexical rules instead of vector similarity, and the spelling hint is optional and off by default, both pending the user's acceptance. Edits always take Cognee's full rebuild, and Retrieve has no vector seed fallback.
 - Fixed the findings of two branch reviews: the lexical claims now come from the committed harness, the support rule accepts a `Name (ABBR)` node's parts, the view overlay copies each edge once, and the hinted root that the checks had altered was replaced.
 
 ## Revision record — 2026-10-31 (minimal identity framework, read-time view and alignment)

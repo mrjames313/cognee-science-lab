@@ -7,7 +7,7 @@ right nodes in the `Entity_name` vector index, and times Shape 1v's in-memory
 view. With --checks it also exercises five Cognee behaviours the design reads
 from source.
 
-    uv run --with anthropic python scripts/align_experiment.py run ROOT --hint|--no-hint [--checks]
+    uv run --with anthropic==2.3.0 python scripts/align_experiment.py run ROOT --hint|--no-hint [--checks]
     uv run python scripts/align_experiment.py analyze ROOT
     uv run python scripts/align_experiment.py dry-run ROOT
     uv run python scripts/align_experiment.py report BASE
@@ -272,9 +272,10 @@ async def align(graph, vector, described, chunks):
         for node_id, cand in sorted(seen.items(), key=lambda kv: kv[1]):
             if node_id in member_ids or not lexical_match(cand, closure):
                 continue
-            if cand in all_listed and cand not in closure:
-                continue
             m = PAREN.match(cand)
+            parts = {cand, m.group(1), m.group(2)} if m else {cand}
+            if any(x in all_listed and x not in closure for x in parts):
+                continue
             terms = set(closure) | ({m.group(1), m.group(2)} if m else {cand})
             ok, bad = support(node_id, terms, chunks)
             record["lexical"].append(
@@ -315,11 +316,15 @@ async def vector_ranks(graph, vector, name, closure, record):
             return "group"
         return "wrong"
 
-    out = dict(depth=len(ranked), right=[], best_group=None, best_wrong=None)
+    out = dict(depth=len(ranked), top=None, exact=None, right=[], best_group=None, best_wrong=None)
     for rank, (node_id, node_name, distance) in enumerate(ranked, start=1):
         k = kind(node_id, node_name)
         entry = dict(rank=rank, name=node_name, distance=distance)
-        if k == "lexical":
+        if out["top"] is None:
+            out["top"] = dict(entry, kind=k)
+        if k == "exact":
+            out["exact"] = entry
+        elif k == "lexical":
             out["right"].append(entry)
         elif k == "group" and out["best_group"] is None:
             out["best_group"] = entry
@@ -363,10 +368,12 @@ async def view_timing(records):
     projected = len(fragment.edges)
     members = {}
     for r in records:
-        ids = []
         if r["outcome"] == "exact":
-            ids.append(r["exact"]["id"])
-        ids += [c["id"] for c in r["lexical"] if c["supported"]]
+            ids = [r["exact"]["id"]]
+        elif r["outcome"] == "lexical":
+            ids = [c["id"] for c in r["lexical"] if c["supported"]]
+        else:
+            ids = []
         for node_id in ids:
             members.setdefault(frozenset(r["group"]), set()).add(node_id)
     originals = {
@@ -449,13 +456,15 @@ async def run(root, hint: bool, checks: bool) -> dict:
         )
     data_ids = await corpus_ids()
     measured, engines = await measure(data_ids)
-    result |= measured
-    result["llm_calls_total"] = len(calls.log)
-    write(root, result)
-    if checks:
-        result["checks"] = await behaviour_checks(cognee, calls, data_ids)
+    try:
+        result |= measured
         result["llm_calls_total"] = len(calls.log)
-    await environment.close_stores(*engines)
+        write(root, result)
+        if checks:
+            result["checks"] = await behaviour_checks(cognee, calls, data_ids)
+            result["llm_calls_total"] = len(calls.log)
+    finally:
+        await environment.close_stores(*engines)
     return result
 
 
@@ -521,6 +530,8 @@ async def behaviour_checks(cognee, calls, data_ids):
 
 async def analyze(root) -> dict:
     result = json.loads((root / "result.json").read_text())
+    if "checks" in result:
+        raise SystemExit("The checks pruned this root's graph after its measurement; analyze would overwrite it")
     measured, engines = await measure(await corpus_ids())
     await environment.close_stores(*engines)
     return {k: v for k, v in result.items() if k in ("hint", "cognifies", "llm_calls_total", "checks")} | measured
@@ -561,8 +572,8 @@ def report(base: Path) -> str:
         "",
         "Names not aligned `exact`, by run.",
         "",
-        "| Run | Name | Outcome | Lexical node | Its vector rank and distance | Best wrong hit | Best in-group hit |",
-        "|---|---|---|---|---|---|---|",
+        "| Run | Name | Outcome | Lexical node | Its vector rank and distance | Top hit (kind) | Best wrong hit | Best in-group hit |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for name, r in runs:
         for a in r["alignment"]:
@@ -574,8 +585,9 @@ def report(base: Path) -> str:
                 "-" if not a["lexical"] else f"not in top {v['depth']}"
             )
             fmt = lambda e: f"{e['name']}, rank {e['rank']} at {e['distance']}" if e else "-"
+            top = f"{fmt(v['top'])} ({v['top']['kind']})" if v.get("top") else "-"
             out.append(
-                f"| {name} | {a['name']} | {a['outcome']} | {lex} | {right} | "
+                f"| {name} | {a['name']} | {a['outcome']} | {lex} | {right} | {top} | "
                 f"{fmt(v['best_wrong'])} | {fmt(v['best_group'])} |"
             )
     out += [
@@ -594,6 +606,8 @@ def report(base: Path) -> str:
         "|---|---|---|---|---|---|---|",
     ]
     for name, r in runs:
+        if "checks" in r:
+            continue
         v = r["view"]
         out.append(
             f"| {name} | {v['nodes']} | {v['projected_edges']} | {v['overlay_edges']} | "
@@ -622,7 +636,7 @@ def main():
 
     root = args.root.resolve()
     outputs = REPO / "outputs"
-    if outputs not in root.parents or any(p.name.startswith("stage6_") for p in root.parents):
+    if outputs not in root.parents or any(p.name.startswith("stage6_") for p in (root, *root.parents)):
         raise SystemExit("ROOT must be under outputs/ and outside every reviewed stage6_* root")
     if args.command == "analyze":
         with environment.fixture_environment(root):
