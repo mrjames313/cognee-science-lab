@@ -797,6 +797,13 @@ Step 5 owns the standard entry points, dataset Forget, endpoint gaps during a re
 
 Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
 
+## Revision record — 2026-10-31 (minimal identity framework, alignment experiment)
+
+- Ran the alignment experiment of open question 7 on the user's Mac, at the user's request: Claude Haiku 5.5 extraction, the configured real embedding model, DOC01 and DOC02, three runs with the spelling hint and three without, 80 LLM calls. Results in `results/minimal_identity_alignment_experiment.md`, harness `scripts/align_experiment.py`.
+- The hint aligned every name exactly but planted 7 or 8 false chunk links per run. The vector similar pass ranked a wrong Entity first for every miss, so the design replaces it with a lexical pass (a trailing `(ABBR)` stripped), which recovered every variant node. With it the hint bought nothing, so it is optional and off by default, pending the user.
+- CB11, CB16, CB17 and CB20 observed as the design states. Shape 1v's in-memory view took milliseconds on graphs of about 70 nodes.
+- Added the `anthropic` extra to the Cognee dependency, so Cognee can use an Anthropic model.
+
 ## Revision record — 2026-10-31 (minimal identity framework, read-time view and alignment)
 
 - Added a technical design summary and Shape 1v, an identity view built at read time and cached only while the ledger and graph versions both match, to `docs/minimal_identity_framework.md`. The cache rule is the user's.
