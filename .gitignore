@@ -1,10 +1,25 @@
+# Editor backups and swap files: Emacs, Vim, nano, JetBrains, VS Code local history, merge tools
 *~
-#*#
+\#*#
 .#*
+*.swp
+*.swo
+*.bak
+*.backup
+*.orig
+*.rej
+*.save
+*.tmp
+*___jb_tmp___
+*___jb_old___
+.history/
 .venv/
 __pycache__/
 *.pyc
+# Every env file and its copies, except the template
 .env
+.env*
+!.env.example
 outputs/*
 !outputs/.gitkeep
 .cognee_system/
