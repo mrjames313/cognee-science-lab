@@ -768,7 +768,7 @@ Cognee behaviour the proposal inherits.
 12. Cognee's native search types ignore the ledger. They can serve a forgotten source's chunks and facts (CB4). Only Retrieve applies eligibility.
 13. A delete or update made through Cognee's own API is detected at the next read, not prevented (9.9). `prune_data` is not detected at all, because the facet still holds. Only a ledger fact's text goes missing (9.9).
 14. After the default prune, the originals keep their processed marks and must have them reset before a plain cognify rebuilds Cognee's facts (9.9, CB16).
-15. Access control on was never tested. The ledger's placement and the shared `Entity_name` index may both change under it (section 6).
+15. Access control on was never tested. The ledger's placement and which graph Retrieve reads may both change under it (section 6).
 
 ## 10. Open questions for the user
 
@@ -777,7 +777,7 @@ Cognee behaviour the proposal inherits.
 3. Variant scope. Decided. Corpus-wide scope is acceptable for the first build.
 4. Identity inside Cognee's graph. Decided. Graph-completion search is in scope, so the first build is Shape 1 plus Shape 1v's in-memory route (Appendix B). Prototype its view build time on a real dataset first. Its physical-copy route works only with backend access control off (question 6). Shape 2 and its written overlay (section 9.10) are for a reader that must walk the live graph itself.
 5. The no-forget variant. Kept as an option, and not a significant decision. It forbids removing a source, not editing one, so it saves only Erasure's three steps and the `erasing` state.
-6. Access control. Decided for now. Start with whichever is easiest, which is backend access control off, set explicitly (`ENABLE_BACKEND_ACCESS_CONTROL=false`), as the reference implementation ran. The rest of this question applies when the project turns it on. Will access control be on in the target project? If so, the ledger placement and the seed step need a check nobody has run, and Shape 1v loses its physical-copy route, because `cognee.search` then sets each dataset's own graph database itself.
+6. Access control. Decided for now. Start with whichever is easiest, which is backend access control off, set explicitly (`ENABLE_BACKEND_ACCESS_CONTROL=false`), as the reference implementation ran. The rest of this question applies when the project turns it on. Will access control be on in the target project? If so, the ledger placement and Retrieve's graph reads need a check nobody has run, and Shape 1v loses its physical-copy route, because `cognee.search` then sets each dataset's own graph database itself.
 7. The spelling hint. Measured on 2026-10-31 (section 9.12). With the lexical pass it bought nothing on the test corpus and linked names to chunks that do not name them in every run, so the recommendation is to build without it and keep it as an option. Do you accept that, or keep it on by default? The replacement of vector similarity by the lexical pass waits on the same answer.
 
 ## Appendix A. Where the evidence comes from
