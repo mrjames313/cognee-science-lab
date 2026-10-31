@@ -2,11 +2,68 @@
 
 A proposal for review. This document stands alone. It assumes you know Cognee basics (add, cognify, search, datasets, Data items, DataPoints, the graph, vector and relational stores) and nothing else.
 
+## Technical design summary
+
+The framework keeps identity in a table it owns and applies it when it reads. It never writes identity into Cognee. Cognee keeps building and storing its own graph from the documents, and the framework treats that graph as read-only input.
+
+```
+                 document text (a Cognee Data item)
+                               |
+                               v
+   Describe (rules, a model, or a person)  -->  description (JSON)
+                               |
+                               v
+   Publish: validate, then one compare-and-set row write
+                               |
+                               v
+   +------------------------------------------------------+
+   | Ledger: identity_publications, one row per source     |
+   | current / erasing / forgotten, revision, description  |
+   +------------------------------------------------------+
+         |                    |                       |
+         v                    v                       v
+   Retrieve              Status                  Forget
+   seed, closure,        is each current row     Cleanup: flip the row
+   facts                 still backed by its     Erasure: flip, then
+         |               original?               cognee.forget, then
+         | reads, filtered by ownership key      Cognee's own sweeps
+         v                                            |
+   +------------------------------------------------------+
+   | Cognee: Data rows, chunks, Entities, edges, vectors   |
+   | built by cognee.add, cognify and update; never        |
+   | written by the framework                              |
+   +------------------------------------------------------+
+```
+
+The components, and what each owns.
+
+| Component | Owns | Reads | Writes |
+|---|---|---|---|
+| Describe | the identity judgments for one document | the document's extracted text | a description, in memory |
+| Description | one source's entities by name, variant pairs, mention groups with exact code-point ranges and a resolution status, optional mention-anchored facts, the producer, and a hash of the text the ranges address | | |
+| Validator | the rules a description must pass before anything is written | the description, the Data row's hash, the extracted text | nothing |
+| Ledger | the truth. One row per source with its revision, its state and its current description | | one row per operation, always a compare-and-set on state and revision |
+| Publish | moving a source to a new revision | the validator's verdict, the row | the row |
+| Forget | Cleanup (drop the identity, keep the document) and Erasure (drop both, never blocked) | the row, the Data row's file paths | the row; under Erasure also `cognee.forget` and Cognee's two post-delete sweeps |
+| Status | whether each `current` row is still backed by its original | the Data row's hash, the document node | nothing |
+| Retrieve | answering a query with identity applied | the served rows, Cognee's Entity names and vectors, Cognee's edges and their ownership keys | nothing |
+
+How they hang together.
+
+- **Publishing.** A document enters Cognee the ordinary way, through `cognee.add` and `cognee.cognify`. Describe reads its text and returns a description. Publish validates the description against the document as it is now, then writes it to the ledger as the next revision in one row write. Nothing else changes, so a crash leaves either the old revision or the new one.
+- **Reading.** Retrieve serves the `current` rows that Status still finds backed by their originals. It seeds the query to one entity name. It computes the identity group from the served descriptions' variant pairs, in memory. It collects the group's mentions and the facts in those descriptions. It then reads Cognee's own edges for the group's Entities, and keeps only edges whose ownership key names the searched dataset and a served document. Identity and Cognee's facts meet only here, at query time.
+- **Changing a document.** `cognee.update` keeps the Data ID and rebuilds the chunks. Status then reports the row `native_changed` until a new description is published, and Retrieve excludes it meanwhile. A republish retires every mention ID of the old revision, because IDs embed the revision.
+- **Removing a document.** Cleanup is one row flip. Erasure flips the row to `erasing`, calls Cognee's delete on the document, runs the two sweeps Cognee runs after its own commit, and flips to `forgotten`. A crash at any point leaves an `erasing` row that Status reports and the next Forget finishes.
+
+What holds it together is one rule. No source's description can name another source's judgment, and entities are plain names. So every operation touches one row, nothing can depend on a source, and Erasure never needs to ask anyone.
+
+What it gives up, and where each piece returns. `cognee.search` and native graph walks see no identity, because identity lives only in the ledger. Section 8 gives three ways to add it back, in rising cost. A derived view builds an identity-aware copy of the graph when a reader needs one and leaves the live graph alone (Shape 1v). A written overlay keeps an identity index inside Cognee's graph (Shape 2). Continuity, citations and the cascade are Shapes 3 and 4.
+
 ## 1. What this document is
 
 This is a design for a small identity resolution layer on Cognee 1.6.2, for someone building it from scratch in another project. The layer writes identity into one table the project owns and nothing into Cognee. `cognee.search` and native graph walks see no identity. Only the layer's own Retrieve applies it. It is derived from a reference implementation, which is the only evidence this document has. The reference implementation is a laboratory project on Cognee 1.6.2 that built identity resolution over 18 days, from its first design decision on 2026-10-11 to its last measurement on 2026-10-29. Two people appear throughout. The user is the person who commissioned the reference implementation and made its decisions. The assistant is the agent that built it under the user's direction. The reference implementation never ran a language model inside its tests. Every identity judgment in it is a captured fixture input, the corpora are small (two to four documents, six to ten chunks each), and every number below comes from its code, its test runs or its measurements. Appendix A says who measured what, when, and at which commit.
 
-Two reading paths. A reader who wants only the design reads sections 2, 3, 8, 9 and 10. Section 2 gives the terms, section 3 the Cognee behaviours the design rests on, section 8 the design space, section 9 the proposal and section 10 the questions only the user can answer. A reader who wants the evidence also reads sections 4 to 7, which inventory the decisions the reference implementation made, measure what each cost, rank the Cognee functions by the cost of coexisting with them, and show how costs compound. Section 9 points into them wherever a choice rests on a measurement.
+The technical design summary above is the short version of the proposal. Two reading paths cover the rest. A reader who wants only the design reads sections 2, 3, 8, 9 and 10. Section 2 gives the terms, section 3 the Cognee behaviours the design rests on, section 8 the design space, section 9 the proposal and section 10 the questions only the user can answer. A reader who wants the evidence also reads sections 4 to 7, which inventory the decisions the reference implementation made, measure what each cost, rank the Cognee functions by the cost of coexisting with them, and show how costs compound. Section 9 points into them wherever a choice rests on a measurement.
 
 The user who commissioned this marked nothing as must-keep. One recorded requirement is respected throughout. A delete has two intents. Cleanup means "no longer needed" and may refuse while other sources depend on the source. Erasure means "must go" (privacy, legal, licence, a fabricated source) and must never be blocked by dependents. Section 9.5 says what the proposal does with each.
 
@@ -363,7 +420,7 @@ With forget, crash safety and outside deletes, it adds nothing.
 
 ## 8. The design space
 
-Five coherent shapes, from simplest upward. Each names what it supports and what it costs. Costs for shapes 0 to 3 are estimates derived from the measured areas of section 5.1. Shape 4 is measured.
+Six coherent shapes, from simplest upward. Each names what it supports and what it costs. Costs for shapes 0 to 3 are estimates derived from the measured areas of section 5.1. Shape 4 is measured.
 
 ### Shape 0. Prompt-side normalization, no identity layer
 
@@ -376,6 +433,27 @@ It supports better native identity for documents that define their own abbreviat
 Describe produces one saved description per source. A ledger row holds it with a revision and a state. Publish is one relational write. Nothing is written to Cognee's graph, vector or file stores. Retrieve reads the served descriptions, computes the identity closure from their variant pairs and mention groups in memory, and reads Cognee's graph only to collect Cognee's own facts for the closure's Entities, filtered by ownership key to the served sources. Forget flips the row and, under Erasure, calls Cognee's own delete on the document. An edit is a native update plus a republish.
 
 It supports identity groups, mentions with exact occurrences, resolution states, facts carried in the description and served beside Cognee's, forget and erasure of one source, and detection of a changed or deleted original. It costs about 650 to 1,000 lines plus a producer and tests (estimate, section 9.7). It loses identity in the graph. A native graph walk, and any other reader of Cognee's graph, sees Cognee's fragmented Entities with no `variant_of` edges, no mention nodes and no mention-anchored facts. An Entity that cognify did not extract and a description names, such as a year, exists only in the ledger. It loses continuity across edits and citations, as every shape below Shape 3 does, and `cognee.search` uniformity, which Shape 3 adds back.
+
+### Shape 1v. Shape 1 plus a derived identity view
+
+Added on 2026-10-31. It was read in the Cognee 1.6.2 source and has not been built, measured or reviewed.
+
+The live graph stays as Cognee built it. When a reader needs identity inside the graph, a view builder makes a copy of the dataset's graph, adds identity from the served descriptions, and runs the reader against the copy. The copy is keyed on the ledger version and the graph version and is cached, so repeated reads of unchanged data reuse it. Nothing in Cognee's stores has to be kept consistent with the ledger, because nothing is written there.
+
+What the builder adds to the copy. For each identity group, a `variant_of` edge between members, and each member's edges copied onto every other member, so a query that lands on any name reaches the facts of the whole group. For each served mention-anchored fact, an edge from the mention's target Entity. Copying edges keeps every node ID as Cognee made it, which keeps Cognee's vector hits mapping onto the right nodes. Merging each group into one node would also work but needs an alias map, because a vector hit is mapped onto a node by its ID and a later hit overwrites an earlier one instead of keeping the best score (`modules/graph/cognee_graph/CogneeGraph.py:349-380`, `CogneeGraphElements.py:69-77`).
+
+There are two ways to make the copy.
+
+- **In memory.** Cognee's graph-completion search already copies the graph into memory for every query. `get_memory_fragment` projects it into a `CogneeGraph`, and `brute_force_triplet_search` accepts a ready-made fragment as `memory_fragment` (`modules/retrieval/utils/brute_force_triplet_search.py:49-116`, `:223-250`). `GraphCompletionRetriever` does not pass one (`modules/retrieval/graph_completion_retriever.py:206-221`). So a subclass of that retriever, registered as its own search type, can pass the cached identity view instead. Readers outside that retriever family see nothing. The view holds the dataset's whole projected graph in memory. Filtering it to a query's vector hits in memory should match Cognee's per-query projection (inferred, not checked).
+- **A physical copy.** Cognee picks its graph database from the `graph_db_config` context variable before the global configuration (`infrastructure/databases/graph/config.py:199-207`, `context_global_variables.py:31-32`). So a task can copy the graph database, write the identity edges into the copy, set that variable, and run any search type unmodified, including the built-in ones. The copy costs time and disk in proportion to the graph. Copying an embedded database that is open needs a consistent snapshot, and whether access control sets the same variable per dataset is unchecked. The vector store stays the original, so identity edges get no vectors unless it is copied too.
+
+The two version keys. The ledger version is cheap, for example a counter that every row write increments. Cognee 1.6.2 keeps no graph version. A search of its graph modules found none. The graph version must be derived, for example from the dataset's Data rows and their content hashes and from its latest pipeline run (inferred). That derivation misses a write made through the graph API outside a pipeline, and the physical-copy route could add the database file's modification time to catch it.
+
+Erasure and the cache. A cached view holds the erased document's facts. A forget changes the ledger version, so a stale view is never served, but the old entry still exists. Forget must evict every cached view of the dataset, and must delete any copy on disk, before Erasure counts as done.
+
+It supports identity in graph-completion search (in memory) or in every reader of the graph (a physical copy), with none of Shape 2's write machinery: no anchor, no sentinel, no sweep, no `pending` or `failed` state and no write internals. It costs a view build after every change to either version (time unmeasured), memory or disk for the copy, a retriever subclass or the copy plumbing, the graph-version derivation, and eviction on Erasure. Estimate 200 to 400 lines for the in-memory route, unbuilt. It loses nothing Shape 1 has. Against Shape 2 it loses identity for a reader that walks the live graph directly.
+
+The pattern applies beyond identity. Wherever injecting project data into Cognee's graph is worth having but keeping it consistent is expensive, the project can keep its data as the authority in its own table, leave Cognee's stores native, and build the joined view on demand, keyed on both versions. That trades write-time consistency work for read-time build cost and cache eviction.
 
 ### Shape 2. Shape 1 plus a derived overlay owned by a per-revision anchor
 
@@ -667,7 +745,7 @@ Cognee behaviour the proposal inherits.
 1. Ledger placement. In Cognee's relational database (one session layer, lost on `prune_system(metadata=True)`) or a separate database (survives reset, needs its own connection)?
 2. Describe for the first build. Rules only, or rules plus a model from the start? The answer decides whether edits re-derive the same groups.
 3. Is corpus-wide variant scope acceptable for the first build?
-4. Does anything other than Retrieve need to see identity or mention-anchored facts in Cognee's graph? If yes, the build is Shape 2 and the overlay and its facts come with it (section 9.10). If no, the build is Shape 1, and facts are description entries that Retrieve serves.
+4. Does anything other than Retrieve need to see identity or mention-anchored facts in Cognee's graph? If no, the build is Shape 1, and facts are description entries that Retrieve serves. If graph-completion search or another reader needs them, try Shape 1v first, the derived view, and prototype its view build time on a real dataset. Shape 2 and its written overlay (section 9.10) are for a reader that must walk the live graph itself.
 5. Do you want the no-forget variant (append-only, rebuild to remove) evaluated as a prototype before committing to Shape 1?
 6. Will access control be on in the target project? If so, the ledger placement and the seed step need a check nobody has run.
 
