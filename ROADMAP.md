@@ -1,6 +1,6 @@
 # Cognee Science Lab Roadmap
 
-**Last revised:** 2026-10-29
+**Last revised:** 2026-10-31
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
 **Current work:** Stage 6 is in progress. Steps 1–2 have native fixtures. Step 3 demonstrates multi-source withdrawal. Step 4 demonstrates guarded unchanged-text identity corrections and captured prefix edits. Prefix edits use whole-document native rechunking, remapped positions and rebuilt fact evidence. The multi-chunk fixture covers split markers and fact continuations. See the [first-slice guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md).
@@ -800,7 +800,8 @@ Entries below retain the decisions and evidence status at their stated date. The
 ## Revision record — 2026-10-31 (minimal identity framework, read-time view and alignment)
 
 - Added a technical design summary and Shape 1v, an identity view built at read time and cached only while the ledger and graph versions both match, to `docs/minimal_identity_framework.md`. The cache rule is the user's.
-- Recorded the user's choice of how Describe's names meet cognify's. Each runs on its own, Retrieve aligns them per query (exact, similar, supported by chunk text), and Describe's entity names go into cognify's prompt as a spelling hint that nothing depends on. Open question 7 is the experiment that decides whether the hint earns its place. The Cognee behaviours behind it (CB20, CB21) were read in the 1.6.2 source by the assistant on the user's Mac and not run.
+- Recorded the user's choice of how Describe's names meet cognify's. Each runs on its own, Retrieve aligns them per query (exact or similar match, then a chunk-text support check), and Describe's entity names go into cognify's prompt as a spelling hint that nothing depends on. Open question 7 is the experiment that decides whether the hint earns its place. The Cognee behaviours behind it (CB20, CB21) were read in the 1.6.2 source by the assistant on the user's Mac and not run.
+- Fixed the findings of the two branch reviews of that change: the edit order and the hash definitions, the writer policy and how far the hint reaches, the costs and couplings, an invariant for alignment, the alignment rules and the limits.
 
 ## Revision record — 2026-10-29 (minimal identity framework)
 
