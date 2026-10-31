@@ -1,102 +1,282 @@
 # Minimal identity framework: the alignment experiment
 
-Run by the assistant on the user's Mac on 2026-10-31, at the user's request, with Cognee 1.6.2, Claude Haiku 5.5 (`claude-haiku-5-5`) for extraction and the embedding model that `.env` names. It answers open question 7 of [the minimal identity framework](../docs/minimal_identity_framework.md): does the spelling hint earn its place, and what threshold should alignment's similar pass use? It also times Shape 1v's in-memory view and checks five Cognee behaviours the design had read in the source but never run.
+Run by the assistant on the user's Mac on 2026-10-31, at the user's request. It used Cognee 1.6.2, Claude Haiku 5.5 (`claude-haiku-5-5`) for extraction, and the embedding model that `.env` names, whose name and dimension count every root's `stage6-fixture.json` records.
 
-The harness is [`scripts/align_experiment.py`](../scripts/align_experiment.py). The raw results are under `outputs/minimal-align-20261031-1256/`, which is not committed.
+It answers open question 7 of [the minimal identity framework](../docs/minimal_identity_framework.md): does the spelling hint earn its place, and how should alignment find a cognify spelling that is not an exact match? It also times Shape 1v's in-memory view, and checks four Cognee behaviours (CB11, CB16, CB17, CB20) that the design had read in the source but never run.
+
+The harness is [`scripts/align_experiment.py`](../scripts/align_experiment.py). The raw roots are under `outputs/minimal-align-20261031-1256/`, which is not committed. Every table below comes from `report` on that directory, and the last section reproduces its whole output.
 
 ## Method
 
-- **Corpus.** DOC01 and DOC02 of the Helios corpus (`data/DOC01_helios1_technical_overview.md`, `data/DOC02_campaign_A_high_current.md`). Cognee's chunker made 2 chunks of each.
-- **Describe.** The lab's rule describer (`reusable_names` in `src/cognee_lab/identity/conformance_fixture.py`) over each document's stored text. It gives 20 distinct names in 10 variant groups across the two documents. Its author had read the conformance answers, so it is a fixed description, not a test of Describe.
-- **Conditions.** Six fresh isolated roots, three with the spelling hint and three without. Each root runs add DOC01, Describe, cognify, then the same for DOC02. With the hint, cognify gets Cognee's configured graph prompt plus a section listing that document's names.
-- **Alignment.** Each of the 20 names is checked for an exact node at `Entity.id_for(name)`. That node is then support-checked against the text of its `contains` chunks: whole words, using the name or another name in its group. The top 10 `Entity_name` vector hits are recorded with their distances and their own support.
-- **The view.** Cognee's `get_memory_fragment` projects the whole graph. Each admitted group member's non-structural edges are copied onto the other members. The result is deep-copied once, standing in for the per-query clone.
-- **Checks.** On the last hinted root, after measurement:
-  1. A hinted `cognee.update` of DOC01 to its v2 text.
-  2. `cognee.forget(memory_only=True)` of DOC02, then a plain cognify.
-  3. The default `cognee.prune.prune_system()`, then a plain cognify.
-- **Cost.** 80 LLM calls in total, counted at Cognee's `LLMGateway`:
-  - 9 per root (one connectivity call, then 2 graph extractions and 2 summaries per document);
-  - 8 more for the checks;
-  - a 9-call smoke run;
-  - a 9-call first attempt at the checks root that failed in the update check.
+**Corpus and description.**
+- **The documents.** DOC01 and DOC02 of the Helios corpus (`data/DOC01_helios1_technical_overview.md`, `data/DOC02_campaign_A_high_current.md`). Cognee's chunker made 2 chunks of each.
+- **The describer.** The lab's rule describer, `reusable_names` in `src/cognee_lab/identity/conformance_fixture.py`, run over each document's stored text. It gives 20 distinct names across the two documents, in 10 variant groups. Its author had read the conformance answers, so it is a fixed description, not a test of Describe.
+
+**Conditions.** Seven fresh isolated roots:
+- three with the spelling hint, `hint-1` to `hint-3`;
+- four without it, `nohint-1` to `nohint-3` and `checks`. `checks` was measured first and then used for the behaviour checks.
+
+Each root adds DOC01, cognifies it, then does the same for DOC02. With the hint, cognify gets Cognee's configured graph prompt plus a section listing that document's names.
+
+**Alignment.** `align()` runs the framework's rules (section 9.3) on each of the 20 names:
+1. **Exact.** The node at `Entity.id_for(name)`.
+2. **Lexical.** The other Entities that a chunk of the name's documents `contains` and whose name matches. A name matches when it equals a group name, or when it equals one once a trailing parenthetical is stripped, or when its parenthetical does. So `magnetic probe array (mpa)` matches `magnetic probe array` and `mpa`. A group member's own exact node is excluded, because it aligns under its own name.
+3. **Support.** Every candidate is support-checked. A `contains` chunk must hold, as a whole word, a name of the group or the candidate's base or parenthetical.
+
+The outcome is `exact`, `lexical`, `unsupported` (candidates, none supported) or `unaligned` (no candidate).
+
+**Vector ranking.** For each name, `vector_ranks()` records where the lexical nodes and the group's own nodes rank in the top 100 `Entity_name` hits, and the best hit that is neither.
+
+**Planted links.** A planted link joins a chunk to the exact node of a described name, where the chunk's text holds no name of that group. The whole-word test counts a paraphrase such as "the reconstruction" as planted too.
+
+**The view.** Cognee's `get_memory_fragment` projects the whole graph. Each aligned member's own non-structural edges are then copied once onto the other aligned members of its group, and the result is deep-copied once. The ownership filter that Appendix B of the framework requires is not applied, so this times projection, overlay copy and clone only.
+
+**Checks.** These ran on the `checks` root, after its measurement was written:
+1. A hinted `cognee.update` of DOC01 to its v2 text.
+2. `cognee.forget(memory_only=True)` of DOC02, then a plain cognify.
+3. The default `cognee.prune.prune_system()`, then a plain cognify.
+
+**Cost.** 106 LLM calls, counted at Cognee's `LLMGateway`:
+- 9 per root: one connectivity call, then 2 graph extractions and 2 summaries per document;
+- 8 more for the checks;
+- a 9-call smoke run;
+- 18 calls in an earlier checks root. That root lost its first attempt to a harness bug (`cognee.update` rejects an open file handle) and then lost its measurement to the checks. It was replaced, and its result is not used.
+
+`analyze` re-measured the earlier roots with the final rules, which costs embedding calls only.
 
 ## Results
 
-### The hint
+### Alignment outcomes
 
-| Run | Names aligned `exact` | No exact node | `contains` edges whose chunk lacks the name | Entities |
-|---|---|---|---|---|
-| hint-1 | 20 of 20 | 0 | 7 | 50 |
-| hint-2 | 20 of 20 | 0 | 8 | 38 |
-| hint-3 | 20 of 20 | 0 | 8 | 44 |
-| nohint-1 | 15 of 20 | 5 | 0 | 43 |
-| nohint-2 | 14 of 20 | 6 | 0 | 42 |
-| nohint-3 | 8 of 20 | 12 | 0 | 38 |
+| Run | Hint | exact | lexical | unsupported | unaligned | Planted links (names) | Entities |
+|---|---|---|---|---|---|---|---|
+| hint-1 | yes | 20 | 0 | 0 | 0 | 7 (7) | 50 |
+| hint-2 | yes | 20 | 0 | 0 | 0 | 8 (7) | 38 |
+| hint-3 | yes | 17 | 0 | 3 | 0 | 7 (7) | 40 |
+| nohint-1 | no | 15 | 0 | 0 | 5 | 0 (0) | 43 |
+| nohint-2 | no | 14 | 0 | 0 | 6 | 0 (0) | 42 |
+| nohint-3 | no | 8 | 11 | 0 | 1 | 0 (0) | 38 |
+| checks | no | 13 | 0 | 0 | 7 | 0 (0) | 42 |
 
-- **Effect on exact alignment.** With the hint, every described name had an exact, supported node in all three runs. Without it, 8 to 15 of the 20 did, with wide run-to-run variation (CB3).
-- **What the hint plants.** It sends the whole document's list with every chunk, and the model links names to chunks that never mention them. In hint-1, DOC01's second chunk was linked to `mpa`, `pcps`, `rcm`, `magnetic probe array`, `plasma current power supply` and `rogowski current monitor`, and DOC02's second chunk to `rogowski current monitor`. None of those chunks contains the name or any variant of it. Every hinted run planted 7 or 8 such links. The support check rejected each one, and every planted node still had a real supporting chunk.
-- **Not measured.** Whether the model also extracted facts on those planted links.
+**With the hint.**
+- **Exact alignment.** Every name aligned `exact` in two runs, and 17 of 20 in the third.
+- **Where the planted links land.** The hint goes with every chunk, and the model linked 7 names to chunks that never mention them in every run. All of those links are on DOC01's second chunk, apart from one on DOC02's second chunk in `hint-2`.
+- **The 3 `unsupported` names in `hint-3`.** `mpa`, `pcps` and `rcm` had nodes there, but only on the planted chunk, so the support check rejected them. Their long forms aligned `exact`, so each group still had a node.
 
-### Why the no-hint names missed
+**Without the hint.**
+- **Every `unaligned` name was an abbreviation cognify never extracted.** The Entity names of `nohint-1` and `nohint-2` contain no node for them. Its group's long form aligned `exact`, so no group lost its node.
+- **In `nohint-3`, cognify named the long forms with the abbreviation in parentheses.** The lexical pass aligned all 11 such names, each supported, and admitted nothing outside a group.
 
-Every miss without the hint was one of two kinds:
-- **Never extracted.** In nohint-1 and nohint-2, cognify made no node for `afrl`, `ech`, `mpa`, `nbi`, `pcps` or `rcm`. Their long forms were exact and supported, so each group still had a node, and no native fact was lost.
-- **Extracted with the abbreviation in parentheses.** In nohint-3, cognify named 11 of its 12 missing names this way, for example `magnetic probe array (mpa)`, `vertical control system (vcs)` and `rogowski current monitor (rcm)`.
+Across all seven runs, every group had at least one aligned node.
 
-A lexical rule finds every such node. It strips one trailing parenthetical, then checks whether the base or the parenthetical equals a name in the group. It recovered all 11 in nohint-3 and admitted nothing wrong in any run.
+### The vector index does not find what the lexical pass finds
 
-### The vector similar pass
+For every name not aligned `exact`, in every run, the top `Entity_name` hit was a wrong Entity. The only exceptions were three long forms whose own group member ranked first: `electron cyclotron heating system`, `neutral beam injection system` and `rogowski current monitor`, in `nohint-3`.
 
-It does not work with this embedding model, at any threshold.
-- **For the 12 nohint-3 misses.** The right node ranked 2nd to 37th among `Entity_name` hits, at distances 0.247 to 0.478. A wrong Entity ranked above it every time, at distances 0.078 to 0.258. For example:
-  - for `mpa`, `energy confinement` scored 0.078, and `magnetic probe array (mpa)` ranked 30th at 0.351;
-  - for `magnetic probe array`, `aurora magnetic reconstruction` scored 0.165, and the right node ranked 11th at 0.270.
-- **For names with no node at all.** The best hit the pass could admit was always wrong, at distances of about 0.06 to 0.13.
-- **Where it scored well.** Only on long-form pairs such as `neutral beam injection` and `neutral beam injection system` (0.038), and those are already in the same group.
+- **Where the right nodes ranked.** The 11 lexical nodes ranked 2nd to 37th, at distances 0.247 to 0.478.
+- **Where the wrong hits sat.** The best wrong hits sat at 0.059 to 0.258.
+- **What a threshold would do.** A threshold that admitted the nearest lexical node, at 0.247, would also admit a wrong Entity for 32 of the 33 names, all except `electron cyclotron heating system`.
+- **One example.** For `mpa`, `energy confinement` ranked first at 0.078, and `magnetic probe array (mpa)` ranked 30th at 0.351.
 
 ### The view
 
-| Run | Graph nodes | Graph edges | Overlay edges | Project (s) | Overlay (s) | Clone (s) |
+| Run | Nodes | Projected edges | Overlay edges | Project (s) | Overlay (s) | Clone (s) |
 |---|---|---|---|---|---|---|
-| hint-1 | 78 | 190 | 27 | 0.003 | 0.0002 | 0.003 |
-| hint-2 | 63 | 143 | 9 | 0.007 | 0.0002 | 0.005 |
-| hint-3 | 70 | 230 | 59 | 0.004 | 0.0003 | 0.004 |
-| nohint-1 | 73 | 195 | 33 | 0.003 | 0.0002 | 0.003 |
-| nohint-2 | 69 | 182 | 24 | 0.003 | 0.0001 | 0.003 |
-| nohint-3 | 68 | 145 | 0 | 0.003 | 0.0000 | 0.002 |
+| hint-1 | 78 | 163 | 17 | 0.0057 | 0.0002 | 0.0055 |
+| hint-2 | 63 | 134 | 7 | 0.0052 | 0.0001 | 0.0041 |
+| hint-3 | 68 | 162 | 24 | 0.0068 | 0.0003 | 0.0050 |
+| nohint-1 | 73 | 162 | 21 | 0.0057 | 0.0002 | 0.0049 |
+| nohint-2 | 69 | 158 | 17 | 0.0053 | 0.0002 | 0.0047 |
+| nohint-3 | 68 | 145 | 19 | 0.0067 | 0.0002 | 0.0054 |
+| checks | 72 | 172 | 9 | 0.0063 | 0.0001 | 0.0053 |
 
-At this size, building and cloning the view costs milliseconds. The graphs are far smaller than a real dataset. These numbers show the route works, not how it scales.
+Projection, overlay copy and clone together take under 15 ms on graphs of 63 to 78 nodes. The ownership filter is not timed, and these graphs are far smaller than a real dataset. So the numbers show the route works, not what it costs at scale.
 
 ### The Cognee behaviour checks
 
 | Behaviour | Observed | Matches the design |
 |---|---|---|
-| A cognify right after one add processes only that document (CB11) | DOC02's cognify made 4 calls, for its 2 chunks only, in every run | Yes |
-| The custom prompt goes with every extraction call and no summary call (CB20) | 2 of 4 calls hinted per document, both of them `KnowledgeGraph` extractions | Yes |
-| A hinted update takes the full rebuild (CB20) | `status: full_rebuild`, `fallback.reason: custom_extraction_config`. Data ID kept, `raw_content_hash` changed. 4 calls, 2 of them hinted. | Yes |
-| A memory-only forget keeps the Data row and clears its mark (CB17) | Row kept, processed mark cleared, document node gone. A plain cognify re-extracted DOC02 alone in 4 calls. | Yes |
-| The default prune keeps Data rows and their marks (CB16) | 2 rows kept, both still marked processed, graph empty. A plain cognify then made 0 calls and left the graph empty. | Yes |
-
-One harness finding: `cognee.update` rejects an open file handle (`IngestionError: Data type not supported: BufferedReader`, status 415). It takes an absolute path or an upload object.
+| CB11. A cognify right after one add processes only the new document. | DOC02's cognify made 4 calls, for its 2 chunks only, in every root. | Yes |
+| CB20. The custom prompt goes with every extraction call and no summary call. | 2 of the 4 calls per document were hinted, both of them `KnowledgeGraph` extractions. | Yes |
+| CB20. A hinted update takes the full rebuild. | `status: full_rebuild`, `fallback.reason: custom_extraction_config`. Data ID kept, `raw_content_hash` changed. 4 calls, 2 of them hinted. | Yes |
+| CB17. A memory-only forget keeps the Data row and clears its mark. | Row kept and its mark cleared. DOC02's document node gone, DOC01's kept. A plain cognify made 4 calls and restored DOC02's node and mark. | Yes |
+| CB16. The default prune keeps Data rows and their marks. | 2 rows kept, both still marked processed, graph empty. A plain cognify then made 0 calls and the graph stayed at 0 nodes. | Yes |
 
 ## What it means for the design
 
-1. **The vector similar pass should go.** With this embedding model it would serve wrong Entities' facts as `similar` matches, and no threshold separates right from wrong. The lexical pass above replaces it. It is deterministic, needs no threshold and no vector search, and caught every variant node in these runs.
-2. **With the lexical pass, the hint bought nothing here.** Exact plus lexical aligned every node that existed in all three no-hint runs. Each name it left unaligned had no node, and its group still had one. Meanwhile the hint planted 7 or 8 false chunk links per run. That makes it optional at best, and it carries real costs:
+1. **Replace vector similarity with the lexical pass.** With this embedding model, a vector pass would serve a wrong Entity's facts for every abbreviation, and no threshold separates right from wrong. The lexical pass is deterministic, needs no threshold, and aligned every variant node cognify made in these runs.
+2. **The spelling hint does not earn its place here.** With exact and lexical alignment, the runs without the hint left no group without a node. Its cost on this corpus is planted chunk links in every run, and one run where planted links were a name's only links. It also costs:
    - a copy of Cognee's prompt to maintain;
    - one cognify per document;
    - a full rebuild on every update;
-   - a writer policy;
-   - links that may carry false facts.
+   - a writer policy.
 
-   This rests on two documents and one naming pattern, `Name (ABBR)`. A corpus with other variant patterns could change it.
-3. **Shape 1v's in-memory view is cheap at this size.** A scaling measurement needs a larger graph.
-4. **Four design claims read from source now hold in practice:** CB11, CB16, CB17 and CB20.
+   The recommendation is to build without it. This rests on two documents and one variant pattern, `Name (ABBR)`.
+3. **The vector seed fallback is also unreliable for abbreviations.** A query of one abbreviation that matches no described name would seed a wrong Entity.
+4. **The in-memory view route is cheap at this size.** It needs timing with the ownership filter on a real dataset.
+5. **CB11, CB16, CB17 and CB20 hold in practice.**
 
 ## Limits
 
 - **A small corpus.** Two documents, four chunks, one extraction model, one embedding model and one rule describer.
-- **Thin repetition.** Three runs per condition is enough to see the hint's effect and the vector pass's failure, but not to estimate rates tightly.
-- **The similar-pass verdict is specific to these models.** It holds for the configured embedding model and these short technical names. Another embedding model might separate them.
-- **Facts on planted links are unmeasured.**
+- **Thin repetition.** Three hinted and four unhinted runs show the effects, but cannot estimate rates tightly.
+- **The vector verdict is specific to these models.** It holds for the configured embedding model and these short technical names.
+- **Facts are unmeasured.** Nobody checked whether the model extracted facts on planted links.
+- **The `checks` root.** Its graph was pruned by the checks after its measurement, so its Entity names cannot be inspected afterwards.
+
+## The full `report` output
+
+`uv run python scripts/align_experiment.py report outputs/minimal-align-20261031-1256` prints the tables above and these details.
+
+| Run | Hint | exact | lexical | unsupported | unaligned | Planted links (names) | Entities | LLM calls (hinted) |
+|---|---|---|---|---|---|---|---|---|
+| checks | no | 13 | 0 | 0 | 7 | 0 (0) | 42 | 9 (0) |
+| hint-1 | yes | 20 | 0 | 0 | 0 | 7 (7) | 50 | 9 (4) |
+| hint-2 | yes | 20 | 0 | 0 | 0 | 8 (7) | 38 | 9 (4) |
+| hint-3 | yes | 17 | 0 | 3 | 0 | 7 (7) | 40 | 9 (4) |
+| nohint-1 | no | 15 | 0 | 0 | 5 | 0 (0) | 43 | 9 (0) |
+| nohint-2 | no | 14 | 0 | 0 | 6 | 0 (0) | 42 | 9 (0) |
+| nohint-3 | no | 8 | 11 | 0 | 1 | 0 (0) | 38 | 9 (0) |
+
+Names not aligned `exact`, by run.
+
+| Run | Name | Outcome | Lexical node | Its vector rank and distance | Best wrong hit | Best in-group hit |
+|---|---|---|---|---|---|---|
+| checks | afrl | unaligned | - | - | rcm, rank 1 at 0.0947 | aurora fusion research laboratory, rank 15 at 0.2253 |
+| checks | ech | unaligned | - | - | rcm, rank 1 at 0.0782 | electron cyclotron heating, rank 16 at 0.2306 |
+| checks | edc | unaligned | - | - | rcm, rank 1 at 0.1247 | edge density controller, rank 10 at 0.2113 |
+| checks | mpa | unaligned | - | - | energy confinement, rank 1 at 0.0784 | magnetic probe array, rank 14 at 0.1909 |
+| checks | nbi | unaligned | - | - | energy confinement, rank 1 at 0.0908 | neutral beam injection, rank 9 at 0.1394 |
+| checks | pcps | unaligned | - | - | rcm, rank 1 at 0.0926 | plasma current power supply, rank 11 at 0.1873 |
+| checks | vcs | unaligned | - | - | energy confinement, rank 1 at 0.0848 | vertical control system, rank 6 at 0.1257 |
+| hint-3 | mpa | unsupported | - | - | vcs, rank 2 at 0.0589 | magnetic probe array, rank 19 at 0.1909 |
+| hint-3 | pcps | unsupported | - | - | rcm, rank 2 at 0.0926 | plasma current power supply, rank 15 at 0.1873 |
+| hint-3 | rcm | unsupported | - | - | ech, rank 2 at 0.0782 | rogowski current monitor, rank 21 at 0.1969 |
+| nohint-1 | afrl | unaligned | - | - | vcs, rank 1 at 0.086 | aurora fusion research laboratory, rank 17 at 0.2253 |
+| nohint-1 | ech | unaligned | - | - | rcm, rank 1 at 0.0782 | electron cyclotron heating, rank 18 at 0.2306 |
+| nohint-1 | mpa | unaligned | - | - | vcs, rank 1 at 0.0589 | magnetic probe array, rank 16 at 0.1909 |
+| nohint-1 | nbi | unaligned | - | - | vcs, rank 1 at 0.0661 | neutral beam injection, rank 10 at 0.1394 |
+| nohint-1 | pcps | unaligned | - | - | rcm, rank 1 at 0.0926 | plasma current power supply, rank 12 at 0.1873 |
+| nohint-2 | afrl | unaligned | - | - | vcs, rank 1 at 0.086 | aurora fusion research laboratory, rank 15 at 0.2253 |
+| nohint-2 | ech | unaligned | - | - | vcs, rank 1 at 0.086 | electron cyclotron heating, rank 16 at 0.2306 |
+| nohint-2 | mpa | unaligned | - | - | vcs, rank 1 at 0.0589 | magnetic probe array, rank 13 at 0.1909 |
+| nohint-2 | nbi | unaligned | - | - | vcs, rank 1 at 0.0661 | neutral beam injection, rank 8 at 0.1394 |
+| nohint-2 | pcps | unaligned | - | - | vcs, rank 1 at 0.1019 | plasma current power supply, rank 10 at 0.1873 |
+| nohint-2 | rcm | unaligned | - | - | edge reflectometer, rank 1 at 0.0875 | rogowski current monitor, rank 14 at 0.1969 |
+| nohint-3 | afrl | unaligned | - | - | rcm, rank 1 at 0.0947 | aurora fusion research laboratory, rank 11 at 0.2253 |
+| nohint-3 | ech | lexical | electron cyclotron heating system (ech) (supported) | 27 at 0.3566 | rcm, rank 1 at 0.0782 | electron cyclotron heating, rank 11 at 0.2306 |
+| nohint-3 | edc | lexical | edge density controller (edc) (supported) | 34 at 0.423 | rcm, rank 1 at 0.1247 | edge density controller, rank 9 at 0.2113 |
+| nohint-3 | electron cyclotron heating system | lexical | electron cyclotron heating system (ech) (supported) | 2 at 0.2467 | energy confinement, rank 3 at 0.2584 | electron cyclotron heating, rank 1 at 0.0618 |
+| nohint-3 | magnetic probe array | lexical | magnetic probe array (mpa) (supported) | 11 at 0.2703 | aurora magnetic reconstruction, rank 1 at 0.1654 | - |
+| nohint-3 | mpa | lexical | magnetic probe array (mpa) (supported) | 30 at 0.3508 | energy confinement, rank 1 at 0.0784 | - |
+| nohint-3 | nbi | lexical | neutral beam injection system (nbi) (supported) | 33 at 0.401 | energy confinement, rank 1 at 0.0908 | neutral beam injection, rank 8 at 0.1394 |
+| nohint-3 | neutral beam injection system | lexical | neutral beam injection system (nbi) (supported) | 22 at 0.3619 | vertical control system, rank 2 at 0.1469 | neutral beam injection, rank 1 at 0.0379 |
+| nohint-3 | pcps | lexical | plasma current power supply (pcps) (supported) | 33 at 0.3876 | rcm, rank 1 at 0.0926 | - |
+| nohint-3 | plasma current power supply | lexical | plasma current power supply (pcps) (supported) | 19 at 0.3253 | rcm, rank 1 at 0.1604 | - |
+| nohint-3 | rogowski current monitor | lexical | rogowski current monitor (rcm) (supported) | 25 at 0.3846 | energy confinement, rank 2 at 0.2022 | rcm, rank 1 at 0.1969 |
+| nohint-3 | vcs | lexical | vertical control system (vcs) (supported) | 37 at 0.4784 | energy confinement, rank 1 at 0.0848 | vertical control system, rank 6 at 0.1257 |
+
+Planted links: a chunk linked to an exact node of a described name whose text holds no name of its group.
+
+| Run | Name | Document | Chunk index |
+|---|---|---|---|
+| hint-1 | aurora reconstruction suite | doc01 | 1 |
+| hint-1 | magnetic probe array | doc01 | 1 |
+| hint-1 | mpa | doc01 | 1 |
+| hint-1 | pcps | doc01 | 1 |
+| hint-1 | plasma current power supply | doc01 | 1 |
+| hint-1 | rcm | doc01 | 1 |
+| hint-1 | rogowski current monitor | doc01 | 1 |
+| hint-2 | aurora reconstruction suite | doc01 | 1 |
+| hint-2 | aurora reconstruction suite | doc02 | 1 |
+| hint-2 | magnetic probe array | doc01 | 1 |
+| hint-2 | mpa | doc01 | 1 |
+| hint-2 | pcps | doc01 | 1 |
+| hint-2 | plasma current power supply | doc01 | 1 |
+| hint-2 | rcm | doc01 | 1 |
+| hint-2 | rogowski current monitor | doc01 | 1 |
+| hint-3 | aurora reconstruction suite | doc01 | 1 |
+| hint-3 | magnetic probe array | doc01 | 1 |
+| hint-3 | mpa | doc01 | 1 |
+| hint-3 | pcps | doc01 | 1 |
+| hint-3 | plasma current power supply | doc01 | 1 |
+| hint-3 | rcm | doc01 | 1 |
+| hint-3 | rogowski current monitor | doc01 | 1 |
+
+| Run | Nodes | Projected edges | Overlay edges | Project (s) | Overlay (s) | Clone (s) |
+|---|---|---|---|---|---|---|
+| checks | 72 | 172 | 9 | 0.0063 | 0.0001 | 0.0053 |
+| hint-1 | 78 | 163 | 17 | 0.0057 | 0.0002 | 0.0055 |
+| hint-2 | 63 | 134 | 7 | 0.0052 | 0.0001 | 0.0041 |
+| hint-3 | 68 | 162 | 24 | 0.0068 | 0.0003 | 0.005 |
+| nohint-1 | 73 | 162 | 21 | 0.0057 | 0.0002 | 0.0049 |
+| nohint-2 | 69 | 158 | 17 | 0.0053 | 0.0002 | 0.0047 |
+| nohint-3 | 68 | 145 | 19 | 0.0067 | 0.0002 | 0.0054 |
+
+Behaviour checks in checks.
+
+```
+{
+ "hinted_update": {
+  "result": {
+   "status": "full_rebuild",
+   "regions": null,
+   "deleted_chunks": null,
+   "added_chunks": null,
+   "reused_chunks": null,
+   "kept_chunks": null,
+   "reindexed_chunks": null,
+   "total_chunks": null,
+   "duration_seconds": 16.404,
+   "fallback": {
+    "reason": "custom_extraction_config",
+    "detail": "chunk-level update supports only the default graph model and prompt"
+   },
+   "error": null
+  },
+  "data_id_kept": true,
+  "hash_changed": true,
+  "calls": {
+   "total": 4,
+   "by_model": {
+    "KnowledgeGraph": 2,
+    "SummarizedContent": 2
+   },
+   "hinted": 2,
+   "distinct_prompts": 2
+  }
+ },
+ "memory_only_forget": {
+  "data_row_kept": true,
+  "processed_after": false,
+  "doc02_node_after_forget": false,
+  "doc01_node_after_forget": true,
+  "recognify_calls": {
+   "total": 4,
+   "by_model": {
+    "KnowledgeGraph": 2,
+    "SummarizedContent": 2
+   },
+   "hinted": 0,
+   "distinct_prompts": 2
+  },
+  "doc02_node_after_recognify": true,
+  "processed_after_recognify": true
+ },
+ "default_prune": {
+  "data_rows": 2,
+  "processed_after": [
+   true,
+   true
+  ],
+  "graph_nodes_after_prune": 0,
+  "recognify_calls": {
+   "total": 0,
+   "by_model": {},
+   "hinted": 0,
+   "distinct_prompts": 0
+  },
+  "graph_nodes_after_recognify": 0
+ }
+}
+```

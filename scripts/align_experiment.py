@@ -1,16 +1,23 @@
 """The alignment experiment of docs/minimal_identity_framework.md, open question 7.
 
 Cognifies DOC01 and DOC02 in a fresh isolated root, with or without the
-spelling hint, then measures how each described name aligns with Cognee's
-Entities, how long Shape 1v's in-memory view takes to build, and, with
---checks, five Cognee behaviours the design reads from source.
+spelling hint. Then it aligns each described name with Cognee's Entities by
+the framework's rules (exact, then lexical, each support-checked), ranks the
+right nodes in the `Entity_name` vector index, and times Shape 1v's in-memory
+view. With --checks it also exercises five Cognee behaviours the design reads
+from source.
 
-    uv run python scripts/align_experiment.py run ROOT --hint|--no-hint [--checks]
+    uv run --with anthropic python scripts/align_experiment.py run ROOT --hint|--no-hint [--checks]
+    uv run python scripts/align_experiment.py analyze ROOT
     uv run python scripts/align_experiment.py dry-run ROOT
     uv run python scripts/align_experiment.py report BASE
 
-`run` uses the real LLM and embedding settings that .env names, read into
-this process only. Every value stays in memory and none is written to the root.
+`run` spends LLM calls. `analyze` re-measures an existing root and spends
+embedding calls only. `report` prints the tables of
+results/minimal_identity_alignment_experiment.md from the roots under BASE.
+
+`run` uses the real LLM and embedding settings that .env names, read into this
+process only. Every value stays in memory and none is written to the root.
 """
 
 import argparse
@@ -22,6 +29,7 @@ import os
 import re
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -37,11 +45,19 @@ DOCS = {
 }
 DOC01_V2 = REPO / "data" / "DOC01_helios1_technical_overview_v2.md"
 HINT_MARKER = "Naming guidance for this document."
-CALL_CAP = 160
+# About twice what one root with --checks spends, so a runaway retry loop stops early.
+CALL_CAP = 40
+VECTOR_DEPTH = 100
+# Retrieve step 4's structural edges, plus `made_from` (a chunk summary to its
+# chunk), which never touches an Entity and so never reaches step 4.
 STRUCTURAL = {"contains", "is_a", "is_part_of", "belongs_to_set", "made_from"}
+PAREN = re.compile(r"^(.*?)\s*\(([^()]*)\)\s*$")
 
 
 def make_root(root: Path) -> None:
+    # Not environment.create_root: this root is no lab fixture kind, and a lab
+    # command must not route into it. The marker carries the non-secret
+    # embedding record only.
     embedding = environment._env_record(environment._operator_embedding())
     root.mkdir(parents=True, exist_ok=False)
     (root / environment.MARKER).write_text(
@@ -60,6 +76,8 @@ def operator_llm() -> dict[str, str]:
 
 def real_llm_environment(settings: dict[str, str]) -> None:
     os.environ.update(settings)
+    # fixture_environment points the LLM at a closed port so a stray call
+    # fails. This experiment calls the provider on purpose, at its default endpoint.
     os.environ.pop("LLM_ENDPOINT", None)
 
 
@@ -93,12 +111,9 @@ class Calls:
 
     def since(self, mark):
         part = self.log[mark:]
-        by_model = {}
-        for call in part:
-            by_model[call["model"]] = by_model.get(call["model"], 0) + 1
         return dict(
             total=len(part),
-            by_model=by_model,
+            by_model=dict(Counter(c["model"] for c in part)),
             hinted=sum(c["hinted"] for c in part),
             distinct_prompts=len({c["prompt_sha"] for c in part}),
         )
@@ -131,13 +146,12 @@ def hint_prompt(names: list[str]) -> str:
     )
 
 
-async def dataset_and_rows(name):
+async def dataset_and_rows():
     from cognee.modules.data.methods import get_dataset_data, get_datasets_by_name
     from cognee.modules.users.methods import get_default_user
 
     user = await get_default_user()
-    datasets = await get_datasets_by_name(name, user.id)
-    dataset = datasets[0]
+    dataset = (await get_datasets_by_name(environment.DATASET_NAME, user.id))[0]
     return dataset.id, await get_dataset_data(dataset.id)
 
 
@@ -146,13 +160,6 @@ async def stored_text(row) -> str:
 
     async with open_data_file(row.raw_data_location, mode="r", encoding="utf-8") as f:
         return f.read()
-
-
-def processed(row, dataset_id) -> bool:
-    from cognee.modules.pipelines.models.DataItemStatus import is_data_item_completed
-
-    status = (row.pipeline_status or {}).get("cognify_pipeline") or {}
-    return is_data_item_completed(status.get(str(dataset_id)))
 
 
 def describe(text):
@@ -188,29 +195,52 @@ def groups_of(described):
     return {n: frozenset(g) for g in groups.values() for n in g}
 
 
-async def chunk_index(graph, data_ids):
+def other_end(edge, node_id):
+    a, rel, b = edge
+    return rel, (b if str(a.get("id")) == node_id else a)
+
+
+async def read_corpus(graph, data_ids):
+    """Each chunk of the corpus with its document, normalised text and the
+    Entities it `contains`."""
     chunks = {}
     for doc, data_id in data_ids.items():
-        for a, rel, b in await graph.get_edges(str(data_id)):
-            other = b if str(a.get("id")) == str(data_id) else a
-            if rel == "is_part_of" and other.get("type") == "DocumentChunk":
-                node = await graph.get_node(str(other["id"]))
-                chunks[str(other["id"])] = dict(doc=doc, text=norm(node.get("text") or ""))
+        for edge in await graph.get_edges(str(data_id)):
+            rel, other = other_end(edge, str(data_id))
+            if rel != "is_part_of" or other.get("type") != "DocumentChunk":
+                continue
+            chunk_id = str(other["id"])
+            node = await graph.get_node(chunk_id)
+            entities = {}
+            for inner in await graph.get_edges(chunk_id):
+                rel2, ent = other_end(inner, chunk_id)
+                if rel2 == "contains" and ent.get("type") == "Entity":
+                    entities[str(ent["id"])] = ent.get("name", "")
+            chunks[chunk_id] = dict(
+                doc=doc,
+                index=node.get("chunk_index"),
+                text=norm(node.get("text") or ""),
+                entities=entities,
+            )
     return chunks
 
 
-async def support(graph, node_id, terms, chunks):
+def support(node_id, terms, chunks):
+    """The chunks that contain the node, split by whether their text holds
+    one of the terms as a whole word."""
     supported, unsupported = [], []
-    for a, rel, b in await graph.get_edges(node_id):
-        if rel != "contains":
-            continue
-        other = b if str(a.get("id")) == node_id else a
-        chunk = chunks.get(str(other.get("id")))
-        if chunk is None:
-            continue
-        hit = any(whole_word(t, chunk["text"]) for t in terms)
-        (supported if hit else unsupported).append(str(other["id"]))
+    for chunk_id, chunk in chunks.items():
+        if node_id in chunk["entities"]:
+            hit = any(whole_word(t, chunk["text"]) for t in terms)
+            (supported if hit else unsupported).append(chunk_id)
     return supported, unsupported
+
+
+def lexical_match(candidate_name, closure):
+    if candidate_name in closure:
+        return True
+    m = PAREN.match(candidate_name)
+    return bool(m) and (m.group(1) in closure or m.group(2) in closure)
 
 
 async def align(graph, vector, described, chunks):
@@ -220,157 +250,230 @@ async def align(graph, vector, described, chunks):
     listed_by = {}
     for doc, (names, _) in described.items():
         for n in names:
-            listed_by.setdefault(n, []).append(doc)
+            listed_by.setdefault(n, set()).add(doc)
     all_listed = set(group)
     records = []
     for name in sorted(group):
         closure = group[name]
+        docs = set().union(*(listed_by.get(n, set()) for n in closure))
         exact_id = str(Entity.id_for(name))
-        exact = await graph.get_node(exact_id)
-        record = dict(name=name, group=sorted(closure), listed_by=listed_by.get(name, []))
-        if exact is not None:
-            ok, bad = await support(graph, exact_id, {name, *closure}, chunks)
-            record["exact"] = dict(supported_chunks=len(ok), unsupported_chunks=len(bad))
-        else:
-            record["exact"] = None
-        hits = []
-        for hit in await vector.search("Entity_name", query_text=name, limit=10):
-            node = await graph.get_node(str(hit.id))
-            if node is None or node.get("type") != "Entity":
+        record = dict(name=name, group=sorted(closure), exact=None, lexical=[])
+        if await graph.get_node(exact_id) is not None:
+            ok, bad = support(exact_id, closure, chunks)
+            record["exact"] = dict(id=exact_id, supported=len(ok), unsupported=len(bad))
+        seen = {}
+        for chunk in chunks.values():
+            if chunk["doc"] in docs:
+                seen.update(chunk["entities"])
+        # A group member's own exact node aligns under that member's name, so
+        # only a node that sits at no member's exact ID can be a lexical match.
+        member_ids = {str(Entity.id_for(n)) for n in closure}
+        record["member_ids"] = sorted(member_ids)
+        for node_id, cand in sorted(seen.items(), key=lambda kv: kv[1]):
+            if node_id in member_ids or not lexical_match(cand, closure):
                 continue
-            hit_name = node.get("name", "")
-            ok, bad = await support(graph, str(hit.id), {hit_name}, chunks)
-            hits.append(
-                dict(
-                    name=hit_name,
-                    distance=round(float(hit.score), 4),
-                    is_exact=str(hit.id) == exact_id,
-                    in_closure=hit_name in closure,
-                    excluded=hit_name in all_listed and hit_name not in closure,
-                    supported_chunks=len(ok),
-                    unsupported_chunks=len(bad),
-                )
+            if cand in all_listed and cand not in closure:
+                continue
+            m = PAREN.match(cand)
+            terms = set(closure) | ({m.group(1), m.group(2)} if m else {cand})
+            ok, bad = support(node_id, terms, chunks)
+            record["lexical"].append(
+                dict(id=node_id, name=cand, supported=len(ok), unsupported=len(bad))
             )
-        record["similar_hits"] = hits
+        if record["exact"] and record["exact"]["supported"]:
+            record["outcome"] = "exact"
+        elif any(c["supported"] for c in record["lexical"]):
+            record["outcome"] = "lexical"
+        elif record["exact"] or record["lexical"]:
+            record["outcome"] = "unsupported"
+        else:
+            record["outcome"] = "unaligned"
+        record["vector"] = await vector_ranks(graph, vector, name, closure, record)
         records.append(record)
     return records
 
 
-async def graph_stats(graph, described):
+async def vector_ranks(graph, vector, name, closure, record):
+    """Where the right nodes rank among `Entity_name` hits for the name, and
+    the best hit that is none of them."""
+    right = {c["id"] for c in record["lexical"]}
+    ranked = []
+    for hit in await vector.search("Entity_name", query_text=name, limit=VECTOR_DEPTH):
+        node = await graph.get_node(str(hit.id))
+        if node is not None and node.get("type") == "Entity":
+            ranked.append((str(hit.id), node.get("name", ""), round(float(hit.score), 4)))
+    exact_id = record["exact"]["id"] if record["exact"] else None
+
+    members = set(record["member_ids"])
+
+    def kind(node_id, node_name):
+        if node_id == exact_id:
+            return "exact"
+        if node_id in right:
+            return "lexical"
+        if node_id in members or node_name in closure:
+            return "group"
+        return "wrong"
+
+    out = dict(depth=len(ranked), right=[], best_group=None, best_wrong=None)
+    for rank, (node_id, node_name, distance) in enumerate(ranked, start=1):
+        k = kind(node_id, node_name)
+        entry = dict(rank=rank, name=node_name, distance=distance)
+        if k == "lexical":
+            out["right"].append(entry)
+        elif k == "group" and out["best_group"] is None:
+            out["best_group"] = entry
+        elif k == "wrong" and out["best_wrong"] is None:
+            out["best_wrong"] = entry
+    return out
+
+
+def planted(records, chunks):
+    """Links from a chunk to an exact node of a described name whose text holds
+    no name of its group. A whole-word test, so a paraphrase such as "the
+    reconstruction" counts as planted too."""
+    links = []
+    for r in records:
+        if not r["exact"]:
+            continue
+        _, bad = support(r["exact"]["id"], set(r["group"]), chunks)
+        links += [
+            dict(name=r["name"], doc=chunks[c]["doc"], chunk_index=chunks[c]["index"])
+            for c in bad
+        ]
+    return links
+
+
+async def graph_stats(graph):
     nodes, edges = await graph.get_graph_data()
     entities = [p for _, p in nodes if p.get("type") == "Entity"]
-    listed = {n for names, _ in described.values() for n in names}
-    entity_names = {p.get("name") for p in entities}
-    return dict(
-        nodes=len(nodes),
-        edges=len(edges),
-        entities=len(entities),
-        entities_listed_by_describe=len(entity_names & listed),
-        entities_not_listed=len(entity_names - listed),
-        entity_names=sorted(n for n in entity_names if n),
-    )
+    return dict(nodes=len(nodes), edges=len(edges), entities=len(entities))
 
 
-async def view_timing(described, admitted):
-    """Shape 1v's in-memory route: project the whole graph, add the overlay,
-    clone it once as each query would."""
+async def view_timing(records):
+    """Shape 1v's in-memory route without the ownership filter: project the
+    whole graph, copy each admitted member's own non-structural edges onto the
+    other members of its group once, and clone the result as each query would."""
     from cognee.modules.graph.cognee_graph.CogneeGraphElements import Edge
     from cognee.modules.retrieval.utils.brute_force_triplet_search import get_memory_fragment
 
     t0 = time.perf_counter()
     fragment = await get_memory_fragment()
     t1 = time.perf_counter()
+    projected = len(fragment.edges)
+    members = {}
+    for r in records:
+        ids = []
+        if r["outcome"] == "exact":
+            ids.append(r["exact"]["id"])
+        ids += [c["id"] for c in r["lexical"] if c["supported"]]
+        for node_id in ids:
+            members.setdefault(frozenset(r["group"]), set()).add(node_id)
+    originals = {
+        node_id: [
+            e for e in fragment.nodes[node_id].skeleton_edges
+            if e.attributes.get("relationship_name") not in STRUCTURAL
+        ]
+        for ids in members.values()
+        for node_id in ids
+        if node_id in fragment.nodes
+    }
     added = 0
-    for members in {frozenset(g) for g in groups_of(described).values() if len(g) > 1}:
-        nodes = [fragment.nodes[i] for n in members if (i := admitted.get(n)) in fragment.nodes]
-        for source in nodes:
-            for edge in list(source.skeleton_edges):
-                if edge.attributes.get("relationship_name") in STRUCTURAL:
-                    continue
-                far = edge.node2 if edge.node1 is source else edge.node1
-                for member in nodes:
-                    if member is source:
+    for ids in members.values():
+        present = [i for i in ids if i in originals]
+        for source in present:
+            for edge in originals[source]:
+                far = edge.node2 if edge.node1.id == source else edge.node1
+                for member in present:
+                    if member == source or far.id == member:
                         continue
-                    fragment.add_edge(Edge(member, far, attributes=dict(edge.attributes)))
+                    fragment.add_edge(
+                        Edge(fragment.nodes[member], far, attributes=dict(edge.attributes))
+                    )
                     added += 1
     t2 = time.perf_counter()
     copy.deepcopy(fragment)
     t3 = time.perf_counter()
     return dict(
         nodes=len(fragment.nodes),
-        edges=len(fragment.edges),
+        projected_edges=projected,
         overlay_edges=added,
-        project_s=round(t1 - t0, 3),
+        project_s=round(t1 - t0, 4),
         overlay_s=round(t2 - t1, 4),
-        clone_s=round(t3 - t2, 3),
+        clone_s=round(t3 - t2, 4),
     )
 
 
-async def run(root: Path, hint: bool, checks: bool) -> dict:
-    import cognee
+async def measure(data_ids):
     from cognee.infrastructure.databases.graph import get_graph_engine
     from cognee.infrastructure.databases.vector import get_vector_engine
-    from cognee.modules.engine.models import Entity
+
+    _, rows = await dataset_and_rows()
+    by_id = {r.id: r for r in rows}
+    described = {d: describe(await stored_text(by_id[i])) for d, i in data_ids.items()}
+    graph = await get_graph_engine()
+    vector = get_vector_engine()
+    chunks = await read_corpus(graph, data_ids)
+    records = await align(graph, vector, described, chunks)
+    return dict(
+        described={d: dict(names=len(n), variants=len(v)) for d, (n, v) in described.items()},
+        chunks={d: sum(c["doc"] == d for c in chunks.values()) for d in data_ids},
+        graph=await graph_stats(graph),
+        alignment=records,
+        planted=planted(records, chunks),
+        view=await view_timing(records),
+    ), (graph, vector)
+
+
+async def corpus_ids():
+    _, rows = await dataset_and_rows()
+    return {d: next(r.id for r in rows if r.name == p.stem) for d, p in DOCS.items()}
+
+
+async def run(root, hint: bool, checks: bool) -> dict:
+    import cognee
 
     calls = Calls()
     calls.install()
-    result = dict(hint=hint, cognifies={}, described={})
-    name = environment.DATASET_NAME
-    data_ids, described = {}, {}
+    result = dict(hint=hint, cognifies={})
     for doc, path in DOCS.items():
-        await cognee.add(str(path), dataset_name=name)
-        dataset_id, rows = await dataset_and_rows(name)
+        await cognee.add(str(path), dataset_name=environment.DATASET_NAME)
+        _, rows = await dataset_and_rows()
         row = next(r for r in rows if r.name == path.stem)
-        data_ids[doc] = row.id
-        described[doc] = describe(await stored_text(row))
-        prompt = hint_prompt(described[doc][0]) if hint else None
+        prompt = hint_prompt(describe(await stored_text(row))[0]) if hint else None
         mark = calls.mark()
         t0 = time.perf_counter()
-        await cognee.cognify(datasets=[name], custom_prompt=prompt)
+        await cognee.cognify(datasets=[environment.DATASET_NAME], custom_prompt=prompt)
         result["cognifies"][doc] = dict(
             calls=calls.since(mark), seconds=round(time.perf_counter() - t0, 1)
         )
-    result["described"] = {
-        d: dict(names=len(n), variants=len(v)) for d, (n, v) in described.items()
-    }
-    graph = await get_graph_engine()
-    vector = get_vector_engine()
-    chunks = await chunk_index(graph, data_ids)
-    result["chunks"] = {d: sum(c["doc"] == d for c in chunks.values()) for d in DOCS}
-    result["graph"] = await graph_stats(graph, described)
-    records = await align(graph, vector, described, chunks)
-    result["alignment"] = records
-    admitted = {
-        r["name"]: str(Entity.id_for(r["name"]))
-        for r in records
-        if r["exact"] and r["exact"]["supported_chunks"]
-    }
-    result["view"] = await view_timing(described, admitted)
-    if checks:
-        result["checks"] = await behaviour_checks(cognee, calls, data_ids, described)
+    data_ids = await corpus_ids()
+    measured, engines = await measure(data_ids)
+    result |= measured
     result["llm_calls_total"] = len(calls.log)
+    write(root, result)
+    if checks:
+        result["checks"] = await behaviour_checks(cognee, calls, data_ids)
+        result["llm_calls_total"] = len(calls.log)
+    await environment.close_stores(*engines)
     return result
 
 
-async def behaviour_checks(cognee, calls, data_ids, described):
+async def behaviour_checks(cognee, calls, data_ids):
     from cognee.infrastructure.databases.graph import get_graph_engine
+    from cognee_lab.identity.registered import stamped
 
-    name = environment.DATASET_NAME
     out = {}
-    graph = await get_graph_engine()
-
-    dataset_id, rows = await dataset_and_rows(name)
+    dataset_id, rows = await dataset_and_rows()
     before = {r.id: r for r in rows}
-    v2_text = DOC01_V2.read_text()
-    v2_names, _ = describe(v2_text)
     mark = calls.mark()
     update = await cognee.update(
         data_id=data_ids["doc01"],
         data=str(DOC01_V2),
         dataset_id=dataset_id,
-        custom_prompt=hint_prompt(v2_names),
+        custom_prompt=hint_prompt(describe(DOC01_V2.read_text())[0]),
     )
-    _, rows = await dataset_and_rows(name)
+    _, rows = await dataset_and_rows()
     after = {r.id: r for r in rows}
     out["hinted_update"] = dict(
         result=json.loads(json.dumps(update, default=str)),
@@ -380,93 +483,126 @@ async def behaviour_checks(cognee, calls, data_ids, described):
         calls=calls.since(mark),
     )
 
+    graph = await get_graph_engine()
+    doc01, doc02 = str(data_ids["doc01"]), str(data_ids["doc02"])
     await cognee.forget(data_id=data_ids["doc02"], dataset_id=dataset_id, memory_only=True)
-    _, rows = await dataset_and_rows(name)
-    row = next((r for r in rows if r.id == data_ids["doc02"]), None)
+    _, rows = await dataset_and_rows()
     out["memory_only_forget"] = dict(
-        data_row_kept=row is not None,
-        processed_after=processed(row, dataset_id) if row else None,
-        document_node_present=await graph.get_node(str(data_ids["doc02"])) is not None,
+        data_row_kept=any(r.id == data_ids["doc02"] for r in rows),
+        processed_after=await stamped(data_ids["doc02"], dataset_id),
+        doc02_node_after_forget=await graph.get_node(doc02) is not None,
+        doc01_node_after_forget=await graph.get_node(doc01) is not None,
     )
     mark = calls.mark()
-    await cognee.cognify(datasets=[name])
-    out["memory_only_forget"]["recognify_calls"] = calls.since(mark)
+    await cognee.cognify(datasets=[environment.DATASET_NAME])
+    out["memory_only_forget"] |= dict(
+        recognify_calls=calls.since(mark),
+        doc02_node_after_recognify=await graph.get_node(doc02) is not None,
+        processed_after_recognify=await stamped(data_ids["doc02"], dataset_id),
+    )
 
     await cognee.prune.prune_system()
-    _, rows = await dataset_and_rows(name)
+    _, rows = await dataset_and_rows()
     graph = await get_graph_engine()
     nodes, _ = await graph.get_graph_data()
     out["default_prune"] = dict(
         data_rows=len(rows),
-        processed_after=[processed(r, dataset_id) for r in rows],
-        graph_nodes_after=len(nodes),
+        processed_after=[await stamped(r.id, dataset_id) for r in rows],
+        graph_nodes_after_prune=len(nodes),
     )
     mark = calls.mark()
-    await cognee.cognify(datasets=[name])
-    out["default_prune"]["recognify_calls"] = calls.since(mark)
+    await cognee.cognify(datasets=[environment.DATASET_NAME])
+    nodes, _ = await graph.get_graph_data()
+    out["default_prune"] |= dict(
+        recognify_calls=calls.since(mark), graph_nodes_after_recognify=len(nodes)
+    )
     return out
 
 
-def best_similar(record):
-    """The best hit the similar pass could admit: not the exact node, not a
-    name another group lists, and supported by a chunk's text."""
-    hits = [
-        h for h in record["similar_hits"]
-        if not h["is_exact"] and not h["excluded"] and h["supported_chunks"]
-    ]
-    return min(hits, key=lambda h: h["distance"], default=None)
+async def analyze(root) -> dict:
+    result = json.loads((root / "result.json").read_text())
+    measured, engines = await measure(await corpus_ids())
+    await environment.close_stores(*engines)
+    return {k: v for k, v in result.items() if k in ("hint", "cognifies", "llm_calls_total", "checks")} | measured
 
 
-def report(base: Path) -> str:
-    rows, similar, lines = [], [], []
-    for result_file in sorted(base.glob("*/result.json")):
-        run_name = result_file.parent.name
-        r = json.loads(result_file.read_text())
-        if not isinstance(r, dict) or "alignment" not in r:
-            continue
-        a = r["alignment"]
-        exact = [x for x in a if x["exact"] and x["exact"]["supported_chunks"]]
-        unsupported = [x for x in a if x["exact"] and not x["exact"]["supported_chunks"]]
-        planted = sum(x["exact"]["unsupported_chunks"] for x in a if x["exact"])
-        extraction = [c["calls"] for c in r["cognifies"].values()]
-        rows.append(
-            f"| {run_name} | {len(a)} | {len(exact)} | {len(unsupported)} | "
-            f"{len(a) - len(exact) - len(unsupported)} | {planted} | "
-            f"{r['graph']['entities']} | {sum(c['total'] for c in extraction)} | "
-            f"{sum(c['hinted'] for c in extraction)} | {r['view']['project_s']} | "
-            f"{r['view']['overlay_edges']} |"
-        )
-        for x in a:
-            if x in exact:
-                continue
-            best = best_similar(x)
-            closure_hits = [h["distance"] for h in x["similar_hits"] if h["in_closure"] and not h["is_exact"]]
-            similar.append(
-                f"| {run_name} | {x['name']} | "
-                f"{best['name'] if best else '-'} | {best['distance'] if best else '-'} | "
-                f"{min(closure_hits) if closure_hits else '-'} |"
-            )
-    lines += [
-        "| run | names | exact | exact unsupported | no exact | contains edges without text | entities | LLM calls | hinted calls | view project s | overlay edges |",
-        "|---|---|---|---|---|---|---|---|---|---|---|",
-        *rows,
-        "",
-        "Names with no supported exact node, and the best hit the similar pass could admit.",
-        "",
-        "| run | name | best admissible hit | distance | nearest hit in its own group |",
-        "|---|---|---|---|---|",
-        *similar,
-    ]
-    return "\n".join(lines)
-
-
-async def dry_run(root: Path) -> dict:
+async def dry_run() -> dict:
     import cognee
 
     for path in DOCS.values():
         await cognee.add(str(path), dataset_name=environment.DATASET_NAME)
-    estimate = await cognee.cognify(datasets=[environment.DATASET_NAME], dry_run=True)
-    return json.loads(json.dumps(estimate, default=str))
+    return await cognee.cognify(datasets=[environment.DATASET_NAME], dry_run=True)
+
+
+def write(root, result):
+    (root / "result.json").write_text(json.dumps(result, indent=2, default=str))
+
+
+def report(base: Path) -> str:
+    runs = []
+    for path in sorted(base.glob("*/result.json")):
+        r = json.loads(path.read_text())
+        if isinstance(r, dict) and "planted" in r:
+            runs.append((path.parent.name, r))
+    out = [
+        "| Run | Hint | exact | lexical | unsupported | unaligned | Planted links (names) | Entities | LLM calls (hinted) |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for name, r in runs:
+        outcomes = Counter(a["outcome"] for a in r["alignment"])
+        extraction = [c["calls"] for c in r["cognifies"].values()]
+        out.append(
+            f"| {name} | {'yes' if r['hint'] else 'no'} | {outcomes['exact']} | {outcomes['lexical']} | "
+            f"{outcomes['unsupported']} | {outcomes['unaligned']} | {len(r['planted'])} "
+            f"({len({p['name'] for p in r['planted']})}) | {r['graph']['entities']} | "
+            f"{sum(c['total'] for c in extraction)} ({sum(c['hinted'] for c in extraction)}) |"
+        )
+    out += [
+        "",
+        "Names not aligned `exact`, by run.",
+        "",
+        "| Run | Name | Outcome | Lexical node | Its vector rank and distance | Best wrong hit | Best in-group hit |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for name, r in runs:
+        for a in r["alignment"]:
+            if a["outcome"] == "exact":
+                continue
+            lex = ", ".join(f"{c['name']} ({'supported' if c['supported'] else 'unsupported'})" for c in a["lexical"]) or "-"
+            v = a["vector"]
+            right = ", ".join(f"{x['rank']} at {x['distance']}" for x in v["right"]) or (
+                "-" if not a["lexical"] else f"not in top {v['depth']}"
+            )
+            fmt = lambda e: f"{e['name']}, rank {e['rank']} at {e['distance']}" if e else "-"
+            out.append(
+                f"| {name} | {a['name']} | {a['outcome']} | {lex} | {right} | "
+                f"{fmt(v['best_wrong'])} | {fmt(v['best_group'])} |"
+            )
+    out += [
+        "",
+        "Planted links: a chunk linked to an exact node of a described name whose text holds no name of its group.",
+        "",
+        "| Run | Name | Document | Chunk index |",
+        "|---|---|---|---|",
+    ]
+    for name, r in runs:
+        for p in r["planted"]:
+            out.append(f"| {name} | {p['name']} | {p['doc']} | {p['chunk_index']} |")
+    out += [
+        "",
+        "| Run | Nodes | Projected edges | Overlay edges | Project (s) | Overlay (s) | Clone (s) |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for name, r in runs:
+        v = r["view"]
+        out.append(
+            f"| {name} | {v['nodes']} | {v['projected_edges']} | {v['overlay_edges']} | "
+            f"{v['project_s']} | {v['overlay_s']} | {v['clone_s']} |"
+        )
+    for name, r in runs:
+        if "checks" in r:
+            out += ["", f"Behaviour checks in {name}.", "", "```", json.dumps(r["checks"], indent=1, default=str), "```"]
+    return "\n".join(out)
 
 
 def main():
@@ -476,30 +612,34 @@ def main():
     one.add_argument("root", type=Path)
     one.add_argument("--hint", action=argparse.BooleanOptionalAction, required=True)
     one.add_argument("--checks", action="store_true")
-    dry = sub.add_parser("dry-run")
-    dry.add_argument("root", type=Path)
-    rep = sub.add_parser("report")
-    rep.add_argument("base", type=Path)
+    for command in ("analyze", "dry-run"):
+        sub.add_parser(command).add_argument("root", type=Path)
+    sub.add_parser("report").add_argument("base", type=Path)
     args = parser.parse_args()
     if args.command == "report":
         print(report(args.base))
         return
 
     root = args.root.resolve()
-    if REPO / "outputs" not in root.parents:
-        raise SystemExit("ROOT must be a new directory under outputs/")
-    llm = operator_llm() if args.command == "run" else None
-    make_root(root)
-    with environment.fixture_environment(root):
-        if llm:
-            real_llm_environment(llm)
-        if args.command == "run":
-            result = asyncio.run(run(root, args.hint, args.checks))
-        else:
-            result = asyncio.run(dry_run(root))
-    (root / "result.json").write_text(json.dumps(result, indent=2, default=str))
+    outputs = REPO / "outputs"
+    if outputs not in root.parents or any(p.name.startswith("stage6_") for p in root.parents):
+        raise SystemExit("ROOT must be under outputs/ and outside every reviewed stage6_* root")
+    if args.command == "analyze":
+        with environment.fixture_environment(root):
+            result = asyncio.run(analyze(root))
+    else:
+        llm = operator_llm() if args.command == "run" else None
+        make_root(root)
+        with environment.fixture_environment(root):
+            if llm:
+                real_llm_environment(llm)
+            if args.command == "run":
+                result = asyncio.run(run(root, args.hint, args.checks))
+            else:
+                result = asyncio.run(dry_run())
+    write(root, result)
     if isinstance(result, dict):
-        result = {k: v for k, v in result.items() if k != "alignment"}
+        result = {k: v for k, v in result.items() if k not in ("alignment", "planted")}
     print(json.dumps(result, indent=2, default=str))
 
 
