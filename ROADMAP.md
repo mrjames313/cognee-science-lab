@@ -797,6 +797,11 @@ Step 5 owns the standard entry points, dataset Forget, endpoint gaps during a re
 
 Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
 
+## Revision record — 2026-10-31 (minimal identity framework, read-time view and alignment)
+
+- Added a technical design summary and Shape 1v, an identity view built at read time and cached only while the ledger and graph versions both match, to `docs/minimal_identity_framework.md`. The cache rule is the user's.
+- Recorded the user's choice of how Describe's names meet cognify's. Each runs on its own, Retrieve aligns them per query (exact, similar, supported by chunk text), and Describe's entity names go into cognify's prompt as a spelling hint that nothing depends on. Open question 7 is the experiment that decides whether the hint earns its place. The Cognee behaviours behind it (CB20, CB21) were read in the 1.6.2 source by the assistant on the user's Mac and not run.
+
 ## Revision record — 2026-10-29 (minimal identity framework)
 
 - Added `docs/minimal_identity_framework.md`, a stand-alone design for a minimal identity framework on Cognee for a fresh build elsewhere, at the user's request. It proposes ledger-only identity with query-time expansion and an anchor-owned graph overlay as the upgrade. Drafted by the assistant with subagents on the user's Mac, reviewed in five rounds.
