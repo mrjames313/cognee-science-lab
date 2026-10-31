@@ -48,7 +48,7 @@ How they hang together.
 
 One rule holds it together. No source's description can name another source's judgment, and entities are plain names. So every write touches one row, nothing can depend on a source, and Erasure never has anything to refuse for or cascade into.
 
-What it gives up. `cognee.search` and native graph walks see no identity, because identity lives only in the ledger. Cognee's facts reach Retrieve only through alignment, which can miss a name or match it wrongly, and Retrieve reports every miss and every uncertain match. Section 8 gives two ways to put it back. A view built at read time copies the graph, adds identity to the copy and leaves the live graph alone (Shape 1v, unbuilt). A written overlay keeps identity inside Cognee's graph (Shape 2). Continuity across edits and citations between sources are separate losses, which Shapes 3 and 4 add back.
+What it gives up. `cognee.search` and native graph walks see no identity, because identity lives only in the ledger. Cognee's facts reach Retrieve only through alignment, which can miss a name or match it wrongly, and Retrieve reports every miss and every uncertain match. Section 8 gives two ways to put it back. A view built at read time copies the graph, adds identity to the copy and leaves the live graph alone (Shape 1v, unbuilt). Graph-completion search is in scope, so the first build includes that view's in-memory route. A written overlay keeps identity inside Cognee's graph (Shape 2). Continuity across edits and citations between sources are separate losses, which Shapes 3 and 4 add back.
 
 ## 1. What this document is
 
@@ -461,7 +461,7 @@ The reference implementation wrote identity into the graph because its retrieval
 
 ## 9. The proposal
 
-Shape 1. The rest of this section is its specification. Identity lives only in the project's ledger. Cognee's search and graph see none of it, and Retrieve is the one reader that applies it.
+Shape 1. The rest of this section is its specification. Identity lives only in the project's ledger. Cognee's search and graph see none of it, and Retrieve is the one reader that applies it. Graph-completion search is in scope for the first build (open question 4), so the first build adds Shape 1v's in-memory route (Appendix B) on top of this specification. Nothing below changes for it.
 
 ### 9.1 Principles that shape it
 
@@ -494,7 +494,7 @@ The description. One JSON document per source.
 
 | Section | Content |
 |---|---|
-| `producer` | method (`rules`, `llm`, `manual`), implementation, version, configuration digest |
+| `producer` | method (for example `rules`, `llm`, `decision_model`, `manual`, or a combination), implementation, version, configuration digest |
 | `text_hash` | the hash of the extracted document text that Describe read. It binds the ranges to that text. The framework reads that text the way Cognee's `TextDocument.read` does, by opening the Data row's `raw_data_location` as UTF-8 text. Not the raw bytes. |
 | `entities` | every reusable Entity this source names, by name, with an optional type. Validation normalises each name with Cognee's `generate_node_name` (lower case, apostrophes removed), which is how cognify stores names. A name is the whole identity. The framework stores no ID for it and creates nothing in the graph. |
 | `variants` | pairs of entity names with a kind (`abbreviation`, `spelling`, `alias`). Corpus scope only. |
@@ -505,7 +505,7 @@ Occurrence ranges are exact code points in the extracted text and are bound to `
 
 ### 9.3 Operations
 
-Describe. Any producer that reads the extracted document text and returns a description. The framework validates it and refuses otherwise. The reference implementation's seeded passes (explicit abbreviation definitions, exact and normalized name matches, initial-letter candidates, pronouns by nearest compatible antecedent) are a reasonable rule producer to start with. A language model producer must return keys, names and ranges, not prose. Keep the hidden benchmark answers out of any producer's inputs.
+Describe. Any producer that reads the extracted document text and returns a description. The framework validates it and refuses otherwise. The reference implementation's seeded passes (explicit abbreviation definitions, exact and normalized name matches, initial-letter candidates, pronouns by nearest compatible antecedent) are a reasonable rule producer to start with. The specification leaves the producer open. A rule set, a language model, a smaller and cheaper decision model that classifies candidate pairs and mentions, a person, or a combination of them can each produce the description, and the producer record says which one did. Any producer that is not rules must return keys, names and ranges, not prose. Keep the hidden benchmark answers out of any producer's inputs.
 
 The order. Describe runs before cognify, because the spelling hint comes from the description. Publish runs last, because only then does the Data row hold the text the description addresses. A new document goes through `cognee.add`, then Describe of the stored extracted text, which the Data row's `raw_data_location` holds once the add returns, then `cognee.cognify(datasets=[dataset], custom_prompt=hint)`, then Publish. An edit goes through Describe of the caller's new text, which gives the hint and the description, then `cognee.update(data_id, new_text, dataset_id, custom_prompt=hint)`, then Publish. Only ingestion writes the Data row's text and hash, so Publish step 1 checks the description against the text Cognee stored. If a loader stored different text from what the caller passed, Publish refuses `source_changed`, and the remedy is Describe again from the stored text and Publish.
 
@@ -776,11 +776,11 @@ Cognee behaviour the proposal inherits.
 ## 10. Open questions for the user
 
 1. Ledger placement. Decided, as an implementation choice. The design requires only that the ledger survive anything the project treats as a repair. It may be lost in anything the project treats as a reset. Cognee's relational database meets that if `prune_system(metadata=True)` counts as a reset (CB16). A separate database meets it too.
-2. Describe for the first build. Rules only, or rules plus a model from the start? The answer decides whether edits re-derive the same groups.
+2. Describe for the first build. Decided to stay open. The design takes any producer through the producer record, including a cheaper decision model, and the specification names none. A deterministic producer re-derives the same groups after an edit, and a model may not.
 3. Variant scope. Decided. Corpus-wide scope is acceptable for the first build.
-4. Does anything other than Retrieve need to see identity or mention-anchored facts in Cognee's graph? If no, the build is Shape 1, and facts are description entries that Retrieve serves. If graph-completion search needs them, try Shape 1v (Appendix B) first, and prototype its in-memory view build time on a real dataset. Its physical-copy route works only with backend access control off (question 6). Shape 2 and its written overlay (section 9.10) are for a reader that must walk the live graph itself.
-5. Do you want the no-forget variant (append-only, rebuild to remove) evaluated as a prototype before committing to Shape 1? It forbids removing a source, not editing one, so it saves only Erasure's three steps and the `erasing` state.
-6. Will access control be on in the target project? If so, the ledger placement and the seed step need a check nobody has run, and Shape 1v loses its physical-copy route, because `cognee.search` then sets each dataset's own graph database itself.
+4. Identity inside Cognee's graph. Decided. Graph-completion search is in scope, so the first build is Shape 1 plus Shape 1v's in-memory route (Appendix B). Prototype its view build time on a real dataset first. Its physical-copy route works only with backend access control off (question 6). Shape 2 and its written overlay (section 9.10) are for a reader that must walk the live graph itself.
+5. The no-forget variant. Kept as an option, and not a significant decision. It forbids removing a source, not editing one, so it saves only Erasure's three steps and the `erasing` state.
+6. Access control. Decided for now. Start with whichever is easiest, which is backend access control off, set explicitly (`ENABLE_BACKEND_ACCESS_CONTROL=false`), as the reference implementation ran. The rest of this question applies when the project turns it on. Will access control be on in the target project? If so, the ledger placement and the seed step need a check nobody has run, and Shape 1v loses its physical-copy route, because `cognee.search` then sets each dataset's own graph database itself.
 7. The spelling hint. Run the hint measurement of section 9.12 before the first build, or ship with the hint and a conservative similarity threshold and measure later?
 
 ## Appendix A. Where the evidence comes from
@@ -807,6 +807,10 @@ Dated decisions behind section 4, all by the user unless stated.
 | 2026-10-31 | Describe's names meet cognify's by read-time alignment, with Describe's names passed to cognify as a spelling hint. |
 | 2026-10-31 | Ledger placement is an implementation choice, under the repair-versus-reset rule of open question 1. |
 | 2026-10-31 | Corpus-wide variant scope is accepted for the first build. |
+| 2026-10-31 | The Describe producer stays open. Rules, a language model, a cheaper decision model, a person or a combination can each plug in. |
+| 2026-10-31 | Graph-completion search is in scope, so the first build adds Shape 1v's in-memory route. |
+| 2026-10-31 | No-forget stays an option and is not a significant decision. |
+| 2026-10-31 | The first build starts with backend access control off, because it is the easiest. |
 
 Dated measurements behind sections 3, 5 and 6. All run on the user's Mac with deterministic loopback embeddings unless stated.
 
