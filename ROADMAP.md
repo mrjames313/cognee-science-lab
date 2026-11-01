@@ -1,6 +1,6 @@
 # Cognee Science Lab Roadmap
 
-**Last revised:** 2026-10-31
+**Last revised:** 2026-11-01
 **Project:** `cognee-science-lab`  
 **Architecture baseline:** Cognee 1.6.2; Ladybug graph backend; LanceDB vector backend  
 **Current work:** Stage 6 is in progress. Steps 1–2 have native fixtures. Step 3 demonstrates multi-source withdrawal. Step 4 demonstrates guarded unchanged-text identity corrections and captured prefix edits. Prefix edits use whole-document native rechunking, remapped positions and rebuilt fact evidence. The multi-chunk fixture covers split markers and fact continuations. See the [first-slice guide](docs/stage6_identity_first_slice.md), [revision guide](docs/stage6_identity_revision_replacement.md), [text-edit guide](docs/stage6_identity_text_changes.md) and [multi-chunk guide](docs/stage6_identity_multichunk.md).
@@ -796,6 +796,11 @@ Step 5 owns the standard entry points, dataset Forget, endpoint gaps during a re
 ## Historical revision record
 
 Entries below retain the decisions and evidence status at their stated date. They do not override the current status above or SESSION_HANDOFF.md. References to earlier “next reviews” document the sequence that led to the accepted handoff.
+
+## Revision record — 2026-11-01 (playbook lessons and a wiki integration guide)
+
+- Added lessons G34 to G36 to `results/cognee_knowledge_integration_playbook.md`, with a dated evidence section: vector similarity cannot align short technical names, a view built at read time can replace a written overlay, and an experiment's numbers belong to the harness that reproduces them.
+- Wrote an integration guide that applies Shape 1v to the user's private wiki repository. It lives in that repository, not here, because this repository is public. The assistant's subagents read that repository without running it.
 
 ## Revision record — 2026-10-31 (minimal identity framework, alignment experiment)
 
