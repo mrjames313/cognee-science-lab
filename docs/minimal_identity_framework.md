@@ -778,7 +778,7 @@ Cognee behaviour the proposal inherits.
 4. Identity inside Cognee's graph. Decided. Graph-completion search is in scope, so the first build is Shape 1 plus Shape 1v's in-memory route (Appendix B). Prototype its view build time on a real dataset first. Its physical-copy route works only with backend access control off (question 6). Shape 2 and its written overlay (section 9.10) are for a reader that must walk the live graph itself.
 5. The no-forget variant. Kept as an option, and not a significant decision. It forbids removing a source, not editing one, so it saves only Erasure's three steps and the `erasing` state.
 6. Access control. Decided for now. Start with whichever is easiest, which is backend access control off, set explicitly (`ENABLE_BACKEND_ACCESS_CONTROL=false`), as the reference implementation ran. The rest of this question applies when the project turns it on. Will access control be on in the target project? If so, the ledger placement and Retrieve's graph reads need a check nobody has run, and Shape 1v loses its physical-copy route, because `cognee.search` then sets each dataset's own graph database itself.
-7. The spelling hint. Measured on 2026-10-31 (section 9.12). With the lexical pass it bought nothing on the test corpus and linked names to chunks that do not name them in every run, so the recommendation is to build without it and keep it as an option. Do you accept that, or keep it on by default? The replacement of vector similarity by the lexical pass waits on the same answer.
+7. The spelling hint. Decided. The first build has no spelling hint, and alignment uses the exact and lexical rules in place of vector similarity, as the 2026-10-31 measurement recommended (section 9.12). The hint stays an option for a corpus whose variant patterns the lexical rules miss.
 
 ## Appendix A. Where the evidence comes from
 
@@ -808,7 +808,7 @@ Dated decisions behind section 4, all by the user unless stated.
 | 2026-10-31 | Graph-completion search is in scope, so the first build adds Shape 1v's in-memory route. |
 | 2026-10-31 | No-forget stays an option and is not a significant decision. |
 | 2026-10-31 | The first build starts with backend access control off, because it is the easiest. |
-| 2026-10-31 | Alignment's vector similar pass replaced by the lexical pass, and the spelling hint made optional and off by default, after the measurement below (assistant, pending the user's acceptance, open question 7). |
+| 2026-10-31 | Alignment's vector similar pass replaced by the lexical pass, and the spelling hint made optional and off by default, after the measurement below (assistant). The user accepted both on 2026-10-31. |
 
 Dated measurements behind sections 3, 5 and 6. All run on the user's Mac with deterministic loopback embeddings unless stated.
 
